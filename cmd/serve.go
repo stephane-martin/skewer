@@ -49,14 +49,20 @@ func Serve() {
 		fmt.Println(err)
 		os.Exit(-1)
 	}
-	s, err := server.New(c.Syslog.ListenAddr)
+	s := server.New(c)
+	/*
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(-1)
+		}
+	*/
+	sig_chan := make(chan os.Signal)
+	signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGINT)
+	err = s.Start()
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(-1)
 	}
-	sig_chan := make(chan os.Signal)
-	signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGINT)
-	s.Start()
 	<-sig_chan
 	s.Stop()
 }
