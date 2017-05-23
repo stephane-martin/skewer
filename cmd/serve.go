@@ -39,8 +39,11 @@ to quickly create a Cobra application.`,
 	},
 }
 
+var testFlag bool
+
 func init() {
 	RootCmd.AddCommand(serveCmd)
+	serveCmd.Flags().BoolVar(&testFlag, "test", false, "Print to stdout instead of sending to Kafka")
 }
 
 func Serve() {
@@ -50,6 +53,9 @@ func Serve() {
 		os.Exit(-1)
 	}
 	s := server.New(c)
+	if testFlag {
+		s.Test()
+	}
 	/*
 		if err != nil {
 			fmt.Println(err)

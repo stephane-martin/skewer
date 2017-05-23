@@ -37,11 +37,16 @@ type RelpServer struct {
 	statusMutex sync.Mutex
 	status      ServerStatus
 	kafkaClient sarama.Client
+	test        bool
 }
 
 func New(c *conf.GlobalConfig) *RelpServer {
 	srv := RelpServer{conf: c}
 	return &srv
+}
+
+func (s *RelpServer) Test() {
+	s.test = true
 }
 
 func (s *RelpServer) init() error {
@@ -94,13 +99,17 @@ func (s *RelpServer) Start() error {
 		return fmt.Errorf("Server is not stopped")
 	}
 	var err error
-	s.kafkaClient, err = s.conf.GetKafkaClient()
-	if err != nil {
-		return err
+	if !s.test {
+		s.kafkaClient, err = s.conf.GetKafkaClient()
+		if err != nil {
+			return err
+		}
 	}
 	err = s.init()
 	if err != nil {
-		s.kafkaClient.Close()
+		if !s.test {
+			s.kafkaClient.Close()
+		}
 		return err
 	}
 	s.status = Started
@@ -123,7 +132,9 @@ func (s *RelpServer) Start() error {
 			s.status = Stopped
 			s.statusMutex.Unlock()
 			close(s.stopChan)
-			s.kafkaClient.Close()
+			if !s.test {
+				s.kafkaClient.Close()
+			}
 			fmt.Println("stopped")
 
 		}()
@@ -237,72 +248,76 @@ func (s *RelpServer) handleConn(conn net.Conn) {
 		local_port, _ = strconv.Atoi(s[len(s)-1])
 	}
 
-	producer, err := s.conf.GetKafkaAsyncProducer()
-	if err != nil {
-		fmt.Println("Can't get a kafka producer. Aborting handleConn.")
-		return
-	}
-	// AsyncClose will eventually terminate the goroutine just below
-	defer producer.AsyncClose()
+	var producer sarama.AsyncProducer
+	var err error
+	if !s.test {
+		producer, err = s.conf.GetKafkaAsyncProducer()
+		if err != nil {
+			fmt.Println("Can't get a kafka producer. Aborting handleConn.")
+			return
+		}
+		// AsyncClose will eventually terminate the goroutine just below
+		defer producer.AsyncClose()
 
-	// listen for the ACKs coming from Kafka
-	// this goroutine ends after producer.AsyncClose() is called
-	go func() {
-		s.wg.Add(1)
-		defer s.wg.Done()
+		// listen for the ACKs coming from Kafka
+		// this goroutine ends after producer.AsyncClose() is called
+		go func() {
+			s.wg.Add(1)
+			defer s.wg.Done()
 
-		more_successes := true
-		more_errors := true
-		var one_success *sarama.ProducerMessage
-		var one_fail *sarama.ProducerError
-		successes := map[int]bool{}
-		failures := map[int]bool{}
-		last_committed_txnr := 0
+			more_successes := true
+			more_errors := true
+			var one_success *sarama.ProducerMessage
+			var one_fail *sarama.ProducerError
+			successes := map[int]bool{}
+			failures := map[int]bool{}
+			last_committed_txnr := 0
 
-		for more_successes || more_errors {
-			select {
-			case one_success, more_successes = <-producer.Successes():
-				if more_successes {
-					// forward the ACK to rsyslog
-					txnr := one_success.Metadata.(int)
-					successes[txnr] = true
+			for more_successes || more_errors {
+				select {
+				case one_success, more_successes = <-producer.Successes():
+					if more_successes {
+						// forward the ACK to rsyslog
+						txnr := one_success.Metadata.(int)
+						successes[txnr] = true
+					}
+				case one_fail, more_errors = <-producer.Errors():
+					if more_errors {
+						// inform rsyslog that the message was not delivered
+						txnr := one_fail.Msg.Metadata.(int)
+						failures[txnr] = true
+
+						switch one_fail.Err {
+						case sarama.ErrOutOfBrokers:
+							// the kafka cluster has gone away
+							// there is no point to accept more messages from rsyslog
+							// until the kafka cluster will be on again
+							s.Stop()
+						default:
+							// log the error
+						}
+					}
 				}
-			case one_fail, more_errors = <-producer.Errors():
-				if more_errors {
-					// inform rsyslog that the message was not delivered
-					txnr := one_fail.Msg.Metadata.(int)
-					failures[txnr] = true
-
-					switch one_fail.Err {
-					case sarama.ErrOutOfBrokers:
-						// the kafka cluster has gone away
-						// there is no point to accept more messages from rsyslog
-						// until the kafka cluster will be on again
-						s.Stop()
-					default:
-						// log the error
+				// rsyslog expects the ACK/txnr correctly and monotonously ordered
+				// so we need a bit of cooking to ensure that
+				for {
+					if _, ok := successes[last_committed_txnr+1]; ok {
+						last_committed_txnr++
+						delete(successes, last_committed_txnr)
+						answer := fmt.Sprintf("%d rsp 6 200 OK\n", last_committed_txnr)
+						conn.Write([]byte(answer))
+					} else if _, ok := failures[last_committed_txnr+1]; ok {
+						delete(failures, last_committed_txnr)
+						last_committed_txnr++
+						answer := fmt.Sprintf("%d rsp 6 500 KO\n", last_committed_txnr)
+						conn.Write([]byte(answer))
+					} else {
+						break
 					}
 				}
 			}
-			// rsyslog expects the ACK/txnr correctly and monotonously ordered
-			// so we need a bit of cooking to ensure that
-			for {
-				if _, ok := successes[last_committed_txnr+1]; ok {
-					last_committed_txnr++
-					delete(successes, last_committed_txnr)
-					answer := fmt.Sprintf("%d rsp 6 200 OK\n", last_committed_txnr)
-					conn.Write([]byte(answer))
-				} else if _, ok := failures[last_committed_txnr+1]; ok {
-					delete(failures, last_committed_txnr)
-					last_committed_txnr++
-					answer := fmt.Sprintf("%d rsp 6 500 KO\n", last_committed_txnr)
-					conn.Write([]byte(answer))
-				} else {
-					break
-				}
-			}
-		}
-	}()
+		}()
+	}
 
 	// push parsed messages to Kafka
 	go func() {
@@ -327,15 +342,22 @@ func (s *RelpServer) handleConn(conn net.Conn) {
 				// todo
 				continue
 			}
-			// todo: sanitize topic so that it will be accepted by kafka
-			pm := sarama.ProducerMessage{
-				Key:       sarama.ByteEncoder(pk_buf.Bytes()),
-				Value:     sarama.ByteEncoder(value),
-				Topic:     t_buf.String(),
-				Timestamp: *m.Message.TimeReported,
-				Metadata:  m.Txnr,
+
+			if s.test {
+				fmt.Println(string(value))
+				answer := fmt.Sprintf("%d rsp 6 200 OK\n", m.Txnr)
+				conn.Write([]byte(answer))
+			} else {
+				// todo: sanitize topic so that it will be accepted by kafka
+				pm := sarama.ProducerMessage{
+					Key:       sarama.ByteEncoder(pk_buf.Bytes()),
+					Value:     sarama.ByteEncoder(value),
+					Topic:     t_buf.String(),
+					Timestamp: *m.Message.TimeReported,
+					Metadata:  m.Txnr,
+				}
+				producer.Input() <- &pm
 			}
-			producer.Input() <- &pm
 		}
 	}()
 
