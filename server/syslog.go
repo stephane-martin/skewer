@@ -60,3 +60,13 @@ func (m *SyslogMessage) String() string {
 		props,
 	)
 }
+
+func Parse(m string, format string) (*SyslogMessage, error) {
+	if format == "rfc5424" {
+		return ParseRfc5424Format(m)
+	} else if format == "json" {
+		return ParseJsonFormat(m)
+	} else {
+		return nil, fmt.Errorf("unknown format")
+	}
+}

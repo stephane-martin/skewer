@@ -28,10 +28,11 @@ const (
 )
 
 type RelpServer struct {
-	conf        *conf.GlobalConfig
-	listener    net.Listener
-	stopChan    chan bool
+	conf      *conf.GlobalConfig
+	listeners []net.Listener
+	//stopChan    chan bool
 	wg          sync.WaitGroup
+	acceptsWg   sync.WaitGroup
 	connections map[net.Conn]bool
 	connMutex   sync.Mutex
 	statusMutex sync.Mutex
@@ -53,13 +54,17 @@ func (s *RelpServer) init() error {
 	if s == nil {
 		return fmt.Errorf("Trying to init an void pointer!!!")
 	}
-	l, err := net.Listen("tcp", s.conf.Syslog.ListenAddr)
-	if err != nil {
-		return err
+	s.listeners = []net.Listener{}
+	for _, syslogConf := range s.conf.Syslog {
+		l, err := net.Listen("tcp", syslogConf.ListenAddr)
+		if err != nil {
+			// todo: close the previous listeners ?
+			return err
+		}
+		s.listeners = append(s.listeners, l)
 	}
-	s.listener = l
 	s.connections = map[net.Conn]bool{}
-	s.stopChan = make(chan bool, 1)
+	//s.stopChan = make(chan bool, 1)
 	s.status = Stopped
 	return nil
 }
@@ -88,6 +93,64 @@ func (s *RelpServer) CloseConnections() {
 	}
 }
 
+func (s *RelpServer) Accept(i int) {
+	defer s.wg.Done()
+	defer s.acceptsWg.Done()
+	for {
+		conn, accept_err := s.listeners[i].Accept()
+		if accept_err != nil {
+			switch t := accept_err.(type) {
+			case *net.OpError:
+				if t.Err.Error() == "use of closed network connection" {
+					fmt.Println("closed listener")
+					// can happen because we called the Stop() method
+					return
+				}
+			default:
+				// log the error and continue
+				fmt.Println(accept_err)
+			}
+		} else if conn != nil {
+			fmt.Println("new client")
+			s.wg.Add(1)
+			go s.handleConn(conn, i)
+		}
+	}
+}
+
+func (s *RelpServer) AcceptAll() {
+
+	for i, _ := range s.listeners {
+		s.acceptsWg.Add(1)
+		s.wg.Add(1)
+		go s.Accept(i)
+	}
+	s.acceptsWg.Wait()
+
+	// the listeners are closed, we are now stopping
+	fmt.Println("Stopping...")
+
+	s.statusMutex.Lock()
+	s.status = Stopping
+	s.statusMutex.Unlock()
+
+	// close the client connections
+	s.CloseConnections()
+
+	s.wg.Done()
+	// wait that all goroutines have ended
+	s.wg.Wait()
+
+	s.statusMutex.Lock()
+	s.status = Stopped
+	s.statusMutex.Unlock()
+
+	if !s.test {
+		s.kafkaClient.Close()
+	}
+	fmt.Println("stopped")
+}
+
 func (s *RelpServer) Start() error {
 	if s == nil {
 		return fmt.Errorf("Start() on nil pointer!!!")
@@ -114,56 +177,9 @@ func (s *RelpServer) Start() error {
 	}
 	s.status = Started
 
-	go func() {
-		s.wg.Add(1)
-		defer func() {
-			fmt.Println("Stopping...")
-			s.statusMutex.Lock()
-			s.status = Stopping
-			s.statusMutex.Unlock()
+	s.wg.Add(1)
+	go s.AcceptAll()
 
-			s.listener.Close()
-			s.CloseConnections()
-
-			s.wg.Done()
-			s.wg.Wait()
-
-			s.statusMutex.Lock()
-			s.status = Stopped
-			s.statusMutex.Unlock()
-			close(s.stopChan)
-			if !s.test {
-				s.kafkaClient.Close()
-			}
-			fmt.Println("stopped")
-
-		}()
-		for {
-			select {
-			case <-s.stopChan:
-				fmt.Println("notified by stopChan!")
-				return
-			default:
-			}
-			conn, accept_err := s.listener.Accept()
-			if accept_err != nil {
-				switch t := accept_err.(type) {
-				case *net.OpError:
-					if t.Err.Error() == "use of closed network connection" {
-						fmt.Println("closed listener")
-						// can happen because we called the Stop() method
-						return
-					}
-				default:
-					// log the error and continue
-					fmt.Println(accept_err)
-				}
-			} else if conn != nil {
-				fmt.Println("new client")
-				go s.handleConn(conn)
-			}
-		}
-	}()
 	fmt.Println("started")
 	return nil
 }
@@ -183,9 +199,10 @@ func (s *RelpServer) Stop() {
 	s.status = Stopping
 	s.statusMutex.Unlock()
 
-	s.stopChan <- true
-	s.listener.Close()
-
+	//s.stopChan <- true
+	for _, l := range s.listeners {
+		l.Close()
+	}
 	s.wg.Wait()
 }
 
@@ -203,20 +220,19 @@ type ParsedMessage struct {
 	LocalPort int            `json:"local_port,string"`
 }
 
-func (s *RelpServer) handleConn(conn net.Conn) {
+func (s *RelpServer) handleConn(conn net.Conn, i int) {
 	// http://www.rsyslog.com/doc/relp.html
-	s.wg.Add(1)
 	s.AddConnection(conn)
 
 	raw_messages_chan := make(chan *RawMessage)
 	parsed_messages_chan := make(chan *ParsedMessage)
 
 	// pull messages from raw_messages_chan and push them to parsed_messages_chan
+	s.wg.Add(1)
 	go func() {
-		s.wg.Add(1)
 		defer s.wg.Done()
 		for m := range raw_messages_chan {
-			p, err := ParseRfc5424Format(m.Message)
+			p, err := Parse(m.Message, s.conf.Syslog[i].Format)
 			if err == nil {
 				parsed_msg := ParsedMessage{Message: p, Txnr: m.Txnr, Client: m.Client, LocalPort: m.LocalPort}
 				parsed_messages_chan <- &parsed_msg
@@ -261,8 +277,8 @@ func (s *RelpServer) handleConn(conn net.Conn) {
 
 		// listen for the ACKs coming from Kafka
 		// this goroutine ends after producer.AsyncClose() is called
+		s.wg.Add(1)
 		go func() {
-			s.wg.Add(1)
 			defer s.wg.Done()
 
 			more_successes := true
@@ -320,8 +336,8 @@ func (s *RelpServer) handleConn(conn net.Conn) {
 	}
 
 	// push parsed messages to Kafka
+	s.wg.Add(1)
 	go func() {
-		s.wg.Add(1)
 		defer s.wg.Done()
 		for m := range parsed_messages_chan {
 			// todo: optional filtering of parsed messages
@@ -331,13 +347,13 @@ func (s *RelpServer) handleConn(conn net.Conn) {
 				continue
 			}
 			pk_buf := bytes.Buffer{}
-			err = s.conf.Syslog.PartitionKeyTemplate.Execute(&pk_buf, m)
+			err = s.conf.Syslog[i].PartitionKeyTemplate.Execute(&pk_buf, m)
 			if err != nil {
 				// todo
 				continue
 			}
 			t_buf := bytes.Buffer{}
-			err = s.conf.Syslog.TopicTemplate.Execute(&t_buf, m)
+			err = s.conf.Syslog[i].TopicTemplate.Execute(&t_buf, m)
 			if err != nil {
 				// todo
 				continue

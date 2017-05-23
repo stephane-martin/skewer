@@ -17,8 +17,8 @@ import (
 )
 
 type GlobalConfig struct {
-	Syslog SyslogConfig `mapstructure:"syslog" toml:"syslog"`
-	Kafka  KafkaConfig  `mapstructure:"kafka" toml:"kafka"`
+	Syslog []SyslogConfig `mapstructure:"syslog" toml:"syslog"`
+	Kafka  KafkaConfig    `mapstructure:"kafka" toml:"kafka"`
 }
 
 type KafkaConfig struct {
@@ -103,7 +103,7 @@ func (c *GlobalConfig) GetKafkaClient() (sarama.Client, error) {
 func New() *GlobalConfig {
 	brokers := []string{}
 	kafka := KafkaConfig{Brokers: brokers, ClientID: ""}
-	syslog := SyslogConfig{}
+	syslog := []SyslogConfig{}
 	conf := GlobalConfig{Syslog: syslog, Kafka: kafka}
 	return &conf
 }
@@ -164,17 +164,6 @@ func (c *GlobalConfig) Export() string {
 }
 
 func (c *GlobalConfig) Complete() error {
-	c.Syslog.BindIP = net.ParseIP(c.Syslog.BindAddr)
-	if c.Syslog.BindIP == nil {
-		return fmt.Errorf("syslog.bind_addr is not an IP address")
-	}
-
-	if c.Syslog.BindIP.IsUnspecified() {
-		c.Syslog.ListenAddr = fmt.Sprintf(":%d", c.Syslog.Port)
-	} else {
-		c.Syslog.ListenAddr = fmt.Sprintf("%s:%d", c.Syslog.BindIP.String(), c.Syslog.Port)
-	}
-
 	switch c.Kafka.Compression {
 	case "snappy":
 		c.Kafka.pCompression = sarama.CompressionSnappy
@@ -196,13 +185,53 @@ func (c *GlobalConfig) Complete() error {
 	}
 	c.Kafka.pVersion = ver
 
-	c.Syslog.TopicTemplate, err = template.New("topic").Parse(c.Syslog.TopicTmpl)
-	if err != nil {
-		return errwrap.Wrapf("Error compiling the topic template: {{err}}", err)
+	if len(c.Syslog) == 0 {
+		syslogConf := SyslogConfig{
+			Port:          2514,
+			BindAddr:      "127.0.0.1",
+			Format:        "rfc5424",
+			TopicTmpl:     "rsyslog-{{.Message.Appname}}",
+			PartitionTmpl: "{{.Message.Hostname}}",
+		}
+		c.Syslog = []SyslogConfig{syslogConf}
 	}
-	c.Syslog.PartitionKeyTemplate, err = template.New("partition").Parse(c.Syslog.PartitionTmpl)
-	if err != nil {
-		return errwrap.Wrapf("Error compiling the partition key template: {{err}}", err)
+	for i, syslogConf := range c.Syslog {
+		if syslogConf.Port == 0 {
+			c.Syslog[i].Port = 2514
+		}
+		if syslogConf.BindAddr == "" {
+			c.Syslog[i].BindAddr = "127.0.0.1"
+		}
+		if syslogConf.Format == "" {
+			c.Syslog[i].Format = "rfc5424"
+		}
+		if syslogConf.TopicTmpl == "" {
+			c.Syslog[i].TopicTmpl = "rsyslog-{{.Message.Appname}}"
+		}
+		if syslogConf.PartitionTmpl == "" {
+			c.Syslog[i].PartitionTmpl = "{{.Message.Hostname}}"
+		}
+
+		c.Syslog[i].TopicTemplate, err = template.New("topic").Parse(c.Syslog[i].TopicTmpl)
+		if err != nil {
+			return errwrap.Wrapf("Error compiling the topic template: {{err}}", err)
+		}
+		c.Syslog[i].PartitionKeyTemplate, err = template.New("partition").Parse(c.Syslog[i].PartitionTmpl)
+		if err != nil {
+			return errwrap.Wrapf("Error compiling the partition key template: {{err}}", err)
+		}
+
+		c.Syslog[i].BindIP = net.ParseIP(c.Syslog[i].BindAddr)
+		if c.Syslog[i].BindIP == nil {
+			return fmt.Errorf("syslog.bind_addr is not an IP address")
+		}
+
+		if c.Syslog[i].BindIP.IsUnspecified() {
+			c.Syslog[i].ListenAddr = fmt.Sprintf(":%d", c.Syslog[i].Port)
+		} else {
+			c.Syslog[i].ListenAddr = fmt.Sprintf("%s:%d", c.Syslog[i].BindIP.String(), c.Syslog[i].Port)
+		}
+
 	}
 
 	return nil

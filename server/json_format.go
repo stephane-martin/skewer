@@ -91,8 +91,14 @@ func ParseJsonFormat(m string) (*SyslogMessage, error) {
 		Msgid:         msgid,
 		Structured:    structured,
 		Message:       strings.TrimSpace(sourceMsg.Message),
-		Properties:    sourceMsg.Properties,
 	}
+
+	if sourceMsg.Properties == nil {
+		msg.Properties = map[string]interface{}{}
+	} else {
+		msg.Properties = sourceMsg.Properties
+	}
+
 	return &msg, nil
 }
 
