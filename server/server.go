@@ -94,15 +94,13 @@ func (s *RelpServer) Start() error {
 		return fmt.Errorf("Server is not stopped")
 	}
 	var err error
-	/*
-		s.kafkaClient, err = s.conf.GetKafkaClient()
-		if err != nil {
-			return err
-		}
-	*/
+	s.kafkaClient, err = s.conf.GetKafkaClient()
+	if err != nil {
+		return err
+	}
 	err = s.init()
 	if err != nil {
-		//s.kafkaClient.Close()
+		s.kafkaClient.Close()
 		return err
 	}
 	s.status = Started
@@ -125,7 +123,7 @@ func (s *RelpServer) Start() error {
 			s.status = Stopped
 			s.statusMutex.Unlock()
 			close(s.stopChan)
-			//s.kafkaClient.Close()
+			s.kafkaClient.Close()
 			fmt.Println("stopped")
 
 		}()
@@ -194,15 +192,6 @@ type ParsedMessage struct {
 	LocalPort int            `json:"local_port,string"`
 }
 
-// implement the sarama.Encoder interface
-func (m *ParsedMessage) Encode() ([]byte, error) {
-	return json.Marshal(m)
-}
-
-func (m *ParsedMessage) Length() int {
-	return 0
-}
-
 func (s *RelpServer) handleConn(conn net.Conn) {
 	// http://www.rsyslog.com/doc/relp.html
 	s.wg.Add(1)
@@ -216,7 +205,7 @@ func (s *RelpServer) handleConn(conn net.Conn) {
 		s.wg.Add(1)
 		defer s.wg.Done()
 		for m := range raw_messages_chan {
-			p, err := Parse(m.Message)
+			p, err := ParseRfc5424Format(m.Message)
 			if err == nil {
 				parsed_msg := ParsedMessage{Message: p, Txnr: m.Txnr, Client: m.Client, LocalPort: m.LocalPort}
 				parsed_messages_chan <- &parsed_msg
@@ -226,11 +215,11 @@ func (s *RelpServer) handleConn(conn net.Conn) {
 	}()
 
 	defer func() {
-		// closing raw_messages_chan causes parsed_messages_chan to be closed too
+		// closing raw_messages_chan causes parsed_messages_chan to be closed too, because of the goroutine just above
 		close(raw_messages_chan)
 		s.RemoveConnection(conn)
-		s.wg.Done()
 		fmt.Println("client connection closed")
+		s.wg.Done()
 	}()
 
 	relpIsOpen := false
@@ -238,7 +227,7 @@ func (s *RelpServer) handleConn(conn net.Conn) {
 	var client string
 	remote := conn.RemoteAddr()
 	if remote != nil {
-		client = remote.String()
+		client = strings.Split(remote.String(), ":")[0]
 	}
 
 	var local_port int
@@ -248,41 +237,109 @@ func (s *RelpServer) handleConn(conn net.Conn) {
 		local_port, _ = strconv.Atoi(s[len(s)-1])
 	}
 
-	/*
-		producer, err := s.conf.GetKafkaAsyncProducer()
-		if err != nil {
-			fmt.Println("Can't get a kafka producer. Aborting handleConn.")
-			return
-		}
-	*/
+	producer, err := s.conf.GetKafkaAsyncProducer()
+	if err != nil {
+		fmt.Println("Can't get a kafka producer. Aborting handleConn.")
+		return
+	}
+	// AsyncClose will eventually terminate the goroutine just below
+	defer producer.AsyncClose()
 
-	// listen to ACK from Kafka
-	/*
-		go func() {
-			for success := range producer.Successes() {
-				fmt.Println(success)
+	// listen for the ACKs coming from Kafka
+	// this goroutine ends after producer.AsyncClose() is called
+	go func() {
+		s.wg.Add(1)
+		defer s.wg.Done()
+
+		more_successes := true
+		more_errors := true
+		var one_success *sarama.ProducerMessage
+		var one_fail *sarama.ProducerError
+		successes := map[int]bool{}
+		failures := map[int]bool{}
+		last_committed_txnr := 0
+
+		for more_successes || more_errors {
+			select {
+			case one_success, more_successes = <-producer.Successes():
+				if more_successes {
+					// forward the ACK to rsyslog
+					txnr := one_success.Metadata.(int)
+					successes[txnr] = true
+				}
+			case one_fail, more_errors = <-producer.Errors():
+				if more_errors {
+					// inform rsyslog that the message was not delivered
+					txnr := one_fail.Msg.Metadata.(int)
+					failures[txnr] = true
+
+					switch one_fail.Err {
+					case sarama.ErrOutOfBrokers:
+						// the kafka cluster has gone away
+						// there is no point to accept more messages from rsyslog
+						// until the kafka cluster will be on again
+						s.Stop()
+					default:
+						// log the error
+					}
+				}
 			}
-		}()
-	*/
-
-	// listen to errors from Kafka
+			// rsyslog expects the ACK/txnr correctly and monotonously ordered
+			// so we need a bit of cooking to ensure that
+			for {
+				if _, ok := successes[last_committed_txnr+1]; ok {
+					last_committed_txnr++
+					delete(successes, last_committed_txnr)
+					answer := fmt.Sprintf("%d rsp 6 200 OK\n", last_committed_txnr)
+					conn.Write([]byte(answer))
+				} else if _, ok := failures[last_committed_txnr+1]; ok {
+					delete(failures, last_committed_txnr)
+					last_committed_txnr++
+					answer := fmt.Sprintf("%d rsp 6 500 KO\n", last_committed_txnr)
+					conn.Write([]byte(answer))
+				} else {
+					break
+				}
+			}
+		}
+	}()
 
 	// push parsed messages to Kafka
-	push_parsed_messages_func := func() {
+	go func() {
 		s.wg.Add(1)
 		defer s.wg.Done()
 		for m := range parsed_messages_chan {
-			// push m to Kafka
-
-			fmt.Println(m.Client)
-			fmt.Println(m.LocalPort)
-			e, _ := m.Encode()
-			fmt.Println(e)
+			// todo: optional filtering of parsed messages
+			value, err := json.Marshal(m)
+			if err != nil {
+				// todo: log err
+				continue
+			}
+			pk_buf := bytes.Buffer{}
+			err = s.conf.Syslog.PartitionKeyTemplate.Execute(&pk_buf, m)
+			if err != nil {
+				// todo
+				continue
+			}
+			t_buf := bytes.Buffer{}
+			err = s.conf.Syslog.TopicTemplate.Execute(&t_buf, m)
+			if err != nil {
+				// todo
+				continue
+			}
+			// todo: sanitize topic so that it will be accepted by kafka
+			pm := sarama.ProducerMessage{
+				Key:       sarama.ByteEncoder(pk_buf.Bytes()),
+				Value:     sarama.ByteEncoder(value),
+				Topic:     t_buf.String(),
+				Timestamp: *m.Message.TimeReported,
+				Metadata:  m.Txnr,
+			}
+			producer.Input() <- &pm
 		}
-	}
+	}()
 
-	go push_parsed_messages_func()
-
+	// RELP server
 	scanner := bufio.NewScanner(conn)
 	scanner.Split(RelpSplit)
 	for {
@@ -315,7 +372,6 @@ func (s *RelpServer) handleConn(conn net.Conn) {
 				if !relpIsOpen {
 					return
 				}
-				//answer = fmt.Sprintf("%d rsp 6 200 OK\n", txnr)
 				raw := RawMessage{Message: data, Txnr: txnr, Client: client, LocalPort: local_port}
 				raw_messages_chan <- &raw
 			default:
@@ -331,6 +387,7 @@ func splitSpaceOrLF(r rune) bool {
 	return r == ' ' || r == '\n' || r == '\r'
 }
 
+// RelpSplit is used to extract RELP lines from the incoming TCP stream
 func RelpSplit(data []byte, atEOF bool) (int, []byte, error) {
 	if atEOF && len(data) == 0 {
 		return 0, nil, nil

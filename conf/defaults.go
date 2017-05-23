@@ -9,6 +9,8 @@ func SetDefaults(v *viper.Viper) {
 	v.SetDefault("syslog.port", 2514)
 	v.SetDefault("syslog.bind_addr", "127.0.0.1")
 	v.SetDefault("syslog.format", "rfc5424")
+	v.SetDefault("syslog.topic_tmpl", "rsyslog-{{.Message.Appname}}")
+	v.SetDefault("syslog.partition_key_tmpl", "{{.Message.Hostname}}")
 
 	v.SetDefault("kafka.brokers", []string{"kafka1", "kafka2", "kafka3"})
 	v.SetDefault("kafka.client_id", "relp2kafka")

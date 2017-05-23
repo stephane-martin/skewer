@@ -6,6 +6,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"text/template"
 	"time"
 
 	sarama "gopkg.in/Shopify/sarama.v1"
@@ -49,11 +50,15 @@ type KafkaConfig struct {
 }
 
 type SyslogConfig struct {
-	Port       int    `mapstructure:"port" toml:"port"`
-	BindAddr   string `mapstructure:"bind_addr" toml:"bind_addr"`
-	Format     string `mapstructure:"format" toml:"format"`
-	BindIP     net.IP `toml:"-"`
-	ListenAddr string `toml:"-"`
+	Port                 int                `mapstructure:"port" toml:"port"`
+	BindAddr             string             `mapstructure:"bind_addr" toml:"bind_addr"`
+	Format               string             `mapstructure:"format" toml:"format"`
+	TopicTmpl            string             `mapstructure:"topic_tmpl" toml:"topic_tmpl"`
+	PartitionTmpl        string             `mapstructure:"partition_key_tmpl" toml:"partition_key_tmpl"`
+	TopicTemplate        *template.Template `toml:"-"`
+	PartitionKeyTemplate *template.Template `toml:"-"`
+	BindIP               net.IP             `toml:"-"`
+	ListenAddr           string             `toml:"-"`
 }
 
 func (c *GlobalConfig) GetSaramaConfig() *sarama.Config {
@@ -190,6 +195,15 @@ func (c *GlobalConfig) Complete() error {
 		}
 	}
 	c.Kafka.pVersion = ver
+
+	c.Syslog.TopicTemplate, err = template.New("topic").Parse(c.Syslog.TopicTmpl)
+	if err != nil {
+		return errwrap.Wrapf("Error compiling the topic template: {{err}}", err)
+	}
+	c.Syslog.PartitionKeyTemplate, err = template.New("partition").Parse(c.Syslog.PartitionTmpl)
+	if err != nil {
+		return errwrap.Wrapf("Error compiling the partition key template: {{err}}", err)
+	}
 
 	return nil
 }

@@ -7,57 +7,13 @@ import (
 	"time"
 )
 
-type Priority int
-type Facility int
-type Severity int
-type Version int
+func ParseRfc5424Format(m string) (*SyslogMessage, error) {
+	// HEADER = PRI VERSION SP TIMESTAMP SP HOSTNAME SP APP-NAME SP PROCID SP MSGID
+	// PRI = "<" PRIVAL ">"
+	// SYSLOG-MSG = HEADER SP STRUCTURED-DATA [SP MSG]
 
-// HEADER = PRI VERSION SP TIMESTAMP SP HOSTNAME SP APP-NAME SP PROCID SP MSGID
-// PRI = "<" PRIVAL ">"
-// SYSLOG-MSG = HEADER SP STRUCTURED-DATA [SP MSG]
-type SyslogMessage struct {
-	Priority   Priority  `json:"priority,string"`
-	Facility   Facility  `json:"facility,string"`
-	Severity   Severity  `json:"severity,string"`
-	Version    Version   `json:"version,string"`
-	Timestamp  time.Time `json:"timestamp"`
-	Hostname   string    `json:"hostname"`
-	Appname    string    `json:"appname"`
-	Procid     string    `json:"procid"`
-	Msgid      string    `json:"msgid"`
-	Structured string    `json:"structured"`
-	Message    string    `json:"message"`
-}
-
-var SyslogMessageFmt string = `Facility: %d
-Severity: %d
-Version: %d
-Timestamp: %s
-Hostname: %s
-Appname: %s
-ProcID: %s
-MsgID: %s
-Structured: %s
-Message: %s`
-
-func (m *SyslogMessage) String() string {
-	return fmt.Sprintf(
-		SyslogMessageFmt,
-		m.Facility,
-		m.Severity,
-		m.Version,
-		m.Timestamp.Format(time.RFC3339),
-		m.Hostname,
-		m.Appname,
-		m.Procid,
-		m.Msgid,
-		m.Structured,
-		m.Message)
-}
-
-func Parse(m string) (*SyslogMessage, error) {
 	smsg := SyslogMessage{}
-	splits := strings.SplitN(m, " ", 8)
+	splits := strings.SplitN(m, " ", 7)
 
 	if len(splits) < 7 {
 		return nil, fmt.Errorf("Message does not have enough parts")
@@ -70,13 +26,13 @@ func Parse(m string) (*SyslogMessage, error) {
 	}
 
 	if splits[1] == "-" {
-		smsg.Timestamp = time.Time{}
+		smsg.TimeReported = nil
 	} else {
 		t, err := time.Parse(time.RFC3339, splits[1])
 		if err != nil {
 			return nil, fmt.Errorf("Invalid timestamp: %s", splits[1])
 		}
-		smsg.Timestamp = t
+		smsg.TimeReported = &t
 	}
 
 	if splits[2] != "-" {
@@ -91,14 +47,39 @@ func Parse(m string) (*SyslogMessage, error) {
 	if splits[5] != "-" {
 		smsg.Msgid = splits[5]
 	}
-	if splits[6] != "-" {
-		smsg.Structured = splits[6]
-	}
-	if len(splits) == 8 {
-		smsg.Message = strings.TrimSpace(splits[7])
+	structured_and_msg := strings.TrimSpace(splits[6])
+	if strings.HasPrefix(structured_and_msg, "-") {
+		// structured data is empty
+		smsg.Message = strings.TrimSpace(structured_and_msg[1:])
+	} else if strings.HasPrefix(structured_and_msg, "[") {
+		s1, s2, err := SplitStructuredAndMessage(structured_and_msg)
+		if err != nil {
+			return nil, err
+		}
+		smsg.Structured = s1
+		smsg.Message = s2
+	} else {
+		return nil, fmt.Errorf("Invalid structured data")
 	}
 
+	smsg.Properties = map[string]interface{}{}
+
 	return &smsg, nil
+}
+
+func SplitStructuredAndMessage(structured_and_msg string) (string, string, error) {
+	length := len(structured_and_msg)
+	for i := 0; i < length; i++ {
+		if structured_and_msg[i] == ']' {
+			if i == (length - 1) {
+				return structured_and_msg, "", nil
+			}
+			if structured_and_msg[i+1] == ' ' {
+				return structured_and_msg[:i+1], strings.TrimSpace(structured_and_msg[i+1:]), nil
+			}
+		}
+	}
+	return "", "", fmt.Errorf("Invalid structured data")
 }
 
 func ParsePriorityVersion(pv string) (Priority, Facility, Severity, Version, error) {
