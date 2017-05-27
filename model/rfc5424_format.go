@@ -1,4 +1,4 @@
-package server
+package model
 
 import (
 	"fmt"
@@ -28,12 +28,18 @@ func ParseRfc5424Format(m string) (*SyslogMessage, error) {
 	if splits[1] == "-" {
 		smsg.TimeReported = nil
 	} else {
-		t, err := time.Parse(time.RFC3339, splits[1])
+		t1, err := time.Parse(time.RFC3339Nano, splits[1])
 		if err != nil {
-			return nil, fmt.Errorf("Invalid timestamp: %s", splits[1])
+			t2, err := time.Parse(time.RFC3339, splits[1])
+			if err != nil {
+				return nil, fmt.Errorf("Invalid timestamp: %s", splits[1])
+			}
+			smsg.TimeReported = &t2
 		}
-		smsg.TimeReported = &t
+		smsg.TimeReported = &t1
 	}
+	n := time.Now()
+	smsg.TimeGenerated = &n
 
 	if splits[2] != "-" {
 		smsg.Hostname = splits[2]

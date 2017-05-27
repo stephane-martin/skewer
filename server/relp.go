@@ -12,61 +12,85 @@ import (
 
 	sarama "gopkg.in/Shopify/sarama.v1"
 
+	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/relp2kafka/conf"
+	"github.com/stephane-martin/relp2kafka/model"
 )
 
-func main() {
-	fmt.Println("vim-go")
-}
-
-type ServerStatus int
+type RelpServerStatus int
 
 const (
-	Stopped ServerStatus = iota
+	Stopped RelpServerStatus = iota
 	Started
-	Stopping
+	FinalStopped
+	Waiting
 )
 
 type RelpServer struct {
-	conf      *conf.GlobalConfig
-	listeners []net.Listener
-	//stopChan    chan bool
+	confDirName string
+	conf        *conf.GlobalConfig
+	listeners   []net.Listener
 	wg          sync.WaitGroup
 	acceptsWg   sync.WaitGroup
 	connections map[net.Conn]bool
 	connMutex   sync.Mutex
 	statusMutex sync.Mutex
-	status      ServerStatus
+	status      RelpServerStatus
+	StatusChan  chan RelpServerStatus
 	kafkaClient sarama.Client
 	test        bool
+	logger      log15.Logger
 }
 
-func New(c *conf.GlobalConfig) *RelpServer {
-	srv := RelpServer{conf: c}
-	return &srv
+func New(dirname string, logger log15.Logger) *RelpServer {
+	s := RelpServer{}
+	s.confDirName = dirname
+	s.StatusChan = make(chan RelpServerStatus, 1)
+	s.status = Stopped
+	s.listeners = []net.Listener{}
+	s.connections = map[net.Conn]bool{}
+	s.logger = logger
+	return &s
 }
 
-func (s *RelpServer) Test() {
+func (s *RelpServer) SetTest() {
 	s.test = true
 }
 
-func (s *RelpServer) init() error {
-	if s == nil {
-		return fmt.Errorf("Trying to init an void pointer!!!")
+func (s *RelpServer) initConf() error {
+	c, err := conf.Load(s.confDirName)
+	if err != nil {
+		// returns a conf.ConfigurationError
+		return err
 	}
+	s.conf = c
+	return nil
+}
+
+func (s *RelpServer) initListeners() error {
 	s.listeners = []net.Listener{}
 	for _, syslogConf := range s.conf.Syslog {
+		s.logger.Info("Listener", "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
 		l, err := net.Listen("tcp", syslogConf.ListenAddr)
 		if err != nil {
-			// todo: close the previous listeners ?
+			for _, pl := range s.listeners {
+				pl.Close()
+			}
+			s.listeners = []net.Listener{}
+			// returns a net.OpError
 			return err
 		}
 		s.listeners = append(s.listeners, l)
 	}
 	s.connections = map[net.Conn]bool{}
-	//s.stopChan = make(chan bool, 1)
-	s.status = Stopped
 	return nil
+}
+
+func (s *RelpServer) resetListeners() {
+	for _, l := range s.listeners {
+		l.Close()
+	}
+	s.listeners = []net.Listener{}
 }
 
 func (s *RelpServer) AddConnection(conn net.Conn) {
@@ -102,7 +126,6 @@ func (s *RelpServer) Accept(i int) {
 			switch t := accept_err.(type) {
 			case *net.OpError:
 				if t.Err.Error() == "use of closed network connection" {
-					fmt.Println("closed listener")
 					// can happen because we called the Stop() method
 					return
 				}
@@ -111,99 +134,133 @@ func (s *RelpServer) Accept(i int) {
 				fmt.Println(accept_err)
 			}
 		} else if conn != nil {
-			fmt.Println("new client")
 			s.wg.Add(1)
-			go s.handleConn(conn, i)
+			go s.handleRelpConnection(conn, i)
 		}
 	}
 }
 
-func (s *RelpServer) AcceptAll() {
-
+func (s *RelpServer) Listen() {
 	for i, _ := range s.listeners {
 		s.acceptsWg.Add(1)
 		s.wg.Add(1)
 		go s.Accept(i)
 	}
+	// wait until the listeners stop and return
 	s.acceptsWg.Wait()
-
-	// the listeners are closed, we are now stopping
-	fmt.Println("Stopping...")
-
-	s.statusMutex.Lock()
-	s.status = Stopping
-	s.statusMutex.Unlock()
-
 	// close the client connections
 	s.CloseConnections()
-
 	s.wg.Done()
-	// wait that all goroutines have ended
-	s.wg.Wait()
-
-	s.statusMutex.Lock()
-	s.status = Stopped
-	s.statusMutex.Unlock()
-
-	if !s.test {
-		s.kafkaClient.Close()
-	}
-	fmt.Println("stopped")
 }
 
 func (s *RelpServer) Start() error {
-	if s == nil {
-		return fmt.Errorf("Start() on nil pointer!!!")
+	return s.doStart(&s.statusMutex)
+}
+
+func (s *RelpServer) doStart(mu *sync.Mutex) (err error) {
+	if mu != nil {
+		mu.Lock()
+		defer mu.Unlock()
+	}
+	if s.status == FinalStopped {
+		err = ServerDefinitelyStopped
+		return
+	}
+	if s.status != Stopped && s.status != Waiting {
+		err = ServerNotStopped
+		return
 	}
 
-	s.statusMutex.Lock()
-	defer s.statusMutex.Unlock()
-	if s.status != Stopped {
-		return fmt.Errorf("Server is not stopped")
+	err = s.initConf()
+	if err != nil {
+		// ConfigurationError
+		return
 	}
-	var err error
+	err = s.initListeners()
+	if err != nil {
+		// net.OpError
+		return
+	}
 	if !s.test {
+		s.logger.Debug("trying to reach kafka")
 		s.kafkaClient, err = s.conf.GetKafkaClient()
 		if err != nil {
-			return err
+			// sarama/kafka error
+			s.resetListeners()
+			return
 		}
 	}
-	err = s.init()
-	if err != nil {
-		if !s.test {
-			s.kafkaClient.Close()
-		}
-		return err
-	}
+
 	s.status = Started
+	s.StatusChan <- Started
 
 	s.wg.Add(1)
-	go s.AcceptAll()
-
-	fmt.Println("started")
-	return nil
+	go s.Listen()
+	return
 }
 
 func (s *RelpServer) Stop() {
-	fmt.Println("Stop() method was called")
-	if s == nil {
-		return
-	}
+	s.doStop(false, false, &s.statusMutex)
+}
 
+func (s *RelpServer) FinalStop() {
+	s.doStop(true, false, &s.statusMutex)
+}
+
+func (s *RelpServer) StopAndWait() {
+	s.doStop(false, true, &s.statusMutex)
+}
+
+func (s *RelpServer) EndWait() {
 	s.statusMutex.Lock()
-	if s.status != Started {
-		s.statusMutex.Unlock()
-		fmt.Println("Stop(): server is not started")
+	defer s.statusMutex.Unlock()
+	if s.status != Waiting {
 		return
 	}
-	s.status = Stopping
-	s.statusMutex.Unlock()
+	s.status = Stopped
+	s.StatusChan <- Stopped
+}
 
-	//s.stopChan <- true
-	for _, l := range s.listeners {
-		l.Close()
+func (s *RelpServer) doStop(final bool, wait bool, mu *sync.Mutex) {
+	if mu != nil {
+		mu.Lock()
+		defer mu.Unlock()
 	}
+	if final && (s.status == Waiting || s.status == Stopped || s.status == FinalStopped) {
+		if s.status != FinalStopped {
+			s.status = FinalStopped
+			s.StatusChan <- FinalStopped
+		}
+		return
+	}
+
+	if s.status == Stopped || s.status == FinalStopped || s.status == Waiting {
+		if s.status != Waiting && wait {
+			s.status = Waiting
+			s.StatusChan <- Waiting
+		}
+		return
+	}
+
+	s.resetListeners()
+	// wait that all goroutines have ended
 	s.wg.Wait()
+
+	if s.kafkaClient != nil {
+		s.kafkaClient.Close()
+		s.kafkaClient = nil
+	}
+
+	if final {
+		s.status = FinalStopped
+		s.StatusChan <- FinalStopped
+	} else if wait {
+		s.status = Waiting
+		s.StatusChan <- Waiting
+	} else {
+		s.status = Stopped
+		s.StatusChan <- Stopped
+	}
 }
 
 type RawMessage struct {
@@ -214,13 +271,38 @@ type RawMessage struct {
 }
 
 type ParsedMessage struct {
-	Message   *SyslogMessage `json:"message"`
-	Txnr      int            `json:"-"`
-	Client    string         `json:"client"`
-	LocalPort int            `json:"local_port,string"`
+	Message   *model.SyslogMessage `json:"message"`
+	Txnr      int                  `json:"-"`
+	Client    string               `json:"client"`
+	LocalPort int                  `json:"local_port,string"`
 }
 
-func (s *RelpServer) handleConn(conn net.Conn, i int) {
+func isFatalKafkaError(e error) bool {
+	switch e {
+	case sarama.ErrOutOfBrokers,
+		sarama.ErrUnknown,
+		sarama.ErrUnknownTopicOrPartition,
+		sarama.ErrReplicaNotAvailable,
+		sarama.ErrLeaderNotAvailable,
+		sarama.ErrNotLeaderForPartition,
+		sarama.ErrNetworkException,
+		sarama.ErrOffsetsLoadInProgress,
+		sarama.ErrInvalidTopic,
+		sarama.ErrNotEnoughReplicas,
+		sarama.ErrNotEnoughReplicasAfterAppend,
+		sarama.ErrTopicAuthorizationFailed,
+		sarama.ErrGroupAuthorizationFailed,
+		sarama.ErrClusterAuthorizationFailed,
+		sarama.ErrUnsupportedVersion,
+		sarama.ErrUnsupportedForMessageFormat,
+		sarama.ErrPolicyViolation:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *RelpServer) handleRelpConnection(conn net.Conn, i int) {
 	// http://www.rsyslog.com/doc/relp.html
 	s.AddConnection(conn)
 
@@ -232,10 +314,12 @@ func (s *RelpServer) handleConn(conn net.Conn, i int) {
 	go func() {
 		defer s.wg.Done()
 		for m := range raw_messages_chan {
-			p, err := Parse(m.Message, s.conf.Syslog[i].Format)
+			p, err := model.Parse(m.Message, s.conf.Syslog[i].Format)
 			if err == nil {
 				parsed_msg := ParsedMessage{Message: p, Txnr: m.Txnr, Client: m.Client, LocalPort: m.LocalPort}
 				parsed_messages_chan <- &parsed_msg
+			} else {
+				// log the parsing error
 			}
 		}
 		close(parsed_messages_chan)
@@ -245,7 +329,6 @@ func (s *RelpServer) handleConn(conn net.Conn, i int) {
 		// closing raw_messages_chan causes parsed_messages_chan to be closed too, because of the goroutine just above
 		close(raw_messages_chan)
 		s.RemoveConnection(conn)
-		fmt.Println("client connection closed")
 		s.wg.Done()
 	}()
 
@@ -264,12 +347,15 @@ func (s *RelpServer) handleConn(conn net.Conn, i int) {
 		local_port, _ = strconv.Atoi(s[len(s)-1])
 	}
 
+	logger := s.logger.New("remote", client, "local_port", local_port)
+	logger.Info("New client")
+
 	var producer sarama.AsyncProducer
 	var err error
 	if !s.test {
 		producer, err = s.conf.GetKafkaAsyncProducer()
 		if err != nil {
-			fmt.Println("Can't get a kafka producer. Aborting handleConn.")
+			logger.Warn("Can't get a kafka producer. Aborting handleConn.")
 			return
 		}
 		// AsyncClose will eventually terminate the goroutine just below
@@ -281,37 +367,30 @@ func (s *RelpServer) handleConn(conn net.Conn, i int) {
 		go func() {
 			defer s.wg.Done()
 
-			more_successes := true
-			more_errors := true
-			var one_success *sarama.ProducerMessage
-			var one_fail *sarama.ProducerError
+			fatal := false
+			more_succs := true
+			more_fails := true
+			var succ *sarama.ProducerMessage
+			var fail *sarama.ProducerError
 			successes := map[int]bool{}
 			failures := map[int]bool{}
 			last_committed_txnr := 0
 
-			for more_successes || more_errors {
+			for more_succs || more_fails {
 				select {
-				case one_success, more_successes = <-producer.Successes():
-					if more_successes {
+				case succ, more_succs = <-producer.Successes():
+					if more_succs {
 						// forward the ACK to rsyslog
-						txnr := one_success.Metadata.(int)
+						txnr := succ.Metadata.(int)
 						successes[txnr] = true
 					}
-				case one_fail, more_errors = <-producer.Errors():
-					if more_errors {
+				case fail, more_fails = <-producer.Errors():
+					if more_fails {
 						// inform rsyslog that the message was not delivered
-						txnr := one_fail.Msg.Metadata.(int)
+						txnr := fail.Msg.Metadata.(int)
 						failures[txnr] = true
-
-						switch one_fail.Err {
-						case sarama.ErrOutOfBrokers:
-							// the kafka cluster has gone away
-							// there is no point to accept more messages from rsyslog
-							// until the kafka cluster will be on again
-							s.Stop()
-						default:
-							// log the error
-						}
+						logger.Info("NACK from Kafka", "error", fail.Error(), "txnr", txnr, "topic", fail.Msg.Topic)
+						fatal = isFatalKafkaError(fail.Err)
 					}
 				}
 				// rsyslog expects the ACK/txnr correctly and monotonously ordered
@@ -323,13 +402,18 @@ func (s *RelpServer) handleConn(conn net.Conn, i int) {
 						answer := fmt.Sprintf("%d rsp 6 200 OK\n", last_committed_txnr)
 						conn.Write([]byte(answer))
 					} else if _, ok := failures[last_committed_txnr+1]; ok {
-						delete(failures, last_committed_txnr)
 						last_committed_txnr++
+						delete(failures, last_committed_txnr)
 						answer := fmt.Sprintf("%d rsp 6 500 KO\n", last_committed_txnr)
 						conn.Write([]byte(answer))
 					} else {
 						break
 					}
+				}
+
+				if fatal {
+					s.StopAndWait()
+					return
 				}
 			}
 		}()
@@ -343,19 +427,19 @@ func (s *RelpServer) handleConn(conn net.Conn, i int) {
 			// todo: optional filtering of parsed messages
 			value, err := json.Marshal(m)
 			if err != nil {
-				// todo: log err
+				logger.Warn("Error marshaling a message to JSON", "error", err)
 				continue
 			}
 			pk_buf := bytes.Buffer{}
 			err = s.conf.Syslog[i].PartitionKeyTemplate.Execute(&pk_buf, m)
 			if err != nil {
-				// todo
+				logger.Warn("Error generating the partition hash key", "error", err)
 				continue
 			}
 			t_buf := bytes.Buffer{}
 			err = s.conf.Syslog[i].TopicTemplate.Execute(&t_buf, m)
 			if err != nil {
-				// todo
+				logger.Warn("Error generating the topic", "error", err)
 				continue
 			}
 
@@ -394,6 +478,7 @@ func (s *RelpServer) handleConn(conn net.Conn, i int) {
 			switch command {
 			case "open":
 				if relpIsOpen {
+					logger.Warn("Received open command twice")
 					return
 				}
 				answer := fmt.Sprintf("%d rsp %d 200 OK\n%s\n", txnr, len(data)+7, data)
@@ -401,6 +486,7 @@ func (s *RelpServer) handleConn(conn net.Conn, i int) {
 				relpIsOpen = true
 			case "close":
 				if !relpIsOpen {
+					logger.Warn("Received close command before open")
 					return
 				}
 				answer := fmt.Sprintf("%d rsp 0\n0 serverclose 0\n", txnr)
@@ -408,14 +494,17 @@ func (s *RelpServer) handleConn(conn net.Conn, i int) {
 				relpIsOpen = false
 			case "syslog":
 				if !relpIsOpen {
+					logger.Warn("Received syslog command before open")
 					return
 				}
 				raw := RawMessage{Message: data, Txnr: txnr, Client: client, LocalPort: local_port}
 				raw_messages_chan <- &raw
 			default:
+				logger.Warn("Unknown RELP command", "command", command)
 				return
 			}
 		} else {
+			logger.Info("Scanning the client stream has ended", "error", scanner.Err())
 			return
 		}
 	}

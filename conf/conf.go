@@ -12,7 +12,6 @@ import (
 	sarama "gopkg.in/Shopify/sarama.v1"
 
 	"github.com/BurntSushi/toml"
-	"github.com/hashicorp/errwrap"
 	"github.com/spf13/viper"
 )
 
@@ -93,11 +92,19 @@ func (c *GlobalConfig) GetSaramaConfig() *sarama.Config {
 }
 
 func (c *GlobalConfig) GetKafkaAsyncProducer() (sarama.AsyncProducer, error) {
-	return sarama.NewAsyncProducer(c.Kafka.Brokers, c.GetSaramaConfig())
+	p, err := sarama.NewAsyncProducer(c.Kafka.Brokers, c.GetSaramaConfig())
+	if err == nil {
+		return p, nil
+	}
+	return nil, KafkaError{Err: err}
 }
 
 func (c *GlobalConfig) GetKafkaClient() (sarama.Client, error) {
-	return sarama.NewClient(c.Kafka.Brokers, c.GetSaramaConfig())
+	cl, err := sarama.NewClient(c.Kafka.Brokers, c.GetSaramaConfig())
+	if err == nil {
+		return cl, nil
+	}
+	return nil, KafkaError{Err: err}
 }
 
 func New() *GlobalConfig {
@@ -138,16 +145,15 @@ func Load(dirname string) (*GlobalConfig, error) {
 	if err != nil {
 		switch err.(type) {
 		default:
-			return nil, errwrap.Wrapf("Error reading the configuration file", err)
+			return nil, ConfigurationReadError{err}
 		case viper.ConfigFileNotFoundError:
 			// log.Log.WithError(err).Debug("No configuration file was found")
 		}
 	}
-
 	c := New()
 	err = v.Unmarshal(c)
 	if err != nil {
-		return nil, errwrap.Wrapf("Syntax error in configuration file: {{err}}", err)
+		return nil, ConfigurationSyntaxError{Err: err, Filename: v.ConfigFileUsed()}
 	}
 	err = c.Complete()
 	if err != nil {
@@ -180,7 +186,7 @@ func (c *GlobalConfig) Complete() error {
 	for i, n := range strings.SplitN(c.Kafka.Version, ".", 4) {
 		ver[i], err = strconv.Atoi(n)
 		if err != nil {
-			return fmt.Errorf("Kafka Version has invalid format")
+			return ConfigurationCheckError{ErrString: fmt.Sprintf("Kafka Version has invalid format: %s", c.Kafka.Version)}
 		}
 	}
 	c.Kafka.pVersion = ver
@@ -214,15 +220,16 @@ func (c *GlobalConfig) Complete() error {
 
 		c.Syslog[i].TopicTemplate, err = template.New("topic").Parse(c.Syslog[i].TopicTmpl)
 		if err != nil {
-			return errwrap.Wrapf("Error compiling the topic template: {{err}}", err)
+			return ConfigurationCheckError{ErrString: "Error compiling the topic template", Err: err}
 		}
 		c.Syslog[i].PartitionKeyTemplate, err = template.New("partition").Parse(c.Syslog[i].PartitionTmpl)
 		if err != nil {
-			return errwrap.Wrapf("Error compiling the partition key template: {{err}}", err)
+			return ConfigurationCheckError{ErrString: "Error compiling the partition key template", Err: err}
 		}
 
 		c.Syslog[i].BindIP = net.ParseIP(c.Syslog[i].BindAddr)
 		if c.Syslog[i].BindIP == nil {
+			return ConfigurationCheckError{ErrString: fmt.Sprintf("bind_addr is not an IP address: %s", c.Syslog[i].BindAddr)}
 			return fmt.Errorf("syslog.bind_addr is not an IP address")
 		}
 
