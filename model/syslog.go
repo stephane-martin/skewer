@@ -62,11 +62,14 @@ func (m *SyslogMessage) String() string {
 }
 
 func Parse(m string, format string) (*SyslogMessage, error) {
-	if format == "rfc5424" {
+	switch format {
+	case "rfc5424":
 		return ParseRfc5424Format(m)
-	} else if format == "json" {
+	case "rfc3164":
+		return ParseRfc3164Format(m)
+	case "json":
 		return ParseJsonFormat(m)
-	} else {
+	default:
 		return nil, fmt.Errorf("unknown format")
 	}
 }

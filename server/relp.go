@@ -309,29 +309,6 @@ func (s *RelpServer) handleRelpConnection(conn net.Conn, i int) {
 	raw_messages_chan := make(chan *RawMessage)
 	parsed_messages_chan := make(chan *ParsedMessage)
 
-	// pull messages from raw_messages_chan and push them to parsed_messages_chan
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		for m := range raw_messages_chan {
-			p, err := model.Parse(m.Message, s.conf.Syslog[i].Format)
-			if err == nil {
-				parsed_msg := ParsedMessage{Message: p, Txnr: m.Txnr, Client: m.Client, LocalPort: m.LocalPort}
-				parsed_messages_chan <- &parsed_msg
-			} else {
-				// log the parsing error
-			}
-		}
-		close(parsed_messages_chan)
-	}()
-
-	defer func() {
-		// closing raw_messages_chan causes parsed_messages_chan to be closed too, because of the goroutine just above
-		close(raw_messages_chan)
-		s.RemoveConnection(conn)
-		s.wg.Done()
-	}()
-
 	relpIsOpen := false
 
 	var client string
@@ -349,6 +326,29 @@ func (s *RelpServer) handleRelpConnection(conn net.Conn, i int) {
 
 	logger := s.logger.New("remote", client, "local_port", local_port)
 	logger.Info("New client")
+
+	// pull messages from raw_messages_chan and push them to parsed_messages_chan
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		for m := range raw_messages_chan {
+			p, err := model.Parse(m.Message, s.conf.Syslog[i].Format)
+			if err == nil {
+				parsed_msg := ParsedMessage{Message: p, Txnr: m.Txnr, Client: m.Client, LocalPort: m.LocalPort}
+				parsed_messages_chan <- &parsed_msg
+			} else {
+				logger.Info("Parsing error", "Message", m.Message)
+			}
+		}
+		close(parsed_messages_chan)
+	}()
+
+	defer func() {
+		// closing raw_messages_chan causes parsed_messages_chan to be closed too, because of the goroutine just above
+		close(raw_messages_chan)
+		s.RemoveConnection(conn)
+		s.wg.Done()
+	}()
 
 	var producer sarama.AsyncProducer
 	var err error
@@ -484,6 +484,7 @@ func (s *RelpServer) handleRelpConnection(conn net.Conn, i int) {
 				answer := fmt.Sprintf("%d rsp %d 200 OK\n%s\n", txnr, len(data)+7, data)
 				conn.Write([]byte(answer))
 				relpIsOpen = true
+				logger.Info("Received 'open' command")
 			case "close":
 				if !relpIsOpen {
 					logger.Warn("Received close command before open")
@@ -492,6 +493,7 @@ func (s *RelpServer) handleRelpConnection(conn net.Conn, i int) {
 				answer := fmt.Sprintf("%d rsp 0\n0 serverclose 0\n", txnr)
 				conn.Write([]byte(answer))
 				relpIsOpen = false
+				logger.Info("Received 'close' command")
 			case "syslog":
 				if !relpIsOpen {
 					logger.Warn("Received syslog command before open")

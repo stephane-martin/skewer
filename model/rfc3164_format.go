@@ -84,6 +84,7 @@ func ParseRfc3164Format(m string) (*SyslogMessage, error) {
 			smsg.TimeReported = def_smsg.TimeReported
 			return &smsg, nil
 		}
+		t = t.AddDate(time.Now().Year(), 0, 0)
 		smsg.TimeGenerated = &t
 		smsg.TimeReported = &t
 		if len(s) == 3 {
@@ -139,12 +140,12 @@ func ParseRfc3164Format(m string) (*SyslogMessage, error) {
 func ParseTag(tag string) (appname string, procid string) {
 	tag = strings.Trim(tag, ":")
 	i := strings.Index(tag, "[")
-	if i >= 0 {
+	if i >= 0 && len(tag) > (i+1) {
 		j := strings.Index(tag, "]")
 		if j > i {
-			procid = tag[i:j]
+			procid = tag[i+1 : j]
 		} else {
-			procid = tag[i:]
+			procid = tag[i+1:]
 		}
 		if i > 0 {
 			appname = tag[0:i]
