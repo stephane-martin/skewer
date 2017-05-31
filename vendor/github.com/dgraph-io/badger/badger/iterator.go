@@ -17,6 +17,7 @@
 package badger
 
 import (
+	"bytes"
 	"sync"
 
 	"github.com/dgraph-io/badger/y"
@@ -46,6 +47,11 @@ func (item *KVItem) Key() []byte {
 func (item *KVItem) Value() []byte {
 	item.wg.Wait()
 	return item.val
+}
+
+// Counter returns the CAS counter associated with the value.
+func (item *KVItem) Counter() uint16 {
+	return item.casCounter
 }
 
 type list struct {
@@ -110,11 +116,6 @@ func (it *Iterator) newItem() *KVItem {
 	return item
 }
 
-func (it *Iterator) fetchOneValue(item *KVItem) {
-	item.val = it.kv.decodeValue(item.vptr, item.meta, item.slice)
-	item.wg.Done()
-}
-
 // Item returns pointer to the current KVItem.
 // This item is only valid until it.Next() gets called.
 func (it *Iterator) Item() *KVItem { return it.item }
@@ -138,12 +139,15 @@ func (it *Iterator) Next() {
 	it.item = it.data.pop()
 
 	// Advance internal iterator until entry is not deleted
-	for it.iitr.Valid() {
-		it.iitr.Next()
-		if it.iitr.Value().Meta&BitDelete == 0 {
+	for it.iitr.Next(); it.iitr.Valid(); it.iitr.Next() {
+		if bytes.HasPrefix(it.iitr.Key(), badgerPrefix) {
+			continue
+		}
+		if it.iitr.Value().Meta&BitDelete == 0 { // Not deleted.
 			break
 		}
 	}
+
 	if !it.iitr.Valid() {
 		return
 	}
@@ -160,7 +164,10 @@ func (it *Iterator) fill(item *KVItem) {
 	item.vptr = y.Safecopy(item.vptr, vs.Value)
 	if it.opt.FetchValues {
 		item.wg.Add(1)
-		go it.fetchOneValue(item)
+		go func() {
+			it.kv.fillItem(item)
+			item.wg.Done()
+		}()
 	}
 }
 
@@ -169,6 +176,9 @@ func (it *Iterator) prefetch() {
 	var count int
 	it.item = nil
 	for ; i.Valid(); i.Next() {
+		if bytes.HasPrefix(it.iitr.Key(), badgerPrefix) {
+			continue
+		}
 		if i.Value().Meta&BitDelete > 0 {
 			continue
 		}
@@ -196,6 +206,9 @@ func (it *Iterator) Seek(key []byte) {
 		it.waste.push(i)
 	}
 	it.iitr.Seek(key)
+	for it.iitr.Valid() && bytes.HasPrefix(it.iitr.Key(), badgerPrefix) {
+		it.iitr.Next()
+	}
 	it.prefetch()
 }
 
@@ -211,6 +224,9 @@ func (it *Iterator) Rewind() {
 	}
 
 	it.iitr.Rewind()
+	for it.iitr.Valid() && bytes.HasPrefix(it.iitr.Key(), badgerPrefix) {
+		it.iitr.Next()
+	}
 	it.prefetch()
 }
 

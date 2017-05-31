@@ -95,13 +95,17 @@ func (lf *logFile) doneWriting() error {
 	return lf.openReadOnly()
 }
 
-type logEntry func(e Entry, vp valuePointer) bool
+var errStop = errors.New("Stop iteration")
+
+type logEntry func(e Entry, vp valuePointer) error
 
 // iterate iterates over log file. It doesn't not allocate new memory for every kv pair.
 // Therefore, the kv pair is only valid for the duration of fn call.
 func (f *logFile) iterate(offset uint32, fn logEntry) error {
 	_, err := f.fd.Seek(int64(offset), 0)
-	y.Check(err)
+	if err != nil {
+		return y.Wrap(err)
+	}
 
 	read := func(r *bufio.Reader, buf []byte) error {
 		for {
@@ -184,17 +188,18 @@ func (f *logFile) iterate(offset uint32, fn logEntry) error {
 		vp.Offset = e.offset
 		vp.Fid = f.fid
 
-		if !fn(e, vp) {
-			break
+		if err := fn(e, vp); err != nil {
+			if err == errStop {
+				break
+			}
+			return y.Wrap(err)
 		}
 		count++
 	}
 	return nil
 }
 
-var entries = make([]*Entry, 0, 1000000)
-
-func (vlog *valueLog) rewrite(f *logFile) {
+func (vlog *valueLog) rewrite(f *logFile) error {
 	maxFid := atomic.LoadUint32(&vlog.maxFid)
 	y.AssertTruef(uint32(f.fid) < maxFid, "fid to move: %d. Current max fid: %d", f.fid, maxFid)
 
@@ -203,33 +208,39 @@ func (vlog *valueLog) rewrite(f *logFile) {
 	elog.Printf("Rewriting fid: %d", f.fid)
 	y.Printf("rewrite called\n")
 
-	entries = entries[:0]
+	vlog.entries = vlog.entries[:0]
 	y.AssertTrue(vlog.kv != nil)
 	var count int
-	fe := func(e Entry) {
+	fe := func(e Entry) error {
 		count++
 		if count%10000 == 0 {
 			elog.Printf("Processing entry %d", count)
 		}
 
-		vs := vlog.kv.get(e.Key)
+		vs, err := vlog.kv.get(e.Key)
+		if err != nil {
+			return err
+		}
+
 		if (vs.Meta & BitDelete) > 0 {
-			return
+			return nil
 		}
 		if (vs.Meta & BitValuePointer) == 0 {
-			return
+			return nil
 		}
 
 		// Value is still present in value log.
-		y.AssertTrue(len(vs.Value) > 0)
+		if len(vs.Value) == 0 {
+			return errors.Errorf("Empty value: %+v", vs)
+		}
 		var vp valuePointer
 		vp.Decode(vs.Value)
 
 		if vp.Fid > f.fid {
-			return
+			return nil
 		}
 		if vp.Offset > e.offset {
-			return
+			return nil
 		}
 		if vp.Fid == f.fid && vp.Offset == e.offset {
 			// This new entry only contains the key, and a pointer to the value.
@@ -241,27 +252,31 @@ func (vlog *valueLog) rewrite(f *logFile) {
 			ne.Value = make([]byte, len(e.Value))
 			copy(ne.Value, e.Value)
 			ne.CASCounterCheck = vs.CASCounter // CAS counter check. Do not rewrite if key has a newer value.
-			entries = append(entries, &ne)
+			vlog.entries = append(vlog.entries, &ne)
 
 		} else {
 			// This can now happen because we can move some entries forward, but then not write
 			// them to LSM tree due to CAS check failure.
-			// y.Fatalf("This shouldn't happen. Latest Pointer:%+v. Meta:%v.", vp, vs.Meta)
 		}
+		return nil
 	}
 
-	err := f.iterate(0, func(e Entry, vp valuePointer) bool {
-		fe(e)
-		return true
+	err := f.iterate(0, func(e Entry, vp valuePointer) error {
+		return fe(e)
 	})
-	y.Check(err)
+	if err != nil {
+		return err
+	}
 
 	elog.Printf("Processed %d entries in total", count)
 	// Sort the entries, so lookups can potentially use page cache better.
-	sort.Slice(entries, func(i, j int) bool {
-		return bytes.Compare(entries[i].Key, entries[j].Key) < 0
+	sort.Slice(vlog.entries, func(i, j int) bool {
+		return bytes.Compare(vlog.entries[i].Key, vlog.entries[j].Key) < 0
 	})
-	vlog.writeToKV(elog)
+
+	if len(vlog.entries) > 0 {
+		vlog.writeToKV(elog)
+	}
 
 	elog.Printf("Removing fid: %d", f.fid)
 	// Entries written to LSM. Remove the older file now.
@@ -271,7 +286,7 @@ func (vlog *valueLog) rewrite(f *logFile) {
 			return vlog.files[idx].fid >= f.fid
 		})
 		if idx == len(vlog.files) || vlog.files[idx].fid != f.fid {
-			y.Fatalf("Unable to find fid: %d", f.fid)
+			return errors.Errorf("Unable to find fid: %d", f.fid)
 		}
 		vlog.files = append(vlog.files[:idx], vlog.files[idx+1:]...)
 		vlog.RUnlock()
@@ -279,7 +294,7 @@ func (vlog *valueLog) rewrite(f *logFile) {
 
 	rem := vlog.fpath(f.fid)
 	elog.Printf("Removing %s", rem)
-	y.Check(os.Remove(rem))
+	return os.Remove(rem)
 }
 
 func (vlog *valueLog) writeToKV(elog trace.EventLog) {
@@ -289,8 +304,7 @@ func (vlog *valueLog) writeToKV(elog trace.EventLog) {
 	}
 	requests := make([]*request, 0, 10)
 	requests = append(requests, req)
-	for _, e := range entries {
-		req.Entries = append(req.Entries, e)
+	for _, e := range vlog.entries {
 		if len(req.Entries) >= 1000 {
 			req = &request{
 				Wg:      sync.WaitGroup{},
@@ -298,11 +312,12 @@ func (vlog *valueLog) writeToKV(elog trace.EventLog) {
 			}
 			requests = append(requests, req)
 		}
+		req.Entries = append(req.Entries, e)
 	}
 	for i, b := range requests {
 		elog.Printf("req %d has %d entries", i, len(b.Entries))
 		b.Wg.Add(1)
-		y.AssertTrue(len(b.Entries) > 0)
+		y.AssertTruef(len(b.Entries) > 0, "len(requests): %d", len(requests))
 		vlog.kv.writeCh <- b // Write out these blocks with newer value offsets.
 	}
 	for i, b := range requests {
@@ -444,6 +459,7 @@ type valueLog struct {
 	opt     Options
 
 	encoder *entryEncoder
+	entries []*Entry
 }
 
 func (l *valueLog) fpath(fid uint16) string {
@@ -572,6 +588,7 @@ type request struct {
 	Entries []*Entry
 	Ptrs    []valuePointer
 	Wg      sync.WaitGroup
+	Err     error
 }
 
 // sync is thread-unsafe and should not be called concurrently with write.
@@ -626,7 +643,6 @@ func (l *valueLog) write(reqs []*request) error {
 			if err != nil {
 				return errors.Wrapf(err, "While creating new value log: %q", newlf.path)
 			}
-			y.Check(err)
 
 			l.Lock()
 			l.files = append(l.files, newlf)
@@ -725,7 +741,7 @@ func (l *valueLog) runGCInLoop(lc *y.LevelCloser) {
 		return
 	}
 
-	tick := time.NewTicker(10 * time.Minute)
+	tick := time.NewTicker(l.opt.ValueGCRunInterval)
 	for {
 		select {
 		case <-lc.HasBeenClosed():
@@ -750,10 +766,10 @@ func (l *valueLog) pickLog() *logFile {
 	return l.files[lfi]
 }
 
-func (vlog *valueLog) doRunGC() {
+func (vlog *valueLog) doRunGC() error {
 	lf := vlog.pickLog()
 	if lf == nil {
-		return
+		return nil
 	}
 
 	type reason struct {
@@ -772,11 +788,11 @@ func (vlog *valueLog) doRunGC() {
 
 	start := time.Now()
 	y.AssertTrue(vlog.kv != nil)
-	err := lf.iterate(0, func(e Entry, vp valuePointer) bool {
+	err := lf.iterate(0, func(e Entry, vp valuePointer) error {
 		esz := float64(vp.Len) / (1 << 20) // in MBs. +4 for the CAS stuff.
 		skipped += esz
 		if skipped < skipFirstM {
-			return true
+			return nil
 		}
 
 		count++
@@ -785,22 +801,25 @@ func (vlog *valueLog) doRunGC() {
 		}
 		r.total += esz
 		if r.total > window {
-			return false
+			return errStop
 		}
 		if time.Since(start) > 10*time.Second {
-			return false
+			return errStop
 		}
 
-		vs := vlog.kv.get(e.Key)
+		vs, err := vlog.kv.get(e.Key)
+		if err != nil {
+			return err
+		}
 		if (vs.Meta & BitDelete) > 0 {
 			// Key has been deleted. Discard.
 			r.discard += esz
-			return true
+			return nil
 		}
 		if (vs.Meta & BitValuePointer) == 0 {
 			// Value is stored alongside key. Discard.
 			r.discard += esz
-			return true
+			return nil
 		}
 
 		// Value is still present in value log.
@@ -811,12 +830,12 @@ func (vlog *valueLog) doRunGC() {
 		if vp.Fid > lf.fid {
 			// Value is present in a later log. Discard.
 			r.discard += esz
-			return true
+			return nil
 		}
 		if vp.Offset > e.offset {
 			// Value is present in a later offset, but in the same log.
 			r.discard += esz
-			return true
+			return nil
 		}
 		if vp.Fid == lf.fid && vp.Offset == e.offset {
 			// This is still the active entry. This would need to be rewritten.
@@ -825,27 +844,36 @@ func (vlog *valueLog) doRunGC() {
 		} else {
 			y.Printf("Reason=%+v\n", r)
 			ne, err := vlog.Read(vp, nil)
-			y.Check(err)
+			if err != nil {
+				return errStop
+			}
 			ne.offset = vp.Offset
 			if ne.casCounter == e.casCounter {
 				ne.print("Latest Entry in LSM")
 				e.print("Latest Entry in Log")
-				y.Fatalf("This shouldn't happen. Latest Pointer:%+v. Meta:%v.", vp, vs.Meta)
+				return errors.Errorf(
+					"This shouldn't happen. Latest Pointer:%+v. Meta:%v.", vp, vs.Meta)
 			}
 		}
-		return true
+		return nil
 	})
 
-	y.Checkf(err, "While iterating for RunGC.")
-	y.Printf("Fid: %d Data status=%+v\n", lf.fid, r)
+	if err != nil {
+		vlog.elog.Errorf("Error while iterating for RunGC: %v", err)
+		return err
+	}
+	vlog.elog.Printf("Fid: %d Data status=%+v\n", lf.fid, r)
 
 	if r.total < 10.0 || r.keep >= vlog.opt.ValueGCThreshold*r.total {
 		y.Printf("Skipping GC on fid: %d\n\n", lf.fid)
-		return
+		return nil
 	}
 
 	y.Printf("=====> REWRITING VLOG %d\n", lf.fid)
-	vlog.rewrite(lf)
+	if err = vlog.rewrite(lf); err != nil {
+		return err
+	}
 	y.Printf("REWRITE DONE\n")
 	vlog.elog.Printf("Done rewriting.")
+	return nil
 }

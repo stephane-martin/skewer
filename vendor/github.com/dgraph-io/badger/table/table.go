@@ -69,22 +69,31 @@ type Table struct {
 	bf bbloom.Bloom
 }
 
-func (s *Table) Ref() int32 { return atomic.LoadInt32(&s.ref) }
+func (t *Table) Ref() int32 { return atomic.LoadInt32(&t.ref) }
 
-func (s *Table) IncrRef() {
-	atomic.AddInt32(&s.ref, 1)
+func (t *Table) IncrRef() {
+	atomic.AddInt32(&t.ref, 1)
 }
 
-func (s *Table) DecrRef() {
-	newRef := atomic.AddInt32(&s.ref, -1)
+func (t *Table) DecrRef() error {
+	newRef := atomic.AddInt32(&t.ref, -1)
 	if newRef == 0 {
 		// We can safely delete this file, because for all the current files, we always have
 		// at least one reference pointing to them.
-		s.fd.Truncate(0) // This is very important to let the FS know that the file is deleted.
-		filename := s.fd.Name()
-		y.Check(s.fd.Close())
-		os.Remove(filename)
+
+		if err := t.fd.Truncate(0); err != nil {
+			// This is very important to let the FS know that the file is deleted.
+			return err
+		}
+		filename := t.fd.Name()
+		if err := t.fd.Close(); err != nil {
+			return err
+		}
+		if err := os.Remove(filename); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 type Block struct {
@@ -106,7 +115,7 @@ func (b byKey) Less(i int, j int) bool { return bytes.Compare(b[i].key, b[j].key
 func OpenTable(fd *os.File, mapTableTo int) (*Table, error) {
 	id, ok := ParseFileID(fd.Name())
 	if !ok {
-		return nil, y.Errorf("Invalid filename: %s", fd.Name())
+		return nil, errors.Errorf("Invalid filename: %s", fd.Name())
 	}
 	t := &Table{
 		fd:         fd,
@@ -116,7 +125,7 @@ func OpenTable(fd *os.File, mapTableTo int) (*Table, error) {
 	}
 	fileInfo, err := fd.Stat()
 	if err != nil {
-		return nil, err
+		return nil, y.Wrap(err)
 	}
 	t.tableSize = int(fileInfo.Size())
 
@@ -124,14 +133,17 @@ func OpenTable(fd *os.File, mapTableTo int) (*Table, error) {
 		t.mmap, err = syscall.Mmap(int(fd.Fd()), 0, int(fileInfo.Size()),
 			syscall.PROT_READ, syscall.MAP_SHARED)
 		if err != nil {
-			y.Fatalf("Unable to map file: %v", err)
+			return t, y.Wrapf(err, "Unable to map file")
 		}
 	} else if mapTableTo == LoadToRAM {
-		t.LoadToRAM()
+		err = t.LoadToRAM()
+		if err != nil {
+			return t, y.Wrap(err)
+		}
 	}
 
 	if err := t.readIndex(); err != nil {
-		return nil, err
+		return nil, y.Wrap(err)
 	}
 
 	it := t.NewIterator(false)
@@ -150,21 +162,31 @@ func OpenTable(fd *os.File, mapTableTo int) (*Table, error) {
 	return t, nil
 }
 
-func (s *Table) Close() {
-	s.fd.Close()
-	if s.mapTableTo == MemoryMap {
-		syscall.Munmap(s.mmap)
+func (t *Table) Close() error {
+	if err := t.fd.Close(); err != nil {
+		return err
 	}
+	if t.mapTableTo == MemoryMap {
+		return syscall.Munmap(t.mmap)
+	}
+	return nil
 }
 
 // SetMetadata updates our metadata to the new metadata.
 // For now, they must be of the same size.
-func (t *Table) SetMetadata(meta []byte) {
+func (t *Table) SetMetadata(meta []byte) error {
 	y.AssertTrue(len(meta) == len(t.metadata))
 	pos := t.tableSize - 4 - len(t.metadata)
-	written, err := t.fd.WriteAt(meta, int64(pos))
-	y.AssertTrue(written == len(meta))
-	y.Check(err)
+	_, err := t.fd.WriteAt(meta, int64(pos))
+	return y.Wrap(err)
+}
+
+// updateLevel is called only when moving table to the next level, when there is no overlap
+// with the next level. Here, we update the table metadata.
+func (t *Table) UpdateLevel(newLevel int) {
+	var metadata [2]byte
+	binary.BigEndian.PutUint16(metadata[:], uint16(newLevel))
+	t.SetMetadata(metadata[:])
 }
 
 var EOF = errors.New("End of mapped region")
@@ -252,17 +274,16 @@ func (t *Table) readIndex() error {
 			}
 
 			h.Decode(buf)
-			y.AssertTruef(h.plen == 0, "Block index: %d, Key offset: %+v, h.plen = %d",
-				i, *ko, h.plen)
+			y.AssertTruef(h.plen == 0, "Key offset: %+v, h.plen = %d", *ko, h.plen)
 
 			offset += h.Size()
 			buf = make([]byte, h.klen)
-			if out, err := t.read(offset, h.klen); err != nil {
+			var out []byte
+			if out, err = t.read(offset, h.klen); err != nil {
 				che <- errors.Wrap(err, "While reading first key in block")
 				return
-			} else {
-				y.AssertTrue(len(buf) == copy(buf, out))
 			}
+			y.AssertTrue(len(buf) == copy(buf, out))
 
 			ko.key = buf
 			che <- nil
@@ -323,10 +344,11 @@ func NewFilename(id uint64, dir string) string {
 	return filepath.Join(dir, fmt.Sprintf("%06d", id)+fileSuffix)
 }
 
-func (t *Table) LoadToRAM() {
+func (t *Table) LoadToRAM() error {
 	t.mmap = make([]byte, t.tableSize)
 	read, err := t.fd.ReadAt(t.mmap, 0)
 	if err != nil || read != t.tableSize {
-		y.Fatalf("Unable to load file in memory: %v. Read: %v", err, read)
+		return y.Wrapf(err, "Unable to load file in memory. Table file: %s", t.Filename())
 	}
+	return nil
 }
