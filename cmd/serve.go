@@ -11,6 +11,7 @@ import (
 
 	"github.com/inconshreveable/log15"
 	"github.com/spf13/cobra"
+	"github.com/stephane-martin/relp2kafka/conf"
 	"github.com/stephane-martin/relp2kafka/server"
 )
 
@@ -90,48 +91,75 @@ func setLogging() {
 
 func Serve() {
 	setLogging()
+	c, e := conf.Load(configDirName)
+	if e != nil {
+		fmt.Println(e)
+		os.Exit(-1)
+	}
 
-	s := server.New(configDirName, logger)
+	relpServer := server.NewRelpServer(c, logger)
 	if testFlag {
-		s.SetTest()
+		relpServer.SetTest()
 	}
 	sig_chan := make(chan os.Signal)
 	signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
-	s.StatusChan <- server.Stopped
+	relpServer.StatusChan <- server.Stopped
+
+	tcpServer := server.NewTcpServer(c, logger)
+	if testFlag {
+		tcpServer.SetTest()
+	}
+	e = tcpServer.Start()
+	if e != nil {
+		logger.Error("Error starting the TCP server", "error", e)
+	} else {
+		logger.Info("The TCP service has started")
+	}
 
 	go func() {
 		for {
-			sig := <-sig_chan
-			if sig == syscall.SIGHUP {
-				logger.Info("SIGHUP received")
-				s.Stop()
-			} else if sig == syscall.SIGTERM || sig == syscall.SIGINT {
-				logger.Info("Termination signal received", "signal", sig)
-				s.FinalStop()
+			select {
+			case sig := <-sig_chan:
+				if sig == syscall.SIGHUP {
+					logger.Info("SIGHUP received")
+					relpServer.Stop()
+					tcpServer.Stop()
+					<-tcpServer.StatusChan
+					tcpServer.Start()
+
+				} else if sig == syscall.SIGTERM || sig == syscall.SIGINT {
+					logger.Info("Termination signal received", "signal", sig)
+					relpServer.FinalStop()
+					tcpServer.Stop()
+				}
 			}
 		}
 	}()
 
 	for {
-		state := <-s.StatusChan
+		state := <-relpServer.StatusChan
 		switch state {
 		case server.FinalStopped:
+			logger.Info("The RELP service was definitely halted")
+			// wait that the tcp service stops too
+			<-tcpServer.StatusChan
+			logger.Info("The TCP service has stopped")
 			return
 		case server.Stopped:
-			err := s.Start()
+			err := relpServer.Start()
 			if err != nil {
-				logger.Warn("relp2kafka failed to start", "error", err)
-				s.StopAndWait()
+				logger.Warn("The RELP service failed to start", "error", err)
+				relpServer.StopAndWait()
 			}
 		case server.Waiting:
 			logger.Info("Waiting")
 			go func() {
 				time.Sleep(time.Duration(30) * time.Second)
-				s.EndWait()
+				relpServer.EndWait()
 			}()
 
 		case server.Started:
-			logger.Info("relp2kafka has started")
+			logger.Info("The RELP service has started")
 		}
 	}
 }

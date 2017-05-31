@@ -82,6 +82,7 @@ func ParseRfc3164Format(m string) (*SyslogMessage, error) {
 			smsg.Message = m
 			smsg.TimeGenerated = def_smsg.TimeGenerated
 			smsg.TimeReported = def_smsg.TimeReported
+			// todo: check
 			return &smsg, nil
 		}
 		t = t.AddDate(time.Now().Year(), 0, 0)

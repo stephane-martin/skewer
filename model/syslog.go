@@ -3,7 +3,10 @@ package model
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
+
+	uuid "github.com/satori/go.uuid"
 )
 
 type Priority int
@@ -25,6 +28,43 @@ type SyslogMessage struct {
 	Structured    string                 `json:"structured"`
 	Message       string                 `json:"message"`
 	Properties    map[string]interface{} `json:"properties"`
+}
+
+type TcpRawMessage struct {
+	RawMessage
+	Uid uuid.UUID
+}
+
+type TcpParsedMessage struct {
+	Message   *SyslogMessage `json:"message"`
+	Uid       string         `json:"-"`
+	Client    string         `json:"client"`
+	LocalPort int            `json:"local_port,string"`
+	ConfIndex int            `json:"-"`
+}
+
+type RawMessage struct {
+	Message   string
+	Client    string
+	LocalPort int
+}
+
+type ParsedMessage struct {
+	Message   *SyslogMessage `json:"message"`
+	Client    string         `json:"client"`
+	LocalPort int            `json:"local_port,string"`
+}
+
+type RelpRawMessage struct {
+	RawMessage
+	Txnr int
+}
+
+type RelpParsedMessage struct {
+	Message   *SyslogMessage `json:"message"`
+	Txnr      int            `json:"-"`
+	Client    string         `json:"client"`
+	LocalPort int            `json:"local_port,string"`
 }
 
 var SyslogMessageFmt string = `Facility: %d
@@ -69,6 +109,25 @@ func Parse(m string, format string) (*SyslogMessage, error) {
 		return ParseRfc3164Format(m)
 	case "json":
 		return ParseJsonFormat(m)
+	case "auto":
+		if m[0] == byte('{') {
+			return ParseJsonFormat(m)
+		}
+		if m[0] != byte('<') {
+			return ParseRfc3164Format(m)
+		}
+		i := strings.Index(m, ">")
+		if i < 2 {
+			return ParseRfc3164Format(m)
+		}
+		if len(m) == (i + 1) {
+			return ParseRfc3164Format(m)
+		}
+		if m[i+1] == byte('1') {
+			return ParseRfc5424Format(m)
+		}
+		return ParseRfc3164Format(m)
+
 	default:
 		return nil, fmt.Errorf("unknown format")
 	}

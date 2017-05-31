@@ -28,4 +28,6 @@ func SetDefaults(v *viper.Viper) {
 	v.SetDefault("kafka.flush_messages_max", 0)
 	v.SetDefault("kafka.retry_send_max", 3)
 	v.SetDefault("kafka.retry_send_backoff", "100ms")
+
+	v.SetDefault("store.dirname", "/var/lib/relp2kafka")
 }

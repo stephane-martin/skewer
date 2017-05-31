@@ -34,8 +34,9 @@ func ParseJsonFormat(m string) (*SyslogMessage, error) {
 		return nil, err
 	}
 
-	var generated *time.Time
-	var reported *time.Time
+	n := time.Now()
+	generated := &n
+	reported := &n
 
 	if sourceMsg.TimeReported != "-" {
 		r, err := time.Parse(time.RFC3339Nano, sourceMsg.TimeReported)

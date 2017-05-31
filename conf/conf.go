@@ -18,6 +18,11 @@ import (
 type GlobalConfig struct {
 	Syslog []SyslogConfig `mapstructure:"syslog" toml:"syslog"`
 	Kafka  KafkaConfig    `mapstructure:"kafka" toml:"kafka"`
+	Store  StoreConfig    `mapstructure:"store" toml:"store"`
+}
+
+type StoreConfig struct {
+	Dirname string `mapstructure:"dirname" toml:"dirname"`
 }
 
 type KafkaConfig struct {
@@ -45,7 +50,6 @@ type KafkaConfig struct {
 	RetrySendBackoff         time.Duration           `mapstructure:"retry_send_backoff" toml:"retry_send_backoff"`
 	pVersion                 [4]int                  `toml:"-"`
 	pCompression             sarama.CompressionCodec `toml:"-"`
-	// Partitioner ?
 }
 
 type SyslogConfig struct {
@@ -54,10 +58,15 @@ type SyslogConfig struct {
 	Format               string             `mapstructure:"format" toml:"format"`
 	TopicTmpl            string             `mapstructure:"topic_tmpl" toml:"topic_tmpl"`
 	PartitionTmpl        string             `mapstructure:"partition_key_tmpl" toml:"partition_key_tmpl"`
+	Protocol             string             `mapstructure:"protocol" json:"protocol"`
 	TopicTemplate        *template.Template `toml:"-"`
 	PartitionKeyTemplate *template.Template `toml:"-"`
 	BindIP               net.IP             `toml:"-"`
 	ListenAddr           string             `toml:"-"`
+	// Filter ?
+	// Partitioner ?
+	// Topic function ?
+	// Partition key function ?
 }
 
 func (c *GlobalConfig) GetSaramaConfig() *sarama.Config {
@@ -210,6 +219,9 @@ func (c *GlobalConfig) Complete() error {
 		}
 		if syslogConf.Format == "" {
 			c.Syslog[i].Format = "rfc5424"
+		}
+		if syslogConf.Protocol == "" {
+			c.Syslog[i].Protocol = "relp"
 		}
 		if syslogConf.TopicTmpl == "" {
 			c.Syslog[i].TopicTmpl = "rsyslog-{{.Message.Appname}}"
