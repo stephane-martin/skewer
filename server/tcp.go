@@ -132,17 +132,17 @@ func (s *TcpServer) Store2Kafka() {
 	} else {
 		var producer sarama.AsyncProducer
 		var err error
-		for !s.store.Stopped() {
+		for {
+			if s.store.Stopped() {
+				return
+			}
 			producer, err = s.Conf.GetKafkaAsyncProducer()
 			if err == nil {
 				break
 			} else {
-				// todo: wait a bit
 				s.logger.Warn("Error getting a Kafka client", "error", err)
+				time.Sleep(time.Second)
 			}
-		}
-		if producer == nil {
-			return
 		}
 		defer producer.AsyncClose()
 
@@ -193,11 +193,16 @@ func (s *TcpServer) Store2Kafka() {
 				s.logger.Warn("Error generating the topic", "error", err)
 				continue
 			}
+			topic := topicBuf.String()
+			if !TopicNameIsValid(topic) {
+				s.logger.Warn("Invalid topic name", "topic", topic)
+				continue
+			}
 
 			kafka_msg := sarama.ProducerMessage{
 				Key:       sarama.ByteEncoder(partitionKeyBuf.Bytes()),
 				Value:     sarama.ByteEncoder(value),
-				Topic:     topicBuf.String(),
+				Topic:     topic,
 				Timestamp: *message.Message.TimeReported,
 				Metadata:  message.Uid,
 			}

@@ -180,15 +180,28 @@ func (s *MessageStore) resetFailures() {
 			s.failed_mu.Unlock()
 			break
 		}
+
 		s.ready_mu.Lock()
-		// todo: batch
+
+		deleteEntries := []*badger.Entry{}
+		setEntries := []*badger.Entry{}
 		for _, uid := range uids {
-			s.failed.Delete([]byte(uid))
-			s.ready.Set([]byte(uid), []byte("true"))
+			deleteEntries = badger.EntriesDelete(deleteEntries, []byte(uid))
+			setEntries = badger.EntriesSet(setEntries, []byte(uid), []byte("true"))
 		}
+		err := s.ready.BatchSet(setEntries)
+		if err != nil {
+			s.logger.Error("Error pushing entries from failed queue to ready queue!")
+		} else {
+			err := s.failed.BatchSet(deleteEntries)
+			if err != nil {
+				s.logger.Error("Error deleting entries from failed queue!")
+			}
+			s.logger.Debug("Messages pushed back from failed queue to ready queue", "nb_messages", len(uids))
+		}
+
 		s.ready_mu.Unlock()
 		s.failed_mu.Unlock()
-		s.logger.Debug("Failed messages pushed back to ready state", "nb_messages", len(uids))
 	}
 }
 
@@ -208,7 +221,6 @@ func (s *MessageStore) startIngest() {
 func (s *MessageStore) StartSend() {
 	s.logger.Debug("StartSend")
 	s.Outputs = make(chan *model.TcpParsedMessage)
-	// todo: ticker to periodically reset failures
 	s.wg.Add(1)
 	go func() {
 		defer func() {
@@ -269,13 +281,27 @@ func (s *MessageStore) retrieve(n int) (messages map[string]*model.TcpParsedMess
 				}
 			}
 		} else {
-			s.logger.Warn("Error getting message from internal DB", "uid", string(uid))
+			s.logger.Warn("Error getting message content from message queue", "uid", string(uid))
 		}
 	}
-	// todo: use batch
+	if len(messages) == 0 {
+		return messages
+	}
+	deleteEntries := []*badger.Entry{}
+	setEntries := []*badger.Entry{}
 	for uid, _ := range messages {
-		s.sent.Set([]byte(uid), []byte("true"))
-		s.ready.Delete([]byte(uid))
+		deleteEntries = badger.EntriesDelete(deleteEntries, []byte(uid))
+		setEntries = badger.EntriesSet(setEntries, []byte(uid), []byte("true"))
+	}
+	err := s.sent.BatchSet(setEntries)
+	if err != nil {
+		s.logger.Error("Error pushing ready messages to the sent queue!")
+		return map[string]*model.TcpParsedMessage{}
+	} else {
+		err := s.ready.BatchSet(deleteEntries)
+		if err != nil {
+			s.logger.Error("Error deleting ready messages!")
+		}
 	}
 	return messages
 }

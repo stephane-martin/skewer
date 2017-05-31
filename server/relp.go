@@ -298,6 +298,11 @@ func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
 				logger.Warn("Error generating the topic", "error", err)
 				continue
 			}
+			topic := topicBuf.String()
+			if !TopicNameIsValid(topic) {
+				logger.Warn("Invalid topic name", "topic", topic)
+				continue
+			}
 
 			if s.test {
 				fmt.Println(string(value))
@@ -308,11 +313,10 @@ func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
 				if m.Message.TimeReported != nil {
 					t = *m.Message.TimeReported
 				}
-				// todo: sanitize topic so that it will be accepted by kafka
 				pm := sarama.ProducerMessage{
 					Key:       sarama.ByteEncoder(partitionKeyBuf.Bytes()),
 					Value:     sarama.ByteEncoder(value),
-					Topic:     topicBuf.String(),
+					Topic:     topic,
 					Timestamp: t,
 					Metadata:  m.Txnr,
 				}
