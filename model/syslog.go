@@ -1,10 +1,15 @@
 package model
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
+	"text/template"
 	"time"
+	"unicode/utf8"
+
+	sarama "gopkg.in/Shopify/sarama.v1"
 
 	uuid "github.com/satori/go.uuid"
 )
@@ -30,19 +35,6 @@ type SyslogMessage struct {
 	Properties    map[string]interface{} `json:"properties"`
 }
 
-type TcpRawMessage struct {
-	RawMessage
-	Uid uuid.UUID
-}
-
-type TcpParsedMessage struct {
-	Message   *SyslogMessage `json:"message"`
-	Uid       string         `json:"-"`
-	Client    string         `json:"client"`
-	LocalPort int            `json:"local_port,string"`
-	ConfIndex int            `json:"-"`
-}
-
 type RawMessage struct {
 	Message   string
 	Client    string
@@ -50,9 +42,49 @@ type RawMessage struct {
 }
 
 type ParsedMessage struct {
-	Message   *SyslogMessage `json:"message"`
+	Fields    *SyslogMessage `json:"fields"`
 	Client    string         `json:"client"`
 	LocalPort int            `json:"local_port,string"`
+}
+
+func (m *ParsedMessage) ToKafka(pkeyTmpl, topicTmpl *template.Template) (km *sarama.ProducerMessage, err error) {
+	value, err := json.Marshal(m)
+	if err != nil {
+		return nil, err
+	}
+	partitionKeyBuf := bytes.Buffer{}
+	err = pkeyTmpl.Execute(&partitionKeyBuf, m)
+	if err != nil {
+		return nil, err
+	}
+	topicBuf := bytes.Buffer{}
+	err = topicTmpl.Execute(&topicBuf, m)
+	if err != nil {
+		return nil, err
+	}
+	topic := topicBuf.String()
+	if !TopicNameIsValid(topic) {
+		return nil, fmt.Errorf("Invalid topic name: '%s'", topic)
+	}
+
+	kafka_msg := sarama.ProducerMessage{
+		Key:       sarama.ByteEncoder(partitionKeyBuf.Bytes()),
+		Value:     sarama.ByteEncoder(value),
+		Topic:     topic,
+		Timestamp: *m.Fields.TimeReported,
+	}
+	return &kafka_msg, nil
+}
+
+type TcpRawMessage struct {
+	RawMessage
+	Uid uuid.UUID
+}
+
+type TcpParsedMessage struct {
+	Parsed    ParsedMessage `json:"parsed"`
+	Uid       string        `json:"uid"`
+	ConfIndex int           `json:"conf_index"`
 }
 
 type RelpRawMessage struct {
@@ -61,10 +93,8 @@ type RelpRawMessage struct {
 }
 
 type RelpParsedMessage struct {
-	Message   *SyslogMessage `json:"message"`
-	Txnr      int            `json:"-"`
-	Client    string         `json:"client"`
-	LocalPort int            `json:"local_port,string"`
+	Parsed ParsedMessage `json:"parsed"`
+	Txnr   int           `json:"txnr"`
 }
 
 var SyslogMessageFmt string = `Facility: %d
@@ -131,4 +161,44 @@ func Parse(m string, format string) (*SyslogMessage, error) {
 	default:
 		return nil, fmt.Errorf("unknown format")
 	}
+}
+
+func TopicNameIsValid(name string) bool {
+	if len(name) == 0 {
+		return false
+	}
+	if len(name) > 249 {
+		return false
+	}
+	if !utf8.ValidString(name) {
+		return false
+	}
+	for _, r := range name {
+		if !validRune(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func validRune(r rune) bool {
+	if r >= 'a' && r <= 'z' {
+		return true
+	}
+	if r >= 'A' && r <= 'Z' {
+		return true
+	}
+	if r >= '0' && r <= '9' {
+		return true
+	}
+	if r == '.' {
+		return true
+	}
+	if r == '_' {
+		return true
+	}
+	if r == '-' {
+		return true
+	}
+	return false
 }

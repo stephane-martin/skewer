@@ -3,7 +3,6 @@ package server
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"net"
 	"strconv"
@@ -120,14 +119,26 @@ func (s *TcpServer) Store2Kafka() {
 	s.logger.Debug("Store2Kafka")
 	if s.test {
 		s.store.StartSend()
-		s.logger.Debug("Test mode: we don't really send messages to Kafka, we just print them")
 		for message := range s.store.Outputs {
 			if message != nil {
-				fmt.Println(message.Message)
+				pkeyTmpl := s.Conf.Syslog[message.ConfIndex].PartitionKeyTemplate
+				topicTmpl := s.Conf.Syslog[message.ConfIndex].TopicTemplate
+				kafkaMsg, err := message.Parsed.ToKafka(pkeyTmpl, topicTmpl)
+				if err != nil {
+					s.logger.Warn("Error generating Kafka message", "error", err)
+					s.store.Nack(message.Uid)
+					continue
+				}
+
+				v, _ := kafkaMsg.Value.Encode()
+				pkey, _ := kafkaMsg.Key.Encode()
+				fmt.Printf("pkey: '%s' topic:'%s' uid:'%s'\n", pkey, kafkaMsg.Topic, message.Uid)
+				fmt.Println(string(v))
+				fmt.Println()
+
 				s.store.Ack(message.Uid)
 			}
 		}
-		s.logger.Debug("Consumed all messages coming from the Store")
 		s.store.Close()
 	} else {
 		var producer sarama.AsyncProducer
@@ -176,41 +187,16 @@ func (s *TcpServer) Store2Kafka() {
 
 		s.store.StartSend()
 		for message := range s.store.Outputs {
-			value, err := json.Marshal(message)
+			pkeyTmpl := s.Conf.Syslog[message.ConfIndex].PartitionKeyTemplate
+			topicTmpl := s.Conf.Syslog[message.ConfIndex].TopicTemplate
+			kafkaMsg, err := message.Parsed.ToKafka(pkeyTmpl, topicTmpl)
 			if err != nil {
-				s.logger.Warn("Error marshaling a message to JSON", "error", err)
+				s.logger.Warn("Error generating Kafka message", "error", err)
 				s.store.Nack(message.Uid)
 				continue
 			}
-			partitionKeyBuf := bytes.Buffer{}
-			err = s.Conf.Syslog[message.ConfIndex].PartitionKeyTemplate.Execute(&partitionKeyBuf, message)
-			if err != nil {
-				s.logger.Warn("Error generating the partition hash key", "error", err)
-				s.store.Nack(message.Uid)
-				continue
-			}
-			topicBuf := bytes.Buffer{}
-			err = s.Conf.Syslog[message.ConfIndex].TopicTemplate.Execute(&topicBuf, message)
-			if err != nil {
-				s.logger.Warn("Error generating the topic", "error", err)
-				s.store.Nack(message.Uid)
-				continue
-			}
-			topic := topicBuf.String()
-			if !TopicNameIsValid(topic) {
-				s.logger.Warn("Invalid topic name", "topic", topic)
-				s.store.Nack(message.Uid)
-				continue
-			}
-
-			kafka_msg := sarama.ProducerMessage{
-				Key:       sarama.ByteEncoder(partitionKeyBuf.Bytes()),
-				Value:     sarama.ByteEncoder(value),
-				Topic:     topic,
-				Timestamp: *message.Message.TimeReported,
-				Metadata:  message.Uid,
-			}
-			producer.Input() <- &kafka_msg
+			kafkaMsg.Metadata = message.Uid
+			producer.Input() <- kafkaMsg
 		}
 	}
 }
@@ -256,7 +242,15 @@ func (h TcpHandler) HandleConnection(conn net.Conn, i int) {
 			}
 			if err == nil {
 				uid := t.Format(time.RFC3339) + m.Uid.String()
-				parsed_msg := model.TcpParsedMessage{Message: p, Uid: uid, Client: m.Client, LocalPort: m.LocalPort, ConfIndex: i}
+				parsed_msg := model.TcpParsedMessage{
+					Parsed: model.ParsedMessage{
+						Fields:    p,
+						Client:    m.Client,
+						LocalPort: m.LocalPort,
+					},
+					Uid:       uid,
+					ConfIndex: i,
+				}
 				s.store.Inputs <- &parsed_msg
 			} else {
 				logger.Info("Parsing error", "Message", m.Message)

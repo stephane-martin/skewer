@@ -3,13 +3,11 @@ package server
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"net"
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	sarama "gopkg.in/Shopify/sarama.v1"
 
@@ -192,7 +190,14 @@ func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
 		for m := range raw_messages_chan {
 			p, err := model.Parse(m.Message, s.Conf.Syslog[i].Format)
 			if err == nil {
-				parsed_msg := model.RelpParsedMessage{Message: p, Txnr: m.Txnr, Client: m.Client, LocalPort: m.LocalPort}
+				parsed_msg := model.RelpParsedMessage{
+					Parsed: model.ParsedMessage{
+						Fields:    p,
+						Client:    m.Client,
+						LocalPort: m.LocalPort,
+					},
+					Txnr: m.Txnr,
+				}
 				parsed_messages_chan <- &parsed_msg
 			} else {
 				logger.Info("Parsing error", "Message", m.Message)
@@ -324,49 +329,25 @@ func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
 		}()
 		for m := range parsed_messages_chan {
 			// todo: optional filtering of parsed messages
-			value, err := json.Marshal(m)
+			pkeyTmpl := s.Conf.Syslog[i].PartitionKeyTemplate
+			topicTmpl := s.Conf.Syslog[i].TopicTemplate
+			kafkaMsg, err := m.Parsed.ToKafka(pkeyTmpl, topicTmpl)
 			if err != nil {
-				logger.Warn("Error marshaling a message to JSON", "error", err)
+				s.logger.Warn("Error generating Kafka message", "error", err)
 				other_fails_chan <- m.Txnr
 				continue
 			}
-			partitionKeyBuf := bytes.Buffer{}
-			err = s.Conf.Syslog[i].PartitionKeyTemplate.Execute(&partitionKeyBuf, m)
-			if err != nil {
-				logger.Warn("Error generating the partition hash key", "error", err)
-				other_fails_chan <- m.Txnr
-				continue
-			}
-			topicBuf := bytes.Buffer{}
-			err = s.Conf.Syslog[i].TopicTemplate.Execute(&topicBuf, m)
-			if err != nil {
-				logger.Warn("Error generating the topic", "error", err)
-				other_fails_chan <- m.Txnr
-				continue
-			}
-			topic := topicBuf.String()
-			if !TopicNameIsValid(topic) {
-				logger.Warn("Invalid topic name", "topic", topic)
-				other_fails_chan <- m.Txnr
-				continue
-			}
+			kafkaMsg.Metadata = m.Txnr
 
 			if s.test {
-				fmt.Println(string(value))
+				v, _ := kafkaMsg.Value.Encode()
+				pkey, _ := kafkaMsg.Key.Encode()
+				fmt.Printf("pkey: '%s' topic:'%s' txnr:'%d'\n", pkey, kafkaMsg.Topic, m.Txnr)
+				fmt.Println(string(v))
+				fmt.Println()
 				other_successes_chan <- m.Txnr
 			} else {
-				t := time.Now()
-				if m.Message.TimeReported != nil {
-					t = *m.Message.TimeReported
-				}
-				pm := sarama.ProducerMessage{
-					Key:       sarama.ByteEncoder(partitionKeyBuf.Bytes()),
-					Value:     sarama.ByteEncoder(value),
-					Topic:     topic,
-					Timestamp: t,
-					Metadata:  m.Txnr,
-				}
-				producer.Input() <- &pm
+				producer.Input() <- kafkaMsg
 			}
 		}
 	}()

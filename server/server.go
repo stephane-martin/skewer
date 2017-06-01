@@ -3,7 +3,6 @@ package server
 import (
 	"net"
 	"sync"
-	"unicode/utf8"
 
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/relp2kafka/conf"
@@ -126,44 +125,4 @@ func (s *Server) Listen() {
 	// close the client connections
 	s.CloseConnections()
 	s.wg.Done()
-}
-
-func TopicNameIsValid(name string) bool {
-	if len(name) == 0 {
-		return false
-	}
-	if len(name) > 249 {
-		return false
-	}
-	if !utf8.ValidString(name) {
-		return false
-	}
-	for _, r := range name {
-		if !validRune(r) {
-			return false
-		}
-	}
-	return true
-}
-
-func validRune(r rune) bool {
-	if r >= 'a' && r <= 'z' {
-		return true
-	}
-	if r >= 'A' && r <= 'Z' {
-		return true
-	}
-	if r >= '0' && r <= '9' {
-		return true
-	}
-	if r == '.' {
-		return true
-	}
-	if r == '_' {
-		return true
-	}
-	if r == '-' {
-		return true
-	}
-	return false
 }

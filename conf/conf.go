@@ -137,7 +137,7 @@ type SyslogConfig struct {
 	Format               string             `mapstructure:"format" toml:"format"`
 	TopicTmpl            string             `mapstructure:"topic_tmpl" toml:"topic_tmpl"`
 	PartitionTmpl        string             `mapstructure:"partition_key_tmpl" toml:"partition_key_tmpl"`
-	Protocol             string             `mapstructure:"protocol" json:"protocol"`
+	Protocol             string             `mapstructure:"protocol" toml:"protocol"`
 	TopicTemplate        *template.Template `toml:"-"`
 	PartitionKeyTemplate *template.Template `toml:"-"`
 	BindIP               net.IP             `toml:"-"`
@@ -279,8 +279,8 @@ func (c *GlobalConfig) Complete() (err error) {
 			BindAddr:      "127.0.0.1",
 			Format:        "rfc5424",
 			Protocol:      "relp",
-			TopicTmpl:     "rsyslog-{{.Message.Appname}}",
-			PartitionTmpl: "{{.Message.Hostname}}",
+			TopicTmpl:     "rsyslog-{{.Fields.Appname}}",
+			PartitionTmpl: "mypk-{{.Fields.Hostname}}",
 		}
 		c.Syslog = []SyslogConfig{syslogConf}
 	}
@@ -298,10 +298,10 @@ func (c *GlobalConfig) Complete() (err error) {
 			c.Syslog[i].Protocol = "relp"
 		}
 		if syslogConf.TopicTmpl == "" {
-			c.Syslog[i].TopicTmpl = "rsyslog-{{.Message.Appname}}"
+			c.Syslog[i].TopicTmpl = "rsyslog-{{.Fields.Appname}}"
 		}
 		if syslogConf.PartitionTmpl == "" {
-			c.Syslog[i].PartitionTmpl = "{{.Message.Hostname}}"
+			c.Syslog[i].PartitionTmpl = "mypk-{{.Fields.Hostname}}"
 		}
 
 		c.Syslog[i].TopicTemplate, err = template.New("topic").Parse(c.Syslog[i].TopicTmpl)
