@@ -179,23 +179,27 @@ func (s *TcpServer) Store2Kafka() {
 			value, err := json.Marshal(message)
 			if err != nil {
 				s.logger.Warn("Error marshaling a message to JSON", "error", err)
+				s.store.Nack(message.Uid)
 				continue
 			}
 			partitionKeyBuf := bytes.Buffer{}
 			err = s.Conf.Syslog[message.ConfIndex].PartitionKeyTemplate.Execute(&partitionKeyBuf, message)
 			if err != nil {
 				s.logger.Warn("Error generating the partition hash key", "error", err)
+				s.store.Nack(message.Uid)
 				continue
 			}
 			topicBuf := bytes.Buffer{}
 			err = s.Conf.Syslog[message.ConfIndex].TopicTemplate.Execute(&topicBuf, message)
 			if err != nil {
 				s.logger.Warn("Error generating the topic", "error", err)
+				s.store.Nack(message.Uid)
 				continue
 			}
 			topic := topicBuf.String()
 			if !TopicNameIsValid(topic) {
 				s.logger.Warn("Invalid topic name", "topic", topic)
+				s.store.Nack(message.Uid)
 				continue
 			}
 

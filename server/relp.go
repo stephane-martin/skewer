@@ -164,6 +164,8 @@ func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
 
 	raw_messages_chan := make(chan *model.RelpRawMessage)
 	parsed_messages_chan := make(chan *model.RelpParsedMessage)
+	other_successes_chan := make(chan int)
+	other_fails_chan := make(chan int)
 
 	relpIsOpen := false
 
@@ -208,7 +210,32 @@ func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
 
 	var producer sarama.AsyncProducer
 	var err error
-	if !s.test {
+
+	if s.test {
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			more_other_succs := true
+			more_other_fails := true
+			var other_txnr int
+
+			for more_other_succs || more_other_fails {
+				select {
+				case other_txnr, more_other_succs = <-other_successes_chan:
+					if more_other_succs {
+						answer := fmt.Sprintf("%d rsp 6 200 OK\n", other_txnr)
+						conn.Write([]byte(answer))
+					}
+				case other_txnr, more_other_fails = <-other_fails_chan:
+					if more_other_fails {
+						answer := fmt.Sprintf("%d rsp 6 500 KO\n", other_txnr)
+						conn.Write([]byte(answer))
+					}
+				}
+			}
+
+		}()
+	} else {
 		producer, err = s.Conf.GetKafkaAsyncProducer()
 		if err != nil {
 			logger.Warn("Can't get a kafka producer. Aborting handleConn.")
@@ -226,13 +253,16 @@ func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
 			fatal := false
 			more_succs := true
 			more_fails := true
+			more_other_succs := true
+			more_other_fails := true
+			var other_txnr int
 			var succ *sarama.ProducerMessage
 			var fail *sarama.ProducerError
 			successes := map[int]bool{}
 			failures := map[int]bool{}
 			last_committed_txnr := 0
 
-			for more_succs || more_fails {
+			for more_succs || more_fails || more_other_succs || more_other_fails {
 				select {
 				case succ, more_succs = <-producer.Successes():
 					if more_succs {
@@ -248,7 +278,16 @@ func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
 						logger.Info("NACK from Kafka", "error", fail.Error(), "txnr", txnr, "topic", fail.Msg.Topic)
 						fatal = model.IsFatalKafkaError(fail.Err)
 					}
+				case other_txnr, more_other_succs = <-other_successes_chan:
+					if more_other_succs {
+						successes[other_txnr] = true
+					}
+				case other_txnr, more_other_fails = <-other_fails_chan:
+					if more_other_fails {
+						failures[other_txnr] = true
+					}
 				}
+
 				// rsyslog expects the ACK/txnr correctly and monotonously ordered
 				// so we need a bit of cooking to ensure that
 				for {
@@ -278,36 +317,43 @@ func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
 	// push parsed messages to Kafka
 	s.wg.Add(1)
 	go func() {
-		defer s.wg.Done()
+		defer func() {
+			close(other_successes_chan)
+			close(other_fails_chan)
+			s.wg.Done()
+		}()
 		for m := range parsed_messages_chan {
 			// todo: optional filtering of parsed messages
 			value, err := json.Marshal(m)
 			if err != nil {
 				logger.Warn("Error marshaling a message to JSON", "error", err)
+				other_fails_chan <- m.Txnr
 				continue
 			}
 			partitionKeyBuf := bytes.Buffer{}
 			err = s.Conf.Syslog[i].PartitionKeyTemplate.Execute(&partitionKeyBuf, m)
 			if err != nil {
 				logger.Warn("Error generating the partition hash key", "error", err)
+				other_fails_chan <- m.Txnr
 				continue
 			}
 			topicBuf := bytes.Buffer{}
 			err = s.Conf.Syslog[i].TopicTemplate.Execute(&topicBuf, m)
 			if err != nil {
 				logger.Warn("Error generating the topic", "error", err)
+				other_fails_chan <- m.Txnr
 				continue
 			}
 			topic := topicBuf.String()
 			if !TopicNameIsValid(topic) {
 				logger.Warn("Invalid topic name", "topic", topic)
+				other_fails_chan <- m.Txnr
 				continue
 			}
 
 			if s.test {
 				fmt.Println(string(value))
-				answer := fmt.Sprintf("%d rsp 6 200 OK\n", m.Txnr)
-				conn.Write([]byte(answer))
+				other_successes_chan <- m.Txnr
 			} else {
 				t := time.Now()
 				if m.Message.TimeReported != nil {
