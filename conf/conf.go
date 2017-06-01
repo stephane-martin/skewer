@@ -25,6 +25,85 @@ type StoreConfig struct {
 	Dirname string `mapstructure:"dirname" toml:"dirname"`
 }
 
+type KafkaVersion [4]int
+
+var V0_8_2_0 = KafkaVersion{0, 8, 2, 0}
+var V0_8_2_1 = KafkaVersion{0, 8, 2, 1}
+var V0_8_2_2 = KafkaVersion{0, 8, 2, 2}
+var V0_9_0_0 = KafkaVersion{0, 9, 0, 0}
+var V0_9_0_1 = KafkaVersion{0, 9, 0, 1}
+var V0_10_0_0 = KafkaVersion{0, 10, 0, 0}
+var V0_10_0_1 = KafkaVersion{0, 10, 0, 1}
+var V0_10_1_0 = KafkaVersion{0, 10, 1, 0}
+var V0_10_2_0 = KafkaVersion{0, 10, 2, 0}
+
+func ParseVersion(v string) (skv sarama.KafkaVersion, e error) {
+	var ver KafkaVersion
+	for i, n := range strings.SplitN(v, ".", 4) {
+		ver[i], e = strconv.Atoi(n)
+		if e != nil {
+			return skv, ConfigurationCheckError{ErrString: fmt.Sprintf("Kafka Version has invalid format: %s", v)}
+		}
+	}
+	return ver.ToSaramaVersion()
+}
+
+func (l KafkaVersion) ToSaramaVersion() (v sarama.KafkaVersion, e error) {
+	if l.Greater(V0_10_2_0) {
+		return sarama.V0_10_2_0, nil
+	}
+	if l.Greater(V0_10_1_0) {
+		return sarama.V0_10_1_0, nil
+	}
+	if l.Greater(V0_10_0_1) {
+		return sarama.V0_10_1_0, nil
+	}
+	if l.Greater(V0_10_0_0) {
+		return sarama.V0_10_0_0, nil
+	}
+	if l.Greater(V0_9_0_1) {
+		return sarama.V0_9_0_1, nil
+	}
+	if l.Greater(V0_9_0_0) {
+		return sarama.V0_9_0_0, nil
+	}
+	if l.Greater(V0_8_2_2) {
+		return sarama.V0_8_2_2, nil
+	}
+	if l.Greater(V0_8_2_1) {
+		return sarama.V0_8_2_1, nil
+	}
+	if l.Greater(V0_8_2_0) {
+		return sarama.V0_8_2_0, nil
+	}
+	return v, ConfigurationCheckError{ErrString: "Minimal Kafka version is 0.8.2.0"}
+}
+
+func (l KafkaVersion) Greater(r KafkaVersion) bool {
+	if l[0] > r[0] {
+		return true
+	}
+	if l[0] < r[0] {
+		return false
+	}
+	if l[1] > r[1] {
+		return true
+	}
+	if l[1] < r[1] {
+		return false
+	}
+	if l[2] > r[2] {
+		return true
+	}
+	if l[2] < r[2] {
+		return false
+	}
+	if l[3] >= r[3] {
+		return true
+	}
+	return false
+}
+
 type KafkaConfig struct {
 	Brokers                  []string                `mapstructure:"brokers" toml:"brokers"`
 	ClientID                 string                  `mapstructure:"client_id" toml:"client_id"`
@@ -48,7 +127,7 @@ type KafkaConfig struct {
 	FlushMessagesMax         int                     `mapstructure:"flush_messages_max" toml:"flush_messages_max"`
 	RetrySendMax             int                     `mapstructure:"retry_send_max" toml:"retry_send_max"`
 	RetrySendBackoff         time.Duration           `mapstructure:"retry_send_backoff" toml:"retry_send_backoff"`
-	pVersion                 [4]int                  `toml:"-"`
+	pVersion                 sarama.KafkaVersion     `toml:"-"`
 	pCompression             sarama.CompressionCodec `toml:"-"`
 }
 
@@ -93,8 +172,7 @@ func (c *GlobalConfig) GetSaramaConfig() *sarama.Config {
 	s.Producer.Retry.Max = c.Kafka.RetrySendMax
 	s.ClientID = c.Kafka.ClientID
 	s.ChannelBufferSize = c.Kafka.ChannelBufferSize
-	// todo: parse and set the kafka version
-	s.Version = sarama.V0_10_1_0
+	s.Version = c.Kafka.pVersion
 	// MetricRegistry ?
 	// partitioner ?
 	return s
@@ -178,7 +256,7 @@ func (c *GlobalConfig) Export() string {
 	return buf.String()
 }
 
-func (c *GlobalConfig) Complete() error {
+func (c *GlobalConfig) Complete() (err error) {
 	switch c.Kafka.Compression {
 	case "snappy":
 		c.Kafka.pCompression = sarama.CompressionSnappy
@@ -190,21 +268,17 @@ func (c *GlobalConfig) Complete() error {
 		c.Kafka.pCompression = sarama.CompressionNone
 	}
 
-	ver := [4]int{0, 0, 0, 0}
-	var err error
-	for i, n := range strings.SplitN(c.Kafka.Version, ".", 4) {
-		ver[i], err = strconv.Atoi(n)
-		if err != nil {
-			return ConfigurationCheckError{ErrString: fmt.Sprintf("Kafka Version has invalid format: %s", c.Kafka.Version)}
-		}
+	c.Kafka.pVersion, err = ParseVersion(c.Kafka.Version)
+	if err != nil {
+		return err
 	}
-	c.Kafka.pVersion = ver
 
 	if len(c.Syslog) == 0 {
 		syslogConf := SyslogConfig{
 			Port:          2514,
 			BindAddr:      "127.0.0.1",
 			Format:        "rfc5424",
+			Protocol:      "relp",
 			TopicTmpl:     "rsyslog-{{.Message.Appname}}",
 			PartitionTmpl: "{{.Message.Hostname}}",
 		}
