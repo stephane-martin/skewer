@@ -189,7 +189,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
 	go func() {
 		defer s.wg.Done()
 		for m := range raw_messages_chan {
-			p, err := model.Parse(m.Message, s.Conf.Syslog[i].Format)
+			p, err := model.Parse(m.Message, s.Conf.Syslog[i].Format, s.Conf.Syslog[i].DontParseSD)
 			if err == nil {
 				parsed_msg := model.RelpParsedMessage{
 					Parsed: model.ParsedMessage{

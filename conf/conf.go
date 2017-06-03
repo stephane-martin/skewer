@@ -138,6 +138,7 @@ type SyslogConfig struct {
 	TopicTmpl            string             `mapstructure:"topic_tmpl" toml:"topic_tmpl"`
 	PartitionTmpl        string             `mapstructure:"partition_key_tmpl" toml:"partition_key_tmpl"`
 	Protocol             string             `mapstructure:"protocol" toml:"protocol"`
+	DontParseSD          bool               `mapstructure:"dont_parse_structured_data" toml:"dont_parse_structured_data"`
 	TopicTemplate        *template.Template `toml:"-"`
 	PartitionKeyTemplate *template.Template `toml:"-"`
 	BindIP               net.IP             `toml:"-"`
