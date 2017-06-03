@@ -25,6 +25,7 @@ type Server struct {
 	acceptsWg   sync.WaitGroup
 	handler     Handler
 	protocol    string
+	stream      bool
 }
 
 func (s *Server) initListeners() error {
