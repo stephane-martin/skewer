@@ -32,6 +32,7 @@ type SyslogMessage struct {
 	Msgid         string                 `json:"msgid"`
 	Structured    string                 `json:"structured"`
 	Message       string                 `json:"message"`
+	AuditMessage  interface{}            `json:"audit"`
 	Properties    map[string]interface{} `json:"properties"`
 }
 
@@ -131,36 +132,50 @@ func (m *SyslogMessage) String() string {
 	)
 }
 
-func Parse(m string, format string) (*SyslogMessage, error) {
+func Parse(m string, format string, dont_parse_sd bool) (sm *SyslogMessage, err error) {
+
 	switch format {
 	case "rfc5424":
-		return ParseRfc5424Format(m)
+		sm, err = ParseRfc5424Format(m, dont_parse_sd)
 	case "rfc3164":
-		return ParseRfc3164Format(m)
+		sm, err = ParseRfc3164Format(m)
 	case "json":
-		return ParseJsonFormat(m)
+		sm, err = ParseJsonFormat(m)
 	case "auto":
 		if m[0] == byte('{') {
-			return ParseJsonFormat(m)
+			sm, err = ParseJsonFormat(m)
+		} else if m[0] != byte('<') {
+			sm, err = ParseRfc3164Format(m)
+		} else {
+			i := strings.Index(m, ">")
+			if i < 2 {
+				sm, err = ParseRfc3164Format(m)
+			} else if len(m) == (i + 1) {
+				sm, err = ParseRfc3164Format(m)
+			} else if m[i+1] == byte('1') {
+				sm, err = ParseRfc5424Format(m, dont_parse_sd)
+			} else {
+				sm, err = ParseRfc3164Format(m)
+			}
 		}
-		if m[0] != byte('<') {
-			return ParseRfc3164Format(m)
-		}
-		i := strings.Index(m, ">")
-		if i < 2 {
-			return ParseRfc3164Format(m)
-		}
-		if len(m) == (i + 1) {
-			return ParseRfc3164Format(m)
-		}
-		if m[i+1] == byte('1') {
-			return ParseRfc5424Format(m)
-		}
-		return ParseRfc3164Format(m)
 
 	default:
 		return nil, fmt.Errorf("unknown format")
 	}
+	if err != nil {
+		return nil, err
+	}
+	// special handling of JSON messages produced by go-audit
+	if sm.Appname == "go-audit" {
+		var auditMsg interface{}
+		err = json.Unmarshal([]byte(sm.Message), &auditMsg)
+		if err != nil {
+			return sm, nil
+		}
+		sm.AuditMessage = auditMsg
+		sm.Message = ""
+	}
+	return sm, nil
 }
 
 func TopicNameIsValid(name string) bool {

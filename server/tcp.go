@@ -232,15 +232,17 @@ func (h TcpHandler) HandleConnection(conn net.Conn, i int) {
 	go func() {
 		defer s.wg.Done()
 		for m := range raw_messages_chan {
-			p, err := model.Parse(m.Message, s.Conf.Syslog[i].Format)
-			t := time.Now()
-			if p.TimeReported != nil {
-				t = *p.TimeReported
-			} else {
-				p.TimeReported = &t
-				p.TimeGenerated = &t
-			}
+			p, err := model.Parse(m.Message, s.Conf.Syslog[i].Format, s.Conf.Syslog[i].DontParseSD)
+
 			if err == nil {
+				// todo: get rid of pointer to times
+				t := time.Now()
+				if p.TimeReported != nil {
+					t = *p.TimeReported
+				} else {
+					p.TimeReported = &t
+					p.TimeGenerated = &t
+				}
 				uid := t.Format(time.RFC3339) + m.Uid.String()
 				parsed_msg := model.TcpParsedMessage{
 					Parsed: model.ParsedMessage{
@@ -253,7 +255,7 @@ func (h TcpHandler) HandleConnection(conn net.Conn, i int) {
 				}
 				s.store.Inputs <- &parsed_msg
 			} else {
-				logger.Info("Parsing error", "Message", m.Message)
+				logger.Info("Parsing error", "Message", m.Message, "error", err)
 			}
 		}
 	}()
