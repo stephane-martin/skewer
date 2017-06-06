@@ -77,12 +77,12 @@ func (m *ParsedMessage) ToKafka(pkeyTmpl, topicTmpl *template.Template) (km *sar
 	return &kafka_msg, nil
 }
 
-type TcpRawMessage struct {
+type TcpUdpRawMessage struct {
 	RawMessage
 	Uid uuid.UUID
 }
 
-type TcpParsedMessage struct {
+type TcpUdpParsedMessage struct {
 	Parsed    ParsedMessage `json:"parsed"`
 	Uid       string        `json:"uid"`
 	ConfIndex int           `json:"conf_index"`

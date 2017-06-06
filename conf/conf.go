@@ -12,13 +12,15 @@ import (
 	sarama "gopkg.in/Shopify/sarama.v1"
 
 	"github.com/BurntSushi/toml"
+	"github.com/inconshreveable/log15"
 	"github.com/spf13/viper"
 )
 
 type GlobalConfig struct {
-	Syslog []SyslogConfig `mapstructure:"syslog" toml:"syslog"`
-	Kafka  KafkaConfig    `mapstructure:"kafka" toml:"kafka"`
-	Store  StoreConfig    `mapstructure:"store" toml:"store"`
+	Syslog  []SyslogConfig `mapstructure:"syslog" toml:"syslog"`
+	Kafka   KafkaConfig    `mapstructure:"kafka" toml:"kafka"`
+	Store   StoreConfig    `mapstructure:"store" toml:"store"`
+	Dirname string         `toml:"-"`
 }
 
 type StoreConfig struct {
@@ -216,7 +218,20 @@ func (c *GlobalConfig) String() string {
 	return c.Export()
 }
 
-func Load(dirname string) (*GlobalConfig, error) {
+func Load(dirname string, logger log15.Logger) (c *GlobalConfig) {
+	var err error
+
+	for {
+		c, err = InitLoad(dirname)
+		if err == nil {
+			return c
+		}
+		logger.Error("Error initializing configuration", "error", err)
+		time.Sleep(30 * time.Second)
+	}
+}
+
+func InitLoad(dirname string) (*GlobalConfig, error) {
 	v := viper.New()
 	SetDefaults(v)
 	v.SetConfigName("relp2kafka")
@@ -239,6 +254,7 @@ func Load(dirname string) (*GlobalConfig, error) {
 		}
 	}
 	c := New()
+	c.Dirname = dirname
 	err = v.Unmarshal(c)
 	if err != nil {
 		return nil, ConfigurationSyntaxError{Err: err, Filename: v.ConfigFileUsed()}
@@ -248,6 +264,16 @@ func Load(dirname string) (*GlobalConfig, error) {
 		return nil, err
 	}
 	return c, nil
+}
+
+func (c *GlobalConfig) Reload() error {
+	new_c, err := InitLoad(c.Dirname)
+	if err != nil {
+		return err
+	}
+	new_c.Store.Dirname = c.Store.Dirname // we don't change the location of the badger databases when doing a reload
+	*c = *new_c
+	return nil
 }
 
 func (c *GlobalConfig) Export() string {

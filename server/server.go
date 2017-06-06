@@ -6,30 +6,45 @@ import (
 
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/relp2kafka/conf"
+	"github.com/stephane-martin/relp2kafka/store"
 	sarama "gopkg.in/Shopify/sarama.v1"
 )
 
-type Handler interface {
+type StreamHandler interface {
 	HandleConnection(conn net.Conn, i int)
 }
 
-type Server struct {
-	Conf        *conf.GlobalConfig
-	listeners   map[int]net.Listener
-	logger      log15.Logger
-	connections map[net.Conn]bool
-	connMutex   sync.Mutex
-	kafkaClient sarama.Client
-	test        bool
-	wg          sync.WaitGroup
-	acceptsWg   sync.WaitGroup
-	handler     Handler
-	protocol    string
-	stream      bool
+type PacketHandler interface {
+	HandleConnection(conn net.PacketConn, i int)
 }
 
-func (s *Server) initListeners() error {
-	s.logger.Debug("initListeners")
+type Server struct {
+	Conf              conf.GlobalConfig
+	listeners         map[int]net.Listener
+	logger            log15.Logger
+	connections       map[net.Conn]bool
+	packetConnections map[net.PacketConn]bool
+	connMutex         sync.Mutex
+	kafkaClient       sarama.Client
+	test              bool
+	wg                sync.WaitGroup
+	acceptsWg         sync.WaitGroup
+	shandler          StreamHandler
+	phandler          PacketHandler
+	protocol          string
+	stream            bool
+}
+
+type StoreServer struct {
+	Server
+	store          *store.MessageStore
+	storeToKafkaWg sync.WaitGroup
+	producer       sarama.AsyncProducer
+}
+
+func (s *Server) initListeners() int {
+	nb := 0
+	s.connections = map[net.Conn]bool{}
 	s.listeners = map[int]net.Listener{}
 	for i, syslogConf := range s.Conf.Syslog {
 		if syslogConf.Protocol != s.protocol {
@@ -37,24 +52,21 @@ func (s *Server) initListeners() error {
 		}
 		s.logger.Info("Listener", "protocol", s.protocol, "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
 		l, err := net.Listen("tcp", syslogConf.ListenAddr)
-		if err != nil {
-			for _, pl := range s.listeners {
-				pl.Close()
-			}
-			s.listeners = map[int]net.Listener{}
-			// returns a net.OpError
-			return err
+		if err == nil {
+			nb++
+			s.listeners[i] = l
+		} else {
+			s.logger.Error("Error listening on stream (TCP or RELP)", "listen_addr", syslogConf.ListenAddr, "error", err)
 		}
-		s.listeners[i] = l
 	}
-	s.connections = map[net.Conn]bool{}
-	return nil
+	return nb
 }
 
 func (s *Server) resetListeners() {
-	s.logger.Debug("resetListeners")
-	for _, l := range s.listeners {
-		l.Close()
+	if s.stream {
+		for _, l := range s.listeners {
+			l.Close()
+		}
 	}
 	s.listeners = map[int]net.Listener{}
 }
@@ -69,6 +81,12 @@ func (s *Server) AddConnection(conn net.Conn) {
 	s.connections[conn] = true
 }
 
+func (s *Server) AddPacketConnection(conn net.PacketConn) {
+	s.connMutex.Lock()
+	defer s.connMutex.Unlock()
+	s.packetConnections[conn] = true
+}
+
 func (s *Server) RemoveConnection(conn net.Conn) {
 	s.connMutex.Lock()
 	defer s.connMutex.Unlock()
@@ -78,18 +96,35 @@ func (s *Server) RemoveConnection(conn net.Conn) {
 	}
 }
 
+func (s *Server) RemovePacketConnection(conn net.PacketConn) {
+	s.connMutex.Lock()
+	defer s.connMutex.Unlock()
+	if _, ok := s.packetConnections[conn]; ok {
+		conn.Close()
+		delete(s.packetConnections, conn)
+	}
+}
+
 func (s *Server) CloseConnections() {
 	s.connMutex.Lock()
 	defer s.connMutex.Unlock()
 	for conn, _ := range s.connections {
 		conn.Close()
 	}
+	for conn, _ := range s.packetConnections {
+		conn.Close()
+	}
 	s.connections = map[net.Conn]bool{}
+	s.packetConnections = map[net.PacketConn]bool{}
 
 }
 
-func (s *Server) handleConnection(conn net.Conn, i int) {
-	s.handler.HandleConnection(conn, i)
+func (s *Server) handleStreamConnection(conn net.Conn, i int) {
+	s.shandler.HandleConnection(conn, i)
+}
+
+func (s *Server) handlePacketConnection(conn net.PacketConn, i int) {
+	s.phandler.HandleConnection(conn, i)
 }
 
 func (s *Server) Accept(i int) {
@@ -110,20 +145,42 @@ func (s *Server) Accept(i int) {
 			}
 		} else if conn != nil {
 			s.wg.Add(1)
-			go s.handleConnection(conn, i)
+			go s.handleStreamConnection(conn, i)
 		}
 	}
 }
 
 func (s *Server) Listen() {
-	for i, _ := range s.listeners {
-		s.acceptsWg.Add(1)
-		s.wg.Add(1)
-		go s.Accept(i)
+	if s.stream {
+		for i, _ := range s.listeners {
+			s.acceptsWg.Add(1)
+			s.wg.Add(1)
+			go s.Accept(i)
+		}
+		// wait until the listeners stop and return
+		s.acceptsWg.Wait()
+		// close the client connections
+		s.CloseConnections()
 	}
-	// wait until the listeners stop and return
-	s.acceptsWg.Wait()
-	// close the client connections
-	s.CloseConnections()
 	s.wg.Done()
+
+}
+
+func (s *Server) ListenPacket() int {
+	nb := 0
+	for i, syslogConf := range s.Conf.Syslog {
+		if syslogConf.Protocol != s.protocol {
+			continue
+		}
+		conn, err := net.ListenPacket("udp", syslogConf.ListenAddr)
+		if err != nil {
+			s.logger.Warn("Error listening on UDP", "addr", syslogConf.ListenAddr)
+		} else if conn != nil {
+			s.logger.Info("Listener", "protocol", s.protocol, "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
+			nb++
+			s.wg.Add(1)
+			go s.handlePacketConnection(conn, i)
+		}
+	}
+	return nb
 }

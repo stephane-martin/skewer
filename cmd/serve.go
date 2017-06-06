@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stephane-martin/relp2kafka/conf"
 	"github.com/stephane-martin/relp2kafka/server"
+	"github.com/stephane-martin/relp2kafka/store"
 )
 
 var logger = log15.New()
@@ -91,47 +92,87 @@ func setLogging() {
 
 func Serve() {
 	setLogging()
-	c, e := conf.Load(configDirName)
+	c := conf.Load(configDirName, logger)
+	store, e := store.NewStore(c, logger)
 	if e != nil {
-		fmt.Println(e)
+		logger.Crit("Can't create the message Store", "error", e)
 		os.Exit(-1)
 	}
+	store.SendToKafka(testFlag)
+	defer store.Close()
 
+	// prepare the RELP service
 	relpServer := server.NewRelpServer(c, logger)
 	if testFlag {
 		relpServer.SetTest()
 	}
 	sig_chan := make(chan os.Signal)
 	signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
-	relpServer.StatusChan <- server.Stopped
+	relpServer.StatusChan <- server.Stopped // trigger the RELP service to start
 
-	tcpServer := server.NewTcpServer(c, logger)
+	// start the TCP service
+	tcpServer := server.NewTcpServer(c, store, logger)
 	if testFlag {
 		tcpServer.SetTest()
 	}
 	e = tcpServer.Start()
 	if e != nil {
 		logger.Error("Error starting the TCP server", "error", e)
-	} else {
-		logger.Info("The TCP service has started")
+	}
+
+	// start the UDP service
+	udpServer := server.NewUdpServer(c, store, logger)
+	if testFlag {
+		udpServer.SetTest()
+	}
+	e = udpServer.Start()
+	if e != nil {
+		logger.Error("Error starting the UDP server", "error", e)
 	}
 
 	go func() {
 		for {
-			select {
-			case sig := <-sig_chan:
-				if sig == syscall.SIGHUP {
-					logger.Info("SIGHUP received")
-					relpServer.Stop()
-					tcpServer.Stop()
-					<-tcpServer.StatusChan
-					tcpServer.Start()
-
-				} else if sig == syscall.SIGTERM || sig == syscall.SIGINT {
-					logger.Info("Termination signal received", "signal", sig)
-					relpServer.FinalStop()
-					tcpServer.Stop()
+			sig := <-sig_chan
+			if sig == syscall.SIGHUP {
+				logger.Debug("SIGHUP received: reloading configuration")
+				err := c.Reload() // try to reload the configuration
+				if err != nil {
+					logger.Error("Error reloading configuration. Configuration was not changed.", "error", err)
+				} else {
+					store.StopSendToKafka()
+					store.Conf = *c
+					store.SendToKafka(testFlag)
+					go func() {
+						relpServer.Stop()
+					}()
+					go func() {
+						tcpServer.Stop()
+						<-tcpServer.ClosedChan
+						tcpServer.Conf = *c
+						err := tcpServer.Start()
+						if err != nil {
+							logger.Error("Error starting the TCP server", "error", e)
+						}
+					}()
+					go func() {
+						udpServer.Stop()
+						<-udpServer.ClosedChan
+						udpServer.Conf = *c
+						err := udpServer.Start()
+						if err != nil {
+							logger.Error("Error starting the UDP server", "error", e)
+						}
+					}()
 				}
+
+			} else if sig == syscall.SIGTERM || sig == syscall.SIGINT {
+				logger.Debug("Termination signal received", "signal", sig)
+				relpServer.FinalStop()
+				tcpServer.Stop()
+				udpServer.Stop()
+				return
+			} else {
+				logger.Warn("Unknown signal received", "signal", sig)
 			}
 		}
 	}()
@@ -140,15 +181,19 @@ func Serve() {
 		state := <-relpServer.StatusChan
 		switch state {
 		case server.FinalStopped:
-			logger.Info("The RELP service was definitely halted")
+			logger.Info("The RELP service has been definitely halted")
 			// wait that the tcp service stops too
-			<-tcpServer.StatusChan
-			logger.Info("The TCP service has stopped")
+			<-tcpServer.ClosedChan
+			logger.Info("The TCP service has been stopped")
+			<-udpServer.ClosedChan
+			logger.Info("The UDP service has been stopped")
 			return
 		case server.Stopped:
+			logger.Info("The RELP service has been stopped")
+			relpServer.Conf = *c
 			err := relpServer.Start()
 			if err != nil {
-				logger.Warn("The RELP service failed to start", "error", err)
+				logger.Warn("The RELP service has failed to start", "error", err)
 				relpServer.StopAndWait()
 			}
 		case server.Waiting:
@@ -159,7 +204,7 @@ func Serve() {
 			}()
 
 		case server.Started:
-			logger.Info("The RELP service has started")
+			logger.Info("The RELP service has been started")
 		}
 	}
 }

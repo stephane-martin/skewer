@@ -36,11 +36,11 @@ func NewRelpServer(c *conf.GlobalConfig, logger log15.Logger) *RelpServer {
 	s := RelpServer{}
 	s.protocol = "relp"
 	s.stream = true
-	s.Conf = c
+	s.Conf = *c
 	s.listeners = map[int]net.Listener{}
 	s.connections = map[net.Conn]bool{}
 	s.logger = logger.New("class", "RelpServer")
-	s.handler = RelpHandler{Server: &s}
+	s.shandler = RelpHandler{Server: &s}
 
 	s.StatusChan = make(chan RelpServerStatus, 1)
 	s.status = Stopped
@@ -65,9 +65,9 @@ func (s *RelpServer) doStart(mu *sync.Mutex) (err error) {
 		return
 	}
 
-	err = s.initListeners()
-	if err != nil {
-		// net.OpError
+	nb := s.initListeners()
+	if nb == 0 {
+		s.logger.Info("RELP service not started: no listening port")
 		return
 	}
 	if !s.test {

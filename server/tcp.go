@@ -3,14 +3,11 @@ package server
 import (
 	"bufio"
 	"bytes"
-	"fmt"
 	"net"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
-
-	sarama "gopkg.in/Shopify/sarama.v1"
 
 	"github.com/inconshreveable/log15"
 	"github.com/satori/go.uuid"
@@ -27,25 +24,23 @@ const (
 )
 
 type TcpServer struct {
-	Server
+	StoreServer
 	statusMutex sync.Mutex
 	status      TcpServerStatus
-	StatusChan  chan TcpServerStatus
-	store       *store.MessageStore
-	store_wg    sync.WaitGroup
-	producer    sarama.AsyncProducer
+	ClosedChan  chan TcpServerStatus
 }
 
-func NewTcpServer(c *conf.GlobalConfig, logger log15.Logger) *TcpServer {
+func NewTcpServer(c *conf.GlobalConfig, st *store.MessageStore, logger log15.Logger) *TcpServer {
 	s := TcpServer{}
 	s.protocol = "tcp"
 	s.stream = true
-	s.Conf = c
+	s.Conf = *c
 	s.listeners = map[int]net.Listener{}
 	s.connections = map[net.Conn]bool{}
 	s.logger = logger.New("class", "TcpServer")
-	s.handler = TcpHandler{Server: &s}
+	s.shandler = TcpHandler{Server: &s}
 	s.status = TcpStopped
+	s.store = st
 
 	return &s
 }
@@ -57,149 +52,47 @@ func (s *TcpServer) Start() (err error) {
 		err = ServerNotStopped
 		return
 	}
-	s.StatusChan = make(chan TcpServerStatus, 1)
-
-	// initialize the store
-	s.store, err = store.NewStore(s.Conf.Store.Dirname, s.logger)
-	if err != nil {
-		close(s.StatusChan)
-		return
-	}
+	s.ClosedChan = make(chan TcpServerStatus, 1)
 
 	// start listening on the required ports
-	err = s.initListeners()
-	if err != nil {
-		// net.OpError
-		s.store.StopSend()
-		close(s.StatusChan)
-		return
+	nb := s.initListeners()
+	if nb > 0 {
+		s.status = TcpStarted
+		s.wg.Add(1)
+		go s.Listen()
+		//s.storeToKafkaWg.Add(1)
+		//go s.Store2Kafka()
+	} else {
+		s.logger.Info("TCP Server not started: no listening port")
+		close(s.ClosedChan)
 	}
-	s.status = TcpStarted
-	s.wg.Add(1)
-	go s.Listen()
-
-	s.store_wg.Add(1)
-	go s.Store2Kafka()
-
 	return
+
 }
 
 func (s *TcpServer) Stop() {
 	s.statusMutex.Lock()
 	defer s.statusMutex.Unlock()
-	s.logger.Debug("Stop")
 	if s.status != TcpStarted {
 		return
 	}
-	s.resetListeners() // close the listeners. This will make Listen to return and close each current connection with a client
-	// wait that all HandleConnection goroutines have ended
-	s.wg.Wait()
+	s.resetListeners() // close the listeners. This will make Listen to return and close all current connections.
+	s.wg.Wait()        // wait that all HandleConnection goroutines have ended
 	s.logger.Debug("TcpServer goroutines have ended")
-	// from here there will be no more incoming TCP messages to store: it is safe to stop the Store
-	s.store.StopSend()
-	// StopSend closes the Store.Inputs channel
-	// store.startIngest will then stop. No more messages will be stashed in the Store,
-	// and no more messages will arrive in the Store.toProcess queue
-	// eventually Store.retrieve will return an empty result, and store.StartSend will end
+	//s.store.StopSend()
+	// eventually store.StartSend will end
 	// after that the Store.Outputs channel will be closed (in the defer)
 	// Store2Kafka will end, because of the closed Store.Outputs channel
-	// The Kafka producer is then closed (AsyncClose in defer)
-	// The child goroutine is Store2Kafka will drain the Producer Successes and Errors channels, and then return
-	// After the drain, the Store is finally closed (in defer), and store_wg.Wait() will return
-	s.logger.Debug("Waiting for the Store to finish operations")
-	s.store_wg.Wait()
+	// The Kafka producer is then asked to close (AsyncClose in defer)
+	// The child goroutine is Store2Kafka will drain the Producer Successes and Errors channels, and then return,
+	// and finally storeToKafkaWg.Wait() will return
+	//s.logger.Debug("Waiting for the Store to finish operations")
+	//s.storeToKafkaWg.Wait()
 
 	s.status = TcpStopped
-	s.StatusChan <- TcpStopped
-	close(s.StatusChan)
+	s.ClosedChan <- TcpStopped
+	close(s.ClosedChan)
 	s.logger.Info("TCP server has stopped")
-}
-
-func (s *TcpServer) Store2Kafka() {
-	defer s.store_wg.Done()
-	s.logger.Debug("Store2Kafka")
-	if s.test {
-		s.store.StartSend()
-		for message := range s.store.Outputs {
-			if message != nil {
-				pkeyTmpl := s.Conf.Syslog[message.ConfIndex].PartitionKeyTemplate
-				topicTmpl := s.Conf.Syslog[message.ConfIndex].TopicTemplate
-				kafkaMsg, err := message.Parsed.ToKafka(pkeyTmpl, topicTmpl)
-				if err != nil {
-					s.logger.Warn("Error generating Kafka message", "error", err)
-					s.store.Nack(message.Uid)
-					continue
-				}
-
-				v, _ := kafkaMsg.Value.Encode()
-				pkey, _ := kafkaMsg.Key.Encode()
-				fmt.Printf("pkey: '%s' topic:'%s' uid:'%s'\n", pkey, kafkaMsg.Topic, message.Uid)
-				fmt.Println(string(v))
-				fmt.Println()
-
-				s.store.Ack(message.Uid)
-			}
-		}
-		s.store.Close()
-	} else {
-		var producer sarama.AsyncProducer
-		var err error
-		for {
-			if s.store.Stopped() {
-				return
-			}
-			producer, err = s.Conf.GetKafkaAsyncProducer()
-			if err == nil {
-				break
-			} else {
-				s.logger.Warn("Error getting a Kafka client", "error", err)
-				time.Sleep(time.Second)
-			}
-		}
-		defer producer.AsyncClose()
-
-		// listen for kafka NACK responses
-		s.store_wg.Add(1)
-		go func() {
-			defer func() {
-				s.store.Close()
-				s.store_wg.Done()
-			}()
-			more_succs := true
-			more_fails := true
-			var succ *sarama.ProducerMessage
-			var fail *sarama.ProducerError
-			for more_succs || more_fails {
-				select {
-				case succ, more_succs = <-producer.Successes():
-					if more_succs {
-						uid := succ.Metadata.(string)
-						s.store.Ack(uid)
-					}
-
-				case fail, more_fails = <-producer.Errors():
-					if more_fails {
-						uid := fail.Msg.Metadata.(string)
-						s.store.Nack(uid)
-					}
-				}
-			}
-		}()
-
-		s.store.StartSend()
-		for message := range s.store.Outputs {
-			pkeyTmpl := s.Conf.Syslog[message.ConfIndex].PartitionKeyTemplate
-			topicTmpl := s.Conf.Syslog[message.ConfIndex].TopicTemplate
-			kafkaMsg, err := message.Parsed.ToKafka(pkeyTmpl, topicTmpl)
-			if err != nil {
-				s.logger.Warn("Error generating Kafka message", "error", err)
-				s.store.Nack(message.Uid)
-				continue
-			}
-			kafkaMsg.Metadata = message.Uid
-			producer.Input() <- kafkaMsg
-		}
-	}
 }
 
 type TcpHandler struct {
@@ -210,7 +103,13 @@ func (h TcpHandler) HandleConnection(conn net.Conn, i int) {
 	s := h.Server
 	s.AddConnection(conn)
 
-	raw_messages_chan := make(chan *model.TcpRawMessage)
+	raw_messages_chan := make(chan *model.TcpUdpRawMessage)
+
+	defer func() {
+		close(raw_messages_chan)
+		s.RemoveConnection(conn)
+		s.wg.Done()
+	}()
 
 	var client string
 	remote := conn.RemoteAddr()
@@ -245,7 +144,7 @@ func (h TcpHandler) HandleConnection(conn net.Conn, i int) {
 					p.TimeGenerated = &t
 				}
 				uid := t.Format(time.RFC3339) + m.Uid.String()
-				parsed_msg := model.TcpParsedMessage{
+				parsed_msg := model.TcpUdpParsedMessage{
 					Parsed: model.ParsedMessage{
 						Fields:    p,
 						Client:    m.Client,
@@ -261,12 +160,6 @@ func (h TcpHandler) HandleConnection(conn net.Conn, i int) {
 		}
 	}()
 
-	defer func() {
-		close(raw_messages_chan)
-		s.RemoveConnection(conn)
-		s.wg.Done()
-	}()
-
 	// Syslog TCP server
 	scanner := bufio.NewScanner(conn)
 	scanner.Split(TcpSplit)
@@ -275,7 +168,7 @@ func (h TcpHandler) HandleConnection(conn net.Conn, i int) {
 		if scanner.Scan() {
 			data := scanner.Text()
 
-			raw := model.TcpRawMessage{
+			raw := model.TcpUdpRawMessage{
 				RawMessage: model.RawMessage{
 					Client:    client,
 					LocalPort: local_port,
