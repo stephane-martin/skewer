@@ -99,10 +99,30 @@
 			"revisionTime": "2017-02-15T23:32:05Z"
 		},
 		{
+			"checksumSHA1": "iGAHizBUN43QlmYmn1bPLlNN9pw=",
+			"path": "github.com/hashicorp/consul/api",
+			"revision": "ea2a82b221c3e0a466a4f38ab4e8718ad8c60621",
+			"revisionTime": "2017-05-12T03:49:43Z",
+			"version": "v0.8.3",
+			"versionExact": "v0.8.3"
+		},
+		{
 			"checksumSHA1": "cdOCt0Yb+hdErz8NAQqayxPmRsY=",
 			"path": "github.com/hashicorp/errwrap",
 			"revision": "7554cd9344cec97297fa6649b055a8c98c2a1e55",
 			"revisionTime": "2014-10-28T05:47:10Z"
+		},
+		{
+			"checksumSHA1": "b8F628srIitj5p7Y130xc9k0QWs=",
+			"path": "github.com/hashicorp/go-cleanhttp",
+			"revision": "3573b8b52aa7b37b9358d966a898feb387f62437",
+			"revisionTime": "2017-02-11T01:34:15Z"
+		},
+		{
+			"checksumSHA1": "A1PcINvF3UiwHRKn8UcgARgvGRs=",
+			"path": "github.com/hashicorp/go-rootcerts",
+			"revision": "6bb64b370b90e7ef1fa532be9e591a81c3493e00",
+			"revisionTime": "2016-05-03T14:34:40Z"
 		},
 		{
 			"checksumSHA1": "7JBkp3EZoc0MSbiyWfzVhO4RYoY=",
@@ -157,6 +177,12 @@
 			"path": "github.com/hashicorp/hcl/json/token",
 			"revision": "392dba7d905ed5d04a5794ba89f558b27e2ba1ca",
 			"revisionTime": "2017-05-05T08:58:37Z"
+		},
+		{
+			"checksumSHA1": "/oss17GO4hXGM7QnUdI3VzcAHzA=",
+			"path": "github.com/hashicorp/serf/coordinate",
+			"revision": "d75a3b0f314378394eaeff5091aa93b67cb26c1e",
+			"revisionTime": "2017-06-08T02:22:06Z"
 		},
 		{
 			"checksumSHA1": "Vkzx9mBlq4ooe6cCfoWzUGyj174=",
