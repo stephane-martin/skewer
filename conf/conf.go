@@ -12,19 +12,60 @@ import (
 	sarama "gopkg.in/Shopify/sarama.v1"
 
 	"github.com/BurntSushi/toml"
+	"github.com/hashicorp/consul/api"
 	"github.com/inconshreveable/log15"
 	"github.com/spf13/viper"
+	"github.com/stephane-martin/relp2kafka/consul"
 )
 
-type GlobalConfig struct {
-	Syslog  []SyslogConfig `mapstructure:"syslog" toml:"syslog"`
-	Kafka   KafkaConfig    `mapstructure:"kafka" toml:"kafka"`
-	Store   StoreConfig    `mapstructure:"store" toml:"store"`
-	Dirname string         `toml:"-"`
+type BaseConfig struct {
+	Syslog []SyslogConfig `mapstructure:"syslog" toml:"syslog"`
+	Kafka  KafkaConfig    `mapstructure:"kafka" toml:"kafka"`
+	Store  StoreConfig    `mapstructure:"store" toml:"store"`
+}
+
+type GConfig struct {
+	BaseConfig
+	Dirname      string
+	Updated      chan bool
+	Client       *api.Client
+	ConsulPrefix string
+	ConsulParams consul.ConnParams
+	Logger       log15.Logger
+}
+
+func newBaseConf() *BaseConfig {
+	brokers := []string{}
+	kafka := KafkaConfig{Brokers: brokers, ClientID: ""}
+	syslog := []SyslogConfig{}
+	baseConf := BaseConfig{Syslog: syslog, Kafka: kafka}
+	return &baseConf
+}
+
+func newConf() *GConfig {
+	baseConf := newBaseConf()
+	conf := GConfig{BaseConfig: *baseConf}
+	conf.Updated = make(chan bool, 10)
+	conf.Logger = log15.New()
+	return &conf
+}
+
+func Default() *GConfig {
+	v := viper.New()
+	SetDefaults(v)
+	c := newConf()
+	v.Unmarshal(c)
+	c.Complete()
+	return c
+}
+
+func (c *GConfig) String() string {
+	return c.Export()
 }
 
 type StoreConfig struct {
 	Dirname string `mapstructure:"dirname" toml:"dirname"`
+	// todo: max size
 }
 
 type KafkaVersion [4]int
@@ -44,7 +85,7 @@ func ParseVersion(v string) (skv sarama.KafkaVersion, e error) {
 	for i, n := range strings.SplitN(v, ".", 4) {
 		ver[i], e = strconv.Atoi(n)
 		if e != nil {
-			return skv, ConfigurationCheckError{ErrString: fmt.Sprintf("Kafka Version has invalid format: %s", v)}
+			return skv, ConfigurationCheckError{ErrString: fmt.Sprintf("Kafka Version has invalid format: '%s'", v)}
 		}
 	}
 	return ver.ToSaramaVersion()
@@ -151,7 +192,7 @@ type SyslogConfig struct {
 	// Partition key function ?
 }
 
-func (c *GlobalConfig) GetSaramaConfig() *sarama.Config {
+func (c *GConfig) GetSaramaConfig() *sarama.Config {
 	s := sarama.NewConfig()
 	s.Net.MaxOpenRequests = c.Kafka.MaxOpenRequests
 	s.Net.DialTimeout = c.Kafka.DialTimeout
@@ -181,7 +222,7 @@ func (c *GlobalConfig) GetSaramaConfig() *sarama.Config {
 	return s
 }
 
-func (c *GlobalConfig) GetKafkaAsyncProducer() (sarama.AsyncProducer, error) {
+func (c *GConfig) GetKafkaAsyncProducer() (sarama.AsyncProducer, error) {
 	p, err := sarama.NewAsyncProducer(c.Kafka.Brokers, c.GetSaramaConfig())
 	if err == nil {
 		return p, nil
@@ -189,7 +230,7 @@ func (c *GlobalConfig) GetKafkaAsyncProducer() (sarama.AsyncProducer, error) {
 	return nil, KafkaError{Err: err}
 }
 
-func (c *GlobalConfig) GetKafkaClient() (sarama.Client, error) {
+func (c *GConfig) GetKafkaClient() (sarama.Client, error) {
 	cl, err := sarama.NewClient(c.Kafka.Brokers, c.GetSaramaConfig())
 	if err == nil {
 		return cl, nil
@@ -197,41 +238,10 @@ func (c *GlobalConfig) GetKafkaClient() (sarama.Client, error) {
 	return nil, KafkaError{Err: err}
 }
 
-func New() *GlobalConfig {
-	brokers := []string{}
-	kafka := KafkaConfig{Brokers: brokers, ClientID: ""}
-	syslog := []SyslogConfig{}
-	conf := GlobalConfig{Syslog: syslog, Kafka: kafka}
-	return &conf
-}
+func InitLoad(dirname string, params consul.ConnParams, prefix string, logger log15.Logger) (c *GConfig, stopWatchChan chan bool, err error) {
+	var firstResults map[string]string
+	var consulResults chan map[string]string
 
-func Default() *GlobalConfig {
-	v := viper.New()
-	SetDefaults(v)
-	c := New()
-	v.Unmarshal(c)
-	c.Complete()
-	return c
-}
-
-func (c *GlobalConfig) String() string {
-	return c.Export()
-}
-
-func Load(dirname string, logger log15.Logger) (c *GlobalConfig) {
-	var err error
-
-	for {
-		c, err = InitLoad(dirname)
-		if err == nil {
-			return c
-		}
-		logger.Error("Error initializing configuration", "error", err)
-		time.Sleep(30 * time.Second)
-	}
-}
-
-func InitLoad(dirname string) (*GlobalConfig, error) {
 	v := viper.New()
 	SetDefaults(v)
 	v.SetConfigName("relp2kafka")
@@ -244,46 +254,107 @@ func InitLoad(dirname string) (*GlobalConfig, error) {
 		v.AddConfigPath("/etc")
 	}
 
-	err := v.ReadInConfig()
+	err = v.ReadInConfig()
 	if err != nil {
 		switch err.(type) {
 		default:
-			return nil, ConfigurationReadError{err}
+			return nil, nil, ConfigurationReadError{err}
 		case viper.ConfigFileNotFoundError:
-			// log.Log.WithError(err).Debug("No configuration file was found")
+			logger.Info("No configuration file was found")
 		}
 	}
-	c := New()
-	c.Dirname = dirname
-	err = v.Unmarshal(c)
+
+	baseConf := newBaseConf()
+	err = v.Unmarshal(baseConf)
 	if err != nil {
-		return nil, ConfigurationSyntaxError{Err: err, Filename: v.ConfigFileUsed()}
+		return nil, nil, ConfigurationSyntaxError{Err: err, Filename: v.ConfigFileUsed()}
 	}
+
+	c = &GConfig{BaseConfig: *baseConf}
+	c.Updated = make(chan bool, 10)
+	c.Dirname = dirname
+	c.ConsulParams = params
+	c.ConsulPrefix = prefix
+	c.Logger = logger
+
+	consulAddr := strings.TrimSpace(params.Address)
+	if len(consulAddr) > 0 {
+		var clt *api.Client
+		clt, err = consul.NewClient(params)
+		if err == nil {
+			c.Client = clt
+			consulResults = make(chan map[string]string, 10)
+			firstResults, stopWatchChan, err = consul.WatchTree(c.Client, prefix, consulResults, logger)
+			if err == nil {
+				c.ParseConsulConf(firstResults)
+			} else {
+				logger.Error("Error reading from Consul", "error", err)
+				consulResults = nil
+				close(c.Updated)
+			}
+		} else {
+			logger.Error("Error creating Consul client: configuration will not be fetched from Consul", "error", err)
+			close(c.Updated)
+		}
+	} else {
+		logger.Info("Configuration is not fetched from Consul")
+		close(c.Updated)
+	}
+
 	err = c.Complete()
 	if err != nil {
-		return nil, err
+		if stopWatchChan != nil {
+			close(stopWatchChan)
+		}
+		return nil, nil, err
 	}
-	return c, nil
+
+	if consulResults != nil {
+		// watch for updates from Consul
+		// (c.Updated is not modified or closed, same channel for the new config)
+		go func() {
+			for result := range consulResults {
+				oldDirname := c.Store.Dirname
+				var newConfig *GConfig
+				*newConfig = *c
+				newConfig.ParseConsulConf(result)
+				err := newConfig.Complete()
+				newConfig.Store.Dirname = oldDirname
+				if err == nil {
+					*c = *newConfig
+					c.Updated <- true
+				} else {
+					logger.Error("Error updating conf from Consul", "error", err)
+				}
+			}
+			close(c.Updated)
+		}()
+	}
+
+	return c, stopWatchChan, nil
 }
 
-func (c *GlobalConfig) Reload() error {
-	new_c, err := InitLoad(c.Dirname)
+func (c *GConfig) ParseConsulConf(params map[string]string) {
+
+}
+
+func (c *GConfig) Reload() (newConf *GConfig, stopWatchChan chan bool, err error) {
+	newConf, stopWatchChan, err = InitLoad(c.Dirname, c.ConsulParams, c.ConsulPrefix, c.Logger)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	new_c.Store.Dirname = c.Store.Dirname // we don't change the location of the badger databases when doing a reload
-	*c = *new_c
-	return nil
+	newConf.Store.Dirname = c.Store.Dirname // we don't change the location of the badger databases when doing a reload
+	return newConf, stopWatchChan, nil
 }
 
-func (c *GlobalConfig) Export() string {
+func (c *GConfig) Export() string {
 	buf := new(bytes.Buffer)
 	encoder := toml.NewEncoder(buf)
-	encoder.Encode(*c)
+	encoder.Encode(c.BaseConfig)
 	return buf.String()
 }
 
-func (c *GlobalConfig) Complete() (err error) {
+func (c *GConfig) Complete() (err error) {
 	switch c.Kafka.Compression {
 	case "snappy":
 		c.Kafka.pCompression = sarama.CompressionSnappy

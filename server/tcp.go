@@ -25,13 +25,19 @@ const (
 
 type TcpServer struct {
 	StoreServer
-	statusMutex sync.Mutex
+	statusMutex *sync.Mutex
 	status      TcpServerStatus
 	ClosedChan  chan TcpServerStatus
 }
 
-func NewTcpServer(c *conf.GlobalConfig, st *store.MessageStore, logger log15.Logger) *TcpServer {
+func (s *TcpServer) init() {
+	s.StoreServer.init()
+	s.statusMutex = &sync.Mutex{}
+}
+
+func NewTcpServer(c *conf.GConfig, st *store.MessageStore, logger log15.Logger) *TcpServer {
 	s := TcpServer{}
+	s.init()
 	s.protocol = "tcp"
 	s.stream = true
 	s.Conf = *c

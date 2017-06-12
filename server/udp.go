@@ -23,13 +23,19 @@ const (
 
 type UdpServer struct {
 	StoreServer
-	statusMutex sync.Mutex
+	statusMutex *sync.Mutex
 	status      UdpServerStatus
 	ClosedChan  chan UdpServerStatus
 }
 
-func NewUdpServer(c *conf.GlobalConfig, st *store.MessageStore, logger log15.Logger) *UdpServer {
+func (s *UdpServer) init() {
+	s.StoreServer.init()
+	s.statusMutex = &sync.Mutex{}
+}
+
+func NewUdpServer(c *conf.GConfig, st *store.MessageStore, logger log15.Logger) *UdpServer {
 	s := UdpServer{}
+	s.init()
 	s.protocol = "udp"
 	s.stream = false
 	s.Conf = *c

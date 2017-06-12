@@ -21,23 +21,32 @@ type MessageStore struct {
 	ready          *badger.KV
 	sent           *badger.KV
 	failed         *badger.KV
-	sendStoppedMu  sync.Mutex
+	sendStoppedMu  *sync.Mutex
 	StopSendChan   chan bool
 	closeChan      chan bool
-	ready_mu       sync.Mutex
-	failed_mu      sync.Mutex
+	ready_mu       *sync.Mutex
+	failed_mu      *sync.Mutex
 	sendStopped    bool
 	Inputs         chan *model.TcpUdpParsedMessage
 	Outputs        chan *model.TcpUdpParsedMessage
-	wg             sync.WaitGroup
-	sendWg         sync.WaitGroup
-	storeToKafkaWg sync.WaitGroup
+	wg             *sync.WaitGroup
+	sendWg         *sync.WaitGroup
+	storeToKafkaWg *sync.WaitGroup
 	ticker         *time.Ticker
 	logger         log15.Logger
-	Conf           conf.GlobalConfig
+	Conf           conf.GConfig
 }
 
-func NewStore(c *conf.GlobalConfig, l log15.Logger) (store *MessageStore, err error) {
+func (s *MessageStore) init() {
+	s.sendStoppedMu = &sync.Mutex{}
+	s.ready_mu = &sync.Mutex{}
+	s.failed_mu = &sync.Mutex{}
+	s.wg = &sync.WaitGroup{}
+	s.sendWg = &sync.WaitGroup{}
+	s.storeToKafkaWg = &sync.WaitGroup{}
+}
+
+func NewStore(c *conf.GConfig, l log15.Logger) (store *MessageStore, err error) {
 	dirname := c.Store.Dirname
 	opts_messages := badger.DefaultOptions
 	opts_ready := badger.DefaultOptions
@@ -64,8 +73,8 @@ func NewStore(c *conf.GlobalConfig, l log15.Logger) (store *MessageStore, err er
 		return nil, err
 	}
 
-	s := MessageStore{}
-	store = &s
+	store = &MessageStore{}
+	store.init()
 	store.Conf = *c
 
 	store.messages, err = badger.NewKV(&opts_messages)
@@ -85,28 +94,28 @@ func NewStore(c *conf.GlobalConfig, l log15.Logger) (store *MessageStore, err er
 		return nil, err
 	}
 	store.logger = l.New("class", "MessageStore")
-	s.sendStopped = true
-	s.closeChan = make(chan bool)
+	store.sendStopped = true
+	store.closeChan = make(chan bool)
 
 	// only once, push back messages from previous run that may have been stuck in the sent queue
-	s.resetStuckInSent()
+	store.resetStuckInSent()
 
 	store.ticker = time.NewTicker(time.Minute)
-	s.wg.Add(1)
+	store.wg.Add(1)
 	go func() {
-		defer s.wg.Done()
-		defer s.logger.Debug("End of periodic Store.resetFailures")
+		defer store.wg.Done()
+		defer store.logger.Debug("End of periodic Store.resetFailures")
 		for {
 			select {
 			case <-store.ticker.C:
 				store.resetFailures()
-			case <-s.closeChan:
+			case <-store.closeChan:
 				return
 			}
 
 		}
 	}()
-	s.startIngest()
+	store.startIngest()
 
 	return store, nil
 }
@@ -393,10 +402,10 @@ func (s *MessageStore) store2kafka(test bool) {
 			} else {
 				s.logger.Warn("Error getting a Kafka client", "error", err)
 				select {
-				case <-time.After(time.Second):
 				case <-s.StopSendChan:
+					return
+				case <-time.After(2 * time.Second):
 				}
-				time.Sleep(time.Second)
 			}
 		}
 		defer producer.AsyncClose()

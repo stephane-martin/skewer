@@ -6,17 +6,17 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/inconshreveable/log15"
 	"github.com/spf13/cobra"
 	"github.com/stephane-martin/relp2kafka/conf"
+	"github.com/stephane-martin/relp2kafka/consul"
 	"github.com/stephane-martin/relp2kafka/server"
 	"github.com/stephane-martin/relp2kafka/store"
 )
-
-var logger = log15.New()
 
 // serveCmd represents the serve command
 var serveCmd = &cobra.Command{
@@ -51,7 +51,8 @@ func init() {
 
 }
 
-func setLogging() {
+func SetLogging() log15.Logger {
+	logger := log15.New()
 	log_handlers := []log15.Handler{}
 	var formatter log15.Format
 	if logjsonFlag {
@@ -88,18 +89,32 @@ func setLogging() {
 	handler = log15.LvlFilterHandler(lvl, handler)
 
 	logger.SetHandler(handler)
+	return logger
 }
 
 func Serve() {
-	setLogging()
-	c := conf.Load(configDirName, logger)
-	store, e := store.NewStore(c, logger)
-	if e != nil {
-		logger.Crit("Can't create the message Store", "error", e)
+	logger := SetLogging()
+	var err error
+	var c *conf.GConfig
+	var st *store.MessageStore
+	var stopWatchChan chan bool
+	params := consul.ConnParams{Address: consulAddr, Datacenter: consulDC, Token: consulToken}
+
+	for {
+		c, stopWatchChan, err = conf.InitLoad(configDirName, params, consulPrefix, logger)
+		if err == nil {
+			break
+		}
+		logger.Error("Error getting configuration. Sleep and retry.", "error", err)
+		time.Sleep(30 * time.Second)
+	}
+	st, err = store.NewStore(c, logger)
+	if err != nil {
+		logger.Crit("Can't create the message Store", "error", err)
 		os.Exit(-1)
 	}
-	store.SendToKafka(testFlag)
-	defer store.Close()
+	st.SendToKafka(testFlag)
+	defer st.Close()
 
 	// prepare the RELP service
 	relpServer := server.NewRelpServer(c, logger)
@@ -111,62 +126,87 @@ func Serve() {
 	relpServer.StatusChan <- server.Stopped // trigger the RELP service to start
 
 	// start the TCP service
-	tcpServer := server.NewTcpServer(c, store, logger)
+	tcpServer := server.NewTcpServer(c, st, logger)
 	if testFlag {
 		tcpServer.SetTest()
 	}
-	e = tcpServer.Start()
-	if e != nil {
-		logger.Error("Error starting the TCP server", "error", e)
+	err = tcpServer.Start()
+	if err != nil {
+		logger.Error("Error starting the TCP server", "error", err)
 	}
 
 	// start the UDP service
-	udpServer := server.NewUdpServer(c, store, logger)
+	udpServer := server.NewUdpServer(c, st, logger)
 	if testFlag {
 		udpServer.SetTest()
 	}
-	e = udpServer.Start()
-	if e != nil {
-		logger.Error("Error starting the UDP server", "error", e)
+	err = udpServer.Start()
+	if err != nil {
+		logger.Error("Error starting the UDP server", "error", err)
 	}
 
-	go func() {
-		for {
-			sig := <-sig_chan
-			if sig == syscall.SIGHUP {
-				logger.Debug("SIGHUP received: reloading configuration")
-				err := c.Reload() // try to reload the configuration
-				if err != nil {
-					logger.Error("Error reloading configuration. Configuration was not changed.", "error", err)
-				} else {
-					store.StopSendToKafka()
-					store.Conf = *c
-					store.SendToKafka(testFlag)
-					go func() {
-						relpServer.Stop()
-					}()
-					go func() {
-						tcpServer.Stop()
-						<-tcpServer.ClosedChan
-						tcpServer.Conf = *c
-						err := tcpServer.Start()
-						if err != nil {
-							logger.Error("Error starting the TCP server", "error", e)
-						}
-					}()
-					go func() {
-						udpServer.Stop()
-						<-udpServer.ClosedChan
-						udpServer.Conf = *c
-						err := udpServer.Start()
-						if err != nil {
-							logger.Error("Error starting the UDP server", "error", e)
-						}
-					}()
-				}
+	Reload := func(newConf *conf.GConfig) {
+		st.StopSendToKafka()
+		st.Conf = *newConf
+		st.SendToKafka(testFlag)
+		wg := &sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			relpServer.Stop()
+			wg.Done()
+		}()
+		wg.Add(1)
+		go func() {
+			tcpServer.Stop()
+			<-tcpServer.ClosedChan
+			tcpServer.Conf = *newConf
+			err := tcpServer.Start()
+			if err != nil {
+				logger.Error("Error starting the TCP server", "error", err)
+			}
+			wg.Done()
+		}()
+		wg.Add(1)
+		go func() {
+			udpServer.Stop()
+			<-udpServer.ClosedChan
+			udpServer.Conf = *newConf
+			err := udpServer.Start()
+			if err != nil {
+				logger.Error("Error starting the UDP server", "error", err)
+			}
+			wg.Done()
+		}()
+		wg.Wait()
+	}
 
+	for {
+		select {
+		case _, more := <-c.Updated:
+			if more {
+				logger.Info("Configuration was updated by Consul")
+				Reload(c)
+			}
+
+		case sig := <-sig_chan:
+			if sig == syscall.SIGHUP {
+				logger.Info("SIGHUP received: reloading configuration")
+				newConf, newStopWatchChan, err := c.Reload() // try to reload the configuration
+				if err == nil {
+					if stopWatchChan != nil {
+						close(stopWatchChan) // c.Updated will be eventually closed
+					}
+					stopWatchChan = newStopWatchChan
+					Reload(newConf)
+					*c = *newConf // replaces c.Updated with the new Updated channel
+				} else {
+					logger.Error("Error reloading configuration. Configuration was left untouched.", "error", err)
+				}
 			} else if sig == syscall.SIGTERM || sig == syscall.SIGINT {
 				logger.Debug("Termination signal received", "signal", sig)
+				if stopWatchChan != nil {
+					close(stopWatchChan)
+				}
 				relpServer.FinalStop()
 				tcpServer.Stop()
 				udpServer.Stop()
@@ -174,37 +214,37 @@ func Serve() {
 			} else {
 				logger.Warn("Unknown signal received", "signal", sig)
 			}
-		}
-	}()
 
-	for {
-		state := <-relpServer.StatusChan
-		switch state {
-		case server.FinalStopped:
-			logger.Info("The RELP service has been definitely halted")
-			// wait that the tcp service stops too
-			<-tcpServer.ClosedChan
-			logger.Info("The TCP service has been stopped")
-			<-udpServer.ClosedChan
-			logger.Info("The UDP service has been stopped")
-			return
-		case server.Stopped:
-			logger.Info("The RELP service has been stopped")
-			relpServer.Conf = *c
-			err := relpServer.Start()
-			if err != nil {
-				logger.Warn("The RELP service has failed to start", "error", err)
-				relpServer.StopAndWait()
+		case state := <-relpServer.StatusChan:
+			switch state {
+			case server.FinalStopped:
+				logger.Info("The RELP service has been definitely halted")
+				// wait that the tcp service stops too
+				<-tcpServer.ClosedChan
+				logger.Info("The TCP service has been stopped")
+				<-udpServer.ClosedChan
+				logger.Info("The UDP service has been stopped")
+				return
+			case server.Stopped:
+				logger.Info("The RELP service has been stopped")
+				relpServer.Conf = *c
+				err := relpServer.Start()
+				if err != nil {
+					logger.Warn("The RELP service has failed to start", "error", err)
+					relpServer.StopAndWait()
+				}
+			case server.Waiting:
+				logger.Info("Waiting")
+				go func() {
+					time.Sleep(time.Duration(30) * time.Second)
+					relpServer.EndWait()
+				}()
+
+			case server.Started:
+				logger.Info("The RELP service has been started")
 			}
-		case server.Waiting:
-			logger.Info("Waiting")
-			go func() {
-				time.Sleep(time.Duration(30) * time.Second)
-				relpServer.EndWait()
-			}()
 
-		case server.Started:
-			logger.Info("The RELP service has been started")
 		}
+
 	}
 }

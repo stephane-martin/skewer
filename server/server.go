@@ -19,27 +19,38 @@ type PacketHandler interface {
 }
 
 type Server struct {
-	Conf              conf.GlobalConfig
+	Conf              conf.GConfig
 	listeners         map[int]net.Listener
 	logger            log15.Logger
 	connections       map[net.Conn]bool
 	packetConnections map[net.PacketConn]bool
-	connMutex         sync.Mutex
+	connMutex         *sync.Mutex
 	kafkaClient       sarama.Client
 	test              bool
-	wg                sync.WaitGroup
-	acceptsWg         sync.WaitGroup
+	wg                *sync.WaitGroup
+	acceptsWg         *sync.WaitGroup
 	shandler          StreamHandler
 	phandler          PacketHandler
 	protocol          string
 	stream            bool
 }
 
+func (s *Server) init() {
+	s.connMutex = &sync.Mutex{}
+	s.wg = &sync.WaitGroup{}
+	s.acceptsWg = &sync.WaitGroup{}
+}
+
 type StoreServer struct {
 	Server
 	store          *store.MessageStore
-	storeToKafkaWg sync.WaitGroup
+	storeToKafkaWg *sync.WaitGroup
 	producer       sarama.AsyncProducer
+}
+
+func (s *StoreServer) init() {
+	s.Server.init()
+	s.storeToKafkaWg = &sync.WaitGroup{}
 }
 
 func (s *Server) initListeners() int {

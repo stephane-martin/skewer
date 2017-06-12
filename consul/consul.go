@@ -20,16 +20,22 @@ func copy_map(m map[string]string) map[string]string {
 	return c
 }
 
-func sclose(c chan bool) {
+func sclose(c chan map[string]string) {
 	if c != nil {
 		close(c)
 	}
 }
 
-func NewClient(addr, token, datacenter string) (*api.Client, error) {
+type ConnParams struct {
+	Address    string
+	Datacenter string
+	Token      string
+}
+
+func NewClient(params ConnParams) (*api.Client, error) {
 
 	config := *api.DefaultConfig()
-	addr = strings.TrimSpace(addr)
+	addr := strings.TrimSpace(params.Address)
 	if strings.HasPrefix(addr, "http://") {
 		config.Scheme = "http"
 		addr = addr[7:]
@@ -40,8 +46,8 @@ func NewClient(addr, token, datacenter string) (*api.Client, error) {
 		return nil, fmt.Errorf("consul addr must start with 'http://' or 'https://'")
 	}
 	config.Address = addr
-	config.Token = strings.TrimSpace(token)
-	config.Datacenter = strings.TrimSpace(datacenter)
+	config.Token = strings.TrimSpace(params.Token)
+	config.Datacenter = strings.TrimSpace(params.Datacenter)
 
 	client, err := api.NewClient(&config)
 	if err != nil {
@@ -50,11 +56,11 @@ func NewClient(addr, token, datacenter string) (*api.Client, error) {
 	return client, nil
 }
 
-func WatchTree(client *api.Client, prefix string, notifications chan bool, logger log15.Logger) (results map[string]string, stop chan bool, err error) {
-	// it is our job to close notifications when we won't write anymore to it
+func WatchTree(client *api.Client, prefix string, resultsChan chan map[string]string, logger log15.Logger) (results map[string]string, stop chan bool, err error) {
+	// it is our job to close the notifications channel when we won't write anymore to it
 	if client == nil || len(prefix) == 0 {
 		logger.Info("Not watching Consul for dynamic configuration")
-		sclose(notifications)
+		sclose(resultsChan)
 		return nil, nil, nil
 	}
 	logger.Debug("Getting configuration from Consul", "prefix", prefix)
@@ -63,11 +69,11 @@ func WatchTree(client *api.Client, prefix string, notifications chan bool, logge
 	results, first_index, err = getTree(client, prefix, 0)
 
 	if err != nil {
-		sclose(notifications)
+		sclose(resultsChan)
 		return nil, nil, err
 	}
 
-	if notifications == nil {
+	if resultsChan == nil {
 		return results, nil, nil
 	}
 
@@ -108,14 +114,14 @@ func WatchTree(client *api.Client, prefix string, notifications chan bool, logge
 		}
 
 		if !is_equal {
-			notifications <- true
+			resultsChan <- results
 			previous_index = index
 			previous_keyvalues = results
 		}
 	}
 
 	go func() {
-		defer close(notifications)
+		defer close(resultsChan)
 		for {
 			select {
 			case <-stop:
@@ -131,7 +137,7 @@ func WatchTree(client *api.Client, prefix string, notifications chan bool, logge
 }
 
 func getTree(client *api.Client, prefix string, waitIndex uint64) (map[string]string, uint64, error) {
-	q := &api.QueryOptions{RequireConsistent: true, WaitIndex: waitIndex, WaitTime: time.Duration(2) * time.Second}
+	q := &api.QueryOptions{RequireConsistent: true, WaitIndex: waitIndex, WaitTime: 2 * time.Second}
 	kvpairs, meta, err := client.KV().List(prefix, q)
 	if err != nil {
 		return nil, 0, errwrap.Wrapf("Error reading configuration in Consul: {{err}}", err)
@@ -151,8 +157,8 @@ type Registry struct {
 	logger log15.Logger
 }
 
-func NewRegistry(c_addr, c_token, c_dtctr string, logger log15.Logger) (*Registry, error) {
-	c, err := NewClient(c_addr, c_token, c_dtctr)
+func NewRegistry(params ConnParams, logger log15.Logger) (*Registry, error) {
+	c, err := NewClient(params)
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +179,7 @@ func (r *Registry) Register(name string, ip_s string, port int, check_url string
 		r.logger.Info("Skipping registration of service: it listens on loopback", "name", name)
 		return "", nil
 	}
-	if ip.IsUnspecified() {
+	if ip.IsUnspecified() { // 0.0.0.0
 		// todo: really ?
 		ip, err = LocalIP()
 		if err != nil {

@@ -27,13 +27,19 @@ const (
 
 type RelpServer struct {
 	Server
-	statusMutex sync.Mutex
+	statusMutex *sync.Mutex
 	status      RelpServerStatus
 	StatusChan  chan RelpServerStatus
 }
 
-func NewRelpServer(c *conf.GlobalConfig, logger log15.Logger) *RelpServer {
+func (s *RelpServer) init() {
+	s.Server.init()
+	s.statusMutex = &sync.Mutex{}
+}
+
+func NewRelpServer(c *conf.GConfig, logger log15.Logger) *RelpServer {
 	s := RelpServer{}
+	s.init()
 	s.protocol = "relp"
 	s.stream = true
 	s.Conf = *c
@@ -42,13 +48,13 @@ func NewRelpServer(c *conf.GlobalConfig, logger log15.Logger) *RelpServer {
 	s.logger = logger.New("class", "RelpServer")
 	s.shandler = RelpHandler{Server: &s}
 
-	s.StatusChan = make(chan RelpServerStatus, 1)
+	s.StatusChan = make(chan RelpServerStatus, 10)
 	s.status = Stopped
 	return &s
 }
 
 func (s *RelpServer) Start() error {
-	return s.doStart(&s.statusMutex)
+	return s.doStart(s.statusMutex)
 }
 
 func (s *RelpServer) doStart(mu *sync.Mutex) (err error) {
@@ -89,15 +95,15 @@ func (s *RelpServer) doStart(mu *sync.Mutex) (err error) {
 }
 
 func (s *RelpServer) Stop() {
-	s.doStop(false, false, &s.statusMutex)
+	s.doStop(false, false, s.statusMutex)
 }
 
 func (s *RelpServer) FinalStop() {
-	s.doStop(true, false, &s.statusMutex)
+	s.doStop(true, false, s.statusMutex)
 }
 
 func (s *RelpServer) StopAndWait() {
-	s.doStop(false, true, &s.statusMutex)
+	s.doStop(false, true, s.statusMutex)
 }
 
 func (s *RelpServer) EndWait() {

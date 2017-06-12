@@ -17,8 +17,10 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/inconshreveable/log15"
 	"github.com/spf13/cobra"
 	"github.com/stephane-martin/relp2kafka/conf"
+	"github.com/stephane-martin/relp2kafka/consul"
 )
 
 // printConfigCmd represents the printConfig command
@@ -32,9 +34,10 @@ Cobra is a CLI library for Go that empowers applications.
 This application is a tool to generate the needed files
 to quickly create a Cobra application.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		c, err := conf.InitLoad(configDirName)
+		params := consul.ConnParams{Address: consulAddr, Datacenter: consulDC, Token: consulToken}
+		c, _, err := conf.InitLoad(configDirName, params, consulPrefix, log15.New())
 		if err != nil {
-			fmt.Println(err)
+			fmt.Printf("Error happened: %s\n", err)
 			os.Exit(-1)
 		}
 		fmt.Println(c)
