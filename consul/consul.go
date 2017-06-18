@@ -180,7 +180,6 @@ func (r *Registry) Register(name string, ip_s string, port int, check_url string
 		return "", nil
 	}
 	if ip.IsUnspecified() { // 0.0.0.0
-		// todo: really ?
 		ip, err = LocalIP()
 		if err != nil {
 			return "", err

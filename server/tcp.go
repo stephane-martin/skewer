@@ -3,6 +3,7 @@ package server
 import (
 	"bufio"
 	"bytes"
+	"math/rand"
 	"net"
 	"strconv"
 	"strings"
@@ -10,7 +11,7 @@ import (
 	"time"
 
 	"github.com/inconshreveable/log15"
-	"github.com/satori/go.uuid"
+	"github.com/oklog/ulid"
 	"github.com/stephane-martin/relp2kafka/conf"
 	"github.com/stephane-martin/relp2kafka/model"
 	"github.com/stephane-martin/relp2kafka/store"
@@ -41,8 +42,8 @@ func NewTcpServer(c *conf.GConfig, st *store.MessageStore, logger log15.Logger) 
 	s.protocol = "tcp"
 	s.stream = true
 	s.Conf = *c
-	s.listeners = map[int]net.Listener{}
-	s.connections = map[net.Conn]bool{}
+	s.listeners = map[int]*net.TCPListener{}
+	s.connections = map[*net.TCPConn]bool{}
 	s.logger = logger.New("class", "TcpServer")
 	s.shandler = TcpHandler{Server: &s}
 	s.status = TcpStopped
@@ -61,11 +62,10 @@ func (s *TcpServer) Start() (err error) {
 	s.ClosedChan = make(chan TcpServerStatus, 1)
 
 	// start listening on the required ports
-	nb := s.initListeners()
+	nb := s.initTCPListeners()
 	if nb > 0 {
 		s.status = TcpStarted
-		s.wg.Add(1)
-		go s.Listen()
+		s.ListenTCP()
 		//s.storeToKafkaWg.Add(1)
 		//go s.Store2Kafka()
 	} else {
@@ -82,18 +82,9 @@ func (s *TcpServer) Stop() {
 	if s.status != TcpStarted {
 		return
 	}
-	s.resetListeners() // close the listeners. This will make Listen to return and close all current connections.
-	s.wg.Wait()        // wait that all HandleConnection goroutines have ended
+	s.resetTCPListeners() // close the listeners. This will make Listen to return and close all current connections.
+	s.wg.Wait()           // wait that all HandleConnection goroutines have ended
 	s.logger.Debug("TcpServer goroutines have ended")
-	//s.store.StopSend()
-	// eventually store.StartSend will end
-	// after that the Store.Outputs channel will be closed (in the defer)
-	// Store2Kafka will end, because of the closed Store.Outputs channel
-	// The Kafka producer is then asked to close (AsyncClose in defer)
-	// The child goroutine is Store2Kafka will drain the Producer Successes and Errors channels, and then return,
-	// and finally storeToKafkaWg.Wait() will return
-	//s.logger.Debug("Waiting for the Store to finish operations")
-	//s.storeToKafkaWg.Wait()
 
 	s.status = TcpStopped
 	s.ClosedChan <- TcpStopped
@@ -105,15 +96,15 @@ type TcpHandler struct {
 	Server *TcpServer
 }
 
-func (h TcpHandler) HandleConnection(conn net.Conn, i int) {
+func (h TcpHandler) HandleConnection(conn *net.TCPConn, i int) {
 	s := h.Server
-	s.AddConnection(conn)
+	s.AddTCPConnection(conn)
 
-	raw_messages_chan := make(chan *model.TcpUdpRawMessage)
+	raw_messages_chan := make(chan *model.RawMessage)
 
 	defer func() {
 		close(raw_messages_chan)
-		s.RemoveConnection(conn)
+		s.RemoveTCPConnection(conn)
 		s.wg.Done()
 	}()
 
@@ -137,50 +128,49 @@ func (h TcpHandler) HandleConnection(conn net.Conn, i int) {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+		entropy := rand.New(rand.NewSource(time.Now().UnixNano()))
 		for m := range raw_messages_chan {
 			p, err := model.Parse(m.Message, s.Conf.Syslog[i].Format, s.Conf.Syslog[i].DontParseSD)
 
 			if err == nil {
-				// todo: get rid of pointer to times
-				t := time.Now()
-				if p.TimeReported != nil {
-					t = *p.TimeReported
+				uid, err := ulid.New(ulid.Timestamp(p.TimeReported), entropy)
+				if err != nil {
+					// should not happen
+					s.logger.Error("Error generating a ULID", "error", err)
 				} else {
-					p.TimeReported = &t
-					p.TimeGenerated = &t
+					parsed_msg := model.TcpUdpParsedMessage{
+						Parsed: model.ParsedMessage{
+							Fields:    p,
+							Client:    m.Client,
+							LocalPort: m.LocalPort,
+						},
+						Uid:       uid.String(),
+						ConfIndex: i,
+					}
+					s.store.Inputs <- &parsed_msg
 				}
-				uid := t.Format(time.RFC3339) + m.Uid.String()
-				parsed_msg := model.TcpUdpParsedMessage{
-					Parsed: model.ParsedMessage{
-						Fields:    p,
-						Client:    m.Client,
-						LocalPort: m.LocalPort,
-					},
-					Uid:       uid,
-					ConfIndex: i,
-				}
-				s.store.Inputs <- &parsed_msg
 			} else {
 				logger.Info("Parsing error", "Message", m.Message, "error", err)
 			}
 		}
 	}()
 
-	// Syslog TCP server
+	timeout := s.Conf.Syslog[i].Timeout
+	if timeout > 0 {
+		conn.SetReadDeadline(time.Now().Add(timeout))
+	}
 	scanner := bufio.NewScanner(conn)
 	scanner.Split(TcpSplit)
 
 	for {
 		if scanner.Scan() {
-			data := scanner.Text()
-
-			raw := model.TcpUdpRawMessage{
-				RawMessage: model.RawMessage{
-					Client:    client,
-					LocalPort: local_port,
-					Message:   data,
-				},
-				Uid: uuid.NewV4(),
+			if timeout > 0 {
+				conn.SetReadDeadline(time.Now().Add(timeout))
+			}
+			raw := model.RawMessage{
+				Client:    client,
+				LocalPort: local_port,
+				Message:   scanner.Text(),
 			}
 			raw_messages_chan <- &raw
 		} else {

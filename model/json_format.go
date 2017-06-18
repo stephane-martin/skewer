@@ -35,15 +35,15 @@ func ParseJsonFormat(m string) (*SyslogMessage, error) {
 	}
 
 	n := time.Now()
-	generated := &n
-	reported := &n
+	generated := n
+	reported := n
 
 	if sourceMsg.TimeReported != "-" {
 		r, err := time.Parse(time.RFC3339Nano, sourceMsg.TimeReported)
 		if err != nil {
 			return nil, err
 		}
-		reported = &r
+		reported = r
 	}
 
 	if sourceMsg.TimeGenerated != "-" {
@@ -51,7 +51,7 @@ func ParseJsonFormat(m string) (*SyslogMessage, error) {
 		if err != nil {
 			return nil, err
 		}
-		generated = &g
+		generated = g
 	}
 
 	hostname := ""

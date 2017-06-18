@@ -28,7 +28,7 @@ type GConfig struct {
 	BaseConfig
 	Dirname      string
 	Updated      chan bool
-	Client       *api.Client
+	ConsulClient *api.Client
 	ConsulPrefix string
 	ConsulParams consul.ConnParams
 	Logger       log15.Logger
@@ -65,7 +65,8 @@ func (c *GConfig) String() string {
 
 type StoreConfig struct {
 	Dirname string `mapstructure:"dirname" toml:"dirname"`
-	// todo: max size
+	Maxsize int64  `mapstructure:"max_size" toml:"max_size"`
+	FSync   bool   `mapstructure:"fsync" toml:"fsync"`
 }
 
 type KafkaVersion [4]int
@@ -182,10 +183,14 @@ type SyslogConfig struct {
 	PartitionTmpl        string             `mapstructure:"partition_key_tmpl" toml:"partition_key_tmpl"`
 	Protocol             string             `mapstructure:"protocol" toml:"protocol"`
 	DontParseSD          bool               `mapstructure:"dont_parse_structured_data" toml:"dont_parse_structured_data"`
+	KeepAlive            bool               `mapstructure:"keepalive" toml:"keepalive"`
+	KeepAlivePeriod      time.Duration      `mapstructure:"keepalive_period" toml:"keepalive_period"`
+	Timeout              time.Duration      `mapstructure:"timeout" toml:"timeout"`
 	TopicTemplate        *template.Template `toml:"-"`
 	PartitionKeyTemplate *template.Template `toml:"-"`
 	BindIP               net.IP             `toml:"-"`
 	ListenAddr           string             `toml:"-"`
+
 	// Filter ?
 	// Partitioner ?
 	// Topic function ?
@@ -282,23 +287,23 @@ func InitLoad(dirname string, params consul.ConnParams, prefix string, logger lo
 		var clt *api.Client
 		clt, err = consul.NewClient(params)
 		if err == nil {
-			c.Client = clt
+			c.ConsulClient = clt
 			consulResults = make(chan map[string]string, 10)
-			firstResults, stopWatchChan, err = consul.WatchTree(c.Client, prefix, consulResults, logger)
+			firstResults, stopWatchChan, err = consul.WatchTree(c.ConsulClient, c.ConsulPrefix, consulResults, logger)
 			if err == nil {
-				c.ParseConsulConf(firstResults)
+				err = c.ParseParamsFromConsul(firstResults)
+				if err != nil {
+					c.Logger.Error("Error decoding configuration from Consul", "error", err)
+				}
 			} else {
-				logger.Error("Error reading from Consul", "error", err)
+				c.Logger.Error("Error reading from Consul", "error", err)
 				consulResults = nil
-				close(c.Updated)
 			}
 		} else {
 			logger.Error("Error creating Consul client: configuration will not be fetched from Consul", "error", err)
-			close(c.Updated)
 		}
 	} else {
 		logger.Info("Configuration is not fetched from Consul")
-		close(c.Updated)
 	}
 
 	err = c.Complete()
@@ -317,14 +322,18 @@ func InitLoad(dirname string, params consul.ConnParams, prefix string, logger lo
 				oldDirname := c.Store.Dirname
 				var newConfig *GConfig
 				*newConfig = *c
-				newConfig.ParseConsulConf(result)
-				err := newConfig.Complete()
-				newConfig.Store.Dirname = oldDirname
+				err := newConfig.ParseParamsFromConsul(result)
 				if err == nil {
-					*c = *newConfig
-					c.Updated <- true
+					err = newConfig.Complete()
+					newConfig.Store.Dirname = oldDirname
+					if err == nil {
+						*c = *newConfig
+						c.Updated <- true
+					} else {
+						logger.Error("Error updating conf from Consul", "error", err)
+					}
 				} else {
-					logger.Error("Error updating conf from Consul", "error", err)
+					c.Logger.Error("Error decoding conf from Consul", "error", err)
 				}
 			}
 			close(c.Updated)
@@ -334,8 +343,94 @@ func InitLoad(dirname string, params consul.ConnParams, prefix string, logger lo
 	return c, stopWatchChan, nil
 }
 
-func (c *GConfig) ParseConsulConf(params map[string]string) {
+func (c *GConfig) ParseParamsFromConsul(params map[string]string) error {
+	syslogConfMap := map[string]map[string]string{}
+	kafkaConf := map[string]string{}
+	storeConf := map[string]string{}
+	prefixLen := len(c.ConsulPrefix)
 
+	for k, v := range params {
+		k = strings.Trim(k[prefixLen:], "/")
+		splits := strings.Split(k, "/")
+		switch splits[0] {
+		case "syslog":
+			if len(splits) == 3 {
+				if _, ok := syslogConfMap[splits[1]]; !ok {
+					syslogConfMap[splits[1]] = map[string]string{}
+				}
+				syslogConfMap[splits[1]][splits[2]] = v
+			} else {
+				c.Logger.Debug("Ignoring Consul KV", "key", k, "value", v)
+			}
+		case "kafka":
+			if len(splits) == 2 {
+				kafkaConf[splits[1]] = v
+			} else {
+				c.Logger.Debug("Ignoring Consul KV", "key", k, "value", v)
+			}
+		case "store":
+			if len(splits) == 2 {
+				storeConf[splits[1]] = v
+			} else {
+				c.Logger.Debug("Ignoring Consul KV", "key", k, "value", v)
+			}
+		default:
+			c.Logger.Debug("Ignoring Consul KV", "key", k, "value", v)
+		}
+	}
+
+	var vi *viper.Viper
+
+	syslogConfs := []SyslogConfig{}
+	for _, syslogConf := range syslogConfMap {
+		vi = viper.New()
+		for k, v := range syslogConf {
+			vi.Set(k, v)
+		}
+		sconf := SyslogConfig{}
+		err := vi.Unmarshal(&sconf)
+		if err == nil {
+			syslogConfs = append(syslogConfs, sconf)
+		} else {
+			return err
+		}
+	}
+
+	kconf := KafkaConfig{}
+	if len(kafkaConf) > 0 {
+		vi = viper.New()
+		SetKafkaDefaults(vi, false)
+		for k, v := range kafkaConf {
+			vi.Set(k, v)
+		}
+		err := vi.Unmarshal(&kconf)
+		if err != nil {
+			return err
+		}
+	}
+
+	sconf := StoreConfig{}
+	if len(storeConf) > 0 {
+		vi = viper.New()
+		SetStoreDefaults(vi, false)
+		for k, v := range storeConf {
+			vi.Set(k, v)
+		}
+		err := vi.Unmarshal(&sconf)
+		if err != nil {
+			return err
+		}
+	}
+
+	c.Syslog = append(c.Syslog, syslogConfs...)
+	if len(kafkaConf) > 0 {
+		c.Kafka = kconf
+	}
+	if len(storeConf) > 0 {
+		c.Store = sconf
+	}
+
+	return nil
 }
 
 func (c *GConfig) Reload() (newConf *GConfig, stopWatchChan chan bool, err error) {
@@ -400,6 +495,12 @@ func (c *GConfig) Complete() (err error) {
 		}
 		if syslogConf.PartitionTmpl == "" {
 			c.Syslog[i].PartitionTmpl = "mypk-{{.Fields.Hostname}}"
+		}
+		if syslogConf.KeepAlivePeriod == 0 {
+			c.Syslog[i].KeepAlivePeriod = 30 * time.Second
+		}
+		if syslogConf.Timeout == 0 {
+			c.Syslog[i].Timeout = time.Minute
 		}
 
 		c.Syslog[i].TopicTemplate, err = template.New("topic").Parse(c.Syslog[i].TopicTmpl)

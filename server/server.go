@@ -11,7 +11,7 @@ import (
 )
 
 type StreamHandler interface {
-	HandleConnection(conn net.Conn, i int)
+	HandleConnection(conn *net.TCPConn, i int)
 }
 
 type PacketHandler interface {
@@ -20,9 +20,9 @@ type PacketHandler interface {
 
 type Server struct {
 	Conf              conf.GConfig
-	listeners         map[int]net.Listener
+	listeners         map[int]*net.TCPListener
 	logger            log15.Logger
-	connections       map[net.Conn]bool
+	connections       map[*net.TCPConn]bool
 	packetConnections map[net.PacketConn]bool
 	connMutex         *sync.Mutex
 	kafkaClient       sarama.Client
@@ -53,40 +53,46 @@ func (s *StoreServer) init() {
 	s.storeToKafkaWg = &sync.WaitGroup{}
 }
 
-func (s *Server) initListeners() int {
+func (s *Server) initTCPListeners() int {
 	nb := 0
-	s.connections = map[net.Conn]bool{}
-	s.listeners = map[int]net.Listener{}
+	s.connections = map[*net.TCPConn]bool{}
+	s.listeners = map[int]*net.TCPListener{}
 	for i, syslogConf := range s.Conf.Syslog {
 		if syslogConf.Protocol != s.protocol {
 			continue
 		}
 		s.logger.Info("Listener", "protocol", s.protocol, "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
-		l, err := net.Listen("tcp", syslogConf.ListenAddr)
+		tcpAddr, err := net.ResolveTCPAddr("tcp", syslogConf.ListenAddr)
+		if err != nil {
+			s.logger.Warn("Error resolving TCP address", "address", syslogConf.ListenAddr)
+			continue
+		}
+		l, err := net.ListenTCP("tcp", tcpAddr)
 		if err == nil {
 			nb++
 			s.listeners[i] = l
 		} else {
 			s.logger.Error("Error listening on stream (TCP or RELP)", "listen_addr", syslogConf.ListenAddr, "error", err)
+			continue
 		}
 	}
 	return nb
 }
 
-func (s *Server) resetListeners() {
+func (s *Server) resetTCPListeners() {
 	if s.stream {
 		for _, l := range s.listeners {
 			l.Close()
 		}
 	}
-	s.listeners = map[int]net.Listener{}
+	s.listeners = map[int]*net.TCPListener{}
 }
 
 func (s *Server) SetTest() {
 	s.test = true
 }
 
-func (s *Server) AddConnection(conn net.Conn) {
+func (s *Server) AddTCPConnection(conn *net.TCPConn) {
 	s.connMutex.Lock()
 	defer s.connMutex.Unlock()
 	s.connections[conn] = true
@@ -98,7 +104,7 @@ func (s *Server) AddPacketConnection(conn net.PacketConn) {
 	s.packetConnections[conn] = true
 }
 
-func (s *Server) RemoveConnection(conn net.Conn) {
+func (s *Server) RemoveTCPConnection(conn *net.TCPConn) {
 	s.connMutex.Lock()
 	defer s.connMutex.Unlock()
 	if _, ok := s.connections[conn]; ok {
@@ -125,12 +131,12 @@ func (s *Server) CloseConnections() {
 	for conn, _ := range s.packetConnections {
 		conn.Close()
 	}
-	s.connections = map[net.Conn]bool{}
+	s.connections = map[*net.TCPConn]bool{}
 	s.packetConnections = map[net.PacketConn]bool{}
 
 }
 
-func (s *Server) handleStreamConnection(conn net.Conn, i int) {
+func (s *Server) handleStreamConnection(conn *net.TCPConn, i int) {
 	s.shandler.HandleConnection(conn, i)
 }
 
@@ -138,43 +144,67 @@ func (s *Server) handlePacketConnection(conn net.PacketConn, i int) {
 	s.phandler.HandleConnection(conn, i)
 }
 
-func (s *Server) Accept(i int) {
+func (s *Server) AcceptTCP(i int) {
 	defer s.wg.Done()
 	defer s.acceptsWg.Done()
 	for {
-		conn, accept_err := s.listeners[i].Accept()
+		conn, accept_err := s.listeners[i].AcceptTCP()
 		if accept_err != nil {
-			switch t := accept_err.(type) {
+			s.logger.Info("AcceptTCP() error", "error", accept_err)
+			switch accept_err.(type) {
 			case *net.OpError:
-				if t.Err.Error() == "use of closed network connection" {
-					// can happen because we called the Stop() method
-					return
-				}
+				return
 			default:
-				// log the error and continue
-				s.logger.Error("Accept() error", "error", accept_err)
+				// continue
 			}
 		} else if conn != nil {
+			if s.Conf.Syslog[i].KeepAlive {
+				err := conn.SetKeepAlive(true)
+				if err == nil {
+					err := conn.SetKeepAlivePeriod(s.Conf.Syslog[i].KeepAlivePeriod)
+					if err != nil {
+						s.logger.Warn("Error setting keepalive period", "addr", s.Conf.Syslog[i].ListenAddr, "period", s.Conf.Syslog[i].KeepAlivePeriod)
+					}
+				} else {
+					s.logger.Warn("Error setting keepalive", "addr", s.Conf.Syslog[i].ListenAddr)
+				}
+
+			} else {
+				err := conn.SetKeepAlive(false)
+				if err != nil {
+					s.logger.Warn("Error disabling keepalive", "addr", s.Conf.Syslog[i].ListenAddr)
+				}
+			}
+			err := conn.SetNoDelay(true)
+			if err != nil {
+				s.logger.Warn("Error setting TCP NODELAY", "addr", s.Conf.Syslog[i].ListenAddr)
+			}
+			err = conn.SetLinger(-1)
+			if err != nil {
+				s.logger.Warn("Error setting TCP LINGER", "addr", s.Conf.Syslog[i].ListenAddr)
+			}
 			s.wg.Add(1)
 			go s.handleStreamConnection(conn, i)
 		}
 	}
 }
 
-func (s *Server) Listen() {
+func (s *Server) ListenTCP() {
 	if s.stream {
-		for i, _ := range s.listeners {
-			s.acceptsWg.Add(1)
-			s.wg.Add(1)
-			go s.Accept(i)
-		}
-		// wait until the listeners stop and return
-		s.acceptsWg.Wait()
-		// close the client connections
-		s.CloseConnections()
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			for i, _ := range s.listeners {
+				s.acceptsWg.Add(1)
+				s.wg.Add(1)
+				go s.AcceptTCP(i)
+			}
+			// wait until the listeners stop and return
+			s.acceptsWg.Wait()
+			// close the client connections
+			s.CloseConnections()
+		}()
 	}
-	s.wg.Done()
-
 }
 
 func (s *Server) ListenPacket() int {

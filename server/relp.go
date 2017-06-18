@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	sarama "gopkg.in/Shopify/sarama.v1"
 
@@ -43,8 +44,8 @@ func NewRelpServer(c *conf.GConfig, logger log15.Logger) *RelpServer {
 	s.protocol = "relp"
 	s.stream = true
 	s.Conf = *c
-	s.listeners = map[int]net.Listener{}
-	s.connections = map[net.Conn]bool{}
+	s.listeners = map[int]*net.TCPListener{}
+	s.connections = map[*net.TCPConn]bool{}
 	s.logger = logger.New("class", "RelpServer")
 	s.shandler = RelpHandler{Server: &s}
 
@@ -71,7 +72,7 @@ func (s *RelpServer) doStart(mu *sync.Mutex) (err error) {
 		return
 	}
 
-	nb := s.initListeners()
+	nb := s.initTCPListeners()
 	if nb == 0 {
 		s.logger.Info("RELP service not started: no listening port")
 		return
@@ -81,7 +82,7 @@ func (s *RelpServer) doStart(mu *sync.Mutex) (err error) {
 		s.kafkaClient, err = s.Conf.GetKafkaClient()
 		if err != nil {
 			// sarama/kafka error
-			s.resetListeners()
+			s.resetTCPListeners()
 			return
 		}
 	}
@@ -89,8 +90,7 @@ func (s *RelpServer) doStart(mu *sync.Mutex) (err error) {
 	s.status = Started
 	s.StatusChan <- Started
 
-	s.wg.Add(1)
-	go s.Listen()
+	s.ListenTCP()
 	return
 }
 
@@ -137,7 +137,7 @@ func (s *RelpServer) doStop(final bool, wait bool, mu *sync.Mutex) {
 		return
 	}
 
-	s.resetListeners()
+	s.resetTCPListeners()
 	// wait that all goroutines have ended
 	s.wg.Wait()
 
@@ -162,10 +162,10 @@ type RelpHandler struct {
 	Server *RelpServer
 }
 
-func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
+func (h RelpHandler) HandleConnection(conn *net.TCPConn, i int) {
 	// http://www.rsyslog.com/doc/relp.html
 	s := h.Server
-	s.AddConnection(conn)
+	s.AddTCPConnection(conn)
 
 	raw_messages_chan := make(chan *model.RelpRawMessage)
 	parsed_messages_chan := make(chan *model.RelpParsedMessage)
@@ -216,7 +216,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
 	defer func() {
 		// closing raw_messages_chan causes parsed_messages_chan to be closed too, because of the goroutine just above
 		close(raw_messages_chan)
-		s.RemoveConnection(conn)
+		s.RemoveTCPConnection(conn)
 		s.wg.Done()
 	}()
 
@@ -359,11 +359,17 @@ func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
 		}
 	}()
 
-	// RELP server
+	timeout := s.Conf.Syslog[i].Timeout
+	if timeout > 0 {
+		conn.SetReadDeadline(time.Now().Add(timeout))
+	}
 	scanner := bufio.NewScanner(conn)
 	scanner.Split(RelpSplit)
 	for {
 		if scanner.Scan() {
+			if timeout > 0 {
+				conn.SetReadDeadline(time.Now().Add(timeout))
+			}
 			line := scanner.Text()
 			splits := strings.SplitN(line, " ", 4)
 			txnr, _ := strconv.Atoi(splits[0])

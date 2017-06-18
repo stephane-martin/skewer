@@ -10,8 +10,6 @@ import (
 	"unicode/utf8"
 
 	sarama "gopkg.in/Shopify/sarama.v1"
-
-	uuid "github.com/satori/go.uuid"
 )
 
 type Priority int
@@ -24,8 +22,8 @@ type SyslogMessage struct {
 	Facility      Facility               `json:"facility,string"`
 	Severity      Severity               `json:"severity,string"`
 	Version       Version                `json:"version,string"`
-	TimeReported  *time.Time             `json:"timereported"`
-	TimeGenerated *time.Time             `json:"timegenerated"`
+	TimeReported  time.Time              `json:"timereported,omitempty"`
+	TimeGenerated time.Time              `json:"timegenerated,omitempty"`
 	Hostname      string                 `json:"hostname"`
 	Appname       string                 `json:"appname"`
 	Procid        string                 `json:"procid"`
@@ -46,6 +44,22 @@ type ParsedMessage struct {
 	Fields    *SyslogMessage `json:"fields"`
 	Client    string         `json:"client"`
 	LocalPort int            `json:"local_port,string"`
+}
+
+type TcpUdpParsedMessage struct {
+	Parsed    ParsedMessage `json:"parsed"`
+	Uid       string        `json:"uid"`
+	ConfIndex int           `json:"conf_index"`
+}
+
+type RelpRawMessage struct {
+	RawMessage
+	Txnr int
+}
+
+type RelpParsedMessage struct {
+	Parsed ParsedMessage `json:"parsed"`
+	Txnr   int           `json:"txnr"`
 }
 
 func (m *ParsedMessage) ToKafka(pkeyTmpl, topicTmpl *template.Template) (km *sarama.ProducerMessage, err error) {
@@ -72,30 +86,9 @@ func (m *ParsedMessage) ToKafka(pkeyTmpl, topicTmpl *template.Template) (km *sar
 		Key:       sarama.ByteEncoder(partitionKeyBuf.Bytes()),
 		Value:     sarama.ByteEncoder(value),
 		Topic:     topic,
-		Timestamp: *m.Fields.TimeReported,
+		Timestamp: m.Fields.TimeReported,
 	}
 	return &kafka_msg, nil
-}
-
-type TcpUdpRawMessage struct {
-	RawMessage
-	Uid uuid.UUID
-}
-
-type TcpUdpParsedMessage struct {
-	Parsed    ParsedMessage `json:"parsed"`
-	Uid       string        `json:"uid"`
-	ConfIndex int           `json:"conf_index"`
-}
-
-type RelpRawMessage struct {
-	RawMessage
-	Txnr int
-}
-
-type RelpParsedMessage struct {
-	Parsed ParsedMessage `json:"parsed"`
-	Txnr   int           `json:"txnr"`
 }
 
 var SyslogMessageFmt string = `Facility: %d

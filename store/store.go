@@ -17,16 +17,19 @@ import (
 )
 
 type MessageStore struct {
+	test           bool
 	messages       *badger.KV
 	ready          *badger.KV
 	sent           *badger.KV
 	failed         *badger.KV
 	sendStoppedMu  *sync.Mutex
+	sendStopped    bool
 	StopSendChan   chan bool
-	closeChan      chan bool
+	ClosingChan    chan bool
+	FatalErrorChan chan bool
+	KafkaErrorChan chan bool
 	ready_mu       *sync.Mutex
 	failed_mu      *sync.Mutex
-	sendStopped    bool
 	Inputs         chan *model.TcpUdpParsedMessage
 	Outputs        chan *model.TcpUdpParsedMessage
 	wg             *sync.WaitGroup
@@ -44,9 +47,13 @@ func (s *MessageStore) init() {
 	s.wg = &sync.WaitGroup{}
 	s.sendWg = &sync.WaitGroup{}
 	s.storeToKafkaWg = &sync.WaitGroup{}
+	s.ClosingChan = make(chan bool)
+	s.StopSendChan = make(chan bool)
+	s.FatalErrorChan = make(chan bool)
+	s.KafkaErrorChan = make(chan bool)
 }
 
-func NewStore(c *conf.GConfig, l log15.Logger) (store *MessageStore, err error) {
+func NewStore(c *conf.GConfig, l log15.Logger, test bool) (store *MessageStore, err error) {
 	dirname := c.Store.Dirname
 	opts_messages := badger.DefaultOptions
 	opts_ready := badger.DefaultOptions
@@ -56,6 +63,12 @@ func NewStore(c *conf.GConfig, l log15.Logger) (store *MessageStore, err error) 
 	opts_sent.Dir = path.Join(dirname, "sent")
 	opts_ready.Dir = path.Join(dirname, "ready")
 	opts_failed.Dir = path.Join(dirname, "failed")
+	opts_messages.MaxTableSize = c.Store.Maxsize
+	opts_messages.SyncWrites = c.Store.FSync
+	opts_ready.SyncWrites = c.Store.FSync
+	opts_sent.SyncWrites = c.Store.FSync
+	opts_failed.SyncWrites = c.Store.FSync
+
 	err = os.MkdirAll(opts_messages.Dir, 0700)
 	if err != nil {
 		return nil, err
@@ -76,6 +89,7 @@ func NewStore(c *conf.GConfig, l log15.Logger) (store *MessageStore, err error) 
 	store = &MessageStore{}
 	store.init()
 	store.Conf = *c
+	store.test = test
 
 	store.messages, err = badger.NewKV(&opts_messages)
 	if err != nil {
@@ -95,7 +109,6 @@ func NewStore(c *conf.GConfig, l log15.Logger) (store *MessageStore, err error) 
 	}
 	store.logger = l.New("class", "MessageStore")
 	store.sendStopped = true
-	store.closeChan = make(chan bool)
 
 	// only once, push back messages from previous run that may have been stuck in the sent queue
 	store.resetStuckInSent()
@@ -109,7 +122,7 @@ func NewStore(c *conf.GConfig, l log15.Logger) (store *MessageStore, err error) 
 			select {
 			case <-store.ticker.C:
 				store.resetFailures()
-			case <-store.closeChan:
+			case <-store.ClosingChan:
 				return
 			}
 
@@ -120,42 +133,10 @@ func NewStore(c *conf.GConfig, l log15.Logger) (store *MessageStore, err error) 
 	return store, nil
 }
 
-func (s *MessageStore) startSend() {
-	s.logger.Debug("Store.StartSend called")
-	s.sendStoppedMu.Lock()
-	if !s.sendStopped {
-		s.sendStoppedMu.Unlock()
-		s.logger.Debug("Store is already sending messages")
-		return
-	}
-	s.StopSendChan = make(chan bool)
-	s.Outputs = make(chan *model.TcpUdpParsedMessage)
-	s.sendStopped = false
-	s.sendStoppedMu.Unlock()
-	s.sendWg.Add(1)
-	go func() {
-		s.logger.Debug("StartSend main goroutine")
-		defer func() {
-			s.logger.Debug("Store Send goroutine has ended")
-			close(s.Outputs)
-			s.sendWg.Done()
-		}()
-		for !s.SendStopped() {
-			messages := s.retrieve(1000)
-			if len(messages) == 0 {
-				select {
-				case <-time.After(1000 * time.Millisecond):
-				case <-s.StopSendChan:
-					return
-				}
-			} else {
-				s.logger.Debug("Store has some messages to provide", "nb", len(messages))
-				for _, m := range messages {
-					s.Outputs <- m
-				}
-			}
-		}
-	}()
+func (s *MessageStore) SendToKafka() {
+	s.KafkaErrorChan = make(chan bool)
+	s.storeToKafkaWg.Add(1)
+	go s.store2kafka()
 }
 
 func (s *MessageStore) StopSendToKafka() {
@@ -176,11 +157,11 @@ func (s *MessageStore) StopSendToKafka() {
 
 func (s *MessageStore) Close() {
 	s.StopSendToKafka()
-	close(s.closeChan) // causes resetFailures to end
-	close(s.Inputs)    // causes ingest to end
-	s.ticker.Stop()    // stop to trigger resetFailures
-	s.wg.Wait()        // wait that ingest and resetFailures have finished
-	s.CloseBadgerDB()  // close the badger databases
+	close(s.ClosingChan) // causes resetFailures to end
+	close(s.Inputs)      // causes ingest to end
+	s.ticker.Stop()      // stop to trigger resetFailures
+	s.wg.Wait()          // wait that ingest and resetFailures have finished
+	s.CloseBadgerDB()    // close the badger databases
 
 }
 
@@ -278,22 +259,42 @@ func (s *MessageStore) startIngest() {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+		var err error
 		for m := range s.Inputs {
-			s.stash(m)
+			err = s.stash(m)
+			if err != nil {
+				if err == badger.ErrNoRoom {
+					s.logger.Crit("The store is full!")
+					close(s.FatalErrorChan) // signal the server than we should stop everything
+					return
+				} else {
+					s.logger.Warn("Store unexpected error", "error", err)
+				}
+			}
 		}
 		s.logger.Debug("ingestion goroutine has finished")
 	}()
 }
 
-func (s *MessageStore) stash(m *model.TcpUdpParsedMessage) {
+func (s *MessageStore) stash(m *model.TcpUdpParsedMessage) error {
 
 	b, err := json.Marshal(m)
-	if err == nil {
-		s.ready_mu.Lock()
-		defer s.ready_mu.Unlock()
-		s.messages.Set([]byte(m.Uid), b)
-		s.ready.Set([]byte(m.Uid), []byte("true"))
+	if err != nil {
+		s.logger.Warn("Store discarded a message that could not be JSON-marshalled", "error", err)
+		return nil
 	}
+	s.ready_mu.Lock()
+	defer s.ready_mu.Unlock()
+	err = s.messages.Set([]byte(m.Uid), b)
+	if err != nil {
+		return err
+	}
+	err = s.ready.Set([]byte(m.Uid), []byte("true"))
+	if err != nil {
+		s.messages.Delete([]byte(m.Uid))
+		return err
+	}
+	return nil
 }
 
 func (s *MessageStore) retrieve(n int) (messages map[string]*model.TcpUdpParsedMessage) {
@@ -359,18 +360,13 @@ func (s *MessageStore) Nack(id string) {
 	s.failed.Set([]byte(id), []byte(time.Now().Format(time.RFC3339)))
 }
 
-func (s *MessageStore) SendToKafka(test bool) {
-	s.storeToKafkaWg.Add(1)
-	go s.store2kafka(test)
-}
-
-func (s *MessageStore) store2kafka(test bool) {
+func (s *MessageStore) store2kafka() {
 	defer func() {
 		s.logger.Debug("Store2Kafka has ended")
 		s.storeToKafkaWg.Done()
 	}()
 	s.logger.Debug("Store2Kafka")
-	if test {
+	if s.test {
 		s.startSend()
 		for message := range s.Outputs {
 			if message != nil {
@@ -395,9 +391,10 @@ func (s *MessageStore) store2kafka(test bool) {
 	} else {
 		var producer sarama.AsyncProducer
 		var err error
-		for !s.SendStopped() {
+		for {
 			producer, err = s.Conf.GetKafkaAsyncProducer()
 			if err == nil {
+				s.logger.Debug("Got a Kafka producer")
 				break
 			} else {
 				s.logger.Warn("Error getting a Kafka client", "error", err)
@@ -429,11 +426,13 @@ func (s *MessageStore) store2kafka(test bool) {
 					}
 
 				case fail, more_fails = <-producer.Errors():
-					// todo: check what kind of error happened
-					// if kafka not available, act
 					if more_fails {
 						uid := fail.Msg.Metadata.(string)
 						s.Nack(uid)
+						s.logger.Info("Kafka producer error", "error", fail.Error())
+						if model.IsFatalKafkaError(fail.Err) {
+							close(s.KafkaErrorChan)
+						}
 					}
 				}
 			}
@@ -453,4 +452,42 @@ func (s *MessageStore) store2kafka(test bool) {
 			producer.Input() <- kafkaMsg
 		}
 	}
+}
+
+func (s *MessageStore) startSend() {
+	s.logger.Debug("Store.startSend called")
+	s.sendStoppedMu.Lock()
+	if !s.sendStopped {
+		s.sendStoppedMu.Unlock()
+		s.logger.Debug("Store is already sending messages")
+		return
+	}
+	s.StopSendChan = make(chan bool)
+	s.Outputs = make(chan *model.TcpUdpParsedMessage)
+	s.sendStopped = false
+	s.sendStoppedMu.Unlock()
+	s.sendWg.Add(1)
+	go func() {
+		s.logger.Debug("StartSend main goroutine")
+		defer func() {
+			s.logger.Debug("Store Send goroutine has ended")
+			close(s.Outputs)
+			s.sendWg.Done()
+		}()
+		for !s.SendStopped() {
+			messages := s.retrieve(1000)
+			if len(messages) == 0 {
+				select {
+				case <-time.After(1000 * time.Millisecond):
+				case <-s.StopSendChan:
+					return
+				}
+			} else {
+				s.logger.Debug("Store has some messages to provide", "nb", len(messages))
+				for _, m := range messages {
+					s.Outputs <- m
+				}
+			}
+		}
+	}()
 }

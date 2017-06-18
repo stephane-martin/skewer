@@ -26,21 +26,23 @@ func ParseRfc5424Format(m string, dont_parse_sd bool) (*SyslogMessage, error) {
 		return nil, err
 	}
 
+	n := time.Now()
 	if splits[1] == "-" {
-		smsg.TimeReported = nil
+		smsg.TimeReported = time.Now()
 	} else {
 		t1, err := time.Parse(time.RFC3339Nano, splits[1])
 		if err != nil {
 			t2, err := time.Parse(time.RFC3339, splits[1])
 			if err != nil {
-				return nil, fmt.Errorf("Invalid timestamp: %s", splits[1])
+				smsg.TimeReported = n
+			} else {
+				smsg.TimeReported = t2
 			}
-			smsg.TimeReported = &t2
+		} else {
+			smsg.TimeReported = t1
 		}
-		smsg.TimeReported = &t1
 	}
-	n := time.Now()
-	smsg.TimeGenerated = &n
+	smsg.TimeGenerated = n
 
 	if splits[2] != "-" {
 		smsg.Hostname = splits[2]

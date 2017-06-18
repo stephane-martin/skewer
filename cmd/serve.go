@@ -108,12 +108,12 @@ func Serve() {
 		logger.Error("Error getting configuration. Sleep and retry.", "error", err)
 		time.Sleep(30 * time.Second)
 	}
-	st, err = store.NewStore(c, logger)
+	st, err = store.NewStore(c, logger, testFlag)
 	if err != nil {
 		logger.Crit("Can't create the message Store", "error", err)
 		os.Exit(-1)
 	}
-	st.SendToKafka(testFlag)
+	st.SendToKafka()
 	defer st.Close()
 
 	// prepare the RELP service
@@ -148,15 +148,16 @@ func Serve() {
 	Reload := func(newConf *conf.GConfig) {
 		st.StopSendToKafka()
 		st.Conf = *newConf
-		st.SendToKafka(testFlag)
+		st.SendToKafka()
 		wg := &sync.WaitGroup{}
 		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			relpServer.Stop()
-			wg.Done()
 		}()
 		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			tcpServer.Stop()
 			<-tcpServer.ClosedChan
 			tcpServer.Conf = *newConf
@@ -164,10 +165,10 @@ func Serve() {
 			if err != nil {
 				logger.Error("Error starting the TCP server", "error", err)
 			}
-			wg.Done()
 		}()
 		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			udpServer.Stop()
 			<-udpServer.ClosedChan
 			udpServer.Conf = *newConf
@@ -175,7 +176,6 @@ func Serve() {
 			if err != nil {
 				logger.Error("Error starting the UDP server", "error", err)
 			}
-			wg.Done()
 		}()
 		wg.Wait()
 	}
@@ -214,6 +214,21 @@ func Serve() {
 			} else {
 				logger.Warn("Unknown signal received", "signal", sig)
 			}
+
+		case <-st.FatalErrorChan:
+			logger.Warn("The store had a fatal error")
+			if stopWatchChan != nil {
+				close(stopWatchChan)
+			}
+			relpServer.FinalStop()
+			tcpServer.Stop()
+			udpServer.Stop()
+			return
+
+		case <-st.KafkaErrorChan:
+			logger.Warn("Store has received a Kafka error: resetting connection to Kafka")
+			st.StopSendToKafka()
+			st.SendToKafka()
 
 		case state := <-relpServer.StatusChan:
 			switch state {

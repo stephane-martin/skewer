@@ -22,8 +22,8 @@ func ParseRfc3164Format(m string) (*SyslogMessage, error) {
 	def_smsg := SyslogMessage{}
 	def_smsg.Message = m
 	n := time.Now()
-	def_smsg.TimeGenerated = &n
-	def_smsg.TimeReported = &n
+	def_smsg.TimeGenerated = n
+	def_smsg.TimeReported = n
 
 	smsg.Properties = map[string]interface{}{}
 	if !strings.HasPrefix(m, "<") {
@@ -58,11 +58,11 @@ func ParseRfc3164Format(m string) (*SyslogMessage, error) {
 				smsg.TimeReported = def_smsg.TimeReported
 				return &smsg, nil
 			}
-			smsg.TimeGenerated = &t2
-			smsg.TimeReported = &t2
+			smsg.TimeGenerated = t2
+			smsg.TimeReported = t2
 		} else {
-			smsg.TimeGenerated = &t1
-			smsg.TimeReported = &t1
+			smsg.TimeGenerated = t1
+			smsg.TimeReported = t1
 		}
 		if len(s) == 1 {
 			return &smsg, nil
@@ -85,8 +85,8 @@ func ParseRfc3164Format(m string) (*SyslogMessage, error) {
 			return &smsg, nil
 		}
 		t = t.AddDate(time.Now().Year(), 0, 0)
-		smsg.TimeGenerated = &t
-		smsg.TimeReported = &t
+		smsg.TimeGenerated = t
+		smsg.TimeReported = t
 		if len(s) == 3 {
 			return &smsg, nil
 		}

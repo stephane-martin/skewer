@@ -1,6 +1,7 @@
 package server
 
 import (
+	"math/rand"
 	"net"
 	"strconv"
 	"strings"
@@ -8,7 +9,7 @@ import (
 	"time"
 
 	"github.com/inconshreveable/log15"
-	uuid "github.com/satori/go.uuid"
+	"github.com/oklog/ulid"
 	"github.com/stephane-martin/relp2kafka/conf"
 	"github.com/stephane-martin/relp2kafka/model"
 	"github.com/stephane-martin/relp2kafka/store"
@@ -39,7 +40,7 @@ func NewUdpServer(c *conf.GConfig, st *store.MessageStore, logger log15.Logger) 
 	s.protocol = "udp"
 	s.stream = false
 	s.Conf = *c
-	s.connections = map[net.Conn]bool{}
+	s.connections = map[*net.TCPConn]bool{}
 	s.logger = logger.New("class", "UdpServer")
 	s.phandler = UdpHandler{Server: &s}
 	s.status = UdpStopped
@@ -61,8 +62,6 @@ func (s *UdpServer) Start() (err error) {
 	nb := s.ListenPacket()
 	if nb > 0 {
 		s.status = UdpStarted
-		//s.storeToKafkaWg.Add(1)
-		//go s.Store2Kafka()
 	} else {
 		s.logger.Info("The UDP service has not been started: no listening port")
 		close(s.ClosedChan)
@@ -81,9 +80,6 @@ func (s *UdpServer) Stop() {
 	s.logger.Debug("Waiting for UDP goroutines")
 	s.wg.Wait()
 	s.logger.Debug("UdpServer goroutines have ended")
-	//s.store.StopSend()
-	//s.logger.Debug("Waiting for the Store to finish operations")
-	//s.storeToKafkaWg.Wait()
 
 	s.status = UdpStopped
 	s.ClosedChan <- UdpStopped
@@ -99,7 +95,7 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, i int) {
 	s := h.Server
 	s.AddPacketConnection(conn)
 
-	raw_messages_chan := make(chan *model.TcpUdpRawMessage)
+	raw_messages_chan := make(chan *model.RawMessage)
 
 	defer func() {
 		close(raw_messages_chan)
@@ -120,29 +116,27 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, i int) {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+		entropy := rand.New(rand.NewSource(time.Now().UnixNano()))
 		for m := range raw_messages_chan {
 			p, err := model.Parse(m.Message, s.Conf.Syslog[i].Format, s.Conf.Syslog[i].DontParseSD)
 
 			if err == nil {
-				// todo: get rid of pointer to time
-				t := time.Now()
-				if p.TimeReported != nil {
-					t = *p.TimeReported
+				uid, err := ulid.New(ulid.Timestamp(p.TimeReported), entropy)
+				if err != nil {
+					// should not happen
+					s.logger.Error("Error generating a ULID", "error", err)
 				} else {
-					p.TimeReported = &t
-					p.TimeGenerated = &t
+					parsed_msg := model.TcpUdpParsedMessage{
+						Parsed: model.ParsedMessage{
+							Fields:    p,
+							Client:    m.Client,
+							LocalPort: m.LocalPort,
+						},
+						Uid:       uid.String(),
+						ConfIndex: i,
+					}
+					s.store.Inputs <- &parsed_msg
 				}
-				uid := t.Format(time.RFC3339) + m.Uid.String()
-				parsed_msg := model.TcpUdpParsedMessage{
-					Parsed: model.ParsedMessage{
-						Fields:    p,
-						Client:    m.Client,
-						LocalPort: m.LocalPort,
-					},
-					Uid:       uid,
-					ConfIndex: i,
-				}
-				s.store.Inputs <- &parsed_msg
 			} else {
 				logger.Info("Parsing error", "Message", m.Message, "error", err)
 			}
@@ -158,13 +152,10 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, i int) {
 			return
 		}
 		client := strings.Split(remote.String(), ":")[0]
-		raw := model.TcpUdpRawMessage{
-			RawMessage: model.RawMessage{
-				Client:    client,
-				LocalPort: local_port,
-				Message:   string(packet[:size]),
-			},
-			Uid: uuid.NewV4(),
+		raw := model.RawMessage{
+			Client:    client,
+			LocalPort: local_port,
+			Message:   string(packet[:size]),
 		}
 		raw_messages_chan <- &raw
 	}
