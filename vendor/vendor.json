@@ -228,6 +228,12 @@
 			"revisionTime": "2017-04-22T00:02:51Z"
 		},
 		{
+			"checksumSHA1": "B1iGaUz7NrjEmCjVdIgH5pvkTe8=",
+			"path": "github.com/oklog/ulid",
+			"revision": "66bb6560562feca7045b23db1ae85b01260f87c5",
+			"revisionTime": "2017-01-17T20:06:51Z"
+		},
+		{
 			"checksumSHA1": "F1IYMLBLAZaTOWnmXsgaxTGvrWI=",
 			"path": "github.com/pelletier/go-buffruneio",
 			"revision": "c37440a7cf42ac63b919c752ca73a85067e05992",
@@ -262,12 +268,6 @@
 			"path": "github.com/rcrowley/go-metrics",
 			"revision": "1f30fe9094a513ce4c700b9a54458bbb0c96996c",
 			"revisionTime": "2016-11-28T21:05:44Z"
-		},
-		{
-			"checksumSHA1": "zmC8/3V4ls53DJlNTKDZwPSC/dA=",
-			"path": "github.com/satori/go.uuid",
-			"revision": "5bf94b69c6b68ee1b541973bb8e1144db23a194b",
-			"revisionTime": "2017-03-21T23:07:31Z"
 		},
 		{
 			"checksumSHA1": "lBehULzb2/kIK3wZ0gz2yNmHq9s=",
