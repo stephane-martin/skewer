@@ -13,6 +13,7 @@ import (
 	"github.com/dgraph-io/badger/badger"
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/relp2kafka/conf"
+	"github.com/stephane-martin/relp2kafka/javascript"
 	"github.com/stephane-martin/relp2kafka/model"
 )
 
@@ -38,6 +39,7 @@ type MessageStore struct {
 	ticker         *time.Ticker
 	logger         log15.Logger
 	Conf           conf.GConfig
+	jsenvs         map[int]*javascript.Environment
 }
 
 func (s *MessageStore) init() {
@@ -51,6 +53,28 @@ func (s *MessageStore) init() {
 	s.StopSendChan = make(chan bool)
 	s.FatalErrorChan = make(chan bool)
 	s.KafkaErrorChan = make(chan bool)
+	s.jsenvs = map[int]*javascript.Environment{}
+}
+
+func (s *MessageStore) initJsEnvs() {
+	s.jsenvs = map[int]*javascript.Environment{}
+	for i, syslogConf := range s.Conf.Syslog {
+		if syslogConf.Protocol != "relp" {
+			s.jsenvs[i] = javascript.New(
+				syslogConf.FilterFunc,
+				syslogConf.TopicFunc,
+				syslogConf.TopicTemplate,
+				syslogConf.PartitionFunc,
+				syslogConf.PartitionKeyTemplate,
+				s.logger,
+			)
+		}
+	}
+}
+
+func (s *MessageStore) SetNewConf(newConf *conf.GConfig) {
+	s.Conf = *newConf
+	s.initJsEnvs()
 }
 
 func NewStore(c *conf.GConfig, l log15.Logger, test bool) (store *MessageStore, err error) {
@@ -88,7 +112,7 @@ func NewStore(c *conf.GConfig, l log15.Logger, test bool) (store *MessageStore, 
 
 	store = &MessageStore{}
 	store.init()
-	store.Conf = *c
+	store.SetNewConf(c)
 	store.test = test
 
 	store.messages, err = badger.NewKV(&opts_messages)
@@ -370,11 +394,29 @@ func (s *MessageStore) store2kafka() {
 		s.startSend()
 		for message := range s.Outputs {
 			if message != nil {
-				pkeyTmpl := s.Conf.Syslog[message.ConfIndex].PartitionKeyTemplate
-				topicTmpl := s.Conf.Syslog[message.ConfIndex].TopicTemplate
-				kafkaMsg, err := message.Parsed.ToKafka(pkeyTmpl, topicTmpl)
+				partitionKey := s.jsenvs[message.ConfIndex].PartitionKey(message.Parsed.Fields)
+				topic := s.jsenvs[message.ConfIndex].Topic(message.Parsed.Fields)
+
+				if len(topic) == 0 || len(partitionKey) == 0 {
+					s.logger.Warn("Topic or PartitionKey could not be calculated", "uid", message.Uid)
+					s.Nack(message.Uid)
+					continue
+				}
+
+				tmsg := s.jsenvs[message.ConfIndex].FilterMessage(message.Parsed.Fields)
+				if tmsg == nil {
+					s.Ack(message.Uid)
+					continue
+				}
+
+				nmsg := model.ParsedMessage{
+					Fields:    tmsg,
+					Client:    message.Parsed.Client,
+					LocalPort: message.Parsed.LocalPort,
+				}
+				kafkaMsg, err := nmsg.ToKafkaMessage(partitionKey, topic)
 				if err != nil {
-					s.logger.Warn("Error generating Kafka message", "error", err)
+					s.logger.Warn("Error generating Kafka message", "error", err, "uid", message.Uid)
 					s.Nack(message.Uid)
 					continue
 				}
@@ -440,14 +482,34 @@ func (s *MessageStore) store2kafka() {
 
 		s.startSend()
 		for message := range s.Outputs {
-			pkeyTmpl := s.Conf.Syslog[message.ConfIndex].PartitionKeyTemplate
-			topicTmpl := s.Conf.Syslog[message.ConfIndex].TopicTemplate
-			kafkaMsg, err := message.Parsed.ToKafka(pkeyTmpl, topicTmpl)
-			if err != nil {
-				s.logger.Warn("Error generating Kafka message", "error", err)
+			partitionKey := s.jsenvs[message.ConfIndex].PartitionKey(message.Parsed.Fields)
+			topic := s.jsenvs[message.ConfIndex].Topic(message.Parsed.Fields)
+
+			if len(topic) == 0 || len(partitionKey) == 0 {
+				s.logger.Warn("Topic or PartitionKey could not be calculated", "uid", message.Uid)
 				s.Nack(message.Uid)
 				continue
 			}
+
+			tmsg := s.jsenvs[message.ConfIndex].FilterMessage(message.Parsed.Fields)
+			if tmsg == nil {
+				s.Ack(message.Uid)
+				continue
+			}
+
+			nmsg := model.ParsedMessage{
+				Fields:    tmsg,
+				Client:    message.Parsed.Client,
+				LocalPort: message.Parsed.LocalPort,
+			}
+
+			kafkaMsg, err := nmsg.ToKafkaMessage(partitionKey, topic)
+			if err != nil {
+				s.logger.Warn("Error generating Kafka message", "error", err, "uid", message.Uid)
+				s.Nack(message.Uid)
+				continue
+			}
+
 			kafkaMsg.Metadata = message.Uid
 			producer.Input() <- kafkaMsg
 		}

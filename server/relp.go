@@ -14,6 +14,7 @@ import (
 
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/relp2kafka/conf"
+	"github.com/stephane-martin/relp2kafka/javascript"
 	"github.com/stephane-martin/relp2kafka/model"
 )
 
@@ -31,11 +32,13 @@ type RelpServer struct {
 	statusMutex *sync.Mutex
 	status      RelpServerStatus
 	StatusChan  chan RelpServerStatus
+	jsenvs      map[int]*javascript.Environment
 }
 
 func (s *RelpServer) init() {
 	s.Server.init()
 	s.statusMutex = &sync.Mutex{}
+	s.jsenvs = map[int]*javascript.Environment{}
 }
 
 func NewRelpServer(c *conf.GConfig, logger log15.Logger) *RelpServer {
@@ -52,6 +55,22 @@ func NewRelpServer(c *conf.GConfig, logger log15.Logger) *RelpServer {
 	s.StatusChan = make(chan RelpServerStatus, 10)
 	s.status = Stopped
 	return &s
+}
+
+func (s *RelpServer) initJsEnvs() {
+	s.jsenvs = map[int]*javascript.Environment{}
+	for i, syslogConf := range s.Conf.Syslog {
+		if syslogConf.Protocol == "relp" {
+			s.jsenvs[i] = javascript.New(
+				syslogConf.FilterFunc,
+				syslogConf.TopicFunc,
+				syslogConf.TopicTemplate,
+				syslogConf.PartitionFunc,
+				syslogConf.PartitionKeyTemplate,
+				s.logger,
+			)
+		}
+	}
 }
 
 func (s *RelpServer) Start() error {
@@ -71,6 +90,8 @@ func (s *RelpServer) doStart(mu *sync.Mutex) (err error) {
 		err = ServerNotStopped
 		return
 	}
+
+	s.initJsEnvs()
 
 	nb := s.initTCPListeners()
 	if nb == 0 {
@@ -335,12 +356,29 @@ func (h RelpHandler) HandleConnection(conn *net.TCPConn, i int) {
 			s.wg.Done()
 		}()
 		for m := range parsed_messages_chan {
-			// todo: optional filtering of parsed messages
-			pkeyTmpl := s.Conf.Syslog[i].PartitionKeyTemplate
-			topicTmpl := s.Conf.Syslog[i].TopicTemplate
-			kafkaMsg, err := m.Parsed.ToKafka(pkeyTmpl, topicTmpl)
+			partitionKey := s.jsenvs[i].PartitionKey(m.Parsed.Fields)
+			topic := s.jsenvs[i].Topic(m.Parsed.Fields)
+			if len(topic) == 0 || len(partitionKey) == 0 {
+				s.logger.Warn("Topic or PartitionKey could not be calculated", "txnr", m.Txnr)
+				other_fails_chan <- m.Txnr
+				continue
+			}
+
+			tmsg := s.jsenvs[i].FilterMessage(m.Parsed.Fields)
+			if tmsg == nil {
+				other_successes_chan <- m.Txnr
+				continue
+			}
+
+			nmsg := model.ParsedMessage{
+				Fields:    tmsg,
+				Client:    m.Parsed.Client,
+				LocalPort: m.Parsed.LocalPort,
+			}
+
+			kafkaMsg, err := nmsg.ToKafkaMessage(partitionKey, topic)
 			if err != nil {
-				s.logger.Warn("Error generating Kafka message", "error", err)
+				s.logger.Warn("Error generating Kafka message", "error", err, "txnr", m.Txnr)
 				other_fails_chan <- m.Txnr
 				continue
 			}

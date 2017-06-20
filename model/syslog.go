@@ -1,11 +1,9 @@
 package model
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
-	"text/template"
 	"time"
 	"unicode/utf8"
 
@@ -62,28 +60,14 @@ type RelpParsedMessage struct {
 	Txnr   int           `json:"txnr"`
 }
 
-func (m *ParsedMessage) ToKafka(pkeyTmpl, topicTmpl *template.Template) (km *sarama.ProducerMessage, err error) {
+func (m *ParsedMessage) ToKafkaMessage(partitionKey string, topic string) (km *sarama.ProducerMessage, err error) {
 	value, err := json.Marshal(m)
 	if err != nil {
 		return nil, err
 	}
-	partitionKeyBuf := bytes.Buffer{}
-	err = pkeyTmpl.Execute(&partitionKeyBuf, m)
-	if err != nil {
-		return nil, err
-	}
-	topicBuf := bytes.Buffer{}
-	err = topicTmpl.Execute(&topicBuf, m)
-	if err != nil {
-		return nil, err
-	}
-	topic := topicBuf.String()
-	if !TopicNameIsValid(topic) {
-		return nil, fmt.Errorf("Invalid topic name: '%s'", topic)
-	}
 
 	kafka_msg := sarama.ProducerMessage{
-		Key:       sarama.ByteEncoder(partitionKeyBuf.Bytes()),
+		Key:       sarama.StringEncoder(partitionKey),
 		Value:     sarama.ByteEncoder(value),
 		Topic:     topic,
 		Timestamp: m.Fields.TimeReported,
@@ -94,7 +78,8 @@ func (m *ParsedMessage) ToKafka(pkeyTmpl, topicTmpl *template.Template) (km *sar
 var SyslogMessageFmt string = `Facility: %d
 Severity: %d
 Version: %d
-Timestamp: %s
+TimeReported: %s
+TimeGenerated: %s
 Hostname: %s
 Appname: %s
 ProcID: %s
@@ -115,6 +100,7 @@ func (m *SyslogMessage) String() string {
 		m.Severity,
 		m.Version,
 		m.TimeReported.Format(time.RFC3339),
+		m.TimeGenerated.Format(time.RFC3339),
 		m.Hostname,
 		m.Appname,
 		m.Procid,

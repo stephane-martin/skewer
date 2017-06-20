@@ -147,7 +147,7 @@ func Serve() {
 
 	Reload := func(newConf *conf.GConfig) {
 		st.StopSendToKafka()
-		st.Conf = *newConf
+		st.SetNewConf(newConf)
 		st.SendToKafka()
 		wg := &sync.WaitGroup{}
 		wg.Add(1)

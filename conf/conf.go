@@ -180,7 +180,10 @@ type SyslogConfig struct {
 	BindAddr             string             `mapstructure:"bind_addr" toml:"bind_addr"`
 	Format               string             `mapstructure:"format" toml:"format"`
 	TopicTmpl            string             `mapstructure:"topic_tmpl" toml:"topic_tmpl"`
+	TopicFunc            string             `mapstructure:"topic_function" toml:"topic_function"`
 	PartitionTmpl        string             `mapstructure:"partition_key_tmpl" toml:"partition_key_tmpl"`
+	PartitionFunc        string             `mapstructure:"partition_key_func" toml:"partition_key_func"`
+	FilterFunc           string             `mapstructure:"filter_func" toml:"filter_func"`
 	Protocol             string             `mapstructure:"protocol" toml:"protocol"`
 	DontParseSD          bool               `mapstructure:"dont_parse_structured_data" toml:"dont_parse_structured_data"`
 	KeepAlive            bool               `mapstructure:"keepalive" toml:"keepalive"`
