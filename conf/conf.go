@@ -178,6 +178,7 @@ type KafkaConfig struct {
 type SyslogConfig struct {
 	Port                 int                `mapstructure:"port" toml:"port"`
 	BindAddr             string             `mapstructure:"bind_addr" toml:"bind_addr"`
+	UnixSocketPath       string             `mapstructure:"unix_socket_path" toml:"unix_socket_path"`
 	Format               string             `mapstructure:"format" toml:"format"`
 	TopicTmpl            string             `mapstructure:"topic_tmpl" toml:"topic_tmpl"`
 	TopicFunc            string             `mapstructure:"topic_function" toml:"topic_function"`

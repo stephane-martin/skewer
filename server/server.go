@@ -210,18 +210,31 @@ func (s *Server) ListenTCP() {
 func (s *Server) ListenPacket() int {
 	nb := 0
 	for i, syslogConf := range s.Conf.Syslog {
-		if syslogConf.Protocol != s.protocol {
-			continue
+		switch syslogConf.Protocol {
+		case "udp":
+			conn, err := net.ListenPacket("udp", syslogConf.ListenAddr)
+			if err != nil {
+				s.logger.Warn("Error listening on UDP", "addr", syslogConf.ListenAddr)
+			} else if conn != nil {
+				s.logger.Info("Listener", "protocol", s.protocol, "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
+				nb++
+				s.wg.Add(1)
+				go s.handlePacketConnection(conn, i)
+			}
+
+		case "unixgram":
+			conn, err := net.ListenPacket("unixgram", syslogConf.UnixSocketPath)
+			if err != nil {
+				s.logger.Warn("Error listening on datagram unix socket", "path", syslogConf.UnixSocketPath)
+			} else if conn != nil {
+				s.logger.Info("Listener", "protocol", s.protocol, "path", syslogConf.UnixSocketPath, "format", syslogConf.Format)
+				nb++
+				s.wg.Add(1)
+				go s.handlePacketConnection(conn, i)
+			}
+		default:
 		}
-		conn, err := net.ListenPacket("udp", syslogConf.ListenAddr)
-		if err != nil {
-			s.logger.Warn("Error listening on UDP", "addr", syslogConf.ListenAddr)
-		} else if conn != nil {
-			s.logger.Info("Listener", "protocol", s.protocol, "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
-			nb++
-			s.wg.Add(1)
-			go s.handlePacketConnection(conn, i)
-		}
+
 	}
 	return nb
 }

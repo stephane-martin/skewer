@@ -111,6 +111,7 @@ func NewStore(c *conf.GConfig, l log15.Logger, test bool) (store *MessageStore, 
 	}
 
 	store = &MessageStore{}
+	store.logger = l.New("class", "MessageStore")
 	store.init()
 	store.SetNewConf(c)
 	store.test = test
@@ -131,7 +132,6 @@ func NewStore(c *conf.GConfig, l log15.Logger, test bool) (store *MessageStore, 
 	if err != nil {
 		return nil, err
 	}
-	store.logger = l.New("class", "MessageStore")
 	store.sendStopped = true
 
 	// only once, push back messages from previous run that may have been stuck in the sent queue

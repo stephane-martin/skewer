@@ -43,13 +43,13 @@ func (s *RelpServer) init() {
 
 func NewRelpServer(c *conf.GConfig, logger log15.Logger) *RelpServer {
 	s := RelpServer{}
+	s.logger = logger.New("class", "RelpServer")
 	s.init()
 	s.protocol = "relp"
 	s.stream = true
 	s.Conf = *c
 	s.listeners = map[int]*net.TCPListener{}
 	s.connections = map[*net.TCPConn]bool{}
-	s.logger = logger.New("class", "RelpServer")
 	s.shandler = RelpHandler{Server: &s}
 
 	s.StatusChan = make(chan RelpServerStatus, 10)

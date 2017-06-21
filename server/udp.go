@@ -36,12 +36,12 @@ func (s *UdpServer) init() {
 
 func NewUdpServer(c *conf.GConfig, st *store.MessageStore, logger log15.Logger) *UdpServer {
 	s := UdpServer{}
+	s.logger = logger.New("class", "UdpServer")
 	s.init()
 	s.protocol = "udp"
 	s.stream = false
 	s.Conf = *c
 	s.connections = map[*net.TCPConn]bool{}
-	s.logger = logger.New("class", "UdpServer")
 	s.phandler = UdpHandler{Server: &s}
 	s.status = UdpStopped
 	s.store = st

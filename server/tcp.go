@@ -38,13 +38,13 @@ func (s *TcpServer) init() {
 
 func NewTcpServer(c *conf.GConfig, st *store.MessageStore, logger log15.Logger) *TcpServer {
 	s := TcpServer{}
+	s.logger = logger.New("class", "TcpServer")
 	s.init()
 	s.protocol = "tcp"
 	s.stream = true
 	s.Conf = *c
 	s.listeners = map[int]*net.TCPListener{}
 	s.connections = map[*net.TCPConn]bool{}
-	s.logger = logger.New("class", "TcpServer")
 	s.shandler = TcpHandler{Server: &s}
 	s.status = TcpStopped
 	s.store = st
