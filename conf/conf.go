@@ -19,9 +19,10 @@ import (
 )
 
 type BaseConfig struct {
-	Syslog []SyslogConfig `mapstructure:"syslog" toml:"syslog"`
-	Kafka  KafkaConfig    `mapstructure:"kafka" toml:"kafka"`
-	Store  StoreConfig    `mapstructure:"store" toml:"store"`
+	Syslog  []SyslogConfig `mapstructure:"syslog" toml:"syslog"`
+	Kafka   KafkaConfig    `mapstructure:"kafka" toml:"kafka"`
+	Store   StoreConfig    `mapstructure:"store" toml:"store"`
+	Parsers []ParserConfig `mapstructure:"parser" toml:"parser"`
 }
 
 type GConfig struct {
@@ -36,9 +37,10 @@ type GConfig struct {
 
 func newBaseConf() *BaseConfig {
 	brokers := []string{}
-	kafka := KafkaConfig{Brokers: brokers, ClientID: ""}
+	kafka := KafkaConfig{Brokers: brokers}
 	syslog := []SyslogConfig{}
-	baseConf := BaseConfig{Syslog: syslog, Kafka: kafka}
+	parsers := []ParserConfig{}
+	baseConf := BaseConfig{Syslog: syslog, Kafka: kafka, Parsers: parsers}
 	return &baseConf
 }
 
@@ -61,6 +63,11 @@ func Default() *GConfig {
 
 func (c *GConfig) String() string {
 	return c.Export()
+}
+
+type ParserConfig struct {
+	Name string `mapstructure:"name" toml:"name"`
+	Func string `mapstructure:"func" toml:"func"`
 }
 
 type StoreConfig struct {
@@ -351,6 +358,7 @@ func (c *GConfig) ParseParamsFromConsul(params map[string]string) error {
 	syslogConfMap := map[string]map[string]string{}
 	kafkaConf := map[string]string{}
 	storeConf := map[string]string{}
+	parsersConfMap := map[string]map[string]string{}
 	prefixLen := len(c.ConsulPrefix)
 
 	for k, v := range params {
@@ -378,6 +386,15 @@ func (c *GConfig) ParseParamsFromConsul(params map[string]string) error {
 			} else {
 				c.Logger.Debug("Ignoring Consul KV", "key", k, "value", v)
 			}
+		case "parsers":
+			if len(splits) == 3 {
+				if _, ok := parsersConfMap[splits[1]]; !ok {
+					parsersConfMap[splits[1]] = map[string]string{}
+				}
+				parsersConfMap[splits[1]][splits[2]] = v
+			} else {
+				c.Logger.Debug("Ignoring Consul KV", "key", k, "value", v)
+			}
 		default:
 			c.Logger.Debug("Ignoring Consul KV", "key", k, "value", v)
 		}
@@ -395,6 +412,21 @@ func (c *GConfig) ParseParamsFromConsul(params map[string]string) error {
 		err := vi.Unmarshal(&sconf)
 		if err == nil {
 			syslogConfs = append(syslogConfs, sconf)
+		} else {
+			return err
+		}
+	}
+
+	parsersConf := []ParserConfig{}
+	for parserName, pConf := range parsersConfMap {
+		parserConf := ParserConfig{Name: parserName}
+		vi := viper.New()
+		for k, v := range pConf {
+			vi.Set(k, v)
+		}
+		err := vi.Unmarshal(&parserConf)
+		if err == nil {
+			parsersConf = append(parsersConf, parserConf)
 		} else {
 			return err
 		}
@@ -427,6 +459,7 @@ func (c *GConfig) ParseParamsFromConsul(params map[string]string) error {
 	}
 
 	c.Syslog = append(c.Syslog, syslogConfs...)
+	c.Parsers = append(c.Parsers, parsersConf...)
 	if len(kafkaConf) > 0 {
 		c.Kafka = kconf
 	}
@@ -442,7 +475,7 @@ func (c *GConfig) Reload() (newConf *GConfig, stopWatchChan chan bool, err error
 	if err != nil {
 		return nil, nil, err
 	}
-	newConf.Store.Dirname = c.Store.Dirname // we don't change the location of the badger databases when doing a reload
+	newConf.Store = c.Store // we don't change the location of the badger databases when doing a reload
 	return newConf, stopWatchChan, nil
 }
 
@@ -454,6 +487,19 @@ func (c *GConfig) Export() string {
 }
 
 func (c *GConfig) Complete() (err error) {
+	parsersNames := map[string]bool{}
+	for _, parserConf := range c.Parsers {
+		switch parserConf.Name {
+		case "rfc5424", "rfc3164", "json", "auto":
+			return ConfigurationCheckError{ErrString: "Parser configuration must not use a reserved name"}
+		default:
+			if _, ok := parsersNames[parserConf.Name]; ok {
+				return ConfigurationCheckError{ErrString: "The same parser name is used multiple times"}
+			}
+			parsersNames[parserConf.Name] = true
+		}
+	}
+
 	switch c.Kafka.Compression {
 	case "snappy":
 		c.Kafka.pCompression = sarama.CompressionSnappy
@@ -467,7 +513,7 @@ func (c *GConfig) Complete() (err error) {
 
 	c.Kafka.pVersion, err = ParseVersion(c.Kafka.Version)
 	if err != nil {
-		return err
+		return ConfigurationCheckError{ErrString: "Kafka version can't be parsed", Err: err}
 	}
 
 	if len(c.Syslog) == 0 {
@@ -476,8 +522,8 @@ func (c *GConfig) Complete() (err error) {
 			BindAddr:      "127.0.0.1",
 			Format:        "rfc5424",
 			Protocol:      "relp",
-			TopicTmpl:     "rsyslog-{{.Fields.Appname}}",
-			PartitionTmpl: "mypk-{{.Fields.Hostname}}",
+			TopicTmpl:     "rsyslog-{{.Appname}}",
+			PartitionTmpl: "mypk-{{.Hostname}}",
 		}
 		c.Syslog = []SyslogConfig{syslogConf}
 	}
@@ -495,10 +541,10 @@ func (c *GConfig) Complete() (err error) {
 			c.Syslog[i].Protocol = "relp"
 		}
 		if syslogConf.TopicTmpl == "" {
-			c.Syslog[i].TopicTmpl = "rsyslog-{{.Fields.Appname}}"
+			c.Syslog[i].TopicTmpl = "rsyslog-{{.Appname}}"
 		}
 		if syslogConf.PartitionTmpl == "" {
-			c.Syslog[i].PartitionTmpl = "mypk-{{.Fields.Hostname}}"
+			c.Syslog[i].PartitionTmpl = "mypk-{{.Hostname}}"
 		}
 		if syslogConf.KeepAlivePeriod == 0 {
 			c.Syslog[i].KeepAlivePeriod = 30 * time.Second
@@ -519,7 +565,6 @@ func (c *GConfig) Complete() (err error) {
 		c.Syslog[i].BindIP = net.ParseIP(c.Syslog[i].BindAddr)
 		if c.Syslog[i].BindIP == nil {
 			return ConfigurationCheckError{ErrString: fmt.Sprintf("bind_addr is not an IP address: %s", c.Syslog[i].BindAddr)}
-			return fmt.Errorf("syslog.bind_addr is not an IP address")
 		}
 
 		if c.Syslog[i].BindIP.IsUnspecified() {
@@ -527,7 +572,16 @@ func (c *GConfig) Complete() (err error) {
 		} else {
 			c.Syslog[i].ListenAddr = fmt.Sprintf("%s:%d", c.Syslog[i].BindIP.String(), c.Syslog[i].Port)
 		}
+	}
 
+	for _, syslogConf := range c.Syslog {
+		switch syslogConf.Format {
+		case "rfc5424", "rfc3164", "json", "auto":
+		default:
+			if _, ok := parsersNames[syslogConf.Format]; !ok {
+				return ConfigurationCheckError{ErrString: "Unknown syslog format"}
+			}
+		}
 	}
 
 	return nil

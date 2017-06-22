@@ -61,6 +61,7 @@ func (s *TcpServer) Start() (err error) {
 	}
 	s.ClosedChan = make(chan TcpServerStatus, 1)
 
+	s.initParsers()
 	// start listening on the required ports
 	nb := s.initTCPListeners()
 	if nb > 0 {
@@ -130,7 +131,12 @@ func (h TcpHandler) HandleConnection(conn *net.TCPConn, i int) {
 		defer s.wg.Done()
 		entropy := rand.New(rand.NewSource(time.Now().UnixNano()))
 		for m := range raw_messages_chan {
-			p, err := model.Parse(m.Message, s.Conf.Syslog[i].Format, s.Conf.Syslog[i].DontParseSD)
+			parser := s.GetParser(s.Conf.Syslog[i].Format)
+			if parser == nil {
+				// todo: log
+				continue
+			}
+			p, err := parser.Parse(m.Message, s.Conf.Syslog[i].DontParseSD)
 
 			if err == nil {
 				uid, err := ulid.New(ulid.Timestamp(p.TimeReported), entropy)
@@ -160,7 +166,12 @@ func (h TcpHandler) HandleConnection(conn *net.TCPConn, i int) {
 		conn.SetReadDeadline(time.Now().Add(timeout))
 	}
 	scanner := bufio.NewScanner(conn)
-	scanner.Split(TcpSplit)
+	switch s.Conf.Syslog[i].Format {
+	case "rfc5424", "rfc3164", "json", "auto":
+		scanner.Split(TcpSplit)
+	default:
+		scanner.Split(LFTcpSplit)
+	}
 
 	for {
 		if scanner.Scan() {
@@ -180,6 +191,23 @@ func (h TcpHandler) HandleConnection(conn *net.TCPConn, i int) {
 	}
 }
 
+func LFTcpSplit(data []byte, atEOF bool) (int, []byte, error) {
+	trimmed_data := bytes.TrimLeft(data, " \r\n")
+	if len(trimmed_data) == 0 {
+		return 0, nil, nil
+	}
+	trimmed := len(data) - len(trimmed_data)
+	lf := bytes.IndexByte(trimmed_data, '\n')
+	if lf >= 0 {
+		token := bytes.Trim(trimmed_data[0:lf], " \r\n")
+		advance := trimmed + lf + 1
+		return advance, token, nil
+	} else {
+		// data does not contain a full syslog line
+		return 0, nil, nil
+	}
+}
+
 func TcpSplit(data []byte, atEOF bool) (int, []byte, error) {
 	trimmed_data := bytes.TrimLeft(data, " \r\n")
 	if len(trimmed_data) == 0 {
@@ -187,7 +215,7 @@ func TcpSplit(data []byte, atEOF bool) (int, []byte, error) {
 	}
 	trimmed := len(data) - len(trimmed_data)
 	if trimmed_data[0] == byte('<') {
-		// non-transparent-framing
+		// LF framing
 		lf := bytes.IndexByte(trimmed_data, '\n')
 		if lf >= 0 {
 			token := bytes.Trim(trimmed_data[0:lf], " \r\n")

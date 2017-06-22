@@ -58,6 +58,7 @@ func (s *UdpServer) Start() (err error) {
 	}
 	s.ClosedChan = make(chan UdpServerStatus, 1)
 
+	s.initParsers()
 	s.packetConnections = map[net.PacketConn]bool{}
 	nb := s.ListenPacket()
 	if nb > 0 {
@@ -118,7 +119,12 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, i int) {
 		defer s.wg.Done()
 		entropy := rand.New(rand.NewSource(time.Now().UnixNano()))
 		for m := range raw_messages_chan {
-			p, err := model.Parse(m.Message, s.Conf.Syslog[i].Format, s.Conf.Syslog[i].DontParseSD)
+			parser := s.GetParser(s.Conf.Syslog[i].Format)
+			if parser == nil {
+				// todo: log
+				continue
+			}
+			p, err := parser.Parse(m.Message, s.Conf.Syslog[i].DontParseSD)
 
 			if err == nil {
 				uid, err := ulid.New(ulid.Timestamp(p.TimeReported), entropy)

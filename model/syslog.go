@@ -111,6 +111,21 @@ func (m *SyslogMessage) String() string {
 	)
 }
 
+type Parser struct {
+	format string
+}
+
+func (p *Parser) Parse(m string, dont_parse_sd bool) (*SyslogMessage, error) {
+	return Parse(m, p.format, dont_parse_sd)
+}
+
+func GetParser(format string) *Parser {
+	if format == "rfc5424" || format == "rfc3164" || format == "json" || format == "auto" {
+		return &Parser{format: format}
+	}
+	return nil
+}
+
 func Parse(m string, format string, dont_parse_sd bool) (sm *SyslogMessage, err error) {
 
 	switch format {

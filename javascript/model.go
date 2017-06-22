@@ -33,6 +33,11 @@ function NewSyslogMessage(p, f, s, v, timer, timeg, host, app, proc, msgid, stru
 	return new SyslogMessage(p, f, s, v, timer, timeg, host, app, proc, msgid, structured, msg, props);
 }
 
+function NewEmptySyslogMessage() {
+	var n = Date.now()
+	return new SyslogMessage(0, 0, 0, 1, n, n, "", "", "", "", "", "", {});
+}
+
 function SyslogMessageToGo(m) {
 	return new SyslogMessage(m.Priority, m.Facility, m.Severity, m.Version, m.TimeReported.getTime(), m.TimeGenerated.getTime(), m.Hostname, m.Appname, m.Procid, m.Msgid, m.Structured, m.Message, m.Properties);
 }
@@ -62,8 +67,35 @@ type Environment struct {
 	jsFilterMessages    goja.Callable
 	jsTopic             goja.Callable
 	jsPartitionKey      goja.Callable
+	jsParsers           map[string]goja.Callable
 	topicTmpl           *template.Template
 	partitionKeyTmpl    *template.Template
+}
+
+type Parser struct {
+	e    *Environment
+	name string
+}
+
+func (p *Parser) Parse(rawMessage string, dont_parse_sd bool) (*model.SyslogMessage, error) {
+	jsParser, ok := p.e.jsParsers[p.name]
+	if !ok {
+		return nil, fmt.Errorf("Parser was not found: '%s'", p.name)
+	}
+	rawMessage = strings.Trim(rawMessage, "\r\n ")
+	if len(rawMessage) == 0 {
+		return nil, nil
+	}
+	jsRawMessage := p.e.runtime.ToValue(rawMessage)
+	jsParsedMessage, err := jsParser(nil, jsRawMessage)
+	if err != nil {
+		return nil, err
+	}
+	parsedMessage, err := p.e.FromJsSyslogMessage(jsParsedMessage)
+	if err != nil {
+		return nil, err
+	}
+	return parsedMessage, nil
 }
 
 func New(
@@ -77,6 +109,7 @@ func New(
 
 	e := Environment{topicTmpl: topicTmpl, partitionKeyTmpl: partitionKeyTmpl}
 	e.logger = logger.New("class", "Environment")
+	e.jsParsers = map[string]goja.Callable{}
 	e.runtime = goja.New()
 	e.runtime.RunString(jsSyslogMessage)
 	v := e.runtime.Get("NewSyslogMessage")
@@ -105,6 +138,39 @@ func New(
 		}
 	}
 	return &e
+}
+
+func (e *Environment) GetParser(name string) *Parser {
+	_, ok := e.jsParsers[name]
+	if !ok {
+		return nil
+	}
+	return &Parser{e: e, name: name}
+}
+
+func (e *Environment) AddParser(name string, parserFunc string) error {
+	name = strings.TrimSpace(name)
+	parserFunc = strings.TrimSpace(parserFunc)
+	if len(name) == 0 {
+		return fmt.Errorf("Empty name")
+	}
+	if len(parserFunc) == 0 {
+		return fmt.Errorf("Empty parser function")
+	}
+	_, err := e.runtime.RunString(parserFunc)
+	if err != nil {
+		return err
+	}
+	v := e.runtime.Get(name)
+	if v == nil {
+		return fmt.Errorf("Parser func was not found")
+	}
+	parser, b := goja.AssertFunction(v)
+	if !b {
+		return fmt.Errorf("Parser is not a JS function")
+	}
+	e.jsParsers[name] = parser
+	return nil
 }
 
 func (e *Environment) SetTopicFunc(f string) error {

@@ -1,14 +1,22 @@
 package server
 
 import (
+	"fmt"
 	"net"
+	"os"
 	"sync"
 
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/relp2kafka/conf"
+	"github.com/stephane-martin/relp2kafka/javascript"
+	"github.com/stephane-martin/relp2kafka/model"
 	"github.com/stephane-martin/relp2kafka/store"
 	sarama "gopkg.in/Shopify/sarama.v1"
 )
+
+type Parser interface {
+	Parse(m string, dont_parse_sd bool) (*model.SyslogMessage, error)
+}
 
 type StreamHandler interface {
 	HandleConnection(conn *net.TCPConn, i int)
@@ -24,6 +32,7 @@ type Server struct {
 	logger            log15.Logger
 	connections       map[*net.TCPConn]bool
 	packetConnections map[net.PacketConn]bool
+	unixSocketPaths   []string
 	connMutex         *sync.Mutex
 	kafkaClient       sarama.Client
 	test              bool
@@ -33,12 +42,14 @@ type Server struct {
 	phandler          PacketHandler
 	protocol          string
 	stream            bool
+	parsersEnv        *javascript.Environment
 }
 
 func (s *Server) init() {
 	s.connMutex = &sync.Mutex{}
 	s.wg = &sync.WaitGroup{}
 	s.acceptsWg = &sync.WaitGroup{}
+	s.unixSocketPaths = []string{}
 }
 
 type StoreServer struct {
@@ -53,6 +64,27 @@ func (s *StoreServer) init() {
 	s.storeToKafkaWg = &sync.WaitGroup{}
 }
 
+func (s *Server) initParsers() {
+	s.parsersEnv = javascript.New("", "", nil, "", nil, s.logger)
+	for _, parserConf := range s.Conf.Parsers {
+		err := s.parsersEnv.AddParser(parserConf.Name, parserConf.Func)
+		if err != nil {
+			s.logger.Warn("Error initializing parser", "name", parserConf.Name, "error", err)
+		}
+	}
+}
+
+func (s *Server) GetParser(parserName string) Parser {
+	switch parserName {
+	case "rfc5424", "rfc3164", "json", "auto":
+		fmt.Println("foo")
+		return model.GetParser(parserName)
+	default:
+		fmt.Println("bar")
+		return s.parsersEnv.GetParser(parserName)
+	}
+}
+
 func (s *Server) initTCPListeners() int {
 	nb := 0
 	s.connections = map[*net.TCPConn]bool{}
@@ -61,7 +93,6 @@ func (s *Server) initTCPListeners() int {
 		if syslogConf.Protocol != s.protocol {
 			continue
 		}
-		s.logger.Info("Listener", "protocol", s.protocol, "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
 		tcpAddr, err := net.ResolveTCPAddr("tcp", syslogConf.ListenAddr)
 		if err != nil {
 			s.logger.Warn("Error resolving TCP address", "address", syslogConf.ListenAddr)
@@ -69,6 +100,7 @@ func (s *Server) initTCPListeners() int {
 		}
 		l, err := net.ListenTCP("tcp", tcpAddr)
 		if err == nil {
+			s.logger.Info("Listener", "protocol", s.protocol, "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
 			nb++
 			s.listeners[i] = l
 		} else {
@@ -131,8 +163,12 @@ func (s *Server) CloseConnections() {
 	for conn, _ := range s.packetConnections {
 		conn.Close()
 	}
+	for _, path := range s.unixSocketPaths {
+		os.Remove(path)
+	}
 	s.connections = map[*net.TCPConn]bool{}
 	s.packetConnections = map[net.PacketConn]bool{}
+	s.unixSocketPaths = []string{}
 
 }
 
@@ -208,13 +244,14 @@ func (s *Server) ListenTCP() {
 }
 
 func (s *Server) ListenPacket() int {
+	s.unixSocketPaths = []string{}
 	nb := 0
 	for i, syslogConf := range s.Conf.Syslog {
 		switch syslogConf.Protocol {
 		case "udp":
 			conn, err := net.ListenPacket("udp", syslogConf.ListenAddr)
 			if err != nil {
-				s.logger.Warn("Error listening on UDP", "addr", syslogConf.ListenAddr)
+				s.logger.Warn("Error listening on UDP", "addr", syslogConf.ListenAddr, "error", err)
 			} else if conn != nil {
 				s.logger.Info("Listener", "protocol", s.protocol, "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
 				nb++
@@ -225,10 +262,11 @@ func (s *Server) ListenPacket() int {
 		case "unixgram":
 			conn, err := net.ListenPacket("unixgram", syslogConf.UnixSocketPath)
 			if err != nil {
-				s.logger.Warn("Error listening on datagram unix socket", "path", syslogConf.UnixSocketPath)
+				s.logger.Warn("Error listening on datagram unix socket", "path", syslogConf.UnixSocketPath, "error", err)
 			} else if conn != nil {
 				s.logger.Info("Listener", "protocol", s.protocol, "path", syslogConf.UnixSocketPath, "format", syslogConf.Format)
 				nb++
+				s.unixSocketPaths = append(s.unixSocketPaths, syslogConf.UnixSocketPath)
 				s.wg.Add(1)
 				go s.handlePacketConnection(conn, i)
 			}

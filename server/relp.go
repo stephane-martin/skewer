@@ -92,7 +92,7 @@ func (s *RelpServer) doStart(mu *sync.Mutex) (err error) {
 	}
 
 	s.initJsEnvs()
-
+	s.initParsers()
 	nb := s.initTCPListeners()
 	if nb == 0 {
 		s.logger.Info("RELP service not started: no listening port")
@@ -216,7 +216,12 @@ func (h RelpHandler) HandleConnection(conn *net.TCPConn, i int) {
 	go func() {
 		defer s.wg.Done()
 		for m := range raw_messages_chan {
-			p, err := model.Parse(m.Message, s.Conf.Syslog[i].Format, s.Conf.Syslog[i].DontParseSD)
+			parser := s.GetParser(s.Conf.Syslog[i].Format)
+			if parser == nil {
+				// todo: log
+				continue
+			}
+			p, err := parser.Parse(m.Message, s.Conf.Syslog[i].DontParseSD)
 			if err == nil {
 				parsed_msg := model.RelpParsedMessage{
 					Parsed: model.ParsedMessage{
