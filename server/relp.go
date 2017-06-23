@@ -28,16 +28,15 @@ const (
 )
 
 type RelpServer struct {
-	Server
-	statusMutex *sync.Mutex
+	StreamServer
 	status      RelpServerStatus
 	StatusChan  chan RelpServerStatus
 	jsenvs      map[int]*javascript.Environment
+	kafkaClient sarama.Client
 }
 
 func (s *RelpServer) init() {
 	s.Server.init()
-	s.statusMutex = &sync.Mutex{}
 	s.jsenvs = map[int]*javascript.Environment{}
 }
 
@@ -46,12 +45,8 @@ func NewRelpServer(c *conf.GConfig, logger log15.Logger) *RelpServer {
 	s.logger = logger.New("class", "RelpServer")
 	s.init()
 	s.protocol = "relp"
-	s.stream = true
 	s.Conf = *c
-	s.listeners = map[int]*net.TCPListener{}
-	s.connections = map[*net.TCPConn]bool{}
-	s.shandler = RelpHandler{Server: &s}
-
+	s.handler = RelpHandler{Server: &s}
 	s.StatusChan = make(chan RelpServerStatus, 10)
 	s.status = Stopped
 	return &s
@@ -74,21 +69,13 @@ func (s *RelpServer) initJsEnvs() {
 }
 
 func (s *RelpServer) Start() error {
-	return s.doStart(s.statusMutex)
-}
-
-func (s *RelpServer) doStart(mu *sync.Mutex) (err error) {
-	if mu != nil {
-		mu.Lock()
-		defer mu.Unlock()
-	}
+	s.statusMutex.Lock()
+	defer s.statusMutex.Unlock()
 	if s.status == FinalStopped {
-		err = ServerDefinitelyStopped
-		return
+		return ServerDefinitelyStopped
 	}
 	if s.status != Stopped && s.status != Waiting {
-		err = ServerNotStopped
-		return
+		return ServerNotStopped
 	}
 
 	s.initJsEnvs()
@@ -96,15 +83,16 @@ func (s *RelpServer) doStart(mu *sync.Mutex) (err error) {
 	nb := s.initTCPListeners()
 	if nb == 0 {
 		s.logger.Info("RELP service not started: no listening port")
-		return
+		return nil
 	}
 	if !s.test {
 		s.logger.Debug("trying to reach kafka")
+		var err error
 		s.kafkaClient, err = s.Conf.GetKafkaClient()
 		if err != nil {
 			// sarama/kafka error
 			s.resetTCPListeners()
-			return
+			return err
 		}
 	}
 
@@ -112,7 +100,7 @@ func (s *RelpServer) doStart(mu *sync.Mutex) (err error) {
 	s.StatusChan <- Started
 
 	s.ListenTCP()
-	return
+	return nil
 }
 
 func (s *RelpServer) Stop() {
@@ -183,10 +171,10 @@ type RelpHandler struct {
 	Server *RelpServer
 }
 
-func (h RelpHandler) HandleConnection(conn *net.TCPConn, i int) {
+func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
 	// http://www.rsyslog.com/doc/relp.html
 	s := h.Server
-	s.AddTCPConnection(conn)
+	s.AddConnection(conn)
 
 	raw_messages_chan := make(chan *model.RelpRawMessage)
 	parsed_messages_chan := make(chan *model.RelpParsedMessage)
@@ -242,7 +230,7 @@ func (h RelpHandler) HandleConnection(conn *net.TCPConn, i int) {
 	defer func() {
 		// closing raw_messages_chan causes parsed_messages_chan to be closed too, because of the goroutine just above
 		close(raw_messages_chan)
-		s.RemoveTCPConnection(conn)
+		s.RemoveConnection(conn)
 		s.wg.Done()
 	}()
 

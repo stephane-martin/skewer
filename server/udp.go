@@ -5,7 +5,6 @@ import (
 	"net"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/inconshreveable/log15"
@@ -23,15 +22,19 @@ const (
 )
 
 type UdpServer struct {
-	StoreServer
-	statusMutex *sync.Mutex
-	status      UdpServerStatus
-	ClosedChan  chan UdpServerStatus
+	Server
+	status     UdpServerStatus
+	ClosedChan chan UdpServerStatus
+	store      *store.MessageStore
+	handler    PacketHandler
+}
+
+type UdpHandler struct {
+	Server *UdpServer
 }
 
 func (s *UdpServer) init() {
-	s.StoreServer.init()
-	s.statusMutex = &sync.Mutex{}
+	s.Server.init()
 }
 
 func NewUdpServer(c *conf.GConfig, st *store.MessageStore, logger log15.Logger) *UdpServer {
@@ -39,14 +42,16 @@ func NewUdpServer(c *conf.GConfig, st *store.MessageStore, logger log15.Logger) 
 	s.logger = logger.New("class", "UdpServer")
 	s.init()
 	s.protocol = "udp"
-	s.stream = false
 	s.Conf = *c
-	s.connections = map[*net.TCPConn]bool{}
-	s.phandler = UdpHandler{Server: &s}
+	s.handler = UdpHandler{Server: &s}
 	s.status = UdpStopped
 	s.store = st
 
 	return &s
+}
+
+func (s *UdpServer) handleConnection(conn net.PacketConn, i int) {
+	s.handler.HandleConnection(conn, i)
 }
 
 func (s *UdpServer) Start() (err error) {
@@ -59,7 +64,7 @@ func (s *UdpServer) Start() (err error) {
 	s.ClosedChan = make(chan UdpServerStatus, 1)
 
 	s.initParsers()
-	s.packetConnections = map[net.PacketConn]bool{}
+	s.connections = map[Connection]bool{}
 	nb := s.ListenPacket()
 	if nb > 0 {
 		s.status = UdpStarted
@@ -88,19 +93,49 @@ func (s *UdpServer) Stop() {
 	s.logger.Info("Udp server has stopped")
 }
 
-type UdpHandler struct {
-	Server *UdpServer
+func (s *UdpServer) ListenPacket() int {
+	s.unixSocketPaths = []string{}
+	nb := 0
+	for i, syslogConf := range s.Conf.Syslog {
+		switch syslogConf.Protocol {
+		case "udp":
+			conn, err := net.ListenPacket("udp", syslogConf.ListenAddr)
+			if err != nil {
+				s.logger.Warn("Error listening on UDP", "addr", syslogConf.ListenAddr, "error", err)
+			} else if conn != nil {
+				s.logger.Info("Listener", "protocol", s.protocol, "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
+				nb++
+				s.wg.Add(1)
+				go s.handleConnection(conn, i)
+			}
+
+		case "unixgram":
+			conn, err := net.ListenPacket("unixgram", syslogConf.UnixSocketPath)
+			if err != nil {
+				s.logger.Warn("Error listening on datagram unix socket", "path", syslogConf.UnixSocketPath, "error", err)
+			} else if conn != nil {
+				s.logger.Info("Listener", "protocol", s.protocol, "path", syslogConf.UnixSocketPath, "format", syslogConf.Format)
+				nb++
+				s.unixSocketPaths = append(s.unixSocketPaths, syslogConf.UnixSocketPath)
+				s.wg.Add(1)
+				go s.handleConnection(conn, i)
+			}
+		default:
+		}
+
+	}
+	return nb
 }
 
 func (h UdpHandler) HandleConnection(conn net.PacketConn, i int) {
 	s := h.Server
-	s.AddPacketConnection(conn)
+	s.AddConnection(conn)
 
 	raw_messages_chan := make(chan *model.RawMessage)
 
 	defer func() {
 		close(raw_messages_chan)
-		s.RemovePacketConnection(conn)
+		s.RemoveConnection(conn)
 		s.wg.Done()
 	}()
 

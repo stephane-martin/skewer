@@ -7,7 +7,6 @@ import (
 	"net"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/inconshreveable/log15"
@@ -25,15 +24,14 @@ const (
 )
 
 type TcpServer struct {
-	StoreServer
-	statusMutex *sync.Mutex
-	status      TcpServerStatus
-	ClosedChan  chan TcpServerStatus
+	StreamServer
+	status     TcpServerStatus
+	ClosedChan chan TcpServerStatus
+	store      *store.MessageStore
 }
 
 func (s *TcpServer) init() {
-	s.StoreServer.init()
-	s.statusMutex = &sync.Mutex{}
+	s.Server.init()
 }
 
 func NewTcpServer(c *conf.GConfig, st *store.MessageStore, logger log15.Logger) *TcpServer {
@@ -41,11 +39,8 @@ func NewTcpServer(c *conf.GConfig, st *store.MessageStore, logger log15.Logger) 
 	s.logger = logger.New("class", "TcpServer")
 	s.init()
 	s.protocol = "tcp"
-	s.stream = true
 	s.Conf = *c
-	s.listeners = map[int]*net.TCPListener{}
-	s.connections = map[*net.TCPConn]bool{}
-	s.shandler = TcpHandler{Server: &s}
+	s.handler = TcpHandler{Server: &s}
 	s.status = TcpStopped
 	s.store = st
 
@@ -67,8 +62,6 @@ func (s *TcpServer) Start() (err error) {
 	if nb > 0 {
 		s.status = TcpStarted
 		s.ListenTCP()
-		//s.storeToKafkaWg.Add(1)
-		//go s.Store2Kafka()
 	} else {
 		s.logger.Info("TCP Server not started: no listening port")
 		close(s.ClosedChan)
@@ -97,15 +90,15 @@ type TcpHandler struct {
 	Server *TcpServer
 }
 
-func (h TcpHandler) HandleConnection(conn *net.TCPConn, i int) {
+func (h TcpHandler) HandleConnection(conn net.Conn, i int) {
 	s := h.Server
-	s.AddTCPConnection(conn)
+	s.AddConnection(conn)
 
 	raw_messages_chan := make(chan *model.RawMessage)
 
 	defer func() {
 		close(raw_messages_chan)
-		s.RemoveTCPConnection(conn)
+		s.RemoveConnection(conn)
 		s.wg.Done()
 	}()
 
