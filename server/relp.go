@@ -36,7 +36,7 @@ type RelpServer struct {
 }
 
 func (s *RelpServer) init() {
-	s.Server.init()
+	s.StreamServer.init()
 	s.jsenvs = map[int]*javascript.Environment{}
 }
 

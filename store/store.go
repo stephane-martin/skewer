@@ -344,6 +344,8 @@ func (s *MessageStore) retrieve(n int) (messages map[string]*model.TcpUdpParsedM
 				if err == nil {
 					messages[string(uid)] = &message
 					fetched++
+				} else {
+					// todo
 				}
 			}
 		} else {

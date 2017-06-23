@@ -31,7 +31,7 @@ type TcpServer struct {
 }
 
 func (s *TcpServer) init() {
-	s.Server.init()
+	s.StreamServer.init()
 }
 
 func NewTcpServer(c *conf.GConfig, st *store.MessageStore, logger log15.Logger) *TcpServer {
