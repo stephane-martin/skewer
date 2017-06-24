@@ -99,7 +99,7 @@ func (s *RelpServer) Start() error {
 	s.status = Started
 	s.StatusChan <- Started
 
-	s.ListenTCP()
+	s.Listen()
 	return nil
 }
 

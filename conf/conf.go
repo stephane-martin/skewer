@@ -528,17 +528,27 @@ func (c *GConfig) Complete() (err error) {
 		c.Syslog = []SyslogConfig{syslogConf}
 	}
 	for i, syslogConf := range c.Syslog {
-		if syslogConf.Port == 0 {
-			c.Syslog[i].Port = 2514
-		}
-		if syslogConf.BindAddr == "" {
-			c.Syslog[i].BindAddr = "127.0.0.1"
-		}
-		if syslogConf.Format == "" {
-			c.Syslog[i].Format = "rfc5424"
-		}
 		if syslogConf.Protocol == "" {
 			c.Syslog[i].Protocol = "relp"
+		}
+		if syslogConf.UnixSocketPath == "" {
+			if syslogConf.BindAddr == "" {
+				c.Syslog[i].BindAddr = "127.0.0.1"
+			}
+			if syslogConf.Port == 0 {
+				switch c.Syslog[i].Protocol {
+				case "relp":
+					c.Syslog[i].Port = 2514
+				case "tcp", "udp":
+					c.Syslog[i].Port = 1514
+				default:
+					return ConfigurationCheckError{ErrString: "Unknown protocol"}
+				}
+			}
+		}
+
+		if syslogConf.Format == "" {
+			c.Syslog[i].Format = "auto"
 		}
 		if syslogConf.TopicTmpl == "" {
 			c.Syslog[i].TopicTmpl = "rsyslog-{{.Appname}}"
@@ -562,15 +572,17 @@ func (c *GConfig) Complete() (err error) {
 			return ConfigurationCheckError{ErrString: "Error compiling the partition key template", Err: err}
 		}
 
-		c.Syslog[i].BindIP = net.ParseIP(c.Syslog[i].BindAddr)
-		if c.Syslog[i].BindIP == nil {
-			return ConfigurationCheckError{ErrString: fmt.Sprintf("bind_addr is not an IP address: %s", c.Syslog[i].BindAddr)}
-		}
+		if c.Syslog[i].UnixSocketPath == "" {
+			c.Syslog[i].BindIP = net.ParseIP(c.Syslog[i].BindAddr)
+			if c.Syslog[i].BindIP == nil {
+				return ConfigurationCheckError{ErrString: fmt.Sprintf("bind_addr is not an IP address: %s", c.Syslog[i].BindAddr)}
+			}
 
-		if c.Syslog[i].BindIP.IsUnspecified() {
-			c.Syslog[i].ListenAddr = fmt.Sprintf(":%d", c.Syslog[i].Port)
-		} else {
-			c.Syslog[i].ListenAddr = fmt.Sprintf("%s:%d", c.Syslog[i].BindIP.String(), c.Syslog[i].Port)
+			if c.Syslog[i].BindIP.IsUnspecified() {
+				c.Syslog[i].ListenAddr = fmt.Sprintf(":%d", c.Syslog[i].Port)
+			} else {
+				c.Syslog[i].ListenAddr = fmt.Sprintf("%s:%d", c.Syslog[i].BindIP.String(), c.Syslog[i].Port)
+			}
 		}
 	}
 

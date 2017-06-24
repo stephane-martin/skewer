@@ -97,32 +97,30 @@ func (s *UdpServer) ListenPacket() int {
 	s.unixSocketPaths = []string{}
 	nb := 0
 	for i, syslogConf := range s.Conf.Syslog {
-		switch syslogConf.Protocol {
-		case "udp":
-			conn, err := net.ListenPacket("udp", syslogConf.ListenAddr)
-			if err != nil {
-				s.logger.Warn("Error listening on UDP", "addr", syslogConf.ListenAddr, "error", err)
-			} else if conn != nil {
-				s.logger.Info("Listener", "protocol", s.protocol, "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
-				nb++
-				s.wg.Add(1)
-				go s.handleConnection(conn, i)
+		if syslogConf.Protocol == "udp" {
+			if len(syslogConf.UnixSocketPath) > 0 {
+				conn, err := net.ListenPacket("unixgram", syslogConf.UnixSocketPath)
+				if err != nil {
+					s.logger.Warn("Error listening on datagram unix socket", "path", syslogConf.UnixSocketPath, "error", err)
+				} else if conn != nil {
+					s.logger.Info("Listener", "protocol", s.protocol, "path", syslogConf.UnixSocketPath, "format", syslogConf.Format)
+					nb++
+					s.unixSocketPaths = append(s.unixSocketPaths, syslogConf.UnixSocketPath)
+					s.wg.Add(1)
+					go s.handleConnection(conn, i)
+				}
+			} else {
+				conn, err := net.ListenPacket("udp", syslogConf.ListenAddr)
+				if err != nil {
+					s.logger.Warn("Error listening on UDP", "addr", syslogConf.ListenAddr, "error", err)
+				} else if conn != nil {
+					s.logger.Info("Listener", "protocol", s.protocol, "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
+					nb++
+					s.wg.Add(1)
+					go s.handleConnection(conn, i)
+				}
 			}
-
-		case "unixgram":
-			conn, err := net.ListenPacket("unixgram", syslogConf.UnixSocketPath)
-			if err != nil {
-				s.logger.Warn("Error listening on datagram unix socket", "path", syslogConf.UnixSocketPath, "error", err)
-			} else if conn != nil {
-				s.logger.Info("Listener", "protocol", s.protocol, "path", syslogConf.UnixSocketPath, "format", syslogConf.Format)
-				nb++
-				s.unixSocketPaths = append(s.unixSocketPaths, syslogConf.UnixSocketPath)
-				s.wg.Add(1)
-				go s.handleConnection(conn, i)
-			}
-		default:
 		}
-
 	}
 	return nb
 }

@@ -61,7 +61,7 @@ func (s *TcpServer) Start() (err error) {
 	nb := s.initTCPListeners()
 	if nb > 0 {
 		s.status = TcpStarted
-		s.ListenTCP()
+		s.Listen()
 	} else {
 		s.logger.Info("TCP Server not started: no listening port")
 		close(s.ClosedChan)

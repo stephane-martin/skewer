@@ -50,14 +50,16 @@ func (s *Server) init() {
 
 type StreamServer struct {
 	Server
-	tcpListeners map[int]*net.TCPListener
-	acceptsWg    *sync.WaitGroup
-	handler      StreamHandler
+	tcpListeners  map[int]*net.TCPListener
+	unixListeners map[int]*net.UnixListener
+	acceptsWg     *sync.WaitGroup
+	handler       StreamHandler
 }
 
 func (s *StreamServer) init() {
 	s.Server.init()
 	s.tcpListeners = map[int]*net.TCPListener{}
+	s.unixListeners = map[int]*net.UnixListener{}
 	s.acceptsWg = &sync.WaitGroup{}
 }
 
@@ -84,23 +86,41 @@ func (s *StreamServer) initTCPListeners() int {
 	nb := 0
 	s.connections = map[Connection]bool{}
 	s.tcpListeners = map[int]*net.TCPListener{}
+	s.unixListeners = map[int]*net.UnixListener{}
 	for i, syslogConf := range s.Conf.Syslog {
 		if syslogConf.Protocol != s.protocol {
 			continue
 		}
-		tcpAddr, err := net.ResolveTCPAddr("tcp", syslogConf.ListenAddr)
-		if err != nil {
-			s.logger.Warn("Error resolving TCP address", "address", syslogConf.ListenAddr)
-			continue
-		}
-		l, err := net.ListenTCP("tcp", tcpAddr)
-		if err == nil {
-			s.logger.Info("Listener", "protocol", s.protocol, "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
-			nb++
-			s.tcpListeners[i] = l
+		if len(syslogConf.UnixSocketPath) > 0 {
+			unixAddr, err := net.ResolveUnixAddr("unix", syslogConf.UnixSocketPath)
+			if err != nil {
+				s.logger.Warn("Error resolving Unix socket address", "path", syslogConf.UnixSocketPath, "error", err)
+				continue
+			}
+			l, err := net.ListenUnix("unix", unixAddr)
+			if err == nil {
+				s.logger.Info("Listener", "protocol", s.protocol, "path", syslogConf.UnixSocketPath, "format", syslogConf.Format)
+				nb++
+				s.unixListeners[i] = l
+			} else {
+				s.logger.Error("Error listening on stream unix socket", "path", syslogConf.UnixSocketPath, "error", err)
+				continue
+			}
 		} else {
-			s.logger.Error("Error listening on stream (TCP or RELP)", "listen_addr", syslogConf.ListenAddr, "error", err)
-			continue
+			tcpAddr, err := net.ResolveTCPAddr("tcp", syslogConf.ListenAddr)
+			if err != nil {
+				s.logger.Warn("Error resolving TCP address", "address", syslogConf.ListenAddr, "error", err)
+				continue
+			}
+			l, err := net.ListenTCP("tcp", tcpAddr)
+			if err == nil {
+				s.logger.Info("Listener", "protocol", s.protocol, "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
+				nb++
+				s.tcpListeners[i] = l
+			} else {
+				s.logger.Error("Error listening on stream (TCP or RELP)", "listen_addr", syslogConf.ListenAddr, "error", err)
+				continue
+			}
 		}
 	}
 	return nb
@@ -108,6 +128,9 @@ func (s *StreamServer) initTCPListeners() int {
 
 func (s *StreamServer) resetTCPListeners() {
 	for _, l := range s.tcpListeners {
+		l.Close()
+	}
+	for _, l := range s.unixListeners {
 		l.Close()
 	}
 	s.tcpListeners = map[int]*net.TCPListener{}
@@ -147,6 +170,26 @@ func (s *Server) CloseConnections() {
 
 func (s *StreamServer) handleConnection(conn net.Conn, i int) {
 	s.handler.HandleConnection(conn, i)
+}
+
+func (s *StreamServer) AcceptUnix(i int) {
+	defer s.wg.Done()
+	defer s.acceptsWg.Done()
+	for {
+		conn, accept_err := s.unixListeners[i].AcceptUnix()
+		if accept_err != nil {
+			s.logger.Info("AcceptUnix() error", "error", accept_err)
+			switch accept_err.(type) {
+			case *net.OpError:
+				return
+			default:
+				// continue
+			}
+		} else if conn != nil {
+			go s.handleConnection(conn, i)
+		}
+	}
+
 }
 
 func (s *StreamServer) AcceptTCP(i int) {
@@ -194,7 +237,7 @@ func (s *StreamServer) AcceptTCP(i int) {
 	}
 }
 
-func (s *StreamServer) ListenTCP() {
+func (s *StreamServer) Listen() {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -202,6 +245,11 @@ func (s *StreamServer) ListenTCP() {
 			s.acceptsWg.Add(1)
 			s.wg.Add(1)
 			go s.AcceptTCP(i)
+		}
+		for i, _ := range s.unixListeners {
+			s.acceptsWg.Add(1)
+			s.wg.Add(1)
+			go s.AcceptUnix(i)
 		}
 		// wait until the listeners stop and return
 		s.acceptsWg.Wait()
