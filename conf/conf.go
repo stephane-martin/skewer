@@ -19,10 +19,11 @@ import (
 )
 
 type BaseConfig struct {
-	Syslog  []SyslogConfig `mapstructure:"syslog" toml:"syslog"`
-	Kafka   KafkaConfig    `mapstructure:"kafka" toml:"kafka"`
-	Store   StoreConfig    `mapstructure:"store" toml:"store"`
-	Parsers []ParserConfig `mapstructure:"parser" toml:"parser"`
+	Syslog   []SyslogConfig  `mapstructure:"syslog" toml:"syslog"`
+	Kafka    KafkaConfig     `mapstructure:"kafka" toml:"kafka"`
+	Store    StoreConfig     `mapstructure:"store" toml:"store"`
+	Parsers  []ParserConfig  `mapstructure:"parser" toml:"parser"`
+	Watchers []WatcherConfig `mapstructure:"watcher" toml:"watcher"`
 }
 
 type GConfig struct {
@@ -63,6 +64,11 @@ func Default() *GConfig {
 
 func (c *GConfig) String() string {
 	return c.Export()
+}
+
+type WatcherConfig struct {
+	Filename string `mapstructure:"filename" toml:"filename"`
+	Whence   int    `mapstructure:"whence" toml:"whence"`
 }
 
 type ParserConfig struct {
@@ -489,14 +495,21 @@ func (c *GConfig) Export() string {
 func (c *GConfig) Complete() (err error) {
 	parsersNames := map[string]bool{}
 	for _, parserConf := range c.Parsers {
-		switch parserConf.Name {
+		name := strings.TrimSpace(parserConf.Name)
+		switch name {
 		case "rfc5424", "rfc3164", "json", "auto":
 			return ConfigurationCheckError{ErrString: "Parser configuration must not use a reserved name"}
+		case "":
+			return ConfigurationCheckError{ErrString: "Empty parser name"}
 		default:
-			if _, ok := parsersNames[parserConf.Name]; ok {
+			if _, ok := parsersNames[name]; ok {
 				return ConfigurationCheckError{ErrString: "The same parser name is used multiple times"}
 			}
-			parsersNames[parserConf.Name] = true
+			f := strings.TrimSpace(parserConf.Func)
+			if len(f) == 0 {
+				return ConfigurationCheckError{ErrString: "Empty parser func"}
+			}
+			parsersNames[name] = true
 		}
 	}
 
