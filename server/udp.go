@@ -9,8 +9,8 @@ import (
 
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stephane-martin/relp2kafka/conf"
+	"github.com/stephane-martin/relp2kafka/metrics"
 	"github.com/stephane-martin/relp2kafka/model"
 	"github.com/stephane-martin/relp2kafka/store"
 )
@@ -28,6 +28,7 @@ type UdpServer struct {
 	ClosedChan chan UdpServerStatus
 	store      *store.MessageStore
 	handler    PacketHandler
+	metrics    *metrics.Metrics
 }
 
 type UdpHandler struct {
@@ -38,15 +39,13 @@ func (s *UdpServer) init() {
 	s.Server.init()
 }
 
-func NewUdpServer(c *conf.GConfig, st *store.MessageStore, incomingMsgsCounter *prometheus.CounterVec, logger log15.Logger) *UdpServer {
-	s := UdpServer{}
+func NewUdpServer(c *conf.GConfig, st *store.MessageStore, metrics *metrics.Metrics, logger log15.Logger) *UdpServer {
+	s := UdpServer{status: UdpStopped, metrics: metrics, store: st}
 	s.logger = logger.New("class", "UdpServer")
 	s.init()
 	s.protocol = "udp"
 	s.Conf = *c
 	s.handler = UdpHandler{Server: &s}
-	s.status = UdpStopped
-	s.store = st
 
 	return &s
 }
@@ -127,6 +126,9 @@ func (s *UdpServer) ListenPacket() int {
 }
 
 func (h UdpHandler) HandleConnection(conn net.PacketConn, i int) {
+	var local_port int
+	var err error
+
 	s := h.Server
 	s.AddConnection(conn)
 
@@ -138,14 +140,20 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, i int) {
 		s.wg.Done()
 	}()
 
-	var local_port int
+	path := ""
 	local := conn.LocalAddr()
 	if local != nil {
-		s := strings.Split(local.String(), ":")
-		local_port, _ = strconv.Atoi(s[len(s)-1])
+		l := local.String()
+		s := strings.Split(l, ":")
+		local_port, err = strconv.Atoi(s[len(s)-1])
+		if err != nil {
+			path = l
+		}
 	}
+	path = strings.TrimSpace(path)
+	local_port_s := strconv.FormatInt(int64(local_port), 10)
 
-	logger := s.logger.New("local_port", local_port)
+	logger := s.logger.New("protocol", s.protocol, "local_port", local_port, "unix_socket_path", path)
 
 	// pull messages from raw_messages_chan, parse them and push them to the Store
 	s.wg.Add(1)
@@ -168,9 +176,10 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, i int) {
 				} else {
 					parsed_msg := model.TcpUdpParsedMessage{
 						Parsed: model.ParsedMessage{
-							Fields:    p,
-							Client:    m.Client,
-							LocalPort: m.LocalPort,
+							Fields:         p,
+							Client:         m.Client,
+							LocalPort:      m.LocalPort,
+							UnixSocketPath: m.UnixSocketPath,
 						},
 						Uid:       uid.String(),
 						ConfIndex: i,
@@ -191,12 +200,20 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, i int) {
 			logger.Info("Error reading UDP", "error", err)
 			return
 		}
-		client := strings.Split(remote.String(), ":")[0]
-		raw := model.RawMessage{
-			Client:    client,
-			LocalPort: local_port,
-			Message:   string(packet[:size]),
+		client := ""
+		if remote == nil {
+			// unix socket
+			client = "localhost"
+		} else {
+			client = strings.Split(remote.String(), ":")[0]
 		}
+		raw := model.RawMessage{
+			Client:         client,
+			LocalPort:      local_port,
+			UnixSocketPath: path,
+			Message:        string(packet[:size]),
+		}
+		s.metrics.IncomingMsgsCounter.WithLabelValues(s.protocol, client, local_port_s, path).Inc()
 		raw_messages_chan <- &raw
 	}
 

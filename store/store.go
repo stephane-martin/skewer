@@ -518,9 +518,10 @@ func (s *MessageStore) store2kafka() {
 				}
 
 				nmsg := model.ParsedMessage{
-					Fields:    tmsg,
-					Client:    message.Parsed.Client,
-					LocalPort: message.Parsed.LocalPort,
+					Fields:         tmsg,
+					Client:         message.Parsed.Client,
+					LocalPort:      message.Parsed.LocalPort,
+					UnixSocketPath: message.Parsed.UnixSocketPath,
 				}
 				kafkaMsg, err := nmsg.ToKafkaMessage(partitionKey, topic)
 				if err != nil {
@@ -606,9 +607,10 @@ func (s *MessageStore) store2kafka() {
 			}
 
 			nmsg := model.ParsedMessage{
-				Fields:    tmsg,
-				Client:    message.Parsed.Client,
-				LocalPort: message.Parsed.LocalPort,
+				Fields:         tmsg,
+				Client:         message.Parsed.Client,
+				LocalPort:      message.Parsed.LocalPort,
+				UnixSocketPath: message.Parsed.UnixSocketPath,
 			}
 
 			kafkaMsg, err := nmsg.ToKafkaMessage(partitionKey, topic)

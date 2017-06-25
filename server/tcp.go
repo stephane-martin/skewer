@@ -11,8 +11,8 @@ import (
 
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stephane-martin/relp2kafka/conf"
+	"github.com/stephane-martin/relp2kafka/metrics"
 	"github.com/stephane-martin/relp2kafka/model"
 	"github.com/stephane-martin/relp2kafka/store"
 )
@@ -26,21 +26,21 @@ const (
 
 type TcpServer struct {
 	StreamServer
-	status              TcpServerStatus
-	ClosedChan          chan TcpServerStatus
-	store               *store.MessageStore
-	incomingMsgsCounter *prometheus.CounterVec
+	status     TcpServerStatus
+	ClosedChan chan TcpServerStatus
+	store      *store.MessageStore
+	metrics    *metrics.Metrics
 }
 
 func (s *TcpServer) init() {
 	s.StreamServer.init()
 }
 
-func NewTcpServer(c *conf.GConfig, st *store.MessageStore, incomingMsgsCounter *prometheus.CounterVec, logger log15.Logger) *TcpServer {
+func NewTcpServer(c *conf.GConfig, st *store.MessageStore, metrics *metrics.Metrics, logger log15.Logger) *TcpServer {
 	s := TcpServer{
-		status:              TcpStopped,
-		store:               st,
-		incomingMsgsCounter: incomingMsgsCounter,
+		status:  TcpStopped,
+		store:   st,
+		metrics: metrics,
 	}
 	s.logger = logger.New("class", "TcpServer")
 	s.protocol = "tcp"
@@ -93,7 +93,6 @@ type TcpHandler struct {
 
 func (h TcpHandler) HandleConnection(conn net.Conn, i int) {
 	var local_port int
-	var err error
 
 	s := h.Server
 	s.AddConnection(conn)
@@ -106,26 +105,29 @@ func (h TcpHandler) HandleConnection(conn net.Conn, i int) {
 		s.wg.Done()
 	}()
 
-	var client string
+	client := ""
+	path := ""
 	remote := conn.RemoteAddr()
-	if remote != nil {
-		client = strings.Split(remote.String(), ":")[0]
-	}
-	client = strings.TrimSpace(client)
 
-	local := conn.LocalAddr()
-	if local != nil {
-		local_s := local.String()
-		s := strings.Split(local_s, ":")
-		local_port, err = strconv.Atoi(s[len(s)-1])
-		if err != nil && len(client) == 0 {
-			// unix socket path
-			client = local_s
+	if remote == nil {
+		client = "localhost"
+		local_port = 0
+		path = conn.LocalAddr().String()
+	} else {
+		client = strings.Split(remote.String(), ":")[0]
+		local := conn.LocalAddr()
+		if local != nil {
+			s := strings.Split(local.String(), ":")
+			local_port, _ = strconv.Atoi(s[len(s)-1])
 		}
 	}
+	client = strings.TrimSpace(client)
+	path = strings.TrimSpace(path)
+	local_port_s := strconv.FormatInt(int64(local_port), 10)
 
-	logger := s.logger.New("remote", client, "local_port", local_port)
-	logger.Info("New TCP client")
+	logger := s.logger.New("protocol", s.protocol, "client", client, "local_port", local_port, "unix_socket_path", path)
+	logger.Info("New client")
+	s.metrics.ClientConnectionCounter.WithLabelValues(s.protocol, client, local_port_s, path).Inc()
 
 	// pull messages from raw_messages_chan, parse them and push them to the Store
 	s.wg.Add(1)
@@ -148,9 +150,10 @@ func (h TcpHandler) HandleConnection(conn net.Conn, i int) {
 				} else {
 					parsed_msg := model.TcpUdpParsedMessage{
 						Parsed: model.ParsedMessage{
-							Fields:    p,
-							Client:    m.Client,
-							LocalPort: m.LocalPort,
+							Fields:         p,
+							Client:         m.Client,
+							LocalPort:      m.LocalPort,
+							UnixSocketPath: m.UnixSocketPath,
 						},
 						Uid:       uid.String(),
 						ConfIndex: i,
@@ -185,7 +188,7 @@ func (h TcpHandler) HandleConnection(conn net.Conn, i int) {
 				LocalPort: local_port,
 				Message:   scanner.Text(),
 			}
-			s.incomingMsgsCounter.WithLabelValues(s.protocol, client, strconv.FormatInt(int64(local_port), 10)).Add(1)
+			s.metrics.IncomingMsgsCounter.WithLabelValues(s.protocol, client, local_port_s, path).Inc()
 			raw_messages_chan <- &raw
 		} else {
 			logger.Info("Scanning the TCP stream has ended", "error", scanner.Err())

@@ -33,15 +33,17 @@ type SyslogMessage struct {
 }
 
 type RawMessage struct {
-	Message   string
-	Client    string
-	LocalPort int
+	Message        string
+	Client         string
+	LocalPort      int
+	UnixSocketPath string
 }
 
 type ParsedMessage struct {
-	Fields    *SyslogMessage `json:"fields"`
-	Client    string         `json:"client"`
-	LocalPort int            `json:"local_port,string"`
+	Fields         *SyslogMessage `json:"fields"`
+	Client         string         `json:"client"`
+	LocalPort      int            `json:"local_port,string"`
+	UnixSocketPath string         `json:"unix_socket_path"`
 }
 
 type TcpUdpParsedMessage struct {

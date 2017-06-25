@@ -13,9 +13,9 @@ import (
 	sarama "gopkg.in/Shopify/sarama.v1"
 
 	"github.com/inconshreveable/log15"
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stephane-martin/relp2kafka/conf"
 	"github.com/stephane-martin/relp2kafka/javascript"
+	"github.com/stephane-martin/relp2kafka/metrics"
 	"github.com/stephane-martin/relp2kafka/model"
 )
 
@@ -34,6 +34,7 @@ type RelpServer struct {
 	StatusChan  chan RelpServerStatus
 	jsenvs      map[int]*javascript.Environment
 	kafkaClient sarama.Client
+	metrics     *metrics.Metrics
 }
 
 func (s *RelpServer) init() {
@@ -41,15 +42,14 @@ func (s *RelpServer) init() {
 	s.jsenvs = map[int]*javascript.Environment{}
 }
 
-func NewRelpServer(c *conf.GConfig, incomingMsgsCounter *prometheus.CounterVec, logger log15.Logger) *RelpServer {
-	s := RelpServer{}
+func NewRelpServer(c *conf.GConfig, metrics *metrics.Metrics, logger log15.Logger) *RelpServer {
+	s := RelpServer{status: Stopped, metrics: metrics}
 	s.logger = logger.New("class", "RelpServer")
 	s.init()
 	s.protocol = "relp"
 	s.Conf = *c
 	s.handler = RelpHandler{Server: &s}
 	s.StatusChan = make(chan RelpServerStatus, 10)
-	s.status = Stopped
 	return &s
 }
 
@@ -174,6 +174,10 @@ type RelpHandler struct {
 
 func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
 	// http://www.rsyslog.com/doc/relp.html
+
+	var local_port int
+	var err error
+
 	s := h.Server
 	s.AddConnection(conn)
 
@@ -184,21 +188,29 @@ func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
 
 	relpIsOpen := false
 
-	var client string
+	client := ""
+	path := ""
 	remote := conn.RemoteAddr()
-	if remote != nil {
+
+	if remote == nil {
+		client = "localhost"
+		local_port = 0
+		path = conn.LocalAddr().String()
+	} else {
 		client = strings.Split(remote.String(), ":")[0]
+		local := conn.LocalAddr()
+		if local != nil {
+			s := strings.Split(local.String(), ":")
+			local_port, _ = strconv.Atoi(s[len(s)-1])
+		}
 	}
+	client = strings.TrimSpace(client)
+	path = strings.TrimSpace(path)
+	local_port_s := strconv.FormatInt(int64(local_port), 10)
 
-	var local_port int
-	local := conn.LocalAddr()
-	if local != nil {
-		s := strings.Split(local.String(), ":")
-		local_port, _ = strconv.Atoi(s[len(s)-1])
-	}
-
-	logger := s.logger.New("remote", client, "local_port", local_port)
-	logger.Info("New RELP client")
+	logger := s.logger.New("protocol", s.protocol, "client", client, "local_port", local_port, "unix_socket_path", path)
+	logger.Info("New client")
+	s.metrics.ClientConnectionCounter.WithLabelValues(s.protocol, client, local_port_s, path).Inc()
 
 	// pull messages from raw_messages_chan and push them to parsed_messages_chan
 	s.wg.Add(1)
@@ -214,9 +226,10 @@ func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
 			if err == nil {
 				parsed_msg := model.RelpParsedMessage{
 					Parsed: model.ParsedMessage{
-						Fields:    p,
-						Client:    m.Client,
-						LocalPort: m.LocalPort,
+						Fields:         p,
+						Client:         m.Client,
+						LocalPort:      m.LocalPort,
+						UnixSocketPath: m.UnixSocketPath,
 					},
 					Txnr: m.Txnr,
 				}
@@ -236,7 +249,6 @@ func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
 	}()
 
 	var producer sarama.AsyncProducer
-	var err error
 
 	if s.test {
 		s.wg.Add(1)
@@ -443,6 +455,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
 						LocalPort: local_port,
 					},
 				}
+				s.metrics.IncomingMsgsCounter.WithLabelValues(s.protocol, client, local_port_s, path).Inc()
 				raw_messages_chan <- &raw
 			default:
 				logger.Warn("Unknown RELP command", "command", command)
