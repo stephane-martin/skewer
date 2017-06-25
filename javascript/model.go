@@ -28,7 +28,6 @@ var jsSyslogMessage string = `function SyslogMessage(p, f, s, v, timer, timeg, h
 	this.Properties = props;
 }
 
-
 function NewSyslogMessage(p, f, s, v, timer, timeg, host, app, proc, msgid, structured, msg, props) {
 	return new SyslogMessage(p, f, s, v, timer, timeg, host, app, proc, msgid, structured, msg, props);
 }
@@ -74,13 +73,22 @@ type Environment struct {
 
 type Parser struct {
 	e    *Environment
-	name string
+	Name string
+}
+
+type JSParsingError struct {
+	Message    string
+	ParserName string
+}
+
+func (e *JSParsingError) Error() string {
+	return fmt.Sprintf("The provided JS parser could not parse the raw message: %s", e.Message)
 }
 
 func (p *Parser) Parse(rawMessage string, dont_parse_sd bool) (*model.SyslogMessage, error) {
-	jsParser, ok := p.e.jsParsers[p.name]
+	jsParser, ok := p.e.jsParsers[p.Name]
 	if !ok {
-		return nil, fmt.Errorf("Parser was not found: '%s'", p.name)
+		return nil, fmt.Errorf("Parser was not found: '%s'", p.Name)
 	}
 	rawMessage = strings.Trim(rawMessage, "\r\n ")
 	if len(rawMessage) == 0 {
@@ -89,7 +97,16 @@ func (p *Parser) Parse(rawMessage string, dont_parse_sd bool) (*model.SyslogMess
 	jsRawMessage := p.e.runtime.ToValue(rawMessage)
 	jsParsedMessage, err := jsParser(nil, jsRawMessage)
 	if err != nil {
-		return nil, err
+		if jserr, ok := err.(*goja.Exception); ok {
+			message, ok := jserr.Value().Export().(string)
+			if ok {
+				return nil, &JSParsingError{ParserName: p.Name, Message: message}
+			} else {
+				return nil, err
+			}
+		} else {
+			return nil, err
+		}
 	}
 	parsedMessage, err := p.e.FromJsSyslogMessage(jsParsedMessage)
 	if err != nil {
@@ -145,7 +162,7 @@ func (e *Environment) GetParser(name string) *Parser {
 	if !ok {
 		return nil
 	}
-	return &Parser{e: e, name: name}
+	return &Parser{e: e, Name: name}
 }
 
 func (e *Environment) AddParser(name string, parserFunc string) error {
@@ -341,11 +358,11 @@ func (e *Environment) FromJsSyslogMessage(sm goja.Value) (m *model.SyslogMessage
 		return nil, fmt.Errorf("Undefined goja value")
 	}
 	var smToGo goja.Value
-	imsg := ISyslogMessage{}
 	smToGo, err = e.jsSyslogMessageToGo(nil, sm)
 	if err != nil {
 		return nil, err
 	}
+	imsg := ISyslogMessage{}
 	err = e.runtime.ExportTo(smToGo, &imsg)
 	if err != nil {
 		return nil, err

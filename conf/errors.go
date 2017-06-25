@@ -24,7 +24,6 @@ func (e ConfigurationReadError) ConfigError() string {
 	return e.Error()
 }
 
-//
 type ConfigurationSyntaxError struct {
 	Err      error
 	Filename string
@@ -42,7 +41,6 @@ func (e ConfigurationSyntaxError) ConfigError() string {
 	return e.Error()
 }
 
-//
 type ConfigurationCheckError struct {
 	ErrString string
 	Err       error
