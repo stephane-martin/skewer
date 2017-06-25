@@ -31,6 +31,7 @@ type MessageStore struct {
 	KafkaErrorChan chan bool
 	ready_mu       *sync.Mutex
 	failed_mu      *sync.Mutex
+	messages_mu    *sync.Mutex
 	Inputs         chan *model.TcpUdpParsedMessage
 	Outputs        chan *model.TcpUdpParsedMessage
 	wg             *sync.WaitGroup
@@ -46,6 +47,7 @@ func (s *MessageStore) init() {
 	s.sendStoppedMu = &sync.Mutex{}
 	s.ready_mu = &sync.Mutex{}
 	s.failed_mu = &sync.Mutex{}
+	s.messages_mu = &sync.Mutex{}
 	s.wg = &sync.WaitGroup{}
 	s.sendWg = &sync.WaitGroup{}
 	s.storeToKafkaWg = &sync.WaitGroup{}
@@ -84,9 +86,13 @@ func NewStore(c *conf.GConfig, l log15.Logger, test bool) (store *MessageStore, 
 	opts_sent := badger.DefaultOptions
 	opts_failed := badger.DefaultOptions
 	opts_messages.Dir = path.Join(dirname, "messages")
+	opts_messages.ValueDir = path.Join(dirname, "messages")
 	opts_sent.Dir = path.Join(dirname, "sent")
+	opts_sent.ValueDir = path.Join(dirname, "sent")
 	opts_ready.Dir = path.Join(dirname, "ready")
+	opts_ready.ValueDir = path.Join(dirname, "ready")
 	opts_failed.Dir = path.Join(dirname, "failed")
+	opts_failed.ValueDir = path.Join(dirname, "failed")
 	opts_messages.MaxTableSize = c.Store.Maxsize
 	opts_messages.SyncWrites = c.Store.FSync
 	opts_ready.SyncWrites = c.Store.FSync
@@ -136,6 +142,8 @@ func NewStore(c *conf.GConfig, l log15.Logger, test bool) (store *MessageStore, 
 
 	// only once, push back messages from previous run that may have been stuck in the sent queue
 	store.resetStuckInSent()
+
+	// todo: prune unreferenced messages
 
 	store.ticker = time.NewTicker(time.Minute)
 	store.wg.Add(1)
@@ -190,10 +198,23 @@ func (s *MessageStore) Close() {
 }
 
 func (s *MessageStore) CloseBadgerDB() {
-	s.messages.Close()
-	s.ready.Close()
-	s.sent.Close()
-	s.failed.Close()
+	err := s.messages.Close()
+	if err != nil {
+		s.logger.Warn("Error closing Messages in store", "error", err)
+	}
+	err = s.ready.Close()
+	if err != nil {
+		s.logger.Warn("Error closing Ready in store", "error", err)
+	}
+	err = s.sent.Close()
+	if err != nil {
+		s.logger.Warn("Error closing Sent in store", "error", err)
+	}
+	err = s.failed.Close()
+	if err != nil {
+		s.logger.Warn("Error closing Failed in store", "error", err)
+	}
+	s.logger.Info("Badger databases are closed")
 }
 
 func (s *MessageStore) SendStopped() bool {
@@ -212,14 +233,57 @@ func (s *MessageStore) resetStuckInSent() {
 	uids := []string{}
 	iter := s.sent.NewIterator(iter_opts)
 	for iter.Rewind(); iter.Valid(); iter.Next() {
-		item := iter.Item()
-		uid := string(item.Key())
-		uids = append(uids, uid)
+		uids = append(uids, string(iter.Item().Key()))
 	}
+	iter.Close()
+
+	s.logger.Info("Pushing back stuck messages from Sent to Ready", "nb_messages", len(uids))
 	for _, uid := range uids {
 		s.sent.Delete([]byte(uid))
 		s.ready.Set([]byte(uid), []byte("true"))
 	}
+
+}
+
+func (s *MessageStore) ReadAll() (map[string]string, map[string]string, map[string]string, map[string]string) {
+	iter_opts := badger.IteratorOptions{
+		FetchValues: true,
+		Reverse:     false,
+	}
+
+	messagesMap := map[string]string{}
+	iter := s.messages.NewIterator(iter_opts)
+	for iter.Rewind(); iter.Valid(); iter.Next() {
+		item := iter.Item()
+		messagesMap[string(item.Key())] = string(item.Value())
+	}
+	iter.Close()
+
+	readyMap := map[string]string{}
+	iter = s.ready.NewIterator(iter_opts)
+	for iter.Rewind(); iter.Valid(); iter.Next() {
+		item := iter.Item()
+		readyMap[string(item.Key())] = string(item.Value())
+	}
+	iter.Close()
+
+	failedMap := map[string]string{}
+	iter = s.failed.NewIterator(iter_opts)
+	for iter.Rewind(); iter.Valid(); iter.Next() {
+		item := iter.Item()
+		failedMap[string(item.Key())] = string(item.Value())
+	}
+	iter.Close()
+
+	sentMap := map[string]string{}
+	iter = s.sent.NewIterator(iter_opts)
+	for iter.Rewind(); iter.Valid(); iter.Next() {
+		item := iter.Item()
+		sentMap[string(item.Key())] = string(item.Value())
+	}
+	iter.Close()
+
+	return messagesMap, readyMap, failedMap, sentMap
 }
 
 func (s *MessageStore) resetFailures() {
@@ -248,6 +312,8 @@ func (s *MessageStore) resetFailures() {
 				}
 			}
 		}
+		iter.Close()
+
 		if len(uids) == 0 {
 			s.failed_mu.Unlock()
 			break
@@ -258,6 +324,7 @@ func (s *MessageStore) resetFailures() {
 		deleteEntries := []*badger.Entry{}
 		setEntries := []*badger.Entry{}
 		for _, uid := range uids {
+			s.logger.Debug("Will retry failed message", "uid", uid)
 			deleteEntries = badger.EntriesDelete(deleteEntries, []byte(uid))
 			setEntries = badger.EntriesSet(setEntries, []byte(uid), []byte("true"))
 		}
@@ -268,10 +335,19 @@ func (s *MessageStore) resetFailures() {
 			err := s.failed.BatchSet(deleteEntries)
 			if err != nil {
 				s.logger.Error("Error deleting entries from failed queue!")
+			} else {
+				s.logger.Debug("Messages pushed back from failed queue to ready queue", "nb_messages", len(uids))
 			}
-			s.logger.Debug("Messages pushed back from failed queue to ready queue", "nb_messages", len(uids))
 		}
-
+		_, re, fa, _ := s.ReadAll()
+		fmt.Println("now in failed")
+		for k, v := range fa {
+			fmt.Printf("%s %s\n", k, v)
+		}
+		fmt.Println("now in ready")
+		for k, v := range re {
+			fmt.Printf("%s %s\n", k, v)
+		}
 		s.ready_mu.Unlock()
 		s.failed_mu.Unlock()
 	}
@@ -304,17 +380,20 @@ func (s *MessageStore) stash(m *model.TcpUdpParsedMessage) error {
 
 	b, err := json.Marshal(m)
 	if err != nil {
-		s.logger.Warn("Store discarded a message that could not be JSON-marshalled", "error", err)
+		s.logger.Warn("The store discarded a message that could not be JSON-marshalled", "error", err)
 		return nil
 	}
 	s.ready_mu.Lock()
 	defer s.ready_mu.Unlock()
+	s.messages_mu.Lock()
+	defer s.messages_mu.Unlock()
 	err = s.messages.Set([]byte(m.Uid), b)
 	if err != nil {
 		return err
 	}
 	err = s.ready.Set([]byte(m.Uid), []byte("true"))
 	if err != nil {
+		s.logger.Warn("Error putting message to Ready", "error", err)
 		s.messages.Delete([]byte(m.Uid))
 		return err
 	}
@@ -330,11 +409,14 @@ func (s *MessageStore) retrieve(n int) (messages map[string]*model.TcpUdpParsedM
 		FetchValues:  false,
 		Reverse:      false,
 	}
+	s.messages_mu.Lock()
 	iter := s.ready.NewIterator(iter_opts)
 	fetched := 0
+	nonexistent := []string{}
 	for iter.Rewind(); iter.Valid() && fetched < n; iter.Next() {
 		uid := iter.Item().Key()
 		item := badger.KVItem{}
+		s.logger.Debug("Fetching", "uid", string(uid))
 		err := s.messages.Get(uid, &item)
 		if err == nil {
 			message_b := item.Value()
@@ -345,13 +427,24 @@ func (s *MessageStore) retrieve(n int) (messages map[string]*model.TcpUdpParsedM
 					messages[string(uid)] = &message
 					fetched++
 				} else {
-					// todo
+					s.logger.Warn("Error unmarshaling message from the badger", "uid", string(uid))
+					// todo: delete that message
 				}
+			} else {
+				nonexistent = append(nonexistent, string(uid))
 			}
 		} else {
 			s.logger.Warn("Error getting message content from message queue", "uid", string(uid))
 		}
 	}
+	iter.Close()
+	s.messages_mu.Unlock()
+
+	for _, uid := range nonexistent {
+		s.logger.Debug("Deleting non-existent entry", "uid", string(uid))
+		s.ready.Delete([]byte(uid))
+	}
+
 	if len(messages) == 0 {
 		return messages
 	}
@@ -375,13 +468,26 @@ func (s *MessageStore) retrieve(n int) (messages map[string]*model.TcpUdpParsedM
 }
 
 func (s *MessageStore) Ack(id string) {
-	s.sent.Delete([]byte(id))
-	s.messages.Delete([]byte(id))
+	s.logger.Debug("ACK", "uid", id)
+	err := s.sent.Delete([]byte(id))
+	if err != nil {
+		s.logger.Warn("Error ACKing message", "uid", id, "error", err)
+	} else {
+		s.messages_mu.Lock()
+		err := s.messages.Delete([]byte(id))
+		s.messages_mu.Unlock()
+		if err != nil {
+			s.logger.Warn("Error ACKing message", "uid", id, "error", err)
+		} else {
+			fmt.Println(s.messages.Exists([]byte(id)))
+		}
+	}
 }
 
 func (s *MessageStore) Nack(id string) {
 	s.failed_mu.Lock()
 	defer s.failed_mu.Unlock()
+	s.logger.Debug("NACK", "uid", id)
 	s.sent.Delete([]byte(id))
 	s.failed.Set([]byte(id), []byte(time.Now().Format(time.RFC3339)))
 }

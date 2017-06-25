@@ -13,6 +13,7 @@ import (
 	sarama "gopkg.in/Shopify/sarama.v1"
 
 	"github.com/inconshreveable/log15"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stephane-martin/relp2kafka/conf"
 	"github.com/stephane-martin/relp2kafka/javascript"
 	"github.com/stephane-martin/relp2kafka/model"
@@ -40,7 +41,7 @@ func (s *RelpServer) init() {
 	s.jsenvs = map[int]*javascript.Environment{}
 }
 
-func NewRelpServer(c *conf.GConfig, logger log15.Logger) *RelpServer {
+func NewRelpServer(c *conf.GConfig, incomingMsgsCounter *prometheus.CounterVec, logger log15.Logger) *RelpServer {
 	s := RelpServer{}
 	s.logger = logger.New("class", "RelpServer")
 	s.init()

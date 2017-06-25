@@ -186,6 +186,7 @@ func (s *StreamServer) AcceptUnix(i int) {
 				// continue
 			}
 		} else if conn != nil {
+			s.wg.Add(1)
 			go s.handleConnection(conn, i)
 		}
 	}

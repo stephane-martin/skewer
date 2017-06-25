@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/inconshreveable/log15"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/cobra"
 	"github.com/stephane-martin/relp2kafka/conf"
 	"github.com/stephane-martin/relp2kafka/consul"
@@ -100,6 +101,7 @@ func Serve() {
 	var stopWatchChan chan bool
 	params := consul.ConnParams{Address: consulAddr, Datacenter: consulDC, Token: consulToken}
 
+	// read configuration
 	for {
 		c, stopWatchChan, err = conf.InitLoad(configDirName, params, consulPrefix, logger)
 		if err == nil {
@@ -108,6 +110,8 @@ func Serve() {
 		logger.Error("Error getting configuration. Sleep and retry.", "error", err)
 		time.Sleep(30 * time.Second)
 	}
+
+	// prepare the message store
 	st, err = store.NewStore(c, logger, testFlag)
 	if err != nil {
 		logger.Crit("Can't create the message Store", "error", err)
@@ -116,8 +120,17 @@ func Serve() {
 	st.SendToKafka()
 	defer st.Close()
 
+	// set up metrics
+	incomingMsgsCounter := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "incoming_messages_total",
+			Help: "total number of syslog messages that were received",
+		},
+		[]string{"protocol", "client", "port"},
+	)
+
 	// prepare the RELP service
-	relpServer := server.NewRelpServer(c, logger)
+	relpServer := server.NewRelpServer(c, incomingMsgsCounter, logger)
 	if testFlag {
 		relpServer.SetTest()
 	}
@@ -126,7 +139,7 @@ func Serve() {
 	relpServer.StatusChan <- server.Stopped // trigger the RELP service to start
 
 	// start the TCP service
-	tcpServer := server.NewTcpServer(c, st, logger)
+	tcpServer := server.NewTcpServer(c, st, incomingMsgsCounter, logger)
 	if testFlag {
 		tcpServer.SetTest()
 	}
@@ -136,7 +149,7 @@ func Serve() {
 	}
 
 	// start the UDP service
-	udpServer := server.NewUdpServer(c, st, logger)
+	udpServer := server.NewUdpServer(c, st, incomingMsgsCounter, logger)
 	if testFlag {
 		udpServer.SetTest()
 	}

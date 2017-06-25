@@ -11,6 +11,7 @@ import (
 
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stephane-martin/relp2kafka/conf"
 	"github.com/stephane-martin/relp2kafka/model"
 	"github.com/stephane-martin/relp2kafka/store"
@@ -25,34 +26,35 @@ const (
 
 type TcpServer struct {
 	StreamServer
-	status     TcpServerStatus
-	ClosedChan chan TcpServerStatus
-	store      *store.MessageStore
+	status              TcpServerStatus
+	ClosedChan          chan TcpServerStatus
+	store               *store.MessageStore
+	incomingMsgsCounter *prometheus.CounterVec
 }
 
 func (s *TcpServer) init() {
 	s.StreamServer.init()
 }
 
-func NewTcpServer(c *conf.GConfig, st *store.MessageStore, logger log15.Logger) *TcpServer {
-	s := TcpServer{}
+func NewTcpServer(c *conf.GConfig, st *store.MessageStore, incomingMsgsCounter *prometheus.CounterVec, logger log15.Logger) *TcpServer {
+	s := TcpServer{
+		status:              TcpStopped,
+		store:               st,
+		incomingMsgsCounter: incomingMsgsCounter,
+	}
 	s.logger = logger.New("class", "TcpServer")
-	s.init()
 	s.protocol = "tcp"
 	s.Conf = *c
+	s.init()
 	s.handler = TcpHandler{Server: &s}
-	s.status = TcpStopped
-	s.store = st
-
 	return &s
 }
 
-func (s *TcpServer) Start() (err error) {
+func (s *TcpServer) Start() error {
 	s.statusMutex.Lock()
 	defer s.statusMutex.Unlock()
 	if s.status != TcpStopped {
-		err = ServerNotStopped
-		return
+		return ServerNotStopped
 	}
 	s.ClosedChan = make(chan TcpServerStatus, 1)
 
@@ -66,8 +68,7 @@ func (s *TcpServer) Start() (err error) {
 		s.logger.Info("TCP Server not started: no listening port")
 		close(s.ClosedChan)
 	}
-	return
-
+	return nil
 }
 
 func (s *TcpServer) Stop() {
@@ -91,6 +92,9 @@ type TcpHandler struct {
 }
 
 func (h TcpHandler) HandleConnection(conn net.Conn, i int) {
+	var local_port int
+	var err error
+
 	s := h.Server
 	s.AddConnection(conn)
 
@@ -107,12 +111,17 @@ func (h TcpHandler) HandleConnection(conn net.Conn, i int) {
 	if remote != nil {
 		client = strings.Split(remote.String(), ":")[0]
 	}
+	client = strings.TrimSpace(client)
 
-	var local_port int
 	local := conn.LocalAddr()
 	if local != nil {
-		s := strings.Split(local.String(), ":")
-		local_port, _ = strconv.Atoi(s[len(s)-1])
+		local_s := local.String()
+		s := strings.Split(local_s, ":")
+		local_port, err = strconv.Atoi(s[len(s)-1])
+		if err != nil && len(client) == 0 {
+			// unix socket path
+			client = local_s
+		}
 	}
 
 	logger := s.logger.New("remote", client, "local_port", local_port)
@@ -176,6 +185,7 @@ func (h TcpHandler) HandleConnection(conn net.Conn, i int) {
 				LocalPort: local_port,
 				Message:   scanner.Text(),
 			}
+			s.incomingMsgsCounter.WithLabelValues(s.protocol, client, strconv.FormatInt(int64(local_port), 10)).Add(1)
 			raw_messages_chan <- &raw
 		} else {
 			logger.Info("Scanning the TCP stream has ended", "error", scanner.Err())

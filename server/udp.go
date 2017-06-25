@@ -9,6 +9,7 @@ import (
 
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stephane-martin/relp2kafka/conf"
 	"github.com/stephane-martin/relp2kafka/model"
 	"github.com/stephane-martin/relp2kafka/store"
@@ -37,7 +38,7 @@ func (s *UdpServer) init() {
 	s.Server.init()
 }
 
-func NewUdpServer(c *conf.GConfig, st *store.MessageStore, logger log15.Logger) *UdpServer {
+func NewUdpServer(c *conf.GConfig, st *store.MessageStore, incomingMsgsCounter *prometheus.CounterVec, logger log15.Logger) *UdpServer {
 	s := UdpServer{}
 	s.logger = logger.New("class", "UdpServer")
 	s.init()
