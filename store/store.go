@@ -141,7 +141,8 @@ func NewStore(c *conf.GConfig, l log15.Logger, test bool) (store *MessageStore, 
 	// only once, push back messages from previous run that may have been stuck in the sent queue
 	store.resetStuckInSent()
 
-	// todo: prune unreferenced messages
+	// prune orphaned messages
+	store.pruneOrphaned()
 
 	store.ticker = time.NewTicker(time.Minute)
 	store.wg.Add(1)
@@ -219,6 +220,39 @@ func (s *MessageStore) SendStopped() bool {
 	s.sendStoppedMu.Lock()
 	defer s.sendStoppedMu.Unlock()
 	return s.sendStopped
+}
+
+func (s *MessageStore) pruneOrphaned() {
+	// find if we have some old full messages
+	iter_opts := badger.IteratorOptions{
+		PrefetchSize: 1000,
+		FetchValues:  false,
+		Reverse:      false,
+	}
+
+	uids := []string{}
+	iter := s.messages.NewIterator(iter_opts)
+	for iter.Rewind(); iter.Valid(); iter.Next() {
+		uids = append(uids, string(iter.Item().Key()))
+	}
+	iter.Close()
+
+	// check if the corresponding uid exists in "ready" or "failed"
+	orphaned_uids := []string{}
+	for _, uid := range uids {
+		e1, err1 := s.ready.Exists([]byte(uid))
+		if err1 == nil && !e1 {
+			e2, err2 := s.failed.Exists([]byte(uid))
+			if err2 == nil && !e2 {
+				orphaned_uids = append(orphaned_uids, uid)
+			}
+		}
+	}
+
+	// if no match, delete the message
+	for _, uid := range orphaned_uids {
+		s.messages.Delete([]byte(uid))
+	}
 }
 
 func (s *MessageStore) resetStuckInSent() {
