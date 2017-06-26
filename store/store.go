@@ -40,7 +40,6 @@ type MessageStore struct {
 	ticker         *time.Ticker
 	logger         log15.Logger
 	Conf           conf.GConfig
-	jsenvs         map[int]*javascript.Environment
 }
 
 func (s *MessageStore) init() {
@@ -55,14 +54,13 @@ func (s *MessageStore) init() {
 	s.StopSendChan = make(chan bool)
 	s.FatalErrorChan = make(chan bool)
 	s.KafkaErrorChan = make(chan bool)
-	s.jsenvs = map[int]*javascript.Environment{}
 }
 
-func (s *MessageStore) initJsEnvs() {
-	s.jsenvs = map[int]*javascript.Environment{}
+func (s *MessageStore) NewJsEnvs() map[int]*javascript.Environment {
+	jsenvs := map[int]*javascript.Environment{}
 	for i, syslogConf := range s.Conf.Syslog {
 		if syslogConf.Protocol != "relp" {
-			s.jsenvs[i] = javascript.New(
+			jsenvs[i] = javascript.New(
 				syslogConf.FilterFunc,
 				syslogConf.TopicFunc,
 				syslogConf.TopicTemplate,
@@ -72,11 +70,11 @@ func (s *MessageStore) initJsEnvs() {
 			)
 		}
 	}
+	return jsenvs
 }
 
 func (s *MessageStore) SetNewConf(newConf *conf.GConfig) {
 	s.Conf = *newConf
-	s.initJsEnvs()
 }
 
 func NewStore(c *conf.GConfig, l log15.Logger, test bool) (store *MessageStore, err error) {
@@ -339,15 +337,6 @@ func (s *MessageStore) resetFailures() {
 				s.logger.Debug("Messages pushed back from failed queue to ready queue", "nb_messages", len(uids))
 			}
 		}
-		_, re, fa, _ := s.ReadAll()
-		fmt.Println("now in failed")
-		for k, v := range fa {
-			fmt.Printf("%s %s\n", k, v)
-		}
-		fmt.Println("now in ready")
-		for k, v := range re {
-			fmt.Printf("%s %s\n", k, v)
-		}
 		s.ready_mu.Unlock()
 		s.failed_mu.Unlock()
 	}
@@ -478,8 +467,6 @@ func (s *MessageStore) Ack(id string) {
 		s.messages_mu.Unlock()
 		if err != nil {
 			s.logger.Warn("Error ACKing message", "uid", id, "error", err)
-		} else {
-			fmt.Println(s.messages.Exists([]byte(id)))
 		}
 	}
 }
@@ -498,12 +485,13 @@ func (s *MessageStore) store2kafka() {
 		s.storeToKafkaWg.Done()
 	}()
 	s.logger.Debug("Store2Kafka")
+	jsenvs := s.NewJsEnvs()
 	if s.test {
 		s.startSend()
 		for message := range s.Outputs {
 			if message != nil {
-				partitionKey := s.jsenvs[message.ConfIndex].PartitionKey(message.Parsed.Fields)
-				topic := s.jsenvs[message.ConfIndex].Topic(message.Parsed.Fields)
+				partitionKey := jsenvs[message.ConfIndex].PartitionKey(message.Parsed.Fields)
+				topic := jsenvs[message.ConfIndex].Topic(message.Parsed.Fields)
 
 				if len(topic) == 0 || len(partitionKey) == 0 {
 					s.logger.Warn("Topic or PartitionKey could not be calculated", "uid", message.Uid)
@@ -511,7 +499,7 @@ func (s *MessageStore) store2kafka() {
 					continue
 				}
 
-				tmsg := s.jsenvs[message.ConfIndex].FilterMessage(message.Parsed.Fields)
+				tmsg := jsenvs[message.ConfIndex].FilterMessage(message.Parsed.Fields)
 				if tmsg == nil {
 					s.Ack(message.Uid)
 					continue
@@ -591,8 +579,8 @@ func (s *MessageStore) store2kafka() {
 
 		s.startSend()
 		for message := range s.Outputs {
-			partitionKey := s.jsenvs[message.ConfIndex].PartitionKey(message.Parsed.Fields)
-			topic := s.jsenvs[message.ConfIndex].Topic(message.Parsed.Fields)
+			partitionKey := jsenvs[message.ConfIndex].PartitionKey(message.Parsed.Fields)
+			topic := jsenvs[message.ConfIndex].Topic(message.Parsed.Fields)
 
 			if len(topic) == 0 || len(partitionKey) == 0 {
 				s.logger.Warn("Topic or PartitionKey could not be calculated", "uid", message.Uid)
@@ -600,7 +588,7 @@ func (s *MessageStore) store2kafka() {
 				continue
 			}
 
-			tmsg := s.jsenvs[message.ConfIndex].FilterMessage(message.Parsed.Fields)
+			tmsg := jsenvs[message.ConfIndex].FilterMessage(message.Parsed.Fields)
 			if tmsg == nil {
 				s.Ack(message.Uid)
 				continue

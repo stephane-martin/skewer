@@ -58,7 +58,6 @@ func (s *TcpServer) Start() error {
 	}
 	s.ClosedChan = make(chan TcpServerStatus, 1)
 
-	s.initParsers()
 	// start listening on the required ports
 	nb := s.initTCPListeners()
 	if nb > 0 {
@@ -133,9 +132,10 @@ func (h TcpHandler) HandleConnection(conn net.Conn, i int) {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+		e := s.NewParsersEnv()
 		entropy := rand.New(rand.NewSource(time.Now().UnixNano()))
 		for m := range raw_messages_chan {
-			parser := s.GetParser(s.Conf.Syslog[i].Format)
+			parser := e.GetParser(s.Conf.Syslog[i].Format)
 			if parser == nil {
 				// todo: log
 				continue

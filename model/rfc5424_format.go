@@ -171,7 +171,6 @@ func ParseStructuredData(sd string) (m map[string]map[string]string, err error) 
 		if found {
 			val := sd[position:p]
 			m[current_sdid][current_name] = val
-			fmt.Printf("%s//%s//%s\n", current_sdid, current_name, val)
 			position += len(val)
 			position++ // count for the closing quote
 			if position >= l {

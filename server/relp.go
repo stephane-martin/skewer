@@ -32,14 +32,12 @@ type RelpServer struct {
 	StreamServer
 	status      RelpServerStatus
 	StatusChan  chan RelpServerStatus
-	jsenvs      map[int]*javascript.Environment
 	kafkaClient sarama.Client
 	metrics     *metrics.Metrics
 }
 
 func (s *RelpServer) init() {
 	s.StreamServer.init()
-	s.jsenvs = map[int]*javascript.Environment{}
 }
 
 func NewRelpServer(c *conf.GConfig, metrics *metrics.Metrics, logger log15.Logger) *RelpServer {
@@ -53,20 +51,16 @@ func NewRelpServer(c *conf.GConfig, metrics *metrics.Metrics, logger log15.Logge
 	return &s
 }
 
-func (s *RelpServer) initJsEnvs() {
-	s.jsenvs = map[int]*javascript.Environment{}
-	for i, syslogConf := range s.Conf.Syslog {
-		if syslogConf.Protocol == "relp" {
-			s.jsenvs[i] = javascript.New(
-				syslogConf.FilterFunc,
-				syslogConf.TopicFunc,
-				syslogConf.TopicTemplate,
-				syslogConf.PartitionFunc,
-				syslogConf.PartitionKeyTemplate,
-				s.logger,
-			)
-		}
-	}
+func (s *RelpServer) NewJsEnv(i int) *javascript.Environment {
+	syslogConf := s.Conf.Syslog[i]
+	return javascript.New(
+		syslogConf.FilterFunc,
+		syslogConf.TopicFunc,
+		syslogConf.TopicTemplate,
+		syslogConf.PartitionFunc,
+		syslogConf.PartitionKeyTemplate,
+		s.logger,
+	)
 }
 
 func (s *RelpServer) Start() error {
@@ -79,8 +73,6 @@ func (s *RelpServer) Start() error {
 		return ServerNotStopped
 	}
 
-	s.initJsEnvs()
-	s.initParsers()
 	nb := s.initTCPListeners()
 	if nb == 0 {
 		s.logger.Info("RELP service not started: no listening port")
@@ -216,8 +208,9 @@ func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+		e := s.NewParsersEnv()
 		for m := range raw_messages_chan {
-			parser := s.GetParser(s.Conf.Syslog[i].Format)
+			parser := e.GetParser(s.Conf.Syslog[i].Format)
 			if parser == nil {
 				// todo: log
 				continue
@@ -361,16 +354,18 @@ func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
 			close(other_fails_chan)
 			s.wg.Done()
 		}()
+		e := s.NewJsEnv(i)
 		for m := range parsed_messages_chan {
-			partitionKey := s.jsenvs[i].PartitionKey(m.Parsed.Fields)
-			topic := s.jsenvs[i].Topic(m.Parsed.Fields)
+
+			partitionKey := e.PartitionKey(m.Parsed.Fields)
+			topic := e.Topic(m.Parsed.Fields)
 			if len(topic) == 0 || len(partitionKey) == 0 {
 				s.logger.Warn("Topic or PartitionKey could not be calculated", "txnr", m.Txnr)
 				other_fails_chan <- m.Txnr
 				continue
 			}
 
-			tmsg := s.jsenvs[i].FilterMessage(m.Parsed.Fields)
+			tmsg := e.FilterMessage(m.Parsed.Fields)
 			if tmsg == nil {
 				other_successes_chan <- m.Txnr
 				continue

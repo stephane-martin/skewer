@@ -34,7 +34,6 @@ type Server struct {
 	test            bool
 	wg              *sync.WaitGroup
 	protocol        string
-	parsersEnv      *javascript.Environment
 	connections     map[Connection]bool
 	connMutex       *sync.Mutex
 	statusMutex     *sync.Mutex
@@ -63,22 +62,25 @@ func (s *StreamServer) init() {
 	s.acceptsWg = &sync.WaitGroup{}
 }
 
-func (s *Server) initParsers() {
-	s.parsersEnv = javascript.New("", "", nil, "", nil, s.logger)
+type ParsersEnv javascript.Environment
+
+func (s *Server) NewParsersEnv() *ParsersEnv {
+	p := javascript.New("", "", nil, "", nil, s.logger)
 	for _, parserConf := range s.Conf.Parsers {
-		err := s.parsersEnv.AddParser(parserConf.Name, parserConf.Func)
+		err := p.AddParser(parserConf.Name, parserConf.Func)
 		if err != nil {
 			s.logger.Warn("Error initializing parser", "name", parserConf.Name, "error", err)
 		}
 	}
+	return (*ParsersEnv)(p)
 }
 
-func (s *Server) GetParser(parserName string) Parser {
+func (e *ParsersEnv) GetParser(parserName string) Parser {
 	switch parserName {
 	case "rfc5424", "rfc3164", "json", "auto":
 		return model.GetParser(parserName)
 	default:
-		return s.parsersEnv.GetParser(parserName)
+		return (*javascript.Environment)(e).GetParser(parserName)
 	}
 }
 
