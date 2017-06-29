@@ -45,7 +45,8 @@ to quickly create a Cobra application.`,
 		m.Appname = "myapp"
 		ma := map[string]string{"zog": "zogzog"}
 		m.Properties = map[string]interface{}{"foo": "bar", "ma": ma}
-		m2, result := env.FilterMessage(&m)
+		m2, result, err := env.FilterMessage(&m)
+		fmt.Println(err)
 		fmt.Println(result)
 		fmt.Println(m2)
 		topic := env.Topic(&m)

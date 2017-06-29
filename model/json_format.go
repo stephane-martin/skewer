@@ -25,31 +25,31 @@ func ParseJsonFormat(m string) (*SyslogMessage, error) {
 	sourceMsg := JsonRsyslogMessage{}
 	err := json.Unmarshal([]byte(m), &sourceMsg)
 	if err != nil {
-		return nil, err
+		return nil, &UnmarshalingJsonError{err}
 	}
 
 	pri, err := strconv.Atoi(sourceMsg.Priority)
 	if err != nil {
 		// todo: wrap errors
-		return nil, err
+		return nil, &InvalidPriorityError{}
 	}
 
 	n := time.Now()
 	generated := n
 	reported := n
 
-	if sourceMsg.TimeReported != "-" {
+	if sourceMsg.TimeReported != "-" && len(sourceMsg.TimeReported) > 0 {
 		r, err := time.Parse(time.RFC3339Nano, sourceMsg.TimeReported)
 		if err != nil {
-			return nil, err
+			return nil, &TimeError{}
 		}
 		reported = r
 	}
 
-	if sourceMsg.TimeGenerated != "-" {
+	if sourceMsg.TimeGenerated != "-" && len(sourceMsg.TimeGenerated) > 0 {
 		g, err := time.Parse(time.RFC3339Nano, sourceMsg.TimeGenerated)
 		if err != nil {
-			return nil, err
+			return nil, &TimeError{}
 		}
 		generated = g
 	}

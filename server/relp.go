@@ -366,7 +366,8 @@ func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
 				continue ForParsedChan
 			}
 
-			tmsg, filterResult := e.FilterMessage(m.Parsed.Fields)
+			// todo: catch err
+			tmsg, filterResult, _ := e.FilterMessage(m.Parsed.Fields)
 
 			switch filterResult {
 			case javascript.DROPPED:

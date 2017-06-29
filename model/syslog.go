@@ -156,7 +156,7 @@ func Parse(m string, format string, dont_parse_sd bool) (sm *SyslogMessage, err 
 		}
 
 	default:
-		return nil, fmt.Errorf("unknown format")
+		return nil, &UnknownFormatError{format}
 	}
 	if err != nil {
 		return nil, err

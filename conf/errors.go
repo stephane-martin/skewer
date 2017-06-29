@@ -5,6 +5,7 @@ import "fmt"
 type ConfigurationError interface {
 	Error() string
 	ConfigError() string
+	WrappedErrors() []error
 }
 
 //

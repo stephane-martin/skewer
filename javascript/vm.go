@@ -92,15 +92,6 @@ type Parser struct {
 	Name string
 }
 
-type JSParsingError struct {
-	Message    string
-	ParserName string
-}
-
-func (e *JSParsingError) Error() string {
-	return fmt.Sprintf("The provided JS parser could not parse the raw message: %s", e.Message)
-}
-
 func (p *Parser) Parse(rawMessage string, dont_parse_sd bool) (*model.SyslogMessage, error) {
 	jsParser, ok := p.e.jsParsers[p.Name]
 	if !ok {
@@ -116,7 +107,7 @@ func (p *Parser) Parse(rawMessage string, dont_parse_sd bool) (*model.SyslogMess
 		if jserr, ok := err.(*goja.Exception); ok {
 			message, ok := jserr.Value().Export().(string)
 			if ok {
-				return nil, &JSParsingError{ParserName: p.Name, Message: message}
+				return nil, &model.JSParsingError{ParserName: p.Name, Message: message}
 			} else {
 				return nil, err
 			}
@@ -266,7 +257,7 @@ func (e *Environment) Topic(m *model.SyslogMessage) string {
 			if err == nil {
 				topic = jsTopic.String()
 			} else {
-				e.logger.Warn("Error calculating Topic()", "error", err)
+				e.logger.Warn("Error calculating Topic() in Javascript", "error", err)
 			}
 		} else {
 			e.logger.Warn("Error converting the syslog message to a JS object", "error", err)
@@ -317,48 +308,48 @@ func (e *Environment) PartitionKey(m *model.SyslogMessage) string {
 	return partitionKey
 }
 
-func (e *Environment) FilterMessage(m *model.SyslogMessage) (result *model.SyslogMessage, filterResult FilterResult) {
+func (e *Environment) FilterMessage(m *model.SyslogMessage) (result *model.SyslogMessage, filterResult FilterResult, err error) {
 	var jsMessage goja.Value
 	var resJsMessage goja.Value
-	var err error
 
 	if e.jsFilterMessages == nil {
-		return m, PASS
+		return m, PASS, nil
 	}
 	if m == nil {
-		return nil, DROPPED
+		return nil, DROPPED, nil
 	}
 	jsMessage, err = e.ToJsSyslogMessage(m)
 	if err != nil {
 		e.logger.Warn("Error converting the syslog message to a JS object", "error", err)
-		return nil, FILTER_ERROR
+		return nil, FILTER_ERROR, err
 	}
 	resJsMessage, err = e.jsFilterMessages(nil, jsMessage)
 	_, err = e.jsFilterMessages(nil, jsMessage)
 	if err != nil {
 		e.logger.Warn("Error filtering the syslog message", "error", err)
-		return nil, FILTER_ERROR
+		return nil, FILTER_ERROR, err
 	}
 
 	filterResult = FilterResult(resJsMessage.ToInteger())
 	switch filterResult {
 	case DROPPED:
-		return nil, DROPPED
+		return nil, DROPPED, nil
 	case REJECTED:
-		return nil, REJECTED
+		return nil, REJECTED, nil
 	case FILTER_ERROR:
-		return nil, FILTER_ERROR
+		return nil, FILTER_ERROR, nil
 	case PASS:
 		result, err = e.FromJsSyslogMessage(jsMessage)
 		if err != nil {
 			e.logger.Warn("Error converting back the syslog message from JS", "error", err)
-			return nil, FILTER_ERROR
+			return nil, FILTER_ERROR, err
 		}
-		return result, PASS
+		return result, PASS, nil
 
 	default:
 		e.logger.Warn("JS filter function returned an invalid result", "result", int64(filterResult))
-		return nil, FILTER_ERROR
+		// todo: return error instead
+		return nil, FILTER_ERROR, nil
 	}
 
 }

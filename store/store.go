@@ -534,7 +534,8 @@ func (s *MessageStore) store2kafka() {
 					continue ForOutputsTest
 				}
 
-				tmsg, filterResult := jsenvs[message.ConfIndex].FilterMessage(message.Parsed.Fields)
+				// todo: catch err
+				tmsg, filterResult, _ := jsenvs[message.ConfIndex].FilterMessage(message.Parsed.Fields)
 
 				switch filterResult {
 				case javascript.DROPPED:
@@ -638,7 +639,8 @@ func (s *MessageStore) store2kafka() {
 				continue ForOutputs
 			}
 
-			tmsg, filterResult := jsenvs[message.ConfIndex].FilterMessage(message.Parsed.Fields)
+			// todo: catch err
+			tmsg, filterResult, _ := jsenvs[message.ConfIndex].FilterMessage(message.Parsed.Fields)
 
 			switch filterResult {
 			case javascript.DROPPED:
