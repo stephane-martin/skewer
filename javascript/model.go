@@ -40,7 +40,23 @@ function NewEmptySyslogMessage() {
 function SyslogMessageToGo(m) {
 	return new SyslogMessage(m.Priority, m.Facility, m.Severity, m.Version, m.TimeReported.getTime(), m.TimeGenerated.getTime(), m.Hostname, m.Appname, m.Procid, m.Msgid, m.Structured, m.Message, m.Properties);
 }
+
+var FILTER = {
+	PASS: 0,
+	DROPPED: 1,
+	REJECTED: 2,
+	ERROR: 3,
+}
 `
+
+type FilterResult int64
+
+const (
+	PASS         FilterResult = 0
+	DROPPED                   = 1
+	REJECTED                  = 2
+	FILTER_ERROR              = 3
+)
 
 type ISyslogMessage struct {
 	Priority      int
@@ -301,34 +317,50 @@ func (e *Environment) PartitionKey(m *model.SyslogMessage) string {
 	return partitionKey
 }
 
-func (e *Environment) FilterMessage(m *model.SyslogMessage) *model.SyslogMessage {
+func (e *Environment) FilterMessage(m *model.SyslogMessage) (result *model.SyslogMessage, filterResult FilterResult) {
+	var jsMessage goja.Value
+	var resJsMessage goja.Value
+	var err error
+
 	if e.jsFilterMessages == nil {
-		return m
+		return m, PASS
 	}
 	if m == nil {
-		return nil
+		return nil, DROPPED
 	}
-	jsMessage, err := e.ToJsSyslogMessage(m)
+	jsMessage, err = e.ToJsSyslogMessage(m)
 	if err != nil {
 		e.logger.Warn("Error converting the syslog message to a JS object", "error", err)
-		return m
+		return nil, FILTER_ERROR
 	}
-	resJsMessage, err := e.jsFilterMessages(nil, jsMessage)
+	resJsMessage, err = e.jsFilterMessages(nil, jsMessage)
 	_, err = e.jsFilterMessages(nil, jsMessage)
 	if err != nil {
 		e.logger.Warn("Error filtering the syslog message", "error", err)
-		return m
+		return nil, FILTER_ERROR
 	}
-	if !resJsMessage.ToBoolean() {
-		e.logger.Debug("Syslog message has been filtered out")
-		return nil
+
+	filterResult = FilterResult(resJsMessage.ToInteger())
+	switch filterResult {
+	case DROPPED:
+		return nil, DROPPED
+	case REJECTED:
+		return nil, REJECTED
+	case FILTER_ERROR:
+		return nil, FILTER_ERROR
+	case PASS:
+		result, err = e.FromJsSyslogMessage(jsMessage)
+		if err != nil {
+			e.logger.Warn("Error converting back the syslog message from JS", "error", err)
+			return nil, FILTER_ERROR
+		}
+		return result, PASS
+
+	default:
+		e.logger.Warn("JS filter function returned an invalid result", "result", int64(filterResult))
+		return nil, FILTER_ERROR
 	}
-	result, err := e.FromJsSyslogMessage(jsMessage)
-	if err != nil {
-		e.logger.Warn("Error converting back the syslog message from JS", "error", err)
-		return m
-	}
-	return result
+
 }
 
 func (e *Environment) ToJsSyslogMessage(m *model.SyslogMessage) (sm goja.Value, err error) {

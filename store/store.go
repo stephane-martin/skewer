@@ -435,11 +435,10 @@ func (s *MessageStore) retrieve(n int) (messages map[string]*model.TcpUdpParsedM
 	s.messages_mu.Lock()
 	iter := s.ready.NewIterator(iter_opts)
 	fetched := 0
-	nonexistent := []string{}
+	invalidEntries := []string{}
 	for iter.Rewind(); iter.Valid() && fetched < n; iter.Next() {
 		uid := iter.Item().Key()
 		item := badger.KVItem{}
-		s.logger.Debug("Fetching", "uid", string(uid))
 		err := s.messages.Get(uid, &item)
 		if err == nil {
 			message_b := item.Value()
@@ -450,23 +449,24 @@ func (s *MessageStore) retrieve(n int) (messages map[string]*model.TcpUdpParsedM
 					messages[string(uid)] = &message
 					fetched++
 				} else {
-					s.logger.Warn("Error unmarshaling message from the badger", "uid", string(uid))
-					// todo: delete that message
+					//s.logger.Warn("Error unmarshaling message from the badger", "uid", string(uid))
+					invalidEntries = append(invalidEntries, string(uid))
 				}
 			} else {
-				nonexistent = append(nonexistent, string(uid))
+				invalidEntries = append(invalidEntries, string(uid))
 			}
 		} else {
 			s.logger.Warn("Error getting message content from message queue", "uid", string(uid))
 		}
 	}
 	iter.Close()
-	s.messages_mu.Unlock()
 
-	for _, uid := range nonexistent {
-		s.logger.Debug("Deleting non-existent entry", "uid", string(uid))
+	for _, uid := range invalidEntries {
+		s.logger.Debug("Deleting invalid entry", "uid", string(uid))
 		s.ready.Delete([]byte(uid))
+		s.messages.Delete([]byte(uid))
 	}
+	s.messages_mu.Unlock()
 
 	if len(messages) == 0 {
 		return messages
@@ -522,6 +522,7 @@ func (s *MessageStore) store2kafka() {
 	jsenvs := s.NewJsEnvs()
 	if s.test {
 		s.startSend()
+	ForOutputsTest:
 		for message := range s.Outputs {
 			if message != nil {
 				partitionKey := jsenvs[message.ConfIndex].PartitionKey(message.Parsed.Fields)
@@ -530,13 +531,27 @@ func (s *MessageStore) store2kafka() {
 				if len(topic) == 0 || len(partitionKey) == 0 {
 					s.logger.Warn("Topic or PartitionKey could not be calculated", "uid", message.Uid)
 					s.Nack(message.Uid)
-					continue
+					continue ForOutputsTest
 				}
 
-				tmsg := jsenvs[message.ConfIndex].FilterMessage(message.Parsed.Fields)
-				if tmsg == nil {
+				tmsg, filterResult := jsenvs[message.ConfIndex].FilterMessage(message.Parsed.Fields)
+
+				switch filterResult {
+				case javascript.DROPPED:
 					s.Ack(message.Uid)
-					continue
+					continue ForOutputsTest
+				case javascript.REJECTED:
+					s.Nack(message.Uid)
+					continue ForOutputsTest
+				case javascript.PASS:
+					if tmsg == nil {
+						s.Ack(message.Uid)
+						continue ForOutputsTest
+					}
+				default:
+					s.Nack(message.Uid)
+					// todo: log the faulty message to a specific log
+					continue ForOutputsTest
 				}
 
 				nmsg := model.ParsedMessage{
@@ -549,7 +564,7 @@ func (s *MessageStore) store2kafka() {
 				if err != nil {
 					s.logger.Warn("Error generating Kafka message", "error", err, "uid", message.Uid)
 					s.Nack(message.Uid)
-					continue
+					continue ForOutputsTest
 				}
 
 				v, _ := kafkaMsg.Value.Encode()
@@ -612,6 +627,7 @@ func (s *MessageStore) store2kafka() {
 		}()
 
 		s.startSend()
+	ForOutputs:
 		for message := range s.Outputs {
 			partitionKey := jsenvs[message.ConfIndex].PartitionKey(message.Parsed.Fields)
 			topic := jsenvs[message.ConfIndex].Topic(message.Parsed.Fields)
@@ -619,13 +635,27 @@ func (s *MessageStore) store2kafka() {
 			if len(topic) == 0 || len(partitionKey) == 0 {
 				s.logger.Warn("Topic or PartitionKey could not be calculated", "uid", message.Uid)
 				s.Nack(message.Uid)
-				continue
+				continue ForOutputs
 			}
 
-			tmsg := jsenvs[message.ConfIndex].FilterMessage(message.Parsed.Fields)
-			if tmsg == nil {
+			tmsg, filterResult := jsenvs[message.ConfIndex].FilterMessage(message.Parsed.Fields)
+
+			switch filterResult {
+			case javascript.DROPPED:
 				s.Ack(message.Uid)
-				continue
+				continue ForOutputs
+			case javascript.REJECTED:
+				s.Nack(message.Uid)
+				continue ForOutputs
+			case javascript.PASS:
+				if tmsg == nil {
+					s.Ack(message.Uid)
+					continue ForOutputs
+				}
+			default:
+				s.Nack(message.Uid)
+				// todo: log the faulty message to a specific log
+				continue ForOutputs
 			}
 
 			nmsg := model.ParsedMessage{
@@ -639,7 +669,7 @@ func (s *MessageStore) store2kafka() {
 			if err != nil {
 				s.logger.Warn("Error generating Kafka message", "error", err, "uid", message.Uid)
 				s.Nack(message.Uid)
-				continue
+				continue ForOutputs
 			}
 
 			kafkaMsg.Metadata = message.Uid

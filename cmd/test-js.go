@@ -37,7 +37,7 @@ to quickly create a Cobra application.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Println("testjs called")
 		logger := log15.New()
-		ffunc := `function FilterMessages(m) { m.Message="bla"; return true; }`
+		ffunc := `function FilterMessages(m) { m.Message="bla"; return FILTER.DROPPED; }`
 		tfunc := `function Topic(m) { return "topic-" + m.Appname; }`
 		env := javascript.New(ffunc, tfunc, nil, "", nil, logger)
 		m := model.SyslogMessage{}
@@ -45,7 +45,8 @@ to quickly create a Cobra application.`,
 		m.Appname = "myapp"
 		ma := map[string]string{"zog": "zogzog"}
 		m.Properties = map[string]interface{}{"foo": "bar", "ma": ma}
-		m2 := env.FilterMessage(&m)
+		m2, result := env.FilterMessage(&m)
+		fmt.Println(result)
 		fmt.Println(m2)
 		topic := env.Topic(&m)
 		fmt.Println(topic)

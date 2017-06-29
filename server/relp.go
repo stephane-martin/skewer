@@ -355,6 +355,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
 			s.wg.Done()
 		}()
 		e := s.NewJsEnv(i)
+	ForParsedChan:
 		for m := range parsed_messages_chan {
 
 			partitionKey := e.PartitionKey(m.Parsed.Fields)
@@ -362,13 +363,27 @@ func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
 			if len(topic) == 0 || len(partitionKey) == 0 {
 				s.logger.Warn("Topic or PartitionKey could not be calculated", "txnr", m.Txnr)
 				other_fails_chan <- m.Txnr
-				continue
+				continue ForParsedChan
 			}
 
-			tmsg := e.FilterMessage(m.Parsed.Fields)
-			if tmsg == nil {
+			tmsg, filterResult := e.FilterMessage(m.Parsed.Fields)
+
+			switch filterResult {
+			case javascript.DROPPED:
 				other_successes_chan <- m.Txnr
-				continue
+				continue ForParsedChan
+			case javascript.REJECTED:
+				other_fails_chan <- m.Txnr
+				continue ForParsedChan
+			case javascript.PASS:
+				if tmsg == nil {
+					other_successes_chan <- m.Txnr
+					continue ForParsedChan
+				}
+			default:
+				other_fails_chan <- m.Txnr
+				// todo: log the faulty message to a specific log
+				continue ForParsedChan
 			}
 
 			nmsg := model.ParsedMessage{
@@ -381,7 +396,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
 			if err != nil {
 				s.logger.Warn("Error generating Kafka message", "error", err, "txnr", m.Txnr)
 				other_fails_chan <- m.Txnr
-				continue
+				continue ForParsedChan
 			}
 			kafkaMsg.Metadata = m.Txnr
 
