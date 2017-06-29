@@ -32,12 +32,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"golang.org/x/net/trace"
-
+	"github.com/bkaradzic/go-lz4"
 	"github.com/dgraph-io/badger/y"
 	"github.com/pkg/errors"
-
-	"github.com/bkaradzic/go-lz4"
+	"golang.org/x/net/trace"
 )
 
 // Values have their first byte being byteData or byteDelete. This helps us distinguish between
@@ -292,6 +290,7 @@ func (vlog *valueLog) rewrite(f *logFile) error {
 	}
 
 	rem := vlog.fpath(f.fid)
+	f.fd.Close() // close file previous to remove it
 	elog.Printf("Removing %s", rem)
 	return os.Remove(rem)
 }
@@ -399,7 +398,7 @@ func (e Entry) print(prefix string) {
 
 type header struct {
 	klen            uint32
-	vlen            uint32 // len of value or length of compressed kv if entry storessed compressed
+	vlen            uint32 // len of value or length of compressed kv if entry stored compressed
 	meta            byte
 	casCounter      uint16
 	casCounterCheck uint16
@@ -462,7 +461,7 @@ type valueLog struct {
 }
 
 func (l *valueLog) fpath(fid uint16) string {
-	return fmt.Sprintf("%s/%06d.vlog", l.dirPath, fid)
+	return fmt.Sprintf("%s%s%06d.vlog", l.dirPath, string(os.PathSeparator), fid)
 }
 
 func (l *valueLog) openOrCreateFiles() error {
@@ -558,7 +557,7 @@ func (l *valueLog) Close() error {
 // Replay replays the value log. The kv provided is only valid for the lifetime of function call.
 func (l *valueLog) Replay(ptr valuePointer, fn logEntry) error {
 	fid := ptr.Fid
-	offset := ptr.Offset
+	offset := ptr.Offset + ptr.Len
 	l.elog.Printf("Seeking at value pointer: %+v\n", ptr)
 
 	for _, f := range l.files {
@@ -659,7 +658,7 @@ func (l *valueLog) write(reqs []*request) error {
 			y.AssertTruef(e.Meta&BitCompressed == 0, "Cannot set BitCompressed outside valueLog")
 			var p valuePointer
 
-			if !l.opt.SyncWrites && (e.Meta != BitDelete) && len(e.Value) < l.opt.ValueThreshold {
+			if !l.opt.SyncWrites && len(e.Value) < l.opt.ValueThreshold {
 				// No need to write to value log.
 				b.Ptrs = append(b.Ptrs, p)
 				continue
