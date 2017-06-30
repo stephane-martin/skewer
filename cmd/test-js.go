@@ -49,7 +49,9 @@ to quickly create a Cobra application.`,
 		fmt.Println(err)
 		fmt.Println(result)
 		fmt.Println(m2)
-		topic := env.Topic(&m)
+
+		topic, errs := env.Topic(&m)
+		fmt.Println(errs)
 		fmt.Println(topic)
 
 	},

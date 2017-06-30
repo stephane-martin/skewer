@@ -357,17 +357,22 @@ func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
 		e := s.NewJsEnv(i)
 	ForParsedChan:
 		for m := range parsed_messages_chan {
+			topic, errs := e.Topic(m.Parsed.Fields)
+			for _, err := range errs {
+				s.logger.Info("Error calculating topic", "error", err, "txnr", m.Txnr)
+			}
+			partitionKey, errs := e.PartitionKey(m.Parsed.Fields)
+			for _, err := range errs {
+				s.logger.Info("Error calculating the partition key", "error", err, "txnr", m.Txnr)
+			}
 
-			partitionKey := e.PartitionKey(m.Parsed.Fields)
-			topic := e.Topic(m.Parsed.Fields)
 			if len(topic) == 0 || len(partitionKey) == 0 {
 				s.logger.Warn("Topic or PartitionKey could not be calculated", "txnr", m.Txnr)
 				other_fails_chan <- m.Txnr
 				continue ForParsedChan
 			}
 
-			// todo: catch err
-			tmsg, filterResult, _ := e.FilterMessage(m.Parsed.Fields)
+			tmsg, filterResult, err := e.FilterMessage(m.Parsed.Fields)
 
 			switch filterResult {
 			case javascript.DROPPED:
@@ -383,6 +388,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
 				}
 			default:
 				other_fails_chan <- m.Txnr
+				s.logger.Warn("Error happened processing message", "txnr", m.Txnr, "error", err)
 				// todo: log the faulty message to a specific log
 				continue ForParsedChan
 			}

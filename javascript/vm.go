@@ -95,7 +95,7 @@ type Parser struct {
 func (p *Parser) Parse(rawMessage string, dont_parse_sd bool) (*model.SyslogMessage, error) {
 	jsParser, ok := p.e.jsParsers[p.Name]
 	if !ok {
-		return nil, fmt.Errorf("Parser was not found: '%s'", p.Name)
+		return nil, &model.UnknownFormatError{p.Name}
 	}
 	rawMessage = strings.Trim(rawMessage, "\r\n ")
 	if len(rawMessage) == 0 {
@@ -176,7 +176,7 @@ func (e *Environment) AddParser(name string, parserFunc string) error {
 	name = strings.TrimSpace(name)
 	parserFunc = strings.TrimSpace(parserFunc)
 	if len(name) == 0 {
-		return fmt.Errorf("Empty name")
+		return fmt.Errorf("Empty parser name")
 	}
 	if len(parserFunc) == 0 {
 		return fmt.Errorf("Empty parser function")
@@ -187,11 +187,11 @@ func (e *Environment) AddParser(name string, parserFunc string) error {
 	}
 	v := e.runtime.Get(name)
 	if v == nil {
-		return fmt.Errorf("Parser func was not found")
+		return &ObjectNotFoundError{name}
 	}
 	parser, b := goja.AssertFunction(v)
 	if !b {
-		return fmt.Errorf("Parser is not a JS function")
+		return &NotAFunctionError{name}
 	}
 	e.jsParsers[name] = parser
 	return nil
@@ -204,11 +204,11 @@ func (e *Environment) SetTopicFunc(f string) error {
 	}
 	v := e.runtime.Get("Topic")
 	if v == nil {
-		return fmt.Errorf("Topic function was not found")
+		return &ObjectNotFoundError{"Topic"}
 	}
 	jsTopic, b := goja.AssertFunction(v)
 	if !b {
-		return fmt.Errorf("Topic is not a JS function")
+		return &NotAFunctionError{"Topic"}
 	}
 	e.jsTopic = jsTopic
 	return nil
@@ -221,11 +221,11 @@ func (e *Environment) SetPartitionKeyFunc(f string) error {
 	}
 	v := e.runtime.Get("PartitionKey")
 	if v == nil {
-		return fmt.Errorf("PartitionKey function was not found")
+		return &ObjectNotFoundError{"PartitionKey"}
 	}
 	jsPartitionKey, b := goja.AssertFunction(v)
 	if !b {
-		return fmt.Errorf("PartitionKey is not a JS function")
+		return &NotAFunctionError{"PartitionKey"}
 	}
 	e.jsPartitionKey = jsPartitionKey
 	return nil
@@ -238,74 +238,82 @@ func (e *Environment) SetFilterMessagesFunc(f string) error {
 	}
 	v := e.runtime.Get("FilterMessages")
 	if v == nil {
-		return fmt.Errorf("FilterMessages function was not found")
+		return &ObjectNotFoundError{"FilterMessages"}
 	}
 	jsFilter, b := goja.AssertFunction(v)
 	if !b {
-		return fmt.Errorf("FilterMessages is not a JS function")
+		return &NotAFunctionError{"FilterMessages"}
 	}
 	e.jsFilterMessages = jsFilter
 	return nil
 }
 
-func (e *Environment) Topic(m *model.SyslogMessage) string {
-	topic := ""
+func (e *Environment) Topic(m *model.SyslogMessage) (topic string, errs []error) {
+	var jsMessage goja.Value
+	var jsTopic goja.Value
+	var err error
+	errs = []error{}
+
 	if e.jsTopic != nil && m != nil {
-		jsMessage, err := e.ToJsSyslogMessage(m)
+		jsMessage, err = e.ToJsSyslogMessage(m)
 		if err == nil {
-			jsTopic, err := e.jsTopic(nil, jsMessage)
+			jsTopic, err = e.jsTopic(nil, jsMessage)
 			if err == nil {
 				topic = jsTopic.String()
 			} else {
-				e.logger.Warn("Error calculating Topic() in Javascript", "error", err)
+				errs = append(errs, ExecutingJSErrorFactory(err, "Topic"))
 			}
 		} else {
-			e.logger.Warn("Error converting the syslog message to a JS object", "error", err)
+			errs = append(errs, &ConversionGoJsError{ExecutingJSErrorFactory(err, "NewSyslogMessage")})
 		}
 	}
 	if len(topic) == 0 && e.topicTmpl != nil {
 		topicBuf := bytes.Buffer{}
-		err := e.topicTmpl.Execute(&topicBuf, m)
+		err = e.topicTmpl.Execute(&topicBuf, m)
 		if err == nil {
 			topic = topicBuf.String()
 		} else {
-			e.logger.Warn("Error executing the topic template", "error", err)
+			errs = append(errs, err)
 		}
 	}
 	if len(topic) > 0 {
 		if !model.TopicNameIsValid(topic) {
-			e.logger.Warn("The calculated topic is invalid", "topic", topic)
-			topic = ""
+			errs = append(errs, &model.InvalidTopic{topic})
+			return "", errs
 		}
 	}
-	return topic
+	return topic, errs
 }
 
-func (e *Environment) PartitionKey(m *model.SyslogMessage) string {
-	partitionKey := ""
+func (e *Environment) PartitionKey(m *model.SyslogMessage) (partitionKey string, errs []error) {
+	errs = []error{}
+	var err error
+	var jsMessage goja.Value
+	var jsPartitionKey goja.Value
+
 	if e.jsPartitionKey != nil && m != nil {
-		jsMessage, err := e.ToJsSyslogMessage(m)
+		jsMessage, err = e.ToJsSyslogMessage(m)
 		if err == nil {
-			jsPartitionKey, err := e.jsPartitionKey(nil, jsMessage)
+			jsPartitionKey, err = e.jsPartitionKey(nil, jsMessage)
 			if err == nil {
 				partitionKey = jsPartitionKey.String()
 			} else {
-				e.logger.Warn("Error calculating PartitionKey()", "error", err)
+				errs = append(errs, ExecutingJSErrorFactory(err, "PartitionKey"))
 			}
 		} else {
-			e.logger.Warn("Error converting the syslog message to a JS object", "error", err)
+			errs = append(errs, &ConversionGoJsError{ExecutingJSErrorFactory(err, "NewSyslogMessage")})
 		}
 	}
 	if len(partitionKey) == 0 && e.partitionKeyTmpl != nil {
 		partitionKeyBuf := bytes.Buffer{}
-		err := e.partitionKeyTmpl.Execute(&partitionKeyBuf, m)
+		err = e.partitionKeyTmpl.Execute(&partitionKeyBuf, m)
 		if err == nil {
 			partitionKey = partitionKeyBuf.String()
 		} else {
-			e.logger.Warn("Error executing the PartitionKey template", "error", err)
+			errs = append(errs, err)
 		}
 	}
-	return partitionKey
+	return partitionKey, errs
 }
 
 func (e *Environment) FilterMessage(m *model.SyslogMessage) (result *model.SyslogMessage, filterResult FilterResult, err error) {
@@ -320,14 +328,12 @@ func (e *Environment) FilterMessage(m *model.SyslogMessage) (result *model.Syslo
 	}
 	jsMessage, err = e.ToJsSyslogMessage(m)
 	if err != nil {
-		e.logger.Warn("Error converting the syslog message to a JS object", "error", err)
-		return nil, FILTER_ERROR, err
+		return nil, FILTER_ERROR, &ConversionGoJsError{ExecutingJSErrorFactory(err, "NewSyslogMessage")}
 	}
 	resJsMessage, err = e.jsFilterMessages(nil, jsMessage)
 	_, err = e.jsFilterMessages(nil, jsMessage)
 	if err != nil {
-		e.logger.Warn("Error filtering the syslog message", "error", err)
-		return nil, FILTER_ERROR, err
+		return nil, FILTER_ERROR, ExecutingJSErrorFactory(err, "FilterMessages")
 	}
 
 	filterResult = FilterResult(resJsMessage.ToInteger())
@@ -341,15 +347,12 @@ func (e *Environment) FilterMessage(m *model.SyslogMessage) (result *model.Syslo
 	case PASS:
 		result, err = e.FromJsSyslogMessage(jsMessage)
 		if err != nil {
-			e.logger.Warn("Error converting back the syslog message from JS", "error", err)
-			return nil, FILTER_ERROR, err
+			return nil, FILTER_ERROR, &ConversionJsGoError{Err: err}
 		}
 		return result, PASS, nil
 
 	default:
-		e.logger.Warn("JS filter function returned an invalid result", "result", int64(filterResult))
-		// todo: return error instead
-		return nil, FILTER_ERROR, nil
+		return nil, FILTER_ERROR, fmt.Errorf("JS filter function returned an invalid result: %d", int64(filterResult))
 	}
 
 }
@@ -378,12 +381,12 @@ func (e *Environment) ToJsSyslogMessage(m *model.SyslogMessage) (sm goja.Value, 
 
 func (e *Environment) FromJsSyslogMessage(sm goja.Value) (m *model.SyslogMessage, err error) {
 	if goja.IsUndefined(sm) {
-		return nil, fmt.Errorf("Undefined goja value")
+		return nil, fmt.Errorf("The JS syslog message is 'undefined'")
 	}
 	var smToGo goja.Value
 	smToGo, err = e.jsSyslogMessageToGo(nil, sm)
 	if err != nil {
-		return nil, err
+		return nil, ExecutingJSErrorFactory(err, "SyslogMessageToGo")
 	}
 	imsg := ISyslogMessage{}
 	err = e.runtime.ExportTo(smToGo, &imsg)

@@ -525,8 +525,14 @@ func (s *MessageStore) store2kafka() {
 	ForOutputsTest:
 		for message := range s.Outputs {
 			if message != nil {
-				partitionKey := jsenvs[message.ConfIndex].PartitionKey(message.Parsed.Fields)
-				topic := jsenvs[message.ConfIndex].Topic(message.Parsed.Fields)
+				topic, errs := jsenvs[message.ConfIndex].Topic(message.Parsed.Fields)
+				for _, err := range errs {
+					s.logger.Info("Error calculating topic", "error", err, "uid", message.Uid)
+				}
+				partitionKey, errs := jsenvs[message.ConfIndex].PartitionKey(message.Parsed.Fields)
+				for _, err := range errs {
+					s.logger.Info("Error calculating the partition key", "error", err, "uid", message.Uid)
+				}
 
 				if len(topic) == 0 || len(partitionKey) == 0 {
 					s.logger.Warn("Topic or PartitionKey could not be calculated", "uid", message.Uid)
@@ -534,8 +540,7 @@ func (s *MessageStore) store2kafka() {
 					continue ForOutputsTest
 				}
 
-				// todo: catch err
-				tmsg, filterResult, _ := jsenvs[message.ConfIndex].FilterMessage(message.Parsed.Fields)
+				tmsg, filterResult, err := jsenvs[message.ConfIndex].FilterMessage(message.Parsed.Fields)
 
 				switch filterResult {
 				case javascript.DROPPED:
@@ -551,6 +556,7 @@ func (s *MessageStore) store2kafka() {
 					}
 				default:
 					s.Nack(message.Uid)
+					s.logger.Warn("Error happened when processing message", "uid", message.Uid, "error", err)
 					// todo: log the faulty message to a specific log
 					continue ForOutputsTest
 				}
@@ -630,8 +636,14 @@ func (s *MessageStore) store2kafka() {
 		s.startSend()
 	ForOutputs:
 		for message := range s.Outputs {
-			partitionKey := jsenvs[message.ConfIndex].PartitionKey(message.Parsed.Fields)
-			topic := jsenvs[message.ConfIndex].Topic(message.Parsed.Fields)
+			topic, errs := jsenvs[message.ConfIndex].Topic(message.Parsed.Fields)
+			for _, err := range errs {
+				s.logger.Info("Error calculating topic", "error", err, "uid", message.Uid)
+			}
+			partitionKey, errs := jsenvs[message.ConfIndex].PartitionKey(message.Parsed.Fields)
+			for _, err := range errs {
+				s.logger.Info("Error calculating the partition key", "error", err, "uid", message.Uid)
+			}
 
 			if len(topic) == 0 || len(partitionKey) == 0 {
 				s.logger.Warn("Topic or PartitionKey could not be calculated", "uid", message.Uid)
@@ -640,7 +652,7 @@ func (s *MessageStore) store2kafka() {
 			}
 
 			// todo: catch err
-			tmsg, filterResult, _ := jsenvs[message.ConfIndex].FilterMessage(message.Parsed.Fields)
+			tmsg, filterResult, err := jsenvs[message.ConfIndex].FilterMessage(message.Parsed.Fields)
 
 			switch filterResult {
 			case javascript.DROPPED:
@@ -656,6 +668,7 @@ func (s *MessageStore) store2kafka() {
 				}
 			default:
 				s.Nack(message.Uid)
+				s.logger.Warn("Error happened processing message", "uid", message.Uid, "error", err)
 				// todo: log the faulty message to a specific log
 				continue ForOutputs
 			}

@@ -94,4 +94,13 @@ func (e *JSParsingError) Error() string {
 	return fmt.Sprintf("The provided JS parser '%s' could not parse the raw message: %s", e.ParserName, e.Message)
 }
 
-func (e *JSParsingError) Parsing() {}
+func (e *JSParsingError) Parsing()    {}
+func (e *JSParsingError) Javascript() {}
+
+type InvalidTopic struct {
+	Topic string
+}
+
+func (e *InvalidTopic) Error() string {
+	return fmt.Sprintf("The topic name is invalid: '%s'", e.Topic)
+}
