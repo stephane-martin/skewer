@@ -651,7 +651,6 @@ func (s *MessageStore) store2kafka() {
 				continue ForOutputs
 			}
 
-			// todo: catch err
 			tmsg, filterResult, err := jsenvs[message.ConfIndex].FilterMessage(message.Parsed.Fields)
 
 			switch filterResult {

@@ -30,7 +30,6 @@ func ParseJsonFormat(m string) (*SyslogMessage, error) {
 
 	pri, err := strconv.Atoi(sourceMsg.Priority)
 	if err != nil {
-		// todo: wrap errors
 		return nil, &InvalidPriorityError{}
 	}
 

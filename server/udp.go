@@ -163,7 +163,7 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, i int) {
 		for m := range raw_messages_chan {
 			parser := e.GetParser(s.Conf.Syslog[i].Format)
 			if parser == nil {
-				// todo: log
+				s.logger.Error("Unknown parser", "client", m.Client, "local_port", m.LocalPort, "path", m.UnixSocketPath, "format", s.Conf.Syslog[i].Format)
 				continue
 			}
 			p, err := parser.Parse(m.Message, s.Conf.Syslog[i].DontParseSD)

@@ -212,7 +212,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
 		for m := range raw_messages_chan {
 			parser := e.GetParser(s.Conf.Syslog[i].Format)
 			if parser == nil {
-				// todo: log
+				s.logger.Error("Unknown parser", "client", m.Client, "local_port", m.LocalPort, "path", m.UnixSocketPath, "format", s.Conf.Syslog[i].Format)
 				continue
 			}
 			p, err := parser.Parse(m.Message, s.Conf.Syslog[i].DontParseSD)
@@ -228,7 +228,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
 				}
 				parsed_messages_chan <- &parsed_msg
 			} else {
-				logger.Info("Parsing error", "Message", m.Message)
+				logger.Info("Parsing error", "message", m.Message, "error", err)
 			}
 		}
 		close(parsed_messages_chan)
