@@ -36,11 +36,11 @@ func (s *TcpServer) init() {
 	s.StreamServer.init()
 }
 
-func NewTcpServer(c *conf.GConfig, st *store.MessageStore, metrics *metrics.Metrics, logger log15.Logger) *TcpServer {
+func NewTcpServer(c *conf.GConfig, st *store.MessageStore, metric *metrics.Metrics, logger log15.Logger) *TcpServer {
 	s := TcpServer{
 		status:  TcpStopped,
 		store:   st,
-		metrics: metrics,
+		metrics: metric,
 	}
 	s.logger = logger.New("class", "TcpServer")
 	s.protocol = "tcp"

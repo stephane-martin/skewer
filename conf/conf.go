@@ -636,13 +636,17 @@ func (c *GConfig) Complete() (err error) {
 			c.Syslog[i].Timeout = time.Minute
 		}
 
-		_, err = template.New("topic").Parse(c.Syslog[i].TopicTmpl)
-		if err != nil {
-			return ConfigurationCheckError{ErrString: "Error compiling the topic template", Err: err}
+		if len(c.Syslog[i].TopicTmpl) > 0 {
+			_, err = template.New("topic").Parse(c.Syslog[i].TopicTmpl)
+			if err != nil {
+				return ConfigurationCheckError{ErrString: "Error compiling the topic template", Err: err}
+			}
 		}
-		_, err = template.New("partition").Parse(c.Syslog[i].PartitionTmpl)
-		if err != nil {
-			return ConfigurationCheckError{ErrString: "Error compiling the partition key template", Err: err}
+		if len(c.Syslog[i].PartitionTmpl) > 0 {
+			_, err = template.New("partition").Parse(c.Syslog[i].PartitionTmpl)
+			if err != nil {
+				return ConfigurationCheckError{ErrString: "Error compiling the partition key template", Err: err}
+			}
 		}
 
 		_, err = c.Syslog[i].GetListenAddr()
@@ -662,27 +666,20 @@ func (c *GConfig) Complete() (err error) {
 	}
 
 	if c.Journald.Enabled {
-		journaldConf := SyslogConfig{
-			FilterFunc:    c.Journald.FilterFunc,
-			PartitionFunc: c.Journald.PartitionFunc,
-			PartitionTmpl: c.Journald.PartitionTmpl,
-			TopicFunc:     c.Journald.TopicFunc,
-			TopicTmpl:     c.Journald.TopicTmpl,
-			Protocol:      "journald",
-		}
-
 		var err error
 
-		_, err = template.New("journaldtopic").Parse(journaldConf.TopicTmpl)
-		if err != nil {
-			return ConfigurationCheckError{ErrString: "Error compiling the topic template", Err: err}
+		if len(c.Journald.TopicTmpl) > 0 {
+			_, err = template.New("journaldtopic").Parse(c.Journald.TopicTmpl)
+			if err != nil {
+				return ConfigurationCheckError{ErrString: "Error compiling the topic template", Err: err}
+			}
 		}
-		_, err = template.New("journaldpartition").Parse(journaldConf.PartitionTmpl)
-		if err != nil {
-			return ConfigurationCheckError{ErrString: "Error compiling the partition key template", Err: err}
+		if len(c.Journald.PartitionTmpl) > 0 {
+			_, err = template.New("journaldpartition").Parse(c.Journald.PartitionTmpl)
+			if err != nil {
+				return ConfigurationCheckError{ErrString: "Error compiling the partition key template", Err: err}
+			}
 		}
-		c.Syslog = append(c.Syslog, journaldConf)
-
 	}
 
 	return nil

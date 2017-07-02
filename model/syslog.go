@@ -28,8 +28,8 @@ type SyslogMessage struct {
 	Msgid         string                 `json:"msgid"`
 	Structured    string                 `json:"structured"`
 	Message       string                 `json:"message"`
-	AuditMessage  interface{}            `json:"audit"`
-	Properties    map[string]interface{} `json:"properties"`
+	AuditMessage  interface{}            `json:"audit,omitempty"`
+	Properties    map[string]interface{} `json:"properties,omitempty"`
 }
 
 type RawMessage struct {

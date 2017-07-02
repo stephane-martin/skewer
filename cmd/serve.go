@@ -122,6 +122,18 @@ func Serve() {
 
 	metrics := metrics.SetupMetrics()
 
+	var journaldServer *server.JournaldServer
+	if c.Journald.Enabled {
+		logger.Info("Journald is enabled")
+		journaldServer, err = server.NewJournaldServer(c.Journald, st, metrics, logger)
+		if err == nil {
+			journaldServer.Start()
+			defer journaldServer.Close()
+		} else {
+			// todo: log
+		}
+	}
+
 	// prepare the RELP service
 	relpServer := server.NewRelpServer(c, metrics, logger)
 	if testFlag {
@@ -155,6 +167,17 @@ func Serve() {
 		st.StopSendToKafka()
 		st.SendToKafka(newConf.Kafka)
 		wg := &sync.WaitGroup{}
+
+		if journaldServer != nil {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				journaldServer.Stop()
+				journaldServer.Conf = newConf.Journald
+				journaldServer.Start()
+			}()
+		}
+
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
