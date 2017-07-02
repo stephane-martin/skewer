@@ -80,7 +80,7 @@ func (s *RelpServer) Start() error {
 	if !s.test {
 		s.logger.Debug("trying to reach kafka")
 		var err error
-		s.kafkaClient, err = s.Conf.GetKafkaClient()
+		s.kafkaClient, err = s.Conf.Kafka.GetClient()
 		if err != nil {
 			// sarama/kafka error
 			s.resetTCPListeners()
@@ -267,7 +267,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 
 		}()
 	} else {
-		producer, err = s.Conf.GetKafkaAsyncProducer()
+		producer, err = s.Conf.Kafka.GetAsyncProducer()
 		if err != nil {
 			logger.Warn("Can't get a kafka producer. Aborting handleConn.")
 			return

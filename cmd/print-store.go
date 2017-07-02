@@ -49,7 +49,7 @@ to quickly create a Cobra application.`,
 		}
 
 		// prepare the message store
-		st, err = store.NewStore(c, logger, testFlag)
+		st, err = store.NewStore(c.Store.Dirname, c.Store.Maxsize, c.Store.FSync, logger, testFlag)
 		if err != nil {
 			fmt.Println("Can't create the message Store", "error", err)
 			return

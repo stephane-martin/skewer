@@ -42,7 +42,7 @@ type MessageStore struct {
 	storeToKafkaWg *sync.WaitGroup
 	ticker         *time.Ticker
 	logger         log15.Logger
-	Conf           conf.GConfig
+	//Conf           conf.GConfig
 }
 
 func (s *MessageStore) init() {
@@ -60,12 +60,12 @@ func (s *MessageStore) init() {
 }
 
 func (s *MessageStore) SetNewConf(newConf *conf.GConfig) {
-	s.Conf = *newConf
+	//s.Conf = *newConf
 }
 
-// todo: get rid of conf.GConfig
-func NewStore(c *conf.GConfig, l log15.Logger, test bool) (store *MessageStore, err error) {
-	dirname := c.Store.Dirname
+//func NewStore(c *conf.GConfig, l log15.Logger, test bool) (store *MessageStore, err error) {
+func NewStore(dirname string, maxSize int64, fsync bool, l log15.Logger, test bool) (store *MessageStore, err error) {
+	//dirname := c.Store.Dirname
 	opts_messages := badger.DefaultOptions
 	opts_ready := badger.DefaultOptions
 	opts_sent := badger.DefaultOptions
@@ -81,11 +81,19 @@ func NewStore(c *conf.GConfig, l log15.Logger, test bool) (store *MessageStore, 
 	opts_failed.ValueDir = path.Join(dirname, "failed")
 	opts_configs.Dir = path.Join(dirname, "configs")
 	opts_configs.ValueDir = path.Join(dirname, "configs")
-	opts_messages.MaxTableSize = c.Store.Maxsize
-	opts_messages.SyncWrites = c.Store.FSync
-	opts_ready.SyncWrites = c.Store.FSync
-	opts_sent.SyncWrites = c.Store.FSync
-	opts_failed.SyncWrites = c.Store.FSync
+	/*
+		opts_messages.MaxTableSize = c.Store.Maxsize
+		opts_messages.SyncWrites = c.Store.FSync
+		opts_ready.SyncWrites = c.Store.FSync
+		opts_sent.SyncWrites = c.Store.FSync
+		opts_failed.SyncWrites = c.Store.FSync
+	*/
+	opts_messages.MaxTableSize = maxSize
+	opts_messages.SyncWrites = fsync
+	opts_ready.SyncWrites = fsync
+	opts_sent.SyncWrites = fsync
+	opts_failed.SyncWrites = fsync
+
 	opts_configs.SyncWrites = true
 
 	err = os.MkdirAll(opts_messages.Dir, 0700)
@@ -112,7 +120,7 @@ func NewStore(c *conf.GConfig, l log15.Logger, test bool) (store *MessageStore, 
 	store = &MessageStore{}
 	store.logger = l.New("class", "MessageStore")
 	store.init()
-	store.SetNewConf(c)
+	//store.SetNewConf(c)
 	store.test = test
 
 	store.messages, err = badger.NewKV(&opts_messages)
@@ -198,10 +206,10 @@ func (s *MessageStore) GetSyslogConfig(id string) (*conf.SyslogConfig, error) {
 	return c, nil
 }
 
-func (s *MessageStore) SendToKafka() {
+func (s *MessageStore) SendToKafka(c conf.KafkaConfig) {
 	s.KafkaErrorChan = make(chan bool)
 	s.storeToKafkaWg.Add(1)
-	go s.store2kafka()
+	go s.store2kafka(c)
 }
 
 func (s *MessageStore) StopSendToKafka() {
@@ -547,7 +555,7 @@ func (s *MessageStore) Nack(id string) {
 	s.failed.Set([]byte(id), []byte(time.Now().Format(time.RFC3339)))
 }
 
-func (s *MessageStore) store2kafka() {
+func (s *MessageStore) store2kafka(c conf.KafkaConfig) {
 	defer func() {
 		s.logger.Debug("Store2Kafka has ended")
 		s.storeToKafkaWg.Done()
@@ -638,7 +646,7 @@ func (s *MessageStore) store2kafka() {
 		var producer sarama.AsyncProducer
 		var err error
 		for {
-			producer, err = s.Conf.GetKafkaAsyncProducer()
+			producer, err = c.GetAsyncProducer()
 			if err == nil {
 				s.logger.Debug("Got a Kafka producer")
 				break

@@ -51,6 +51,9 @@ func (e ConfigurationCheckError) Error() string {
 	if e.Err == nil {
 		return e.ErrString
 	}
+	if len(e.ErrString) == 0 {
+		return e.Err.Error()
+	}
 	return fmt.Sprintf("%s: %s", e.ErrString, e.Err.Error())
 }
 

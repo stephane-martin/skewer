@@ -214,11 +214,24 @@ type SyslogConfig struct {
 	KeepAlive       bool          `mapstructure:"keepalive" toml:"keepalive" json:"keepalive"`
 	KeepAlivePeriod time.Duration `mapstructure:"keepalive_period" toml:"keepalive_period" json:"keepalive_period"`
 	Timeout         time.Duration `mapstructure:"timeout" toml:"timeout" json:"timeout"`
-	// todo: delete compiled templates
-	BindIP     net.IP `toml:"-"`
-	ListenAddr string `toml:"-"`
 
 	// Partitioner ?
+}
+
+func (c *SyslogConfig) GetListenAddr() (string, error) {
+	if len(c.UnixSocketPath) > 0 {
+		return "", nil
+	}
+	bindIP := net.ParseIP(c.BindAddr)
+	if bindIP == nil {
+		return "", fmt.Errorf("bind_addr is not an IP address: %s", c.BindAddr)
+	}
+
+	if bindIP.IsUnspecified() {
+		return fmt.Sprintf(":%d", c.Port), nil
+	} else {
+		return fmt.Sprintf("%s:%d", bindIP.String(), c.Port), nil
+	}
 }
 
 func (c *SyslogConfig) Export() []byte {
@@ -235,46 +248,46 @@ func ImportSyslogConfig(data []byte) (*SyslogConfig, error) {
 	return &c, nil
 }
 
-func (c *GConfig) GetSaramaConfig() *sarama.Config {
+func (c *KafkaConfig) GetSaramaConfig() *sarama.Config {
 	s := sarama.NewConfig()
-	s.Net.MaxOpenRequests = c.Kafka.MaxOpenRequests
-	s.Net.DialTimeout = c.Kafka.DialTimeout
-	s.Net.ReadTimeout = c.Kafka.ReadTimeout
-	s.Net.WriteTimeout = c.Kafka.WriteTimeout
-	s.Net.KeepAlive = c.Kafka.KeepAlive
-	s.Metadata.Retry.Backoff = c.Kafka.MetadataRetryBackoff
-	s.Metadata.Retry.Max = c.Kafka.MetadataRetryMax
-	s.Metadata.RefreshFrequency = c.Kafka.MetadataRefreshFrequency
-	s.Producer.MaxMessageBytes = c.Kafka.MessageBytesMax
-	s.Producer.RequiredAcks = sarama.RequiredAcks(c.Kafka.RequiredAcks)
-	s.Producer.Timeout = c.Kafka.ProducerTimeout
-	s.Producer.Compression = c.Kafka.pCompression
+	s.Net.MaxOpenRequests = c.MaxOpenRequests
+	s.Net.DialTimeout = c.DialTimeout
+	s.Net.ReadTimeout = c.ReadTimeout
+	s.Net.WriteTimeout = c.WriteTimeout
+	s.Net.KeepAlive = c.KeepAlive
+	s.Metadata.Retry.Backoff = c.MetadataRetryBackoff
+	s.Metadata.Retry.Max = c.MetadataRetryMax
+	s.Metadata.RefreshFrequency = c.MetadataRefreshFrequency
+	s.Producer.MaxMessageBytes = c.MessageBytesMax
+	s.Producer.RequiredAcks = sarama.RequiredAcks(c.RequiredAcks)
+	s.Producer.Timeout = c.ProducerTimeout
+	s.Producer.Compression = c.pCompression
 	s.Producer.Return.Errors = true
 	s.Producer.Return.Successes = true
-	s.Producer.Flush.Bytes = c.Kafka.FlushBytes
-	s.Producer.Flush.Frequency = c.Kafka.FlushFrequency
-	s.Producer.Flush.Messages = c.Kafka.FlushMessages
-	s.Producer.Flush.MaxMessages = c.Kafka.FlushMessagesMax
-	s.Producer.Retry.Backoff = c.Kafka.RetrySendBackoff
-	s.Producer.Retry.Max = c.Kafka.RetrySendMax
-	s.ClientID = c.Kafka.ClientID
-	s.ChannelBufferSize = c.Kafka.ChannelBufferSize
-	s.Version = c.Kafka.pVersion
+	s.Producer.Flush.Bytes = c.FlushBytes
+	s.Producer.Flush.Frequency = c.FlushFrequency
+	s.Producer.Flush.Messages = c.FlushMessages
+	s.Producer.Flush.MaxMessages = c.FlushMessagesMax
+	s.Producer.Retry.Backoff = c.RetrySendBackoff
+	s.Producer.Retry.Max = c.RetrySendMax
+	s.ClientID = c.ClientID
+	s.ChannelBufferSize = c.ChannelBufferSize
+	s.Version = c.pVersion
 	// MetricRegistry ?
 	// partitioner ?
 	return s
 }
 
-func (c *GConfig) GetKafkaAsyncProducer() (sarama.AsyncProducer, error) {
-	p, err := sarama.NewAsyncProducer(c.Kafka.Brokers, c.GetSaramaConfig())
+func (c *KafkaConfig) GetAsyncProducer() (sarama.AsyncProducer, error) {
+	p, err := sarama.NewAsyncProducer(c.Brokers, c.GetSaramaConfig())
 	if err == nil {
 		return p, nil
 	}
 	return nil, KafkaError{Err: err}
 }
 
-func (c *GConfig) GetKafkaClient() (sarama.Client, error) {
-	cl, err := sarama.NewClient(c.Kafka.Brokers, c.GetSaramaConfig())
+func (c *KafkaConfig) GetClient() (sarama.Client, error) {
+	cl, err := sarama.NewClient(c.Brokers, c.GetSaramaConfig())
 	if err == nil {
 		return cl, nil
 	}
@@ -632,17 +645,9 @@ func (c *GConfig) Complete() (err error) {
 			return ConfigurationCheckError{ErrString: "Error compiling the partition key template", Err: err}
 		}
 
-		if c.Syslog[i].UnixSocketPath == "" {
-			c.Syslog[i].BindIP = net.ParseIP(c.Syslog[i].BindAddr)
-			if c.Syslog[i].BindIP == nil {
-				return ConfigurationCheckError{ErrString: fmt.Sprintf("bind_addr is not an IP address: %s", c.Syslog[i].BindAddr)}
-			}
-
-			if c.Syslog[i].BindIP.IsUnspecified() {
-				c.Syslog[i].ListenAddr = fmt.Sprintf(":%d", c.Syslog[i].Port)
-			} else {
-				c.Syslog[i].ListenAddr = fmt.Sprintf("%s:%d", c.Syslog[i].BindIP.String(), c.Syslog[i].Port)
-			}
+		_, err = c.Syslog[i].GetListenAddr()
+		if err != nil {
+			return ConfigurationCheckError{Err: err}
 		}
 	}
 

@@ -118,9 +118,10 @@ func (s *UdpServer) ListenPacket() int {
 					go s.handleConnection(conn, syslogConf, confId)
 				}
 			} else {
-				conn, err := net.ListenPacket("udp", syslogConf.ListenAddr)
+				listenAddr, _ := syslogConf.GetListenAddr()
+				conn, err := net.ListenPacket("udp", listenAddr)
 				if err != nil {
-					s.logger.Warn("Error listening on UDP", "addr", syslogConf.ListenAddr, "error", err)
+					s.logger.Warn("Error listening on UDP", "addr", listenAddr, "error", err)
 				} else if conn != nil {
 					s.logger.Info("Listener", "protocol", s.protocol, "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
 					nb++

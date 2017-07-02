@@ -112,12 +112,12 @@ func Serve() {
 	}
 
 	// prepare the message store
-	st, err = store.NewStore(c, logger, testFlag)
+	st, err = store.NewStore(c.Store.Dirname, c.Store.Maxsize, c.Store.FSync, logger, testFlag)
 	if err != nil {
 		logger.Crit("Can't create the message Store", "error", err)
 		os.Exit(-1)
 	}
-	st.SendToKafka()
+	st.SendToKafka(c.Kafka)
 	defer st.Close()
 
 	metrics := metrics.SetupMetrics()
@@ -153,8 +153,7 @@ func Serve() {
 
 	Reload := func(newConf *conf.GConfig) {
 		st.StopSendToKafka()
-		st.SetNewConf(newConf)
-		st.SendToKafka()
+		st.SendToKafka(newConf.Kafka)
 		wg := &sync.WaitGroup{}
 		wg.Add(1)
 		go func() {
@@ -234,7 +233,7 @@ func Serve() {
 		case <-st.KafkaErrorChan:
 			logger.Warn("Store has received a Kafka error: resetting connection to Kafka")
 			st.StopSendToKafka()
-			st.SendToKafka()
+			st.SendToKafka(c.Kafka)
 
 		case state := <-relpServer.StatusChan:
 			switch state {

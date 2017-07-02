@@ -119,9 +119,10 @@ func (s *StreamServer) initTCPListeners() int {
 				continue
 			}
 		} else {
-			tcpAddr, err := net.ResolveTCPAddr("tcp", syslogConf.ListenAddr)
+			listenAddr, _ := syslogConf.GetListenAddr()
+			tcpAddr, err := net.ResolveTCPAddr("tcp", listenAddr)
 			if err != nil {
-				s.logger.Warn("Error resolving TCP address", "address", syslogConf.ListenAddr, "error", err)
+				s.logger.Warn("Error resolving TCP address", "address", listenAddr, "error", err)
 				continue
 			}
 			l, err := net.ListenTCP("tcp", tcpAddr)
@@ -134,7 +135,7 @@ func (s *StreamServer) initTCPListeners() int {
 				}
 				s.tcpListeners = append(s.tcpListeners, &lc)
 			} else {
-				s.logger.Error("Error listening on stream (TCP or RELP)", "listen_addr", syslogConf.ListenAddr, "error", err)
+				s.logger.Error("Error listening on stream (TCP or RELP)", "listen_addr", listenAddr, "error", err)
 				continue
 			}
 		}
@@ -229,25 +230,25 @@ func (s *StreamServer) AcceptTCP(lc *TCPListenerConf) {
 				if err == nil {
 					err := conn.SetKeepAlivePeriod(lc.Conf.KeepAlivePeriod)
 					if err != nil {
-						s.logger.Warn("Error setting keepalive period", "addr", lc.Conf.ListenAddr, "period", lc.Conf.KeepAlivePeriod)
+						s.logger.Warn("Error setting keepalive period", "addr", lc.Conf.BindAddr, "period", lc.Conf.KeepAlivePeriod)
 					}
 				} else {
-					s.logger.Warn("Error setting keepalive", "addr", lc.Conf.ListenAddr)
+					s.logger.Warn("Error setting keepalive", "addr", lc.Conf.BindAddr)
 				}
 
 			} else {
 				err := conn.SetKeepAlive(false)
 				if err != nil {
-					s.logger.Warn("Error disabling keepalive", "addr", lc.Conf.ListenAddr)
+					s.logger.Warn("Error disabling keepalive", "addr", lc.Conf.BindAddr)
 				}
 			}
 			err := conn.SetNoDelay(true)
 			if err != nil {
-				s.logger.Warn("Error setting TCP NODELAY", "addr", lc.Conf.ListenAddr)
+				s.logger.Warn("Error setting TCP NODELAY", "addr", lc.Conf.BindAddr)
 			}
 			err = conn.SetLinger(-1)
 			if err != nil {
-				s.logger.Warn("Error setting TCP LINGER", "addr", lc.Conf.ListenAddr)
+				s.logger.Warn("Error setting TCP LINGER", "addr", lc.Conf.BindAddr)
 			}
 			s.wg.Add(1)
 			go s.handleConnection(conn, lc.Conf)
