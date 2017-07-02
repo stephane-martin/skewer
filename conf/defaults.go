@@ -1,6 +1,8 @@
 package conf
 
 import (
+	"os/exec"
+
 	"github.com/spf13/viper"
 	sarama "gopkg.in/Shopify/sarama.v1"
 )
@@ -16,7 +18,13 @@ func SetJournaldDefaults(v *viper.Viper, prefixed bool) {
 	if prefixed {
 		prefix = "journald."
 	}
-	v.SetDefault(prefix+"topic_tmpl", "rsyslog-{{.Appname}}")
+	_, err := exec.LookPath("systemctl")
+	if err == nil {
+		v.SetDefault(prefix+"enabled", true)
+	} else {
+		v.SetDefault(prefix+"enabled", false)
+	}
+	v.SetDefault(prefix+"topic_tmpl", "journald-{{.Appname}}")
 	v.SetDefault(prefix+"partition_key_tmpl", "mypk-{{.Hostname}}")
 }
 

@@ -191,7 +191,7 @@ type KafkaConfig struct {
 }
 
 type JournaldConfig struct {
-	Enabled       bool
+	Enabled       bool   `mapstructure:"enabled" toml:"enabled"`
 	TopicTmpl     string `mapstructure:"topic_tmpl" toml:"topic_tmpl"`
 	TopicFunc     string `mapstructure:"topic_function" toml:"topic_function"`
 	PartitionTmpl string `mapstructure:"partition_key_tmpl" toml:"partition_key_tmpl"`
