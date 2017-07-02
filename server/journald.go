@@ -32,19 +32,19 @@ func EntryToSyslog(entry map[string]string) *model.SyslogMessage {
 			m.Procid = v
 		case "priority":
 			p, err := strconv.Atoi(v)
-			if err != nil {
-				m.Priority = model.Priority(p)
+			if err == nil {
+				m.Severity = model.Severity(p)
 			}
 		case "syslog_facility":
 			f, err := strconv.Atoi(v)
-			if err != nil {
+			if err == nil {
 				m.Facility = model.Facility(f)
 			}
 		case "_hostname":
 			m.Hostname = v
 		case "_source_realtime_timestamp": // microseconds
 			t, err := strconv.ParseInt(v, 10, 64)
-			if err != nil {
+			if err == nil {
 				m.TimeReported = time.Unix(0, t*1000)
 			}
 		default:
@@ -64,6 +64,7 @@ func EntryToSyslog(entry map[string]string) *model.SyslogMessage {
 	if m.TimeReported.IsZero() {
 		m.TimeReported = m.TimeGenerated
 	}
+	m.Priority = model.Priority(int(m.Facility)*8 + int(m.Severity))
 	m.Properties = map[string]interface{}{}
 	m.Properties["journald"] = properties
 	return &m
