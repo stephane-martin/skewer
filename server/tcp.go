@@ -90,7 +90,8 @@ type TcpHandler struct {
 	Server *TcpServer
 }
 
-func (h TcpHandler) HandleConnection(conn net.Conn, i int) {
+func (h TcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
+
 	var local_port int
 
 	s := h.Server
@@ -103,6 +104,12 @@ func (h TcpHandler) HandleConnection(conn net.Conn, i int) {
 		s.RemoveConnection(conn)
 		s.wg.Done()
 	}()
+
+	configId, err := s.store.StoreSyslogConfig(&config)
+	if err != nil {
+		s.logger.Error("Error storing configuration", "error", err)
+		return
+	}
 
 	client := ""
 	path := ""
@@ -135,12 +142,12 @@ func (h TcpHandler) HandleConnection(conn net.Conn, i int) {
 		e := s.NewParsersEnv()
 		entropy := rand.New(rand.NewSource(time.Now().UnixNano()))
 		for m := range raw_messages_chan {
-			parser := e.GetParser(s.Conf.Syslog[i].Format)
+			parser := e.GetParser(config.Format)
 			if parser == nil {
-				s.logger.Error("Unknown parser", "client", m.Client, "local_port", m.LocalPort, "path", m.UnixSocketPath, "format", s.Conf.Syslog[i].Format)
+				s.logger.Error("Unknown parser", "client", m.Client, "local_port", m.LocalPort, "path", m.UnixSocketPath, "format", config.Format)
 				continue
 			}
-			p, err := parser.Parse(m.Message, s.Conf.Syslog[i].DontParseSD)
+			p, err := parser.Parse(m.Message, config.DontParseSD)
 
 			if err == nil {
 				uid, err := ulid.New(ulid.Timestamp(p.TimeReported), entropy)
@@ -155,8 +162,8 @@ func (h TcpHandler) HandleConnection(conn net.Conn, i int) {
 							LocalPort:      m.LocalPort,
 							UnixSocketPath: m.UnixSocketPath,
 						},
-						Uid:       uid.String(),
-						ConfIndex: i,
+						Uid:    uid.String(),
+						ConfId: configId,
 					}
 					s.store.Inputs <- &parsed_msg
 				}
@@ -166,12 +173,12 @@ func (h TcpHandler) HandleConnection(conn net.Conn, i int) {
 		}
 	}()
 
-	timeout := s.Conf.Syslog[i].Timeout
+	timeout := config.Timeout
 	if timeout > 0 {
 		conn.SetReadDeadline(time.Now().Add(timeout))
 	}
 	scanner := bufio.NewScanner(conn)
-	switch s.Conf.Syslog[i].Format {
+	switch config.Format {
 	case "rfc5424", "rfc3164", "json", "auto":
 		scanner.Split(TcpSplit)
 	default:

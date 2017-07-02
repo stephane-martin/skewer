@@ -8,6 +8,16 @@ import (
 func SetDefaults(v *viper.Viper) {
 	SetKafkaDefaults(v, true)
 	SetStoreDefaults(v, true)
+	SetJournaldDefaults(v, true)
+}
+
+func SetJournaldDefaults(v *viper.Viper, prefixed bool) {
+	var prefix string
+	if prefixed {
+		prefix = "journald."
+	}
+	v.SetDefault(prefix+"topic_tmpl", "rsyslog-{{.Appname}}")
+	v.SetDefault(prefix+"partition_key_tmpl", "mypk-{{.Hostname}}")
 }
 
 func SetKafkaDefaults(v *viper.Viper, prefixed bool) {

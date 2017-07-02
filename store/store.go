@@ -1,6 +1,8 @@
 package store
 
 import (
+	"crypto/sha512"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -23,6 +25,7 @@ type MessageStore struct {
 	ready          *badger.KV
 	sent           *badger.KV
 	failed         *badger.KV
+	syslog_configs *badger.KV
 	sendStoppedMu  *sync.Mutex
 	sendStopped    bool
 	StopSendChan   chan bool
@@ -56,33 +59,18 @@ func (s *MessageStore) init() {
 	s.KafkaErrorChan = make(chan bool)
 }
 
-func (s *MessageStore) NewJsEnvs() map[int]*javascript.Environment {
-	jsenvs := map[int]*javascript.Environment{}
-	for i, syslogConf := range s.Conf.Syslog {
-		if syslogConf.Protocol != "relp" {
-			jsenvs[i] = javascript.New(
-				syslogConf.FilterFunc,
-				syslogConf.TopicFunc,
-				syslogConf.TopicTemplate,
-				syslogConf.PartitionFunc,
-				syslogConf.PartitionKeyTemplate,
-				s.logger,
-			)
-		}
-	}
-	return jsenvs
-}
-
 func (s *MessageStore) SetNewConf(newConf *conf.GConfig) {
 	s.Conf = *newConf
 }
 
+// todo: get rid of conf.GConfig
 func NewStore(c *conf.GConfig, l log15.Logger, test bool) (store *MessageStore, err error) {
 	dirname := c.Store.Dirname
 	opts_messages := badger.DefaultOptions
 	opts_ready := badger.DefaultOptions
 	opts_sent := badger.DefaultOptions
 	opts_failed := badger.DefaultOptions
+	opts_configs := badger.DefaultOptions
 	opts_messages.Dir = path.Join(dirname, "messages")
 	opts_messages.ValueDir = path.Join(dirname, "messages")
 	opts_sent.Dir = path.Join(dirname, "sent")
@@ -91,11 +79,14 @@ func NewStore(c *conf.GConfig, l log15.Logger, test bool) (store *MessageStore, 
 	opts_ready.ValueDir = path.Join(dirname, "ready")
 	opts_failed.Dir = path.Join(dirname, "failed")
 	opts_failed.ValueDir = path.Join(dirname, "failed")
+	opts_configs.Dir = path.Join(dirname, "configs")
+	opts_configs.ValueDir = path.Join(dirname, "configs")
 	opts_messages.MaxTableSize = c.Store.Maxsize
 	opts_messages.SyncWrites = c.Store.FSync
 	opts_ready.SyncWrites = c.Store.FSync
 	opts_sent.SyncWrites = c.Store.FSync
 	opts_failed.SyncWrites = c.Store.FSync
+	opts_configs.SyncWrites = true
 
 	err = os.MkdirAll(opts_messages.Dir, 0700)
 	if err != nil {
@@ -110,6 +101,10 @@ func NewStore(c *conf.GConfig, l log15.Logger, test bool) (store *MessageStore, 
 		return nil, err
 	}
 	err = os.MkdirAll(opts_failed.Dir, 0700)
+	if err != nil {
+		return nil, err
+	}
+	err = os.MkdirAll(opts_configs.Dir, 0700)
 	if err != nil {
 		return nil, err
 	}
@@ -133,6 +128,10 @@ func NewStore(c *conf.GConfig, l log15.Logger, test bool) (store *MessageStore, 
 		return nil, err
 	}
 	store.failed, err = badger.NewKV(&opts_failed)
+	if err != nil {
+		return nil, err
+	}
+	store.syslog_configs, err = badger.NewKV(&opts_configs)
 	if err != nil {
 		return nil, err
 	}
@@ -162,6 +161,41 @@ func NewStore(c *conf.GConfig, l log15.Logger, test bool) (store *MessageStore, 
 	store.startIngest()
 
 	return store, nil
+}
+
+func (s *MessageStore) StoreSyslogConfig(config *conf.SyslogConfig) (string, error) {
+	data := config.Export()
+	h := sha512.Sum512(data)
+	hs := h[:]
+	exists, err := s.syslog_configs.Exists(hs)
+	if err != nil {
+		return "", err
+	}
+	if !exists {
+		err := s.syslog_configs.Set(hs, data)
+		if err != nil {
+			return "", err
+		}
+	}
+	return base64.StdEncoding.EncodeToString(hs), nil
+}
+
+func (s *MessageStore) GetSyslogConfig(id string) (*conf.SyslogConfig, error) {
+	ident, err := base64.StdEncoding.DecodeString(id)
+	if err != nil {
+		return nil, fmt.Errorf("The id can't be decoded")
+	}
+	kv := badger.KVItem{}
+	s.syslog_configs.Get(ident, &kv)
+	data := kv.Value()
+	if data == nil {
+		return nil, fmt.Errorf("Unknown syslog configuration id")
+	}
+	c, err := conf.ImportSyslogConfig(data)
+	if err != nil {
+		return nil, fmt.Errorf("Can't unmarshal the syslog config: %s", err.Error())
+	}
+	return c, nil
 }
 
 func (s *MessageStore) SendToKafka() {
@@ -519,17 +553,34 @@ func (s *MessageStore) store2kafka() {
 		s.storeToKafkaWg.Done()
 	}()
 	s.logger.Debug("Store2Kafka")
-	jsenvs := s.NewJsEnvs()
+	jsenvs := map[string]*javascript.Environment{}
 	if s.test {
 		s.startSend()
+
 	ForOutputsTest:
 		for message := range s.Outputs {
+			if _, ok := jsenvs[message.ConfId]; !ok {
+				config, err := s.GetSyslogConfig(message.ConfId)
+				if err != nil {
+					// todo: log
+					continue ForOutputsTest
+				}
+				jsenvs[message.ConfId] = javascript.New(
+					config.FilterFunc,
+					config.TopicFunc,
+					config.TopicTmpl,
+					config.PartitionFunc,
+					config.PartitionTmpl,
+					s.logger,
+				)
+			}
+
 			if message != nil {
-				topic, errs := jsenvs[message.ConfIndex].Topic(message.Parsed.Fields)
+				topic, errs := jsenvs[message.ConfId].Topic(message.Parsed.Fields)
 				for _, err := range errs {
 					s.logger.Info("Error calculating topic", "error", err, "uid", message.Uid)
 				}
-				partitionKey, errs := jsenvs[message.ConfIndex].PartitionKey(message.Parsed.Fields)
+				partitionKey, errs := jsenvs[message.ConfId].PartitionKey(message.Parsed.Fields)
 				for _, err := range errs {
 					s.logger.Info("Error calculating the partition key", "error", err, "uid", message.Uid)
 				}
@@ -540,7 +591,7 @@ func (s *MessageStore) store2kafka() {
 					continue ForOutputsTest
 				}
 
-				tmsg, filterResult, err := jsenvs[message.ConfIndex].FilterMessage(message.Parsed.Fields)
+				tmsg, filterResult, err := jsenvs[message.ConfId].FilterMessage(message.Parsed.Fields)
 
 				switch filterResult {
 				case javascript.DROPPED:
@@ -636,11 +687,27 @@ func (s *MessageStore) store2kafka() {
 		s.startSend()
 	ForOutputs:
 		for message := range s.Outputs {
-			topic, errs := jsenvs[message.ConfIndex].Topic(message.Parsed.Fields)
+			if _, ok := jsenvs[message.ConfId]; !ok {
+				config, err := s.GetSyslogConfig(message.ConfId)
+				if err != nil {
+					// todo: log
+					continue ForOutputs
+				}
+				jsenvs[message.ConfId] = javascript.New(
+					config.FilterFunc,
+					config.TopicFunc,
+					config.TopicTmpl,
+					config.PartitionFunc,
+					config.PartitionTmpl,
+					s.logger,
+				)
+			}
+
+			topic, errs := jsenvs[message.ConfId].Topic(message.Parsed.Fields)
 			for _, err := range errs {
 				s.logger.Info("Error calculating topic", "error", err, "uid", message.Uid)
 			}
-			partitionKey, errs := jsenvs[message.ConfIndex].PartitionKey(message.Parsed.Fields)
+			partitionKey, errs := jsenvs[message.ConfId].PartitionKey(message.Parsed.Fields)
 			for _, err := range errs {
 				s.logger.Info("Error calculating the partition key", "error", err, "uid", message.Uid)
 			}
@@ -651,7 +718,7 @@ func (s *MessageStore) store2kafka() {
 				continue ForOutputs
 			}
 
-			tmsg, filterResult, err := jsenvs[message.ConfIndex].FilterMessage(message.Parsed.Fields)
+			tmsg, filterResult, err := jsenvs[message.ConfId].FilterMessage(message.Parsed.Fields)
 
 			switch filterResult {
 			case javascript.DROPPED:

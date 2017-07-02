@@ -125,24 +125,41 @@ func (p *Parser) Parse(rawMessage string, dont_parse_sd bool) (*model.SyslogMess
 func New(
 	filterFunc string,
 	topicFunc string,
-	topicTmpl *template.Template,
+	topicTmpl string,
 	partitionKeyFunc string,
-	partitionKeyTmpl *template.Template,
+	partitionKeyTmpl string,
 	logger log15.Logger,
 ) *Environment {
 
-	e := Environment{topicTmpl: topicTmpl, partitionKeyTmpl: partitionKeyTmpl}
+	e := Environment{}
 	e.logger = logger.New("class", "Environment")
+
+	if len(topicTmpl) > 0 {
+		t, err := template.New("topic").Parse(topicTmpl)
+		if err == nil {
+			e.topicTmpl = t
+		}
+	}
+	if len(partitionKeyTmpl) > 0 {
+		t, err := template.New("pkey").Parse(partitionKeyTmpl)
+		if err == nil {
+			e.partitionKeyTmpl = t
+		}
+	}
+
 	e.jsParsers = map[string]goja.Callable{}
+
 	e.runtime = goja.New()
 	e.runtime.RunString(jsSyslogMessage)
 	v := e.runtime.Get("NewSyslogMessage")
 	e.jsNewSyslogMessage, _ = goja.AssertFunction(v)
 	v = e.runtime.Get("SyslogMessageToGo")
 	e.jsSyslogMessageToGo, _ = goja.AssertFunction(v)
+
 	topicFunc = strings.TrimSpace(topicFunc)
 	partitionKeyFunc = strings.TrimSpace(partitionKeyFunc)
 	filterFunc = strings.TrimSpace(filterFunc)
+
 	if len(topicFunc) > 0 {
 		err := e.SetTopicFunc(topicFunc)
 		if err != nil {

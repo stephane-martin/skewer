@@ -47,9 +47,9 @@ type ParsedMessage struct {
 }
 
 type TcpUdpParsedMessage struct {
-	Parsed    ParsedMessage `json:"parsed"`
-	Uid       string        `json:"uid"`
-	ConfIndex int           `json:"conf_index"`
+	Parsed ParsedMessage `json:"parsed"`
+	Uid    string        `json:"uid"`
+	ConfId string        `json:"conf_id"`
 }
 
 type RelpRawMessage struct {

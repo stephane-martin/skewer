@@ -2,6 +2,7 @@ package conf
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net"
 	"strconv"
@@ -24,6 +25,7 @@ type BaseConfig struct {
 	Store    StoreConfig     `mapstructure:"store" toml:"store"`
 	Parsers  []ParserConfig  `mapstructure:"parser" toml:"parser"`
 	Watchers []WatcherConfig `mapstructure:"watcher" toml:"watcher"`
+	Journald JournaldConfig  `mapstructure:"journald" toml:"journald"`
 }
 
 type GConfig struct {
@@ -188,30 +190,49 @@ type KafkaConfig struct {
 	pCompression             sarama.CompressionCodec `toml:"-"`
 }
 
-type SyslogConfig struct {
-	Port                 int                `mapstructure:"port" toml:"port"`
-	BindAddr             string             `mapstructure:"bind_addr" toml:"bind_addr"`
-	UnixSocketPath       string             `mapstructure:"unix_socket_path" toml:"unix_socket_path"`
-	Format               string             `mapstructure:"format" toml:"format"`
-	TopicTmpl            string             `mapstructure:"topic_tmpl" toml:"topic_tmpl"`
-	TopicFunc            string             `mapstructure:"topic_function" toml:"topic_function"`
-	PartitionTmpl        string             `mapstructure:"partition_key_tmpl" toml:"partition_key_tmpl"`
-	PartitionFunc        string             `mapstructure:"partition_key_func" toml:"partition_key_func"`
-	FilterFunc           string             `mapstructure:"filter_func" toml:"filter_func"`
-	Protocol             string             `mapstructure:"protocol" toml:"protocol"`
-	DontParseSD          bool               `mapstructure:"dont_parse_structured_data" toml:"dont_parse_structured_data"`
-	KeepAlive            bool               `mapstructure:"keepalive" toml:"keepalive"`
-	KeepAlivePeriod      time.Duration      `mapstructure:"keepalive_period" toml:"keepalive_period"`
-	Timeout              time.Duration      `mapstructure:"timeout" toml:"timeout"`
-	TopicTemplate        *template.Template `toml:"-"`
-	PartitionKeyTemplate *template.Template `toml:"-"`
-	BindIP               net.IP             `toml:"-"`
-	ListenAddr           string             `toml:"-"`
+type JournaldConfig struct {
+	Enabled       bool
+	TopicTmpl     string `mapstructure:"topic_tmpl" toml:"topic_tmpl"`
+	TopicFunc     string `mapstructure:"topic_function" toml:"topic_function"`
+	PartitionTmpl string `mapstructure:"partition_key_tmpl" toml:"partition_key_tmpl"`
+	PartitionFunc string `mapstructure:"partition_key_func" toml:"partition_key_func"`
+	FilterFunc    string `mapstructure:"filter_func" toml:"filter_func"`
+}
 
-	// Filter ?
+type SyslogConfig struct {
+	Port            int           `mapstructure:"port" toml:"port" json:"port"`
+	BindAddr        string        `mapstructure:"bind_addr" toml:"bind_addr" json:"bind_addr"`
+	UnixSocketPath  string        `mapstructure:"unix_socket_path" toml:"unix_socket_path" json:"unix_socket_path"`
+	Format          string        `mapstructure:"format" toml:"format" json:"format"`
+	TopicTmpl       string        `mapstructure:"topic_tmpl" toml:"topic_tmpl" json:"topic_tmpl"`
+	TopicFunc       string        `mapstructure:"topic_function" toml:"topic_function" json:"topic_function"`
+	PartitionTmpl   string        `mapstructure:"partition_key_tmpl" toml:"partition_key_tmpl" json:"partition_key_tmpl"`
+	PartitionFunc   string        `mapstructure:"partition_key_func" toml:"partition_key_func" json:"partition_key_func"`
+	FilterFunc      string        `mapstructure:"filter_func" toml:"filter_func" json:"filter_func"`
+	Protocol        string        `mapstructure:"protocol" toml:"protocol" json:"protocol"`
+	DontParseSD     bool          `mapstructure:"dont_parse_structured_data" toml:"dont_parse_structured_data" json:"dont_parse_structured_data"`
+	KeepAlive       bool          `mapstructure:"keepalive" toml:"keepalive" json:"keepalive"`
+	KeepAlivePeriod time.Duration `mapstructure:"keepalive_period" toml:"keepalive_period" json:"keepalive_period"`
+	Timeout         time.Duration `mapstructure:"timeout" toml:"timeout" json:"timeout"`
+	// todo: delete compiled templates
+	BindIP     net.IP `toml:"-"`
+	ListenAddr string `toml:"-"`
+
 	// Partitioner ?
-	// Topic function ?
-	// Partition key function ?
+}
+
+func (c *SyslogConfig) Export() []byte {
+	b, _ := json.Marshal(c)
+	return b
+}
+
+func ImportSyslogConfig(data []byte) (*SyslogConfig, error) {
+	c := SyslogConfig{}
+	err := json.Unmarshal(data, &c)
+	if err != nil {
+		return nil, fmt.Errorf("Can't unmarshal the syslog config: %s", err.Error())
+	}
+	return &c, nil
 }
 
 func (c *GConfig) GetSaramaConfig() *sarama.Config {
@@ -362,6 +383,7 @@ func InitLoad(dirname string, params consul.ConnParams, prefix string, logger lo
 
 func (c *GConfig) ParseParamsFromConsul(params map[string]string) error {
 	syslogConfMap := map[string]map[string]string{}
+	journaldConf := map[string]string{}
 	kafkaConf := map[string]string{}
 	storeConf := map[string]string{}
 	parsersConfMap := map[string]map[string]string{}
@@ -377,6 +399,12 @@ func (c *GConfig) ParseParamsFromConsul(params map[string]string) error {
 					syslogConfMap[splits[1]] = map[string]string{}
 				}
 				syslogConfMap[splits[1]][splits[2]] = v
+			} else {
+				c.Logger.Debug("Ignoring Consul KV", "key", k, "value", v)
+			}
+		case "journald":
+			if len(splits) == 2 {
+				journaldConf[splits[1]] = v
 			} else {
 				c.Logger.Debug("Ignoring Consul KV", "key", k, "value", v)
 			}
@@ -438,6 +466,19 @@ func (c *GConfig) ParseParamsFromConsul(params map[string]string) error {
 		}
 	}
 
+	jconf := JournaldConfig{}
+	if len(journaldConf) > 0 {
+		vi = viper.New()
+		SetJournaldDefaults(vi, false)
+		for k, v := range journaldConf {
+			vi.Set(k, v)
+		}
+		err := vi.Unmarshal(&jconf)
+		if err != nil {
+			return err
+		}
+	}
+
 	kconf := KafkaConfig{}
 	if len(kafkaConf) > 0 {
 		vi = viper.New()
@@ -471,6 +512,9 @@ func (c *GConfig) ParseParamsFromConsul(params map[string]string) error {
 	}
 	if len(storeConf) > 0 {
 		c.Store = sconf
+	}
+	if len(journaldConf) > 0 {
+		c.Journald = jconf
 	}
 
 	return nil
@@ -540,9 +584,12 @@ func (c *GConfig) Complete() (err error) {
 		}
 		c.Syslog = []SyslogConfig{syslogConf}
 	}
+
 	for i, syslogConf := range c.Syslog {
-		if syslogConf.Protocol == "" {
-			c.Syslog[i].Protocol = "relp"
+		switch syslogConf.Protocol {
+		case "relp", "tcp", "udp":
+		default:
+			return ConfigurationCheckError{ErrString: "Unknown protocol"}
 		}
 		if syslogConf.UnixSocketPath == "" {
 			if syslogConf.BindAddr == "" {
@@ -576,11 +623,11 @@ func (c *GConfig) Complete() (err error) {
 			c.Syslog[i].Timeout = time.Minute
 		}
 
-		c.Syslog[i].TopicTemplate, err = template.New("topic").Parse(c.Syslog[i].TopicTmpl)
+		_, err = template.New("topic").Parse(c.Syslog[i].TopicTmpl)
 		if err != nil {
 			return ConfigurationCheckError{ErrString: "Error compiling the topic template", Err: err}
 		}
-		c.Syslog[i].PartitionKeyTemplate, err = template.New("partition").Parse(c.Syslog[i].PartitionTmpl)
+		_, err = template.New("partition").Parse(c.Syslog[i].PartitionTmpl)
 		if err != nil {
 			return ConfigurationCheckError{ErrString: "Error compiling the partition key template", Err: err}
 		}
@@ -607,6 +654,30 @@ func (c *GConfig) Complete() (err error) {
 				return ConfigurationCheckError{ErrString: "Unknown syslog format"}
 			}
 		}
+	}
+
+	if c.Journald.Enabled {
+		journaldConf := SyslogConfig{
+			FilterFunc:    c.Journald.FilterFunc,
+			PartitionFunc: c.Journald.PartitionFunc,
+			PartitionTmpl: c.Journald.PartitionTmpl,
+			TopicFunc:     c.Journald.TopicFunc,
+			TopicTmpl:     c.Journald.TopicTmpl,
+			Protocol:      "journald",
+		}
+
+		var err error
+
+		_, err = template.New("journaldtopic").Parse(journaldConf.TopicTmpl)
+		if err != nil {
+			return ConfigurationCheckError{ErrString: "Error compiling the topic template", Err: err}
+		}
+		_, err = template.New("journaldpartition").Parse(journaldConf.PartitionTmpl)
+		if err != nil {
+			return ConfigurationCheckError{ErrString: "Error compiling the partition key template", Err: err}
+		}
+		c.Syslog = append(c.Syslog, journaldConf)
+
 	}
 
 	return nil

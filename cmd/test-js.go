@@ -39,7 +39,7 @@ to quickly create a Cobra application.`,
 		logger := log15.New()
 		ffunc := `function FilterMessages(m) { m.Message="bla"; return FILTER.DROPPED; }`
 		tfunc := `function Topic(m) { return "topic-" + m.Appname; }`
-		env := javascript.New(ffunc, tfunc, nil, "", nil, logger)
+		env := javascript.New(ffunc, tfunc, "", "", "", logger)
 		m := model.SyslogMessage{}
 		m.TimeReported = time.Now()
 		m.Appname = "myapp"

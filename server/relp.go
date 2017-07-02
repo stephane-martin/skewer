@@ -51,14 +51,13 @@ func NewRelpServer(c *conf.GConfig, metrics *metrics.Metrics, logger log15.Logge
 	return &s
 }
 
-func (s *RelpServer) NewJsEnv(i int) *javascript.Environment {
-	syslogConf := s.Conf.Syslog[i]
+func (s *RelpServer) NewJsEnv(config conf.SyslogConfig) *javascript.Environment {
 	return javascript.New(
-		syslogConf.FilterFunc,
-		syslogConf.TopicFunc,
-		syslogConf.TopicTemplate,
-		syslogConf.PartitionFunc,
-		syslogConf.PartitionKeyTemplate,
+		config.FilterFunc,
+		config.TopicFunc,
+		config.TopicTmpl,
+		config.PartitionFunc,
+		config.PartitionTmpl,
 		s.logger,
 	)
 }
@@ -164,7 +163,7 @@ type RelpHandler struct {
 	Server *RelpServer
 }
 
-func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
+func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 	// http://www.rsyslog.com/doc/relp.html
 
 	var local_port int
@@ -210,12 +209,12 @@ func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
 		defer s.wg.Done()
 		e := s.NewParsersEnv()
 		for m := range raw_messages_chan {
-			parser := e.GetParser(s.Conf.Syslog[i].Format)
+			parser := e.GetParser(config.Format)
 			if parser == nil {
-				s.logger.Error("Unknown parser", "client", m.Client, "local_port", m.LocalPort, "path", m.UnixSocketPath, "format", s.Conf.Syslog[i].Format)
+				s.logger.Error("Unknown parser", "client", m.Client, "local_port", m.LocalPort, "path", m.UnixSocketPath, "format", config.Format)
 				continue
 			}
-			p, err := parser.Parse(m.Message, s.Conf.Syslog[i].DontParseSD)
+			p, err := parser.Parse(m.Message, config.DontParseSD)
 			if err == nil {
 				parsed_msg := model.RelpParsedMessage{
 					Parsed: model.ParsedMessage{
@@ -354,7 +353,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
 			close(other_fails_chan)
 			s.wg.Done()
 		}()
-		e := s.NewJsEnv(i)
+		e := s.NewJsEnv(config)
 	ForParsedChan:
 		for m := range parsed_messages_chan {
 			topic, errs := e.Topic(m.Parsed.Fields)
@@ -420,7 +419,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, i int) {
 		}
 	}()
 
-	timeout := s.Conf.Syslog[i].Timeout
+	timeout := config.Timeout
 	if timeout > 0 {
 		conn.SetReadDeadline(time.Now().Add(timeout))
 	}

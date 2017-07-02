@@ -31,6 +31,10 @@ type UdpServer struct {
 	metrics    *metrics.Metrics
 }
 
+type PacketHandler interface {
+	HandleConnection(conn net.PacketConn, config conf.SyslogConfig, confId string)
+}
+
 type UdpHandler struct {
 	Server *UdpServer
 }
@@ -50,8 +54,8 @@ func NewUdpServer(c *conf.GConfig, st *store.MessageStore, metrics *metrics.Metr
 	return &s
 }
 
-func (s *UdpServer) handleConnection(conn net.PacketConn, i int) {
-	s.handler.HandleConnection(conn, i)
+func (s *UdpServer) handleConnection(conn net.PacketConn, config conf.SyslogConfig, confId string) {
+	s.handler.HandleConnection(conn, config, confId)
 }
 
 func (s *UdpServer) Start() (err error) {
@@ -95,8 +99,13 @@ func (s *UdpServer) Stop() {
 func (s *UdpServer) ListenPacket() int {
 	s.unixSocketPaths = []string{}
 	nb := 0
-	for i, syslogConf := range s.Conf.Syslog {
+	for _, syslogConf := range s.Conf.Syslog {
 		if syslogConf.Protocol == "udp" {
+			confId, err := s.store.StoreSyslogConfig(&syslogConf)
+			if err != nil {
+				// todo: log
+				continue
+			}
 			if len(syslogConf.UnixSocketPath) > 0 {
 				conn, err := net.ListenPacket("unixgram", syslogConf.UnixSocketPath)
 				if err != nil {
@@ -106,7 +115,7 @@ func (s *UdpServer) ListenPacket() int {
 					nb++
 					s.unixSocketPaths = append(s.unixSocketPaths, syslogConf.UnixSocketPath)
 					s.wg.Add(1)
-					go s.handleConnection(conn, i)
+					go s.handleConnection(conn, syslogConf, confId)
 				}
 			} else {
 				conn, err := net.ListenPacket("udp", syslogConf.ListenAddr)
@@ -116,7 +125,7 @@ func (s *UdpServer) ListenPacket() int {
 					s.logger.Info("Listener", "protocol", s.protocol, "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
 					nb++
 					s.wg.Add(1)
-					go s.handleConnection(conn, i)
+					go s.handleConnection(conn, syslogConf, confId)
 				}
 			}
 		}
@@ -124,7 +133,7 @@ func (s *UdpServer) ListenPacket() int {
 	return nb
 }
 
-func (h UdpHandler) HandleConnection(conn net.PacketConn, i int) {
+func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConfig, confId string) {
 	var local_port int
 	var err error
 
@@ -161,12 +170,12 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, i int) {
 		e := s.NewParsersEnv()
 		entropy := rand.New(rand.NewSource(time.Now().UnixNano()))
 		for m := range raw_messages_chan {
-			parser := e.GetParser(s.Conf.Syslog[i].Format)
+			parser := e.GetParser(config.Format)
 			if parser == nil {
-				s.logger.Error("Unknown parser", "client", m.Client, "local_port", m.LocalPort, "path", m.UnixSocketPath, "format", s.Conf.Syslog[i].Format)
+				s.logger.Error("Unknown parser", "client", m.Client, "local_port", m.LocalPort, "path", m.UnixSocketPath, "format", config.Format)
 				continue
 			}
-			p, err := parser.Parse(m.Message, s.Conf.Syslog[i].DontParseSD)
+			p, err := parser.Parse(m.Message, config.DontParseSD)
 
 			if err == nil {
 				uid, err := ulid.New(ulid.Timestamp(p.TimeReported), entropy)
@@ -181,8 +190,8 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, i int) {
 							LocalPort:      m.LocalPort,
 							UnixSocketPath: m.UnixSocketPath,
 						},
-						Uid:       uid.String(),
-						ConfIndex: i,
+						Uid:    uid.String(),
+						ConfId: confId,
 					}
 					s.store.Inputs <- &parsed_msg
 				}
