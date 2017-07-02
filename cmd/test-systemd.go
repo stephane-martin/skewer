@@ -15,8 +15,10 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/stephane-martin/relp2kafka/journald"
 )
 
 // testSystemdCmd represents the testSystemd command
@@ -31,6 +33,7 @@ This application is a tool to generate the needed files
 to quickly create a Cobra application.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Println("testSystemd called")
+		testSystemd()
 	},
 }
 
@@ -46,4 +49,21 @@ func init() {
 	// Cobra supports local flags which will only run when this command
 	// is called directly, e.g.:
 	// testSystemdCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+}
+
+func testSystemd() {
+	reader, err := journald.NewReader()
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(-1)
+	}
+	reader.Start()
+	for entry := range reader.Entries {
+		fmt.Println("Entry")
+		for k, v := range entry {
+			fmt.Printf("%s: %s\n", k, v)
+		}
+		fmt.Println()
+	}
+
 }
