@@ -17,6 +17,7 @@ import (
 	"github.com/stephane-martin/relp2kafka/metrics"
 	"github.com/stephane-martin/relp2kafka/server"
 	"github.com/stephane-martin/relp2kafka/store"
+	"github.com/stephane-martin/relp2kafka/sys"
 )
 
 // serveCmd represents the serve command
@@ -96,6 +97,10 @@ func SetLogging() log15.Logger {
 func Serve() {
 	logger := SetLogging()
 	var err error
+	err = sys.SetNonDumpable()
+	if err != nil {
+		logger.Warn("Error setting PR_SET_DUMPABLE", "error", err)
+	}
 	var c *conf.GConfig
 	var st *store.MessageStore
 	var stopWatchChan chan bool
