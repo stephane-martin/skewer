@@ -29,7 +29,7 @@ type reader struct {
 
 func NewReader() (JournaldReader, error) {
 	var err error
-	r = &reader{}
+	r := &reader{}
 	r.journal, err = sdjournal.NewJournal()
 	if err != nil {
 		return nil, err
