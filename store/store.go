@@ -19,6 +19,8 @@ import (
 	"github.com/stephane-martin/relp2kafka/model"
 )
 
+// todo: make Store an interface
+
 type MessageStore struct {
 	test           bool
 	messages       *badger.KV
@@ -562,6 +564,7 @@ func (s *MessageStore) store2kafka(c conf.KafkaConfig) {
 	}()
 	s.logger.Debug("Store2Kafka")
 	jsenvs := map[string]*javascript.Environment{}
+	// todo split in two functions
 	if s.test {
 		s.startSend()
 

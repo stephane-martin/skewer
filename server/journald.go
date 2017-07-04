@@ -72,7 +72,7 @@ func EntryToSyslog(entry map[string]string) *model.SyslogMessage {
 
 type JournaldServer struct {
 	store    *store.MessageStore
-	reader   *journald.Reader
+	reader   journald.JournaldReader
 	metrics  *metrics.Metrics
 	logger   log15.Logger
 	stopchan chan bool
@@ -115,7 +115,7 @@ func (s *JournaldServer) Start() {
 
 		for {
 			select {
-			case entry, more := <-s.reader.Entries:
+			case entry, more := <-s.reader.Entries():
 				if more {
 					message := EntryToSyslog(entry)
 					uid, _ := ulid.New(ulid.Timestamp(message.TimeReported), entropy)

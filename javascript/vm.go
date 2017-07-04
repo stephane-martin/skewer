@@ -74,6 +74,9 @@ type ISyslogMessage struct {
 	Properties    map[string]interface{}
 }
 
+// todo: make Environment an interface
+// maybe 2 different interfaces (parsers vs other)
+
 type Environment struct {
 	runtime             *goja.Runtime
 	logger              log15.Logger

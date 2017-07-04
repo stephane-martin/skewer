@@ -58,7 +58,7 @@ func testSystemd() {
 		os.Exit(-1)
 	}
 	reader.Start()
-	for entry := range reader.Entries {
+	for entry := range reader.Entries() {
 		fmt.Println("Entry")
 		for k, v := range entry {
 			fmt.Printf("%s: %s\n", k, v)

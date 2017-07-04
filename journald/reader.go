@@ -13,15 +13,23 @@ func Dummy() bool {
 	return false
 }
 
-type Reader struct {
+type JournaldReader interface {
+	Start()
+	Stop()
+	Close() error
+	Entries() chan map[string]string
+}
+
+type reader struct {
 	journal  *sdjournal.Journal
-	Entries  chan map[string]string
+	entries  chan map[string]string
 	stopchan chan bool
 	wgroup   *sync.WaitGroup
 }
 
-func NewReader() (r *Reader, err error) {
-	r = &Reader{}
+func NewReader() (JournaldReader, error) {
+	var err error
+	r = &reader{}
 	r.journal, err = sdjournal.NewJournal()
 	if err != nil {
 		return nil, err
@@ -36,12 +44,16 @@ func NewReader() (r *Reader, err error) {
 		r.journal.Close()
 		return nil, err
 	}
-	r.Entries = make(chan map[string]string)
+	r.entries = make(chan map[string]string)
 	r.wgroup = &sync.WaitGroup{}
 	return r, nil
 }
 
-func (r *Reader) wait() chan int {
+func (r *reader) Entries() chan map[string]string {
+	return r.entries
+}
+
+func (r *reader) wait() chan int {
 	events := make(chan int)
 	r.wgroup.Add(1)
 
@@ -68,7 +80,7 @@ func (r *Reader) wait() chan int {
 	return events
 }
 
-func (r *Reader) Start() {
+func (r *reader) Start() {
 	r.stopchan = make(chan bool)
 	r.wgroup.Add(1)
 
@@ -95,7 +107,7 @@ func (r *Reader) Start() {
 						if err != nil {
 							// ???
 						}
-						r.Entries <- entry.Fields
+						r.entries <- entry.Fields
 					}
 				}
 			}
@@ -111,15 +123,15 @@ func (r *Reader) Start() {
 	}()
 }
 
-func (r *Reader) Stop() {
+func (r *reader) Stop() {
 	if r.stopchan != nil {
 		close(r.stopchan)
 	}
 	r.wgroup.Wait()
 }
 
-func (r *Reader) Close() error {
+func (r *reader) Close() error {
 	r.Stop()
-	close(r.Entries)
+	close(r.entries)
 	return r.journal.Close()
 }
