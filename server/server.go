@@ -11,17 +11,6 @@ import (
 	"github.com/stephane-martin/relp2kafka/model"
 )
 
-/*
-
-todo: retrieve UID, GID, PID through unix sockets
-
-f, _ := unixSock.File()
-fd := int(f.Fd())
-pcred, _ := syscall.GetsockoptUcred(fd, syscall.SOL_SOCKET, syscall.SO_PEERCRED)
-f.Close()
-fmt.Println("peer uid and gid:", pcred.Uid, pcred.Gid)
-*/
-
 type Parser interface {
 	Parse(m string, dont_parse_sd bool) (*model.SyslogMessage, error)
 }

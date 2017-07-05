@@ -1,7 +1,6 @@
 package server
 
 import (
-	"fmt"
 	"math/rand"
 	"net"
 	"strconv"
@@ -14,7 +13,6 @@ import (
 	"github.com/stephane-martin/relp2kafka/metrics"
 	"github.com/stephane-martin/relp2kafka/model"
 	"github.com/stephane-martin/relp2kafka/store"
-	"github.com/stephane-martin/relp2kafka/sys"
 )
 
 type UdpServerStatus int
@@ -152,16 +150,6 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 		s.wg.Done()
 	}()
 
-	if unixConn, ok := conn.(*net.UnixConn); ok {
-		fmt.Println("UnixConn!")
-		a, b, c, e := sys.GetCredentials(unixConn)
-		if e == nil {
-			fmt.Println(a, b, c)
-		} else {
-			fmt.Println(e)
-		}
-	}
-
 	path := ""
 	local := conn.LocalAddr()
 	if local != nil {
@@ -230,6 +218,7 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 		} else {
 			client = strings.Split(remote.String(), ":")[0]
 		}
+
 		raw := model.RawMessage{
 			Client:         client,
 			LocalPort:      local_port,
