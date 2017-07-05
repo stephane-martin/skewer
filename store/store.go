@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"crypto/sha512"
 	"encoding/base64"
 	"encoding/json"
@@ -31,7 +32,6 @@ type MessageStore struct {
 	sendStoppedMu  *sync.Mutex
 	sendStopped    bool
 	StopSendChan   chan bool
-	ClosingChan    chan bool
 	FatalErrorChan chan bool
 	KafkaErrorChan chan bool
 	ready_mu       *sync.Mutex
@@ -55,7 +55,6 @@ func (s *MessageStore) init() {
 	s.wg = &sync.WaitGroup{}
 	s.sendWg = &sync.WaitGroup{}
 	s.storeToKafkaWg = &sync.WaitGroup{}
-	s.ClosingChan = make(chan bool)
 	s.StopSendChan = make(chan bool)
 	s.FatalErrorChan = make(chan bool)
 	s.KafkaErrorChan = make(chan bool)
@@ -65,8 +64,7 @@ func (s *MessageStore) SetNewConf(newConf *conf.GConfig) {
 	//s.Conf = *newConf
 }
 
-//func NewStore(c *conf.GConfig, l log15.Logger, test bool) (store *MessageStore, err error) {
-func NewStore(dirname string, maxSize int64, fsync bool, l log15.Logger, test bool) (store *MessageStore, err error) {
+func NewStore(ctx context.Context, dirname string, maxSize int64, fsync bool, l log15.Logger, test bool) (store *MessageStore, err error) {
 	//dirname := c.Store.Dirname
 	opts_messages := badger.DefaultOptions
 	opts_ready := badger.DefaultOptions
@@ -154,15 +152,13 @@ func NewStore(dirname string, maxSize int64, fsync bool, l log15.Logger, test bo
 	store.pruneOrphaned()
 
 	store.ticker = time.NewTicker(time.Minute)
-	store.wg.Add(1)
 	go func() {
-		defer store.wg.Done()
-		defer store.logger.Debug("End of periodic Store.resetFailures")
 		for {
 			select {
 			case <-store.ticker.C:
 				store.resetFailures()
-			case <-store.ClosingChan:
+			case <-ctx.Done():
+				store.close()
 				return
 			}
 
@@ -173,7 +169,7 @@ func NewStore(dirname string, maxSize int64, fsync bool, l log15.Logger, test bo
 	return store, nil
 }
 
-func (s *MessageStore) StoreSyslogConfig(config *conf.SyslogConfig) (string, error) {
+func (s *MessageStore) StoreSyslogConfig(config *conf.SyslogConfig) (configID string, err error) {
 	data := config.Export()
 	h := sha512.Sum512(data)
 	hs := h[:]
@@ -190,8 +186,8 @@ func (s *MessageStore) StoreSyslogConfig(config *conf.SyslogConfig) (string, err
 	return base64.StdEncoding.EncodeToString(hs), nil
 }
 
-func (s *MessageStore) GetSyslogConfig(id string) (*conf.SyslogConfig, error) {
-	ident, err := base64.StdEncoding.DecodeString(id)
+func (s *MessageStore) GetSyslogConfig(configID string) (*conf.SyslogConfig, error) {
+	ident, err := base64.StdEncoding.DecodeString(configID)
 	if err != nil {
 		return nil, fmt.Errorf("The id can't be decoded")
 	}
@@ -211,7 +207,11 @@ func (s *MessageStore) GetSyslogConfig(id string) (*conf.SyslogConfig, error) {
 func (s *MessageStore) SendToKafka(c conf.KafkaConfig) {
 	s.KafkaErrorChan = make(chan bool)
 	s.storeToKafkaWg.Add(1)
-	go s.store2kafka(c)
+	if s.test {
+		go s.dummySendKafka(c)
+	} else {
+		go s.sendKafka(c)
+	}
 }
 
 func (s *MessageStore) StopSendToKafka() {
@@ -230,17 +230,15 @@ func (s *MessageStore) StopSendToKafka() {
 	s.logger.Debug("Store.StopSend finished")
 }
 
-func (s *MessageStore) Close() {
+func (s *MessageStore) close() {
 	s.StopSendToKafka()
-	close(s.ClosingChan) // causes resetFailures to end
-	close(s.Inputs)      // causes ingest to end
-	s.ticker.Stop()      // stop to trigger resetFailures
-	s.wg.Wait()          // wait that ingest and resetFailures have finished
-	s.CloseBadgerDB()    // close the badger databases
-
+	close(s.Inputs)  // causes ingest to end
+	s.ticker.Stop()  // stop to trigger resetFailures
+	s.wg.Wait()      // wait that ingest and resetFailures have finished
+	s.closeBadgers() // close the badger databases
 }
 
-func (s *MessageStore) CloseBadgerDB() {
+func (s *MessageStore) closeBadgers() {
 	err := s.messages.Close()
 	if err != nil {
 		s.logger.Warn("Error closing Messages in store", "error", err)
@@ -260,7 +258,7 @@ func (s *MessageStore) CloseBadgerDB() {
 	s.logger.Info("Badger databases are closed")
 }
 
-func (s *MessageStore) SendStopped() bool {
+func (s *MessageStore) sendKafkaIsStopped() bool {
 	s.sendStoppedMu.Lock()
 	defer s.sendStoppedMu.Unlock()
 	return s.sendStopped
@@ -321,7 +319,7 @@ func (s *MessageStore) resetStuckInSent() {
 
 }
 
-func (s *MessageStore) ReadAll() (map[string]string, map[string]string, map[string]string, map[string]string) {
+func (s *MessageStore) ReadAllBadgers() (map[string]string, map[string]string, map[string]string, map[string]string) {
 	iter_opts := badger.IteratorOptions{
 		FetchValues: true,
 		Reverse:     false,
@@ -557,163 +555,162 @@ func (s *MessageStore) Nack(id string) {
 	s.failed.Set([]byte(id), []byte(time.Now().Format(time.RFC3339)))
 }
 
-func (s *MessageStore) store2kafka(c conf.KafkaConfig) {
+func (s *MessageStore) sendKafka(c conf.KafkaConfig) {
 	defer func() {
-		s.logger.Debug("Store2Kafka has ended")
 		s.storeToKafkaWg.Done()
 	}()
-	s.logger.Debug("Store2Kafka")
-	jsenvs := map[string]*javascript.Environment{}
-	// todo split in two functions
-	if s.test {
-		s.startSend()
+	jsenvs := map[string]javascript.FilterEnvironment{}
 
-	ForOutputsTest:
-		for message := range s.Outputs {
-			if _, ok := jsenvs[message.ConfId]; !ok {
-				config, err := s.GetSyslogConfig(message.ConfId)
-				if err != nil {
-					// todo: log
-					continue ForOutputsTest
-				}
-				jsenvs[message.ConfId] = javascript.New(
-					config.FilterFunc,
-					config.TopicFunc,
-					config.TopicTmpl,
-					config.PartitionFunc,
-					config.PartitionTmpl,
-					s.logger,
-				)
-			}
-
-			if message != nil {
-				topic, errs := jsenvs[message.ConfId].Topic(message.Parsed.Fields)
-				for _, err := range errs {
-					s.logger.Info("Error calculating topic", "error", err, "uid", message.Uid)
-				}
-				partitionKey, errs := jsenvs[message.ConfId].PartitionKey(message.Parsed.Fields)
-				for _, err := range errs {
-					s.logger.Info("Error calculating the partition key", "error", err, "uid", message.Uid)
-				}
-
-				if len(topic) == 0 || len(partitionKey) == 0 {
-					s.logger.Warn("Topic or PartitionKey could not be calculated", "uid", message.Uid)
-					s.Nack(message.Uid)
-					continue ForOutputsTest
-				}
-
-				tmsg, filterResult, err := jsenvs[message.ConfId].FilterMessage(message.Parsed.Fields)
-
-				switch filterResult {
-				case javascript.DROPPED:
-					s.Ack(message.Uid)
-					continue ForOutputsTest
-				case javascript.REJECTED:
-					s.Nack(message.Uid)
-					continue ForOutputsTest
-				case javascript.PASS:
-					if tmsg == nil {
-						s.Ack(message.Uid)
-						continue ForOutputsTest
-					}
-				default:
-					s.Nack(message.Uid)
-					s.logger.Warn("Error happened when processing message", "uid", message.Uid, "error", err)
-					// todo: log the faulty message to a specific log
-					continue ForOutputsTest
-				}
-
-				nmsg := model.ParsedMessage{
-					Fields:         tmsg,
-					Client:         message.Parsed.Client,
-					LocalPort:      message.Parsed.LocalPort,
-					UnixSocketPath: message.Parsed.UnixSocketPath,
-				}
-				kafkaMsg, err := nmsg.ToKafkaMessage(partitionKey, topic)
-				if err != nil {
-					s.logger.Warn("Error generating Kafka message", "error", err, "uid", message.Uid)
-					s.Nack(message.Uid)
-					continue ForOutputsTest
-				}
-
-				v, _ := kafkaMsg.Value.Encode()
-				pkey, _ := kafkaMsg.Key.Encode()
-				fmt.Printf("pkey: '%s' topic:'%s' uid:'%s'\n", pkey, kafkaMsg.Topic, message.Uid)
-				fmt.Println(string(v))
-				fmt.Println()
-
-				s.Ack(message.Uid)
+	var producer sarama.AsyncProducer
+	var err error
+	for {
+		producer, err = c.GetAsyncProducer()
+		if err == nil {
+			s.logger.Debug("Got a Kafka producer")
+			break
+		} else {
+			s.logger.Warn("Error getting a Kafka client", "error", err)
+			select {
+			case <-s.StopSendChan:
+				return
+			case <-time.After(2 * time.Second):
 			}
 		}
-	} else {
-		var producer sarama.AsyncProducer
-		var err error
-		for {
-			producer, err = c.GetAsyncProducer()
-			if err == nil {
-				s.logger.Debug("Got a Kafka producer")
-				break
-			} else {
-				s.logger.Warn("Error getting a Kafka client", "error", err)
-				select {
-				case <-s.StopSendChan:
-					return
-				case <-time.After(2 * time.Second):
-				}
-			}
-		}
-		defer producer.AsyncClose()
+	}
+	defer producer.AsyncClose()
 
-		// listen for kafka NACK responses
-		s.storeToKafkaWg.Add(1)
-		go func() {
-			defer func() {
-				s.storeToKafkaWg.Done()
-			}()
-			more_succs := true
-			more_fails := true
-			var succ *sarama.ProducerMessage
-			var fail *sarama.ProducerError
-			for more_succs || more_fails {
-				select {
-				case succ, more_succs = <-producer.Successes():
-					if more_succs {
-						uid := succ.Metadata.(string)
-						s.Ack(uid)
-					}
-
-				case fail, more_fails = <-producer.Errors():
-					if more_fails {
-						uid := fail.Msg.Metadata.(string)
-						s.Nack(uid)
-						s.logger.Info("Kafka producer error", "error", fail.Error())
-						if model.IsFatalKafkaError(fail.Err) {
-							close(s.KafkaErrorChan)
-						}
-					}
-				}
-			}
+	// listen for kafka NACK responses
+	s.storeToKafkaWg.Add(1)
+	go func() {
+		defer func() {
+			s.storeToKafkaWg.Done()
 		}()
-
-		s.startSend()
-	ForOutputs:
-		for message := range s.Outputs {
-			if _, ok := jsenvs[message.ConfId]; !ok {
-				config, err := s.GetSyslogConfig(message.ConfId)
-				if err != nil {
-					// todo: log
-					continue ForOutputs
+		more_succs := true
+		more_fails := true
+		var succ *sarama.ProducerMessage
+		var fail *sarama.ProducerError
+		for more_succs || more_fails {
+			select {
+			case succ, more_succs = <-producer.Successes():
+				if more_succs {
+					uid := succ.Metadata.(string)
+					s.Ack(uid)
 				}
-				jsenvs[message.ConfId] = javascript.New(
-					config.FilterFunc,
-					config.TopicFunc,
-					config.TopicTmpl,
-					config.PartitionFunc,
-					config.PartitionTmpl,
-					s.logger,
-				)
-			}
 
+			case fail, more_fails = <-producer.Errors():
+				if more_fails {
+					uid := fail.Msg.Metadata.(string)
+					s.Nack(uid)
+					s.logger.Info("Kafka producer error", "error", fail.Error())
+					if model.IsFatalKafkaError(fail.Err) {
+						close(s.KafkaErrorChan)
+					}
+				}
+			}
+		}
+	}()
+
+	s.startOutputMessages()
+ForOutputs:
+	for message := range s.Outputs {
+		if _, ok := jsenvs[message.ConfId]; !ok {
+			config, err := s.GetSyslogConfig(message.ConfId)
+			if err != nil {
+				// todo: log
+				continue ForOutputs
+			}
+			jsenvs[message.ConfId] = javascript.NewFilterEnvironment(
+				config.FilterFunc,
+				config.TopicFunc,
+				config.TopicTmpl,
+				config.PartitionFunc,
+				config.PartitionTmpl,
+				s.logger,
+			)
+		}
+
+		topic, errs := jsenvs[message.ConfId].Topic(message.Parsed.Fields)
+		for _, err := range errs {
+			s.logger.Info("Error calculating topic", "error", err, "uid", message.Uid)
+		}
+		partitionKey, errs := jsenvs[message.ConfId].PartitionKey(message.Parsed.Fields)
+		for _, err := range errs {
+			s.logger.Info("Error calculating the partition key", "error", err, "uid", message.Uid)
+		}
+
+		if len(topic) == 0 || len(partitionKey) == 0 {
+			s.logger.Warn("Topic or PartitionKey could not be calculated", "uid", message.Uid)
+			s.Nack(message.Uid)
+			continue ForOutputs
+		}
+
+		tmsg, filterResult, err := jsenvs[message.ConfId].FilterMessage(message.Parsed.Fields)
+
+		switch filterResult {
+		case javascript.DROPPED:
+			s.Ack(message.Uid)
+			continue ForOutputs
+		case javascript.REJECTED:
+			s.Nack(message.Uid)
+			continue ForOutputs
+		case javascript.PASS:
+			if tmsg == nil {
+				s.Ack(message.Uid)
+				continue ForOutputs
+			}
+		default:
+			s.Nack(message.Uid)
+			s.logger.Warn("Error happened processing message", "uid", message.Uid, "error", err)
+			// todo: log the faulty message to a specific log
+			continue ForOutputs
+		}
+
+		nmsg := model.ParsedMessage{
+			Fields:         tmsg,
+			Client:         message.Parsed.Client,
+			LocalPort:      message.Parsed.LocalPort,
+			UnixSocketPath: message.Parsed.UnixSocketPath,
+		}
+
+		kafkaMsg, err := nmsg.ToKafkaMessage(partitionKey, topic)
+		if err != nil {
+			s.logger.Warn("Error generating Kafka message", "error", err, "uid", message.Uid)
+			s.Nack(message.Uid)
+			continue ForOutputs
+		}
+
+		kafkaMsg.Metadata = message.Uid
+		producer.Input() <- kafkaMsg
+	}
+
+}
+
+func (s *MessageStore) dummySendKafka(c conf.KafkaConfig) {
+	defer func() {
+		s.storeToKafkaWg.Done()
+	}()
+	jsenvs := map[string]javascript.FilterEnvironment{}
+	s.startOutputMessages()
+
+ForOutputs:
+	for message := range s.Outputs {
+		if _, ok := jsenvs[message.ConfId]; !ok {
+			config, err := s.GetSyslogConfig(message.ConfId)
+			if err != nil {
+				// todo: log
+				continue ForOutputs
+			}
+			jsenvs[message.ConfId] = javascript.NewFilterEnvironment(
+				config.FilterFunc,
+				config.TopicFunc,
+				config.TopicTmpl,
+				config.PartitionFunc,
+				config.PartitionTmpl,
+				s.logger,
+			)
+		}
+
+		if message != nil {
 			topic, errs := jsenvs[message.ConfId].Topic(message.Parsed.Fields)
 			for _, err := range errs {
 				s.logger.Info("Error calculating topic", "error", err, "uid", message.Uid)
@@ -745,7 +742,7 @@ func (s *MessageStore) store2kafka(c conf.KafkaConfig) {
 				}
 			default:
 				s.Nack(message.Uid)
-				s.logger.Warn("Error happened processing message", "uid", message.Uid, "error", err)
+				s.logger.Warn("Error happened when processing message", "uid", message.Uid, "error", err)
 				// todo: log the faulty message to a specific log
 				continue ForOutputs
 			}
@@ -756,7 +753,6 @@ func (s *MessageStore) store2kafka(c conf.KafkaConfig) {
 				LocalPort:      message.Parsed.LocalPort,
 				UnixSocketPath: message.Parsed.UnixSocketPath,
 			}
-
 			kafkaMsg, err := nmsg.ToKafkaMessage(partitionKey, topic)
 			if err != nil {
 				s.logger.Warn("Error generating Kafka message", "error", err, "uid", message.Uid)
@@ -764,33 +760,35 @@ func (s *MessageStore) store2kafka(c conf.KafkaConfig) {
 				continue ForOutputs
 			}
 
-			kafkaMsg.Metadata = message.Uid
-			producer.Input() <- kafkaMsg
+			v, _ := kafkaMsg.Value.Encode()
+			pkey, _ := kafkaMsg.Key.Encode()
+			fmt.Printf("pkey: '%s' topic:'%s' uid:'%s'\n", pkey, kafkaMsg.Topic, message.Uid)
+			fmt.Println(string(v))
+			fmt.Println()
+
+			s.Ack(message.Uid)
 		}
 	}
 }
 
-func (s *MessageStore) startSend() {
-	s.logger.Debug("Store.startSend called")
+func (s *MessageStore) startOutputMessages() {
 	s.sendStoppedMu.Lock()
 	if !s.sendStopped {
 		s.sendStoppedMu.Unlock()
-		s.logger.Debug("Store is already sending messages")
 		return
 	}
 	s.StopSendChan = make(chan bool)
 	s.Outputs = make(chan *model.TcpUdpParsedMessage)
 	s.sendStopped = false
 	s.sendStoppedMu.Unlock()
+
 	s.sendWg.Add(1)
 	go func() {
-		s.logger.Debug("StartSend main goroutine")
 		defer func() {
-			s.logger.Debug("Store Send goroutine has ended")
 			close(s.Outputs)
 			s.sendWg.Done()
 		}()
-		for !s.SendStopped() {
+		for !s.sendKafkaIsStopped() {
 			messages := s.retrieve(1000)
 			if len(messages) == 0 {
 				select {

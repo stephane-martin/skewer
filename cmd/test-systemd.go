@@ -14,6 +14,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -52,7 +53,9 @@ func init() {
 }
 
 func testSystemd() {
-	reader, err := journald.NewReader()
+	gctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reader, err := journald.NewReader(gctx)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(-1)

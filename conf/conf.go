@@ -2,6 +2,7 @@ package conf
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -13,7 +14,6 @@ import (
 	sarama "gopkg.in/Shopify/sarama.v1"
 
 	"github.com/BurntSushi/toml"
-	"github.com/hashicorp/consul/api"
 	"github.com/inconshreveable/log15"
 	"github.com/spf13/viper"
 	"github.com/stephane-martin/relp2kafka/consul"
@@ -31,8 +31,6 @@ type BaseConfig struct {
 type GConfig struct {
 	BaseConfig
 	Dirname      string
-	Updated      chan bool
-	ConsulClient *api.Client
 	ConsulPrefix string
 	ConsulParams consul.ConnParams
 	Logger       log15.Logger
@@ -50,7 +48,6 @@ func newBaseConf() *BaseConfig {
 func newConf() *GConfig {
 	baseConf := newBaseConf()
 	conf := GConfig{BaseConfig: *baseConf}
-	conf.Updated = make(chan bool, 10)
 	conf.Logger = log15.New()
 	return &conf
 }
@@ -294,7 +291,7 @@ func (c *KafkaConfig) GetClient() (sarama.Client, error) {
 	return nil, KafkaError{Err: err}
 }
 
-func InitLoad(dirname string, params consul.ConnParams, prefix string, logger log15.Logger) (c *GConfig, stopWatchChan chan bool, err error) {
+func InitLoad(ctx context.Context, dirname string, params consul.ConnParams, prefix string, logger log15.Logger) (c *GConfig, updated chan bool, err error) {
 	var firstResults map[string]string
 	var consulResults chan map[string]string
 
@@ -327,20 +324,22 @@ func InitLoad(dirname string, params consul.ConnParams, prefix string, logger lo
 	}
 
 	c = &GConfig{BaseConfig: *baseConf}
-	c.Updated = make(chan bool, 10)
+
 	c.Dirname = dirname
 	c.ConsulParams = params
 	c.ConsulPrefix = prefix
 	c.Logger = logger
 
+	var watchCtx context.Context
+	var cancelWatch context.CancelFunc
+
 	consulAddr := strings.TrimSpace(params.Address)
 	if len(consulAddr) > 0 {
-		var clt *api.Client
-		clt, err = consul.NewClient(params)
+		clt, err := consul.NewClient(params)
 		if err == nil {
-			c.ConsulClient = clt
 			consulResults = make(chan map[string]string, 10)
-			firstResults, stopWatchChan, err = consul.WatchTree(c.ConsulClient, c.ConsulPrefix, consulResults, logger)
+			watchCtx, cancelWatch = context.WithCancel(ctx)
+			firstResults, err = consul.WatchTree(watchCtx, clt, c.ConsulPrefix, consulResults, logger)
 			if err == nil {
 				err = c.ParseParamsFromConsul(firstResults)
 				if err != nil {
@@ -348,6 +347,7 @@ func InitLoad(dirname string, params consul.ConnParams, prefix string, logger lo
 				}
 			} else {
 				c.Logger.Error("Error reading from Consul", "error", err)
+				cancelWatch()
 				consulResults = nil
 			}
 		} else {
@@ -359,27 +359,26 @@ func InitLoad(dirname string, params consul.ConnParams, prefix string, logger lo
 
 	err = c.Complete()
 	if err != nil {
-		if stopWatchChan != nil {
-			close(stopWatchChan)
+		if cancelWatch != nil {
+			cancelWatch()
 		}
 		return nil, nil, err
 	}
 
 	if consulResults != nil {
 		// watch for updates from Consul
-		// (c.Updated is not modified or closed, same channel for the new config)
+		updated = make(chan bool)
 		go func() {
 			for result := range consulResults {
-				oldDirname := c.Store.Dirname
 				var newConfig *GConfig
 				*newConfig = *c
 				err := newConfig.ParseParamsFromConsul(result)
 				if err == nil {
 					err = newConfig.Complete()
-					newConfig.Store.Dirname = oldDirname
+					newConfig.Store = c.Store
 					if err == nil {
 						*c = *newConfig
-						c.Updated <- true
+						updated <- true
 					} else {
 						logger.Error("Error updating conf from Consul", "error", err)
 					}
@@ -387,11 +386,11 @@ func InitLoad(dirname string, params consul.ConnParams, prefix string, logger lo
 					c.Logger.Error("Error decoding conf from Consul", "error", err)
 				}
 			}
-			close(c.Updated)
+			close(updated)
 		}()
 	}
 
-	return c, stopWatchChan, nil
+	return c, updated, nil
 }
 
 func (c *GConfig) ParseParamsFromConsul(params map[string]string) error {
@@ -533,13 +532,13 @@ func (c *GConfig) ParseParamsFromConsul(params map[string]string) error {
 	return nil
 }
 
-func (c *GConfig) Reload() (newConf *GConfig, stopWatchChan chan bool, err error) {
-	newConf, stopWatchChan, err = InitLoad(c.Dirname, c.ConsulParams, c.ConsulPrefix, c.Logger)
+func (c *GConfig) Reload(ctx context.Context) (newConf *GConfig, updated chan bool, err error) {
+	newConf, updated, err = InitLoad(ctx, c.Dirname, c.ConsulParams, c.ConsulPrefix, c.Logger)
 	if err != nil {
 		return nil, nil, err
 	}
 	newConf.Store = c.Store // we don't change the location of the badger databases when doing a reload
-	return newConf, stopWatchChan, nil
+	return newConf, updated, nil
 }
 
 func (c *GConfig) Export() string {

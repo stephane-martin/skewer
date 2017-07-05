@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"log/syslog"
 	"os"
@@ -95,20 +96,31 @@ func SetLogging() log15.Logger {
 }
 
 func Serve() {
+	gctx, gCancel := context.WithCancel(context.Background())
+	shutdownCtx, shutdown := context.WithCancel(gctx)
+	watchCtx, stopWatch := context.WithCancel(shutdownCtx)
+
+	defer func() {
+		gCancel()
+		time.Sleep(time.Second)
+	}()
+
 	logger := SetLogging()
+
 	var err error
 	err = sys.SetNonDumpable()
 	if err != nil {
 		logger.Warn("Error setting PR_SET_DUMPABLE", "error", err)
 	}
+
 	var c *conf.GConfig
 	var st *store.MessageStore
-	var stopWatchChan chan bool
+	var updated chan bool
 	params := consul.ConnParams{Address: consulAddr, Datacenter: consulDC, Token: consulToken}
 
 	// read configuration
 	for {
-		c, stopWatchChan, err = conf.InitLoad(configDirName, params, consulPrefix, logger)
+		c, updated, err = conf.InitLoad(watchCtx, configDirName, params, consulPrefix, logger)
 		if err == nil {
 			break
 		}
@@ -117,23 +129,22 @@ func Serve() {
 	}
 
 	// prepare the message store
-	st, err = store.NewStore(c.Store.Dirname, c.Store.Maxsize, c.Store.FSync, logger, testFlag)
+	st, err = store.NewStore(gctx, c.Store.Dirname, c.Store.Maxsize, c.Store.FSync, logger, testFlag)
 	if err != nil {
 		logger.Crit("Can't create the message Store", "error", err)
 		os.Exit(-1)
 	}
 	st.SendToKafka(c.Kafka)
-	defer st.Close()
 
 	metrics := metrics.SetupMetrics()
 
+	// retrieve messages from journald
 	var journaldServer *server.JournaldServer
 	if c.Journald.Enabled {
 		logger.Info("Journald is enabled")
-		journaldServer, err = server.NewJournaldServer(c.Journald, st, metrics, logger)
+		journaldServer, err = server.NewJournaldServer(gctx, c.Journald, st, metrics, logger)
 		if err == nil {
 			journaldServer.Start()
-			defer journaldServer.Close()
 		} else {
 			// todo: log
 		}
@@ -215,48 +226,57 @@ func Serve() {
 
 	for {
 		select {
-		case _, more := <-c.Updated:
+		case <-shutdownCtx.Done():
+			logger.Info("Shutting down")
+			relpServer.FinalStop()
+			tcpServer.Stop()
+			udpServer.Stop()
+			<-tcpServer.ClosedChan
+			logger.Info("The TCP service has been stopped")
+			<-udpServer.ClosedChan
+			logger.Info("The UDP service has been stopped")
+			return
+
+		case _, more := <-updated:
 			if more {
-				logger.Info("Configuration was updated by Consul")
-				Reload(c)
+				select {
+				case <-shutdownCtx.Done():
+				default:
+					logger.Info("Configuration was updated by Consul")
+					Reload(c)
+				}
 			}
 
 		case sig := <-sig_chan:
 			if sig == syscall.SIGHUP {
-				logger.Info("SIGHUP received: reloading configuration")
-				newConf, newStopWatchChan, err := c.Reload() // try to reload the configuration
-				if err == nil {
-					if stopWatchChan != nil {
-						close(stopWatchChan) // c.Updated will be eventually closed
+				select {
+				case <-shutdownCtx.Done():
+				default:
+					logger.Info("SIGHUP received: reloading configuration")
+					newWatchCtx, newStopWatch := context.WithCancel(shutdownCtx)
+					newConf, newUpdated, err := c.Reload(newWatchCtx) // try to reload the configuration
+					if err == nil {
+						stopWatch() // stop watch the old config
+						stopWatch = newStopWatch
+						updated = newUpdated
+						Reload(newConf)
+						*c = *newConf
+					} else {
+						newStopWatch()
+						logger.Error("Error reloading configuration. Configuration was left untouched.", "error", err)
 					}
-					stopWatchChan = newStopWatchChan
-					Reload(newConf)
-					*c = *newConf // replaces c.Updated with the new Updated channel
-				} else {
-					logger.Error("Error reloading configuration. Configuration was left untouched.", "error", err)
 				}
+
 			} else if sig == syscall.SIGTERM || sig == syscall.SIGINT {
-				logger.Debug("Termination signal received", "signal", sig)
-				if stopWatchChan != nil {
-					close(stopWatchChan)
-				}
-				relpServer.FinalStop()
-				tcpServer.Stop()
-				udpServer.Stop()
-				return
+				logger.Info("Termination signal received", "signal", sig)
+				shutdown()
 			} else {
 				logger.Warn("Unknown signal received", "signal", sig)
 			}
 
 		case <-st.FatalErrorChan:
 			logger.Warn("The store had a fatal error")
-			if stopWatchChan != nil {
-				close(stopWatchChan)
-			}
-			relpServer.FinalStop()
-			tcpServer.Stop()
-			udpServer.Stop()
-			return
+			shutdown()
 
 		case <-st.KafkaErrorChan:
 			logger.Warn("Store has received a Kafka error: resetting connection to Kafka")
@@ -267,12 +287,7 @@ func Serve() {
 			switch state {
 			case server.FinalStopped:
 				logger.Info("The RELP service has been definitely halted")
-				// wait that the tcp service stops too
-				<-tcpServer.ClosedChan
-				logger.Info("The TCP service has been stopped")
-				<-udpServer.ClosedChan
-				logger.Info("The UDP service has been stopped")
-				return
+
 			case server.Stopped:
 				logger.Info("The RELP service has been stopped")
 				relpServer.Conf = *c
@@ -281,6 +296,7 @@ func Serve() {
 					logger.Warn("The RELP service has failed to start", "error", err)
 					relpServer.StopAndWait()
 				}
+
 			case server.Waiting:
 				logger.Info("Waiting")
 				go func() {

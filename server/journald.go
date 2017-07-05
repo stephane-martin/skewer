@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"math/rand"
 	"strconv"
 	"strings"
@@ -80,11 +81,11 @@ type JournaldServer struct {
 	wgroup   *sync.WaitGroup
 }
 
-func NewJournaldServer(c conf.JournaldConfig, st *store.MessageStore, metric *metrics.Metrics, logger log15.Logger) (*JournaldServer, error) {
+func NewJournaldServer(ctx context.Context, c conf.JournaldConfig, st *store.MessageStore, metric *metrics.Metrics, logger log15.Logger) (*JournaldServer, error) {
 	var err error
 	s := JournaldServer{Conf: c, store: st, metrics: metric}
 	s.logger = logger.New("class", "journald")
-	s.reader, err = journald.NewReader()
+	s.reader, err = journald.NewReader(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -146,9 +147,4 @@ func (s *JournaldServer) Stop() {
 		close(s.stopchan)
 	}
 	s.wgroup.Wait()
-}
-
-func (s *JournaldServer) Close() {
-	s.reader.Close() // will close reader.Entries
-
 }

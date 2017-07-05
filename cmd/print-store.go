@@ -14,6 +14,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/inconshreveable/log15"
@@ -39,23 +40,25 @@ to quickly create a Cobra application.`,
 		var err error
 		var c *conf.GConfig
 		var st *store.MessageStore
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
 		logger := log15.New()
 		params := consul.ConnParams{Address: consulAddr, Datacenter: consulDC, Token: consulToken}
 
-		c, _, err = conf.InitLoad(configDirName, params, consulPrefix, logger)
+		c, _, err = conf.InitLoad(ctx, configDirName, params, consulPrefix, logger)
 		if err != nil {
 			fmt.Println("bleh")
 			return
 		}
 
 		// prepare the message store
-		st, err = store.NewStore(c.Store.Dirname, c.Store.Maxsize, c.Store.FSync, logger, testFlag)
+		st, err = store.NewStore(ctx, c.Store.Dirname, c.Store.Maxsize, c.Store.FSync, logger, testFlag)
 		if err != nil {
 			fmt.Println("Can't create the message Store", "error", err)
 			return
 		}
 
-		messagesMap, readyMap, failedMap, sentMap := st.ReadAll()
+		messagesMap, readyMap, failedMap, sentMap := st.ReadAllBadgers()
 
 		fmt.Println("Messages")
 		for k, v := range messagesMap {

@@ -14,6 +14,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -35,7 +36,7 @@ This application is a tool to generate the needed files
 to quickly create a Cobra application.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		params := consul.ConnParams{Address: consulAddr, Datacenter: consulDC, Token: consulToken}
-		c, _, err := conf.InitLoad(configDirName, params, consulPrefix, log15.New())
+		c, _, err := conf.InitLoad(context.Background(), configDirName, params, consulPrefix, log15.New())
 		if err != nil {
 			fmt.Printf("Error happened: %s\n", err)
 			os.Exit(-1)

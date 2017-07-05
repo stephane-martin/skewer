@@ -51,17 +51,6 @@ func NewRelpServer(c *conf.GConfig, metrics *metrics.Metrics, logger log15.Logge
 	return &s
 }
 
-func (s *RelpServer) NewJsEnv(config conf.SyslogConfig) *javascript.Environment {
-	return javascript.New(
-		config.FilterFunc,
-		config.TopicFunc,
-		config.TopicTmpl,
-		config.PartitionFunc,
-		config.PartitionTmpl,
-		s.logger,
-	)
-}
-
 func (s *RelpServer) Start() error {
 	s.statusMutex.Lock()
 	defer s.statusMutex.Unlock()
@@ -353,7 +342,8 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 			close(other_fails_chan)
 			s.wg.Done()
 		}()
-		e := s.NewJsEnv(config)
+		e := javascript.NewFilterEnvironment(config.FilterFunc, config.TopicFunc, config.TopicTmpl, config.PartitionFunc, config.PartitionTmpl, s.logger)
+
 	ForParsedChan:
 		for m := range parsed_messages_chan {
 			topic, errs := e.Topic(m.Parsed.Fields)

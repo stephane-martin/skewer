@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-type JsonRsyslogMessage struct {
+type jsonRsyslogMessage struct {
 	Message       string                 `json:"msg"`
 	TimeReported  string                 `json:"timereported"`
 	TimeGenerated string                 `json:"timegenerated"`
@@ -22,7 +22,7 @@ type JsonRsyslogMessage struct {
 }
 
 func ParseJsonFormat(m string) (*SyslogMessage, error) {
-	sourceMsg := JsonRsyslogMessage{}
+	sourceMsg := jsonRsyslogMessage{}
 	err := json.Unmarshal([]byte(m), &sourceMsg)
 	if err != nil {
 		return nil, &UnmarshalingJsonError{err}

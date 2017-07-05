@@ -2,6 +2,8 @@
 
 package journald
 
+import "context"
+
 func Dummy() bool {
 	return true
 }
@@ -9,7 +11,6 @@ func Dummy() bool {
 type JournaldReader interface {
 	Start()
 	Stop()
-	Close() error
 	Entries() chan map[string]string
 }
 
@@ -17,7 +18,7 @@ type reader struct {
 	entries chan map[string]string
 }
 
-func NewReader() (JournaldReader, error) {
+func NewReader(ctx context.Context) (JournaldReader, error) {
 	r := &reader{}
 	r.entries = make(chan map[string]string)
 	return r, nil
@@ -25,11 +26,6 @@ func NewReader() (JournaldReader, error) {
 
 func (r *reader) Start() {}
 func (r *reader) Stop()  {}
-
-func (r *reader) Close() error {
-	close(r.entries)
-	return nil
-}
 
 func (r *reader) Entries() chan map[string]string {
 	return r.entries

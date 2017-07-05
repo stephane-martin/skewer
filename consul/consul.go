@@ -1,10 +1,12 @@
 package consul
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hashicorp/consul/api"
@@ -56,12 +58,12 @@ func NewClient(params ConnParams) (*api.Client, error) {
 	return client, nil
 }
 
-func WatchTree(client *api.Client, prefix string, resultsChan chan map[string]string, logger log15.Logger) (results map[string]string, stop chan bool, err error) {
+func WatchTree(ctx context.Context, client *api.Client, prefix string, resultsChan chan map[string]string, logger log15.Logger) (results map[string]string, err error) {
 	// it is our job to close the notifications channel when we won't write anymore to it
 	if client == nil || len(prefix) == 0 {
 		logger.Info("Not watching Consul for dynamic configuration")
 		sclose(resultsChan)
-		return nil, nil, nil
+		return nil, nil
 	}
 	logger.Debug("Getting configuration from Consul", "prefix", prefix)
 
@@ -70,14 +72,13 @@ func WatchTree(client *api.Client, prefix string, resultsChan chan map[string]st
 
 	if err != nil {
 		sclose(resultsChan)
-		return nil, nil, err
+		return nil, err
 	}
 
 	if resultsChan == nil {
-		return results, nil, nil
+		return results, nil
 	}
 
-	stop = make(chan bool, 1)
 	previous_index := first_index
 	previous_keyvalues := copy_map(results)
 
@@ -124,7 +125,7 @@ func WatchTree(client *api.Client, prefix string, resultsChan chan map[string]st
 		defer close(resultsChan)
 		for {
 			select {
-			case <-stop:
+			case <-ctx.Done():
 				return
 			default:
 				watch()
@@ -132,7 +133,7 @@ func WatchTree(client *api.Client, prefix string, resultsChan chan map[string]st
 		}
 	}()
 
-	return results, stop, nil
+	return results, nil
 
 }
 
@@ -152,59 +153,144 @@ func getTree(client *api.Client, prefix string, waitIndex uint64) (map[string]st
 	return results, meta.LastIndex, nil
 }
 
-type Registry struct {
-	client *api.Client
-	logger log15.Logger
+type Service struct {
+	ID       string
+	Name     string
+	IP       string
+	parsedIP net.IP
+	Port     int
+	CheckURL string
+	Tags     []string
 }
 
-func NewRegistry(params ConnParams, logger log15.Logger) (*Registry, error) {
+func NewService(name string, ip string, port int, checkURL string, tags []string) *Service {
+	s := Service{
+		Name: name,
+		IP:   ip,
+		Port: port,
+	}
+	checkURL = strings.TrimSpace(checkURL)
+	if len(checkURL) == 0 {
+		s.CheckURL = fmt.Sprintf("http://[%s]:%d/health", ip, port)
+	} else {
+		s.CheckURL = checkURL
+	}
+	if tags == nil {
+		s.Tags = []string{}
+	} else {
+		s.Tags = tags
+	}
+
+	localIP, err := LocalIP()
+	if err != nil {
+		// todo
+		localIP = net.ParseIP("127.0.0.1")
+	}
+
+	var parsedIP net.IP
+
+	ip = strings.TrimSpace(ip)
+	if len(ip) == 0 {
+		parsedIP = localIP
+	} else {
+		parsedIP := net.ParseIP(ip)
+		if parsedIP == nil {
+			parsedIP = localIP
+		}
+	}
+	if parsedIP.IsUnspecified() { // 0.0.0.0
+		parsedIP = localIP
+	}
+	s.parsedIP = parsedIP
+
+	hostname, err := os.Hostname()
+	if err != nil {
+		// todo
+		hostname = parsedIP.String()
+	}
+
+	s.ID = fmt.Sprintf("%s-%s-%s-%d", name, hostname, parsedIP.String(), port)
+	return &s
+}
+
+type Registry struct {
+	client                *api.Client
+	logger                log15.Logger
+	registeredServicesIds map[string]bool
+	RegisterChan          chan *Service
+	UnregisterChan        chan *Service
+	wgroup                *sync.WaitGroup
+}
+
+func (r *Registry) Wait() {
+	r.wgroup.Wait()
+}
+
+func NewRegistry(ctx context.Context, params ConnParams, logger log15.Logger) (*Registry, error) {
 	c, err := NewClient(params)
 	if err != nil {
 		return nil, err
 	}
 	r := Registry{client: c, logger: logger}
+	r.wgroup = &sync.WaitGroup{}
+	r.registeredServicesIds = map[string]bool{}
+	r.RegisterChan = make(chan *Service)
+	r.UnregisterChan = make(chan *Service)
+
+	r.wgroup.Add(1)
+	go func() {
+		defer r.wgroup.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				for svcID, registered := range r.registeredServicesIds {
+					if registered {
+						err := doUnregister(r.client, svcID)
+						if err == nil {
+							r.registeredServicesIds[svcID] = false
+						}
+					}
+				}
+				return
+			case svc := <-r.RegisterChan:
+				if r.registeredServicesIds[svc.ID] {
+					// todo: already registered
+				} else {
+					err := doRegister(r.client, svc)
+					if err == nil {
+						r.registeredServicesIds[svc.ID] = true
+					} else {
+						// todo
+					}
+				}
+			case svc := <-r.UnregisterChan:
+				if r.registeredServicesIds[svc.ID] {
+					err := doUnregister(r.client, svc.ID)
+					if err == nil {
+						r.registeredServicesIds[svc.ID] = false
+					} else {
+						// todo
+					}
+				} else {
+					// todo: not registered
+				}
+			}
+		}
+	}()
+
 	return &r, nil
 }
 
-func (r *Registry) Register(name string, ip_s string, port int, check_url string, tags []string) (service_id string, err error) {
-
-	ip := net.ParseIP(ip_s)
-	if ip == nil {
-		ip, err = LocalIP()
-		if err != nil {
-			return "", err
-		}
-	}
-	if ip.IsLoopback() {
-		r.logger.Info("Skipping registration of service: it listens on loopback", "name", name)
-		return "", nil
-	}
-	if ip.IsUnspecified() { // 0.0.0.0
-		ip, err = LocalIP()
-		if err != nil {
-			return "", err
-		}
-	}
-	var hostname string
-	hostname, err = os.Hostname()
-	if err != nil {
-		return "", err
-	}
-
-	service_id = fmt.Sprintf("%s-%s-%d", name, hostname, port)
-
-	if len(check_url) == 0 {
-		check_url = fmt.Sprintf("http://[%s]:%d/health", ip, port)
-	}
+func doRegister(client *api.Client, svc *Service) error {
 
 	service := &api.AgentServiceRegistration{
-		ID:      service_id,
-		Name:    name,
-		Address: ip.String(),
-		Port:    port,
-		Tags:    tags,
+		ID:      svc.ID,
+		Name:    svc.Name,
+		Address: svc.parsedIP.String(),
+		Port:    svc.Port,
+		Tags:    svc.Tags,
 		Check: &api.AgentServiceCheck{
-			HTTP:          check_url,
+			HTTP:          svc.CheckURL,
 			Interval:      "30s",
 			Timeout:       "2s",
 			TLSSkipVerify: true,
@@ -212,31 +298,20 @@ func (r *Registry) Register(name string, ip_s string, port int, check_url string
 		},
 	}
 
-	err = r.client.Agent().ServiceRegister(service)
-	if err != nil {
-		return "", err
-	}
-	r.logger.Info("Registered service in Consul", "id", service.ID, "ip", service.Address, "port", service.Port,
-		"tags", strings.Join(service.Tags, ","), "health_url", service.Check.HTTP)
-	return service_id, nil
+	return client.Agent().ServiceRegister(service)
+	//r.logger.Info("Registered service in Consul", "id", service.ID, "ip", service.Address, "port", service.Port,"tags", strings.Join(service.Tags, ","), "health_url", service.Check.HTTP)
 }
 
-func (r *Registry) Registered(service_id string) (bool, error) {
+func (r *Registry) Registered(serviceID string) (bool, error) {
 	services, err := r.client.Agent().Services()
 	if err != nil {
 		return false, err
 	}
-	return services[service_id] != nil, nil
+	return services[serviceID] != nil, nil
 }
 
-func (r *Registry) Unregister(service_id string, logger log15.Logger) error {
-	err := r.client.Agent().ServiceDeregister(service_id)
-	if err != nil {
-		logger.Error("Failed to unregister service", "id", service_id)
-		return err
-	}
-	logger.Info("Unregistered service from Consul", "id", service_id)
-	return nil
+func doUnregister(client *api.Client, serviceID string) error {
+	return client.Agent().ServiceDeregister(serviceID)
 }
 
 func LocalIP() (net.IP, error) {

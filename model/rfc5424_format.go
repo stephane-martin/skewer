@@ -21,7 +21,7 @@ func ParseRfc5424Format(m string, dont_parse_sd bool) (*SyslogMessage, error) {
 	}
 
 	var err error
-	smsg.Priority, smsg.Facility, smsg.Severity, smsg.Version, err = ParsePriorityVersion(splits[0])
+	smsg.Priority, smsg.Facility, smsg.Severity, smsg.Version, err = parsePriority(splits[0])
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +61,7 @@ func ParseRfc5424Format(m string, dont_parse_sd bool) (*SyslogMessage, error) {
 		// structured data is empty
 		smsg.Message = strings.TrimSpace(structured_and_msg[1:])
 	} else if strings.HasPrefix(structured_and_msg, "[") {
-		s1, s2, err := SplitStructuredAndMessage(structured_and_msg)
+		s1, s2, err := splitStructuredData(structured_and_msg)
 		if err != nil {
 			return nil, err
 		}
@@ -71,7 +71,7 @@ func ParseRfc5424Format(m string, dont_parse_sd bool) (*SyslogMessage, error) {
 			smsg.Structured = s1
 		} else {
 			smsg.Structured = ""
-			props, err := ParseStructuredData(s1)
+			props, err := parseStructData(s1)
 			if err != nil {
 				return nil, err
 			}
@@ -86,7 +86,7 @@ func ParseRfc5424Format(m string, dont_parse_sd bool) (*SyslogMessage, error) {
 	return &smsg, nil
 }
 
-func SplitStructuredAndMessage(structured_and_msg string) (string, string, error) {
+func splitStructuredData(structured_and_msg string) (string, string, error) {
 	length := len(structured_and_msg)
 	for i := 0; i < length; i++ {
 		if structured_and_msg[i] == ']' {
@@ -101,7 +101,7 @@ func SplitStructuredAndMessage(structured_and_msg string) (string, string, error
 	return "", "", &InvalidStructuredDataError{"Can not find the last ']' that marks the end of structured data"}
 }
 
-func ParsePriorityVersion(pv string) (Priority, Facility, Severity, Version, error) {
+func parsePriority(pv string) (Priority, Facility, Severity, Version, error) {
 	if pv[0] != byte('<') {
 		return 0, 0, 0, 0, &InvalidPriorityError{}
 	}
@@ -128,7 +128,7 @@ func ParsePriorityVersion(pv string) (Priority, Facility, Severity, Version, err
 	return Priority(p), f, s, Version(v), nil
 }
 
-func ParseStructuredData(sd string) (m map[string]map[string]string, err error) {
+func parseStructData(sd string) (m map[string]map[string]string, err error) {
 	// see https://tools.ietf.org/html/rfc5424#section-6.3
 	if !utf8.ValidString(sd) {
 		return nil, &InvalidStructuredDataError{}

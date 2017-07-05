@@ -104,20 +104,20 @@ func ParseRfc3164Format(m string) (*SyslogMessage, error) {
 			// looks like an IPv6/IPv4 address
 			smsg.Hostname = s[0]
 			if strings.ContainsAny(s[1], "[]:") {
-				smsg.Appname, smsg.Procid = ParseTag(s[1])
+				smsg.Appname, smsg.Procid = parseTag(s[1])
 			} else {
 				smsg.Message = s[1]
 			}
 			return &smsg, nil
 		}
 		if strings.ContainsAny(s[0], "[]:") {
-			smsg.Appname, smsg.Procid = ParseTag(s[0])
+			smsg.Appname, smsg.Procid = parseTag(s[0])
 			smsg.Message = s[1]
 			return &smsg, nil
 		}
 		if strings.ContainsAny(s[1], "[]:") {
 			smsg.Hostname = s[0]
-			smsg.Appname, smsg.Procid = ParseTag(s[0])
+			smsg.Appname, smsg.Procid = parseTag(s[0])
 			return &smsg, nil
 		}
 		smsg.Appname = s[0]
@@ -127,17 +127,17 @@ func ParseRfc3164Format(m string) (*SyslogMessage, error) {
 
 	if strings.ContainsAny(s[0], "[]:") || !isHostname(s[0]) {
 		// hostname is omitted
-		smsg.Appname, smsg.Procid = ParseTag(s[0])
+		smsg.Appname, smsg.Procid = parseTag(s[0])
 		smsg.Message = strings.Join(s[1:], " ")
 		return &smsg, nil
 	}
 	smsg.Hostname = s[0]
-	smsg.Appname, smsg.Procid = ParseTag(s[1])
+	smsg.Appname, smsg.Procid = parseTag(s[1])
 	smsg.Message = strings.Join(s[2:], " ")
 	return &smsg, nil
 }
 
-func ParseTag(tag string) (appname string, procid string) {
+func parseTag(tag string) (appname string, procid string) {
 	tag = strings.Trim(tag, ":")
 	i := strings.Index(tag, "[")
 	if i >= 0 && len(tag) > (i+1) {

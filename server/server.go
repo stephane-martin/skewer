@@ -79,17 +79,19 @@ func (s *StreamServer) init() {
 	s.acceptsWg = &sync.WaitGroup{}
 }
 
-type ParsersEnv javascript.Environment
+type ParsersEnv struct {
+	jsenv javascript.ParsersEnvironment
+}
 
 func (s *Server) NewParsersEnv() *ParsersEnv {
-	p := javascript.New("", "", "", "", "", s.logger)
+	p := javascript.NewParsersEnvironment(s.logger)
 	for _, parserConf := range s.Conf.Parsers {
 		err := p.AddParser(parserConf.Name, parserConf.Func)
 		if err != nil {
 			s.logger.Warn("Error initializing parser", "name", parserConf.Name, "error", err)
 		}
 	}
-	return (*ParsersEnv)(p)
+	return &ParsersEnv{p}
 }
 
 func (e *ParsersEnv) GetParser(parserName string) Parser {
@@ -97,7 +99,7 @@ func (e *ParsersEnv) GetParser(parserName string) Parser {
 	case "rfc5424", "rfc3164", "json", "auto":
 		return model.GetParser(parserName)
 	default:
-		return (*javascript.Environment)(e).GetParser(parserName)
+		return e.jsenv.GetParser(parserName)
 	}
 }
 
