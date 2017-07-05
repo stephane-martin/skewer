@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"math/rand"
 	"net"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 	"github.com/stephane-martin/relp2kafka/metrics"
 	"github.com/stephane-martin/relp2kafka/model"
 	"github.com/stephane-martin/relp2kafka/store"
+	"github.com/stephane-martin/relp2kafka/sys"
 )
 
 type UdpServerStatus int
@@ -107,7 +109,8 @@ func (s *UdpServer) ListenPacket() int {
 				continue
 			}
 			if len(syslogConf.UnixSocketPath) > 0 {
-				conn, err := net.ListenPacket("unixgram", syslogConf.UnixSocketPath)
+				addr, _ := net.ResolveUnixAddr("unixgram", syslogConf.UnixSocketPath)
+				conn, err := net.ListenUnixgram("unixgram", addr)
 				if err != nil {
 					s.logger.Warn("Error listening on datagram unix socket", "path", syslogConf.UnixSocketPath, "error", err)
 				} else if conn != nil {
@@ -148,6 +151,16 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 		s.RemoveConnection(conn)
 		s.wg.Done()
 	}()
+
+	if unixConn, ok := conn.(*net.UnixConn); ok {
+		fmt.Println("UnixConn!")
+		a, b, c, e := sys.GetCredentials(unixConn)
+		if e == nil {
+			fmt.Println(a, b, c)
+		} else {
+			fmt.Println(e)
+		}
+	}
 
 	path := ""
 	local := conn.LocalAddr()
