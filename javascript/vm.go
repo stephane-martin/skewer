@@ -74,9 +74,6 @@ type iSyslogMessage struct {
 	Properties    map[string]interface{}
 }
 
-// todo: make Environment an interface
-// maybe 2 different interfaces (parsers vs other)
-
 type Parser interface {
 	Parse(rawMessage string, dont_parse_sd bool) (*model.SyslogMessage, error)
 }
