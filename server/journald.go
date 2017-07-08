@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"math/rand"
 	"strconv"
 	"strings"
 	"sync"
@@ -72,18 +71,24 @@ func EntryToSyslog(entry map[string]string) *model.SyslogMessage {
 }
 
 type JournaldServer struct {
-	store    *store.MessageStore
-	reader   journald.JournaldReader
-	metrics  *metrics.Metrics
-	logger   log15.Logger
-	stopchan chan bool
-	Conf     conf.JournaldConfig
-	wgroup   *sync.WaitGroup
+	store     *store.MessageStore
+	reader    journald.JournaldReader
+	metrics   *metrics.Metrics
+	logger    log15.Logger
+	stopchan  chan bool
+	Conf      conf.JournaldConfig
+	wgroup    *sync.WaitGroup
+	generator chan ulid.ULID
 }
 
-func NewJournaldServer(ctx context.Context, c conf.JournaldConfig, st *store.MessageStore, metric *metrics.Metrics, logger log15.Logger) (*JournaldServer, error) {
+func NewJournaldServer(
+	ctx context.Context, c conf.JournaldConfig,
+	st *store.MessageStore, generator chan ulid.ULID, metric *metrics.Metrics,
+	logger log15.Logger,
+) (*JournaldServer, error) {
+
 	var err error
-	s := JournaldServer{Conf: c, store: st, metrics: metric}
+	s := JournaldServer{Conf: c, store: st, metrics: metric, generator: generator}
 	s.logger = logger.New("class", "journald")
 	s.reader, err = journald.NewReader(ctx)
 	if err != nil {
@@ -112,14 +117,13 @@ func (s *JournaldServer) Start() {
 	s.wgroup.Add(1)
 	go func() {
 		defer s.wgroup.Done()
-		entropy := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 		for {
 			select {
 			case entry, more := <-s.reader.Entries():
 				if more {
 					message := EntryToSyslog(entry)
-					uid, _ := ulid.New(ulid.Timestamp(message.TimeReported), entropy)
+					uid := <-s.generator
 					parsedMessage := model.ParsedMessage{
 						Client:         "journald",
 						LocalPort:      0,

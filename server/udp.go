@@ -2,11 +2,9 @@ package server
 
 import (
 	"fmt"
-	"math/rand"
 	"net"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
@@ -31,6 +29,7 @@ type UdpServer struct {
 	store      *store.MessageStore
 	handler    PacketHandler
 	metrics    *metrics.Metrics
+	generator  chan ulid.ULID
 }
 
 type PacketHandler interface {
@@ -45,8 +44,8 @@ func (s *UdpServer) init() {
 	s.Server.init()
 }
 
-func NewUdpServer(c *conf.GConfig, st *store.MessageStore, metrics *metrics.Metrics, logger log15.Logger) *UdpServer {
-	s := UdpServer{status: UdpStopped, metrics: metrics, store: st}
+func NewUdpServer(c *conf.GConfig, st *store.MessageStore, generator chan ulid.ULID, metrics *metrics.Metrics, logger log15.Logger) *UdpServer {
+	s := UdpServer{status: UdpStopped, metrics: metrics, store: st, generator: generator}
 	s.logger = logger.New("class", "UdpServer")
 	s.init()
 	s.protocol = "udp"
@@ -182,7 +181,6 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 	go func() {
 		defer s.wg.Done()
 		e := s.NewParsersEnv()
-		entropy := rand.New(rand.NewSource(time.Now().UnixNano()))
 		for m := range raw_messages_chan {
 			parser := e.GetParser(config.Format)
 			if parser == nil {
@@ -192,23 +190,18 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 			p, err := parser.Parse(m.Message, config.DontParseSD)
 
 			if err == nil {
-				uid, err := ulid.New(ulid.Timestamp(p.TimeReported), entropy)
-				if err != nil {
-					// should not happen
-					s.logger.Error("Error generating a ULID", "error", err)
-				} else {
-					parsed_msg := model.TcpUdpParsedMessage{
-						Parsed: model.ParsedMessage{
-							Fields:         p,
-							Client:         m.Client,
-							LocalPort:      m.LocalPort,
-							UnixSocketPath: m.UnixSocketPath,
-						},
-						Uid:    uid.String(),
-						ConfId: confId,
-					}
-					s.store.Inputs <- &parsed_msg
+				uid := <-s.generator
+				parsed_msg := model.TcpUdpParsedMessage{
+					Parsed: model.ParsedMessage{
+						Fields:         p,
+						Client:         m.Client,
+						LocalPort:      m.LocalPort,
+						UnixSocketPath: m.UnixSocketPath,
+					},
+					Uid:    uid.String(),
+					ConfId: confId,
 				}
+				s.store.Inputs <- &parsed_msg
 			} else {
 				logger.Info("Parsing error", "Message", m.Message, "error", err)
 			}

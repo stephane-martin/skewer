@@ -3,7 +3,6 @@ package server
 import (
 	"bufio"
 	"bytes"
-	"math/rand"
 	"net"
 	"strconv"
 	"strings"
@@ -30,17 +29,19 @@ type TcpServer struct {
 	ClosedChan chan TcpServerStatus
 	store      *store.MessageStore
 	metrics    *metrics.Metrics
+	generator  chan ulid.ULID
 }
 
 func (s *TcpServer) init() {
 	s.StreamServer.init()
 }
 
-func NewTcpServer(c *conf.GConfig, st *store.MessageStore, metric *metrics.Metrics, logger log15.Logger) *TcpServer {
+func NewTcpServer(c *conf.GConfig, st *store.MessageStore, generator chan ulid.ULID, metric *metrics.Metrics, logger log15.Logger) *TcpServer {
 	s := TcpServer{
-		status:  TcpStopped,
-		store:   st,
-		metrics: metric,
+		status:    TcpStopped,
+		store:     st,
+		metrics:   metric,
+		generator: generator,
 	}
 	s.logger = logger.New("class", "TcpServer")
 	s.protocol = "tcp"
@@ -140,7 +141,6 @@ func (h TcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 	go func() {
 		defer s.wg.Done()
 		e := s.NewParsersEnv()
-		entropy := rand.New(rand.NewSource(time.Now().UnixNano()))
 		for m := range raw_messages_chan {
 			parser := e.GetParser(config.Format)
 			if parser == nil {
@@ -150,23 +150,18 @@ func (h TcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 			p, err := parser.Parse(m.Message, config.DontParseSD)
 
 			if err == nil {
-				uid, err := ulid.New(ulid.Timestamp(p.TimeReported), entropy)
-				if err != nil {
-					// should not happen
-					s.logger.Error("Error generating a ULID", "error", err)
-				} else {
-					parsed_msg := model.TcpUdpParsedMessage{
-						Parsed: model.ParsedMessage{
-							Fields:         p,
-							Client:         m.Client,
-							LocalPort:      m.LocalPort,
-							UnixSocketPath: m.UnixSocketPath,
-						},
-						Uid:    uid.String(),
-						ConfId: configId,
-					}
-					s.store.Inputs <- &parsed_msg
+				uid := <-s.generator
+				parsed_msg := model.TcpUdpParsedMessage{
+					Parsed: model.ParsedMessage{
+						Fields:         p,
+						Client:         m.Client,
+						LocalPort:      m.LocalPort,
+						UnixSocketPath: m.UnixSocketPath,
+					},
+					Uid:    uid.String(),
+					ConfId: configId,
 				}
+				s.store.Inputs <- &parsed_msg
 			} else {
 				logger.Info("Parsing error", "Message", m.Message, "error", err)
 			}

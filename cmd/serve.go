@@ -19,6 +19,7 @@ import (
 	"github.com/stephane-martin/relp2kafka/server"
 	"github.com/stephane-martin/relp2kafka/store"
 	"github.com/stephane-martin/relp2kafka/sys"
+	"github.com/stephane-martin/relp2kafka/utils"
 )
 
 // serveCmd represents the serve command
@@ -106,6 +107,7 @@ func Serve() {
 	}()
 
 	logger := SetLogging()
+	generator := utils.Generator(gctx, logger)
 
 	var err error
 	err = sys.SetNonDumpable()
@@ -129,7 +131,7 @@ func Serve() {
 	}
 
 	// prepare the message store
-	st, err = store.NewStore(gctx, c.Store.Dirname, c.Store.Maxsize, c.Store.FSync, logger, testFlag)
+	st, err = store.NewStore(gctx, c.Store, logger, testFlag)
 	if err != nil {
 		logger.Crit("Can't create the message Store", "error", err)
 		os.Exit(-1)
@@ -142,7 +144,7 @@ func Serve() {
 	var journaldServer *server.JournaldServer
 	if c.Journald.Enabled {
 		logger.Info("Journald is enabled")
-		journaldServer, err = server.NewJournaldServer(gctx, c.Journald, st, metrics, logger)
+		journaldServer, err = server.NewJournaldServer(gctx, c.Journald, st, generator, metrics, logger)
 		if err == nil {
 			journaldServer.Start()
 		} else {
@@ -160,7 +162,7 @@ func Serve() {
 	relpServer.StatusChan <- server.Stopped // trigger the RELP service to start
 
 	// start the TCP service
-	tcpServer := server.NewTcpServer(c, st, metrics, logger)
+	tcpServer := server.NewTcpServer(c, st, generator, metrics, logger)
 	if testFlag {
 		tcpServer.SetTest()
 	}
@@ -170,7 +172,7 @@ func Serve() {
 	}
 
 	// start the UDP service
-	udpServer := server.NewUdpServer(c, st, metrics, logger)
+	udpServer := server.NewUdpServer(c, st, generator, metrics, logger)
 	if testFlag {
 		udpServer.SetTest()
 	}

@@ -18,13 +18,14 @@ import (
 	"github.com/stephane-martin/relp2kafka/conf"
 	"github.com/stephane-martin/relp2kafka/javascript"
 	"github.com/stephane-martin/relp2kafka/model"
+	"github.com/stephane-martin/relp2kafka/utils"
 )
 
 // todo: make Store an interface
 
 type MessageStore struct {
 	test           bool
-	messages       *badger.KV
+	messages       utils.DB
 	ready          *badger.KV
 	sent           *badger.KV
 	failed         *badger.KV
@@ -44,7 +45,6 @@ type MessageStore struct {
 	storeToKafkaWg *sync.WaitGroup
 	ticker         *time.Ticker
 	logger         log15.Logger
-	//Conf           conf.GConfig
 }
 
 func (s *MessageStore) init() {
@@ -60,40 +60,28 @@ func (s *MessageStore) init() {
 	s.KafkaErrorChan = make(chan bool)
 }
 
-func (s *MessageStore) SetNewConf(newConf *conf.GConfig) {
-	//s.Conf = *newConf
-}
-
-func NewStore(ctx context.Context, dirname string, maxSize int64, fsync bool, l log15.Logger, test bool) (store *MessageStore, err error) {
-	//dirname := c.Store.Dirname
+func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger, test bool) (store *MessageStore, err error) {
 	opts_messages := badger.DefaultOptions
 	opts_ready := badger.DefaultOptions
 	opts_sent := badger.DefaultOptions
 	opts_failed := badger.DefaultOptions
 	opts_configs := badger.DefaultOptions
-	opts_messages.Dir = path.Join(dirname, "messages")
-	opts_messages.ValueDir = path.Join(dirname, "messages")
-	opts_sent.Dir = path.Join(dirname, "sent")
-	opts_sent.ValueDir = path.Join(dirname, "sent")
-	opts_ready.Dir = path.Join(dirname, "ready")
-	opts_ready.ValueDir = path.Join(dirname, "ready")
-	opts_failed.Dir = path.Join(dirname, "failed")
-	opts_failed.ValueDir = path.Join(dirname, "failed")
-	opts_configs.Dir = path.Join(dirname, "configs")
-	opts_configs.ValueDir = path.Join(dirname, "configs")
-	/*
-		opts_messages.MaxTableSize = c.Store.Maxsize
-		opts_messages.SyncWrites = c.Store.FSync
-		opts_ready.SyncWrites = c.Store.FSync
-		opts_sent.SyncWrites = c.Store.FSync
-		opts_failed.SyncWrites = c.Store.FSync
-	*/
-	opts_messages.MaxTableSize = maxSize
-	opts_messages.SyncWrites = fsync
-	opts_ready.SyncWrites = fsync
-	opts_sent.SyncWrites = fsync
-	opts_failed.SyncWrites = fsync
+	opts_messages.Dir = path.Join(cfg.Dirname, "messages")
+	opts_messages.ValueDir = path.Join(cfg.Dirname, "messages")
+	opts_sent.Dir = path.Join(cfg.Dirname, "sent")
+	opts_sent.ValueDir = path.Join(cfg.Dirname, "sent")
+	opts_ready.Dir = path.Join(cfg.Dirname, "ready")
+	opts_ready.ValueDir = path.Join(cfg.Dirname, "ready")
+	opts_failed.Dir = path.Join(cfg.Dirname, "failed")
+	opts_failed.ValueDir = path.Join(cfg.Dirname, "failed")
+	opts_configs.Dir = path.Join(cfg.Dirname, "configs")
+	opts_configs.ValueDir = path.Join(cfg.Dirname, "configs")
 
+	opts_messages.MaxTableSize = cfg.Maxsize
+	opts_messages.SyncWrites = cfg.FSync
+	opts_ready.SyncWrites = cfg.FSync
+	opts_sent.SyncWrites = cfg.FSync
+	opts_failed.SyncWrites = cfg.FSync
 	opts_configs.SyncWrites = true
 
 	err = os.MkdirAll(opts_messages.Dir, 0700)
@@ -120,13 +108,17 @@ func NewStore(ctx context.Context, dirname string, maxSize int64, fsync bool, l 
 	store = &MessageStore{}
 	store.logger = l.New("class", "MessageStore")
 	store.init()
-	//store.SetNewConf(c)
 	store.test = test
 
-	store.messages, err = badger.NewKV(&opts_messages)
+	if len(cfg.Secret) > 0 {
+		store.messages, err = utils.NewEncryptedDB(&opts_messages, cfg.SecretB)
+	} else {
+		store.messages, err = utils.NewNonEncryptedDB(&opts_messages)
+	}
 	if err != nil {
 		return nil, err
 	}
+
 	store.ready, err = badger.NewKV(&opts_ready)
 	if err != nil {
 		return nil, err
@@ -266,18 +258,8 @@ func (s *MessageStore) sendKafkaIsStopped() bool {
 
 func (s *MessageStore) pruneOrphaned() {
 	// find if we have some old full messages
-	iter_opts := badger.IteratorOptions{
-		PrefetchSize: 1000,
-		FetchValues:  false,
-		Reverse:      false,
-	}
 
-	uids := []string{}
-	iter := s.messages.NewIterator(iter_opts)
-	for iter.Rewind(); iter.Valid(); iter.Next() {
-		uids = append(uids, string(iter.Item().Key()))
-	}
-	iter.Close()
+	uids := s.messages.ListKeys()
 
 	// check if the corresponding uid exists in "ready" or "failed"
 	orphaned_uids := []string{}
@@ -293,7 +275,7 @@ func (s *MessageStore) pruneOrphaned() {
 
 	// if no match, delete the message
 	for _, uid := range orphaned_uids {
-		s.messages.Delete([]byte(uid))
+		s.messages.Delete(uid)
 	}
 }
 
@@ -319,22 +301,14 @@ func (s *MessageStore) resetStuckInSent() {
 
 }
 
-func (s *MessageStore) ReadAllBadgers() (map[string]string, map[string]string, map[string]string, map[string]string) {
+func (s *MessageStore) ReadAllBadgers() (map[string]string, map[string]string, map[string]string) {
 	iter_opts := badger.IteratorOptions{
 		FetchValues: true,
 		Reverse:     false,
 	}
 
-	messagesMap := map[string]string{}
-	iter := s.messages.NewIterator(iter_opts)
-	for iter.Rewind(); iter.Valid(); iter.Next() {
-		item := iter.Item()
-		messagesMap[string(item.Key())] = string(item.Value())
-	}
-	iter.Close()
-
 	readyMap := map[string]string{}
-	iter = s.ready.NewIterator(iter_opts)
+	iter := s.ready.NewIterator(iter_opts)
 	for iter.Rewind(); iter.Valid(); iter.Next() {
 		item := iter.Item()
 		readyMap[string(item.Key())] = string(item.Value())
@@ -357,7 +331,7 @@ func (s *MessageStore) ReadAllBadgers() (map[string]string, map[string]string, m
 	}
 	iter.Close()
 
-	return messagesMap, readyMap, failedMap, sentMap
+	return readyMap, failedMap, sentMap
 }
 
 func (s *MessageStore) resetFailures() {
@@ -419,7 +393,6 @@ func (s *MessageStore) resetFailures() {
 }
 
 func (s *MessageStore) startIngest() {
-	s.logger.Debug("startIngest")
 	s.Inputs = make(chan *model.TcpUdpParsedMessage, 10000)
 	s.wg.Add(1)
 	go func() {
@@ -437,7 +410,6 @@ func (s *MessageStore) startIngest() {
 				}
 			}
 		}
-		s.logger.Debug("ingestion goroutine has finished")
 	}()
 }
 
@@ -452,14 +424,14 @@ func (s *MessageStore) stash(m *model.TcpUdpParsedMessage) error {
 	defer s.ready_mu.Unlock()
 	s.messages_mu.Lock()
 	defer s.messages_mu.Unlock()
-	err = s.messages.Set([]byte(m.Uid), b)
+	err = s.messages.Set(m.Uid, b)
 	if err != nil {
 		return err
 	}
 	err = s.ready.Set([]byte(m.Uid), []byte("true"))
 	if err != nil {
 		s.logger.Warn("Error putting message to Ready", "error", err)
-		s.messages.Delete([]byte(m.Uid))
+		s.messages.Delete(m.Uid)
 		return err
 	}
 	return nil
@@ -480,10 +452,8 @@ func (s *MessageStore) retrieve(n int) (messages map[string]*model.TcpUdpParsedM
 	invalidEntries := []string{}
 	for iter.Rewind(); iter.Valid() && fetched < n; iter.Next() {
 		uid := iter.Item().Key()
-		item := badger.KVItem{}
-		err := s.messages.Get(uid, &item)
+		message_b, err := s.messages.Get(string(uid))
 		if err == nil {
-			message_b := item.Value()
 			if message_b != nil {
 				message := model.TcpUdpParsedMessage{}
 				err := json.Unmarshal(message_b, &message)
@@ -491,7 +461,6 @@ func (s *MessageStore) retrieve(n int) (messages map[string]*model.TcpUdpParsedM
 					messages[string(uid)] = &message
 					fetched++
 				} else {
-					//s.logger.Warn("Error unmarshaling message from the badger", "uid", string(uid))
 					invalidEntries = append(invalidEntries, string(uid))
 				}
 			} else {
@@ -506,7 +475,7 @@ func (s *MessageStore) retrieve(n int) (messages map[string]*model.TcpUdpParsedM
 	for _, uid := range invalidEntries {
 		s.logger.Debug("Deleting invalid entry", "uid", string(uid))
 		s.ready.Delete([]byte(uid))
-		s.messages.Delete([]byte(uid))
+		s.messages.Delete(uid)
 	}
 	s.messages_mu.Unlock()
 
@@ -532,17 +501,16 @@ func (s *MessageStore) retrieve(n int) (messages map[string]*model.TcpUdpParsedM
 	return messages
 }
 
-func (s *MessageStore) Ack(id string) {
-	s.logger.Debug("ACK", "uid", id)
-	err := s.sent.Delete([]byte(id))
+func (s *MessageStore) Ack(uid string) {
+	err := s.sent.Delete([]byte(uid))
 	if err != nil {
-		s.logger.Warn("Error ACKing message", "uid", id, "error", err)
+		s.logger.Warn("Error ACKing message", "uid", uid, "error", err)
 	} else {
 		s.messages_mu.Lock()
-		err := s.messages.Delete([]byte(id))
+		err := s.messages.Delete(uid)
 		s.messages_mu.Unlock()
 		if err != nil {
-			s.logger.Warn("Error ACKing message", "uid", id, "error", err)
+			s.logger.Warn("Error ACKing message", "uid", uid, "error", err)
 		}
 	}
 }
