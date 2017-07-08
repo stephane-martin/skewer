@@ -3,6 +3,7 @@ package conf
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -76,9 +77,11 @@ type ParserConfig struct {
 }
 
 type StoreConfig struct {
-	Dirname string `mapstructure:"dirname" toml:"dirname"`
-	Maxsize int64  `mapstructure:"max_size" toml:"max_size"`
-	FSync   bool   `mapstructure:"fsync" toml:"fsync"`
+	Dirname string   `mapstructure:"dirname" toml:"dirname"`
+	Maxsize int64    `mapstructure:"max_size" toml:"max_size"`
+	FSync   bool     `mapstructure:"fsync" toml:"fsync"`
+	Secret  string   `mapstructure:"secret" toml:"-"`
+	SecretB [32]byte `toml:"-"`
 }
 
 type KafkaVersion [4]int
@@ -679,6 +682,19 @@ func (c *GConfig) Complete() (err error) {
 				return ConfigurationCheckError{ErrString: "Error compiling the partition key template", Err: err}
 			}
 		}
+	}
+
+	c.Store.Secret = strings.TrimSpace(c.Store.Secret)
+	if len(c.Store.Secret) > 0 {
+		s := make([]byte, base64.URLEncoding.DecodedLen(len(c.Store.Secret)))
+		n, err := base64.URLEncoding.Decode(s, []byte(c.Store.Secret))
+		if err != nil {
+			return ConfigurationCheckError{ErrString: "Error decoding store secret", Err: err}
+		}
+		if n < 32 {
+			return ConfigurationCheckError{ErrString: "Store secret is too short"}
+		}
+		copy(c.Store.SecretB[:], s[:32])
 	}
 
 	return nil
