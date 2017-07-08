@@ -14,6 +14,6 @@ func SetNonDumpable() error {
 	return nil
 }
 
-func GetCredentials(conn *net.UnixConn) (int, int, int, error) {
+func GetCredentials(conn *net.UnixConn) (int32, uint32, uint32, error) {
 	return 0, 0, 0, NotLinuxError{}
 }
