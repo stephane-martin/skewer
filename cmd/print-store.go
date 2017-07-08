@@ -52,19 +52,13 @@ to quickly create a Cobra application.`,
 		}
 
 		// prepare the message store
-		st, err = store.NewStore(ctx, c.Store.Dirname, c.Store.Maxsize, c.Store.FSync, logger, testFlag)
+		st, err = store.NewStore(ctx, c.Store, logger, testFlag)
 		if err != nil {
 			fmt.Println("Can't create the message Store", "error", err)
 			return
 		}
 
-		messagesMap, readyMap, failedMap, sentMap := st.ReadAllBadgers()
-
-		fmt.Println("Messages")
-		for k, v := range messagesMap {
-			fmt.Printf("%s %s\n", k, v)
-		}
-		fmt.Println()
+		readyMap, failedMap, sentMap := st.ReadAllBadgers()
 
 		fmt.Println("Ready")
 		for k, v := range readyMap {
