@@ -43,6 +43,8 @@ var loglevelFlag string
 var logfilenameFlag string
 var logjsonFlag bool
 var pidFilenameFlag string
+var registerFlag bool
+var serviceName string
 
 func init() {
 	RootCmd.AddCommand(serveCmd)
@@ -52,7 +54,8 @@ func init() {
 	serveCmd.Flags().StringVar(&logfilenameFlag, "logfilename", "", "Write logs to a file instead of stderr")
 	serveCmd.Flags().BoolVar(&logjsonFlag, "json", false, "Write logs in JSON format")
 	serveCmd.Flags().StringVar(&pidFilenameFlag, "pidfile", "", "If given, write PID to file")
-
+	serveCmd.Flags().BoolVar(&registerFlag, "register", false, "Register services in consul")
+	serveCmd.Flags().StringVar(&serviceName, "servicename", "skewer", "Service name to register in consul")
 }
 
 func SetLogging() log15.Logger {
@@ -125,6 +128,15 @@ func Serve() {
 		time.Sleep(30 * time.Second)
 	}
 
+	// create a consul registry
+	var registry *consul.Registry
+	if registerFlag {
+		registry, err = consul.NewRegistry(gctx, params, serviceName, logger)
+		if err != nil {
+			registry = nil
+		}
+	}
+
 	// prepare the message store
 	st, err = store.NewStore(gctx, c.Store, logger)
 	if err != nil {
@@ -146,6 +158,10 @@ func Serve() {
 		gCancel()
 		// wait that the badger databases are correctly closed
 		st.WaitFinished()
+		// wait that the services have been unregistered in Consul
+		if registry != nil {
+			registry.WaitFinished()
+		}
 		time.Sleep(time.Second)
 	}()
 
@@ -178,7 +194,9 @@ func Serve() {
 		tcpServer.SetTest()
 	}
 	err = tcpServer.Start()
-	if err != nil {
+	if err == nil {
+		tcpServer.Register(registry)
+	} else {
 		logger.Error("Error starting the TCP server", "error", err)
 	}
 
@@ -218,6 +236,7 @@ func Serve() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			relpServer.Unregister(registry)
 			relpServer.Stop()
 		}()
 
@@ -225,11 +244,14 @@ func Serve() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			tcpServer.Unregister(registry)
 			tcpServer.Stop()
 			<-tcpServer.ClosedChan
 			tcpServer.Conf = *newConf
 			err := tcpServer.Start()
-			if err != nil {
+			if err == nil {
+				tcpServer.Register(registry)
+			} else {
 				logger.Error("Error starting the TCP server", "error", err)
 			}
 		}()
@@ -256,7 +278,9 @@ func Serve() {
 			if journaldServer != nil {
 				journaldServer.Stop()
 			}
+			relpServer.Unregister(registry)
 			relpServer.FinalStop()
+			tcpServer.Unregister(registry)
 			tcpServer.Stop()
 			udpServer.Stop()
 			<-tcpServer.ClosedChan
@@ -338,6 +362,7 @@ func Serve() {
 
 			case server.Started:
 				logger.Info("The RELP service has been started")
+				relpServer.Register(registry)
 			}
 
 		}

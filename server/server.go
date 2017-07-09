@@ -1,12 +1,14 @@
 package server
 
 import (
+	"fmt"
 	"net"
 	"os"
 	"sync"
 
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/relp2kafka/conf"
+	"github.com/stephane-martin/relp2kafka/consul"
 	"github.com/stephane-martin/relp2kafka/javascript"
 	"github.com/stephane-martin/relp2kafka/model"
 )
@@ -89,6 +91,28 @@ func (e *ParsersEnv) GetParser(parserName string) Parser {
 		return model.GetParser(parserName)
 	default:
 		return e.jsenv.GetParser(parserName)
+	}
+}
+
+func (s *StreamServer) Register(r *consul.Registry) {
+	if r == nil {
+		return
+	}
+	for _, lc := range s.tcpListeners {
+		svc := consul.NewService(lc.Conf.BindAddr, lc.Conf.Port, fmt.Sprintf("%s:%d", lc.Conf.BindAddr, lc.Conf.Port), []string{lc.Conf.Protocol})
+		action := consul.ServiceAction{Action: consul.REGISTER, Service: svc}
+		r.RegisterChan <- action
+	}
+}
+
+func (s *StreamServer) Unregister(r *consul.Registry) {
+	if r == nil {
+		return
+	}
+	for _, lc := range s.tcpListeners {
+		svc := consul.NewService(lc.Conf.BindAddr, lc.Conf.Port, fmt.Sprintf("%s:%d", lc.Conf.BindAddr, lc.Conf.Port), []string{lc.Conf.Protocol})
+		action := consul.ServiceAction{Action: consul.UNREGISTER, Service: svc}
+		r.RegisterChan <- action
 	}
 }
 

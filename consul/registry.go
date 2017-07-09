@@ -12,28 +12,34 @@ import (
 	"github.com/inconshreveable/log15"
 )
 
+type ServiceActionType bool
+
+const (
+	REGISTER   ServiceActionType = false
+	UNREGISTER                   = true
+)
+
+type ServiceAction struct {
+	Action  ServiceActionType
+	Service *Service
+}
+
 type Service struct {
 	ID       string
-	Name     string
 	IP       string
 	parsedIP net.IP
 	Port     int
-	CheckURL string
+	Check    string
 	Tags     []string
 }
 
-func NewService(name string, ip string, port int, checkURL string, tags []string) *Service {
+func NewService(ip string, port int, check string, tags []string) *Service {
 	s := Service{
-		Name: name,
-		IP:   ip,
-		Port: port,
+		IP:    ip,
+		Port:  port,
+		Check: check,
 	}
-	checkURL = strings.TrimSpace(checkURL)
-	if len(checkURL) == 0 {
-		s.CheckURL = fmt.Sprintf("http://[%s]:%d/health", ip, port)
-	} else {
-		s.CheckURL = checkURL
-	}
+
 	if tags == nil {
 		s.Tags = []string{}
 	} else {
@@ -42,7 +48,7 @@ func NewService(name string, ip string, port int, checkURL string, tags []string
 
 	localIP, err := LocalIP()
 	if err != nil {
-		// todo
+		// todo: log
 		localIP = net.ParseIP("127.0.0.1")
 	}
 
@@ -52,7 +58,7 @@ func NewService(name string, ip string, port int, checkURL string, tags []string
 	if len(ip) == 0 {
 		parsedIP = localIP
 	} else {
-		parsedIP := net.ParseIP(ip)
+		parsedIP = net.ParseIP(ip)
 		if parsedIP == nil {
 			parsedIP = localIP
 		}
@@ -65,10 +71,10 @@ func NewService(name string, ip string, port int, checkURL string, tags []string
 	hostname, err := os.Hostname()
 	if err != nil {
 		// todo
-		hostname = parsedIP.String()
+		hostname = s.parsedIP.String()
 	}
 
-	s.ID = fmt.Sprintf("%s-%s-%s-%d", name, hostname, parsedIP.String(), port)
+	s.ID = fmt.Sprintf("skewer-%s-%s-%d", hostname, s.parsedIP.String(), port)
 	return &s
 }
 
@@ -76,25 +82,28 @@ type Registry struct {
 	client                *api.Client
 	logger                log15.Logger
 	registeredServicesIds map[string]bool
-	RegisterChan          chan *Service
-	UnregisterChan        chan *Service
+	RegisterChan          chan ServiceAction
 	wgroup                *sync.WaitGroup
+	svcName               string
 }
 
-func (r *Registry) Wait() {
+func (r *Registry) WaitFinished() {
 	r.wgroup.Wait()
 }
 
-func NewRegistry(ctx context.Context, params ConnParams, logger log15.Logger) (*Registry, error) {
+func NewRegistry(ctx context.Context, params ConnParams, svcName string, logger log15.Logger) (*Registry, error) {
+	addr := strings.TrimSpace(params.Address)
+	if len(addr) == 0 {
+		return nil, nil
+	}
 	c, err := NewClient(params)
 	if err != nil {
 		return nil, err
 	}
-	r := Registry{client: c, logger: logger}
+	r := Registry{client: c, logger: logger, svcName: strings.TrimSpace(svcName)}
 	r.wgroup = &sync.WaitGroup{}
 	r.registeredServicesIds = map[string]bool{}
-	r.RegisterChan = make(chan *Service)
-	r.UnregisterChan = make(chan *Service)
+	r.RegisterChan = make(chan ServiceAction)
 
 	r.wgroup.Add(1)
 	go func() {
@@ -111,27 +120,34 @@ func NewRegistry(ctx context.Context, params ConnParams, logger log15.Logger) (*
 					}
 				}
 				return
-			case svc := <-r.RegisterChan:
-				if r.registeredServicesIds[svc.ID] {
-					// todo: already registered
-				} else {
-					err := doRegister(r.client, svc)
-					if err == nil {
-						r.registeredServicesIds[svc.ID] = true
+			case serviceAction := <-r.RegisterChan:
+				svc := serviceAction.Service
+				if !svc.parsedIP.IsLoopback() {
+					if serviceAction.Action == REGISTER {
+						logger.Debug("Registering in consul", "ID", svc.ID, "IP", svc.IP, "port", svc.Port)
+						if r.registeredServicesIds[svc.ID] {
+							// todo: already registered
+						} else {
+							err := doRegister(r.client, svc, r.svcName)
+							if err == nil {
+								r.registeredServicesIds[svc.ID] = true
+							} else {
+								// todo
+							}
+						}
 					} else {
-						// todo
+						if r.registeredServicesIds[svc.ID] {
+							logger.Debug("Unregistering from consul", "ID", svc.ID)
+							err := doUnregister(r.client, svc.ID)
+							if err == nil {
+								r.registeredServicesIds[svc.ID] = false
+							} else {
+								// todo
+							}
+						} else {
+							// todo: not registered
+						}
 					}
-				}
-			case svc := <-r.UnregisterChan:
-				if r.registeredServicesIds[svc.ID] {
-					err := doUnregister(r.client, svc.ID)
-					if err == nil {
-						r.registeredServicesIds[svc.ID] = false
-					} else {
-						// todo
-					}
-				} else {
-					// todo: not registered
 				}
 			}
 		}
@@ -140,21 +156,32 @@ func NewRegistry(ctx context.Context, params ConnParams, logger log15.Logger) (*
 	return &r, nil
 }
 
-func doRegister(client *api.Client, svc *Service) error {
+func doRegister(client *api.Client, svc *Service, svcName string) error {
 
 	service := &api.AgentServiceRegistration{
 		ID:      svc.ID,
-		Name:    svc.Name,
+		Name:    svcName,
 		Address: svc.parsedIP.String(),
 		Port:    svc.Port,
 		Tags:    svc.Tags,
-		Check: &api.AgentServiceCheck{
-			HTTP:          svc.CheckURL,
+	}
+
+	check := strings.TrimSpace(svc.Check)
+	if strings.HasPrefix(check, "http://") || strings.HasPrefix(check, "https://") {
+		service.Check = &api.AgentServiceCheck{
+			HTTP:          svc.Check,
 			Interval:      "30s",
 			Timeout:       "2s",
 			TLSSkipVerify: true,
 			Status:        "passing",
-		},
+		}
+	} else if len(check) > 0 {
+		service.Check = &api.AgentServiceCheck{
+			TCP:      svc.Check,
+			Interval: "30s",
+			Timeout:  "2s",
+			Status:   "passing",
+		}
 	}
 
 	return client.Agent().ServiceRegister(service)
