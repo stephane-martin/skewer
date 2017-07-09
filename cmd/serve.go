@@ -101,11 +101,6 @@ func Serve() {
 	shutdownCtx, shutdown := context.WithCancel(gctx)
 	watchCtx, stopWatch := context.WithCancel(shutdownCtx)
 
-	defer func() {
-		gCancel()
-		time.Sleep(time.Second)
-	}()
-
 	logger := SetLogging()
 	generator := utils.Generator(gctx, logger)
 
@@ -116,7 +111,7 @@ func Serve() {
 	}
 
 	var c *conf.GConfig
-	var st *store.MessageStore
+	var st store.Store
 	var updated chan bool
 	params := consul.ConnParams{Address: consulAddr, Datacenter: consulDC, Token: consulToken}
 
@@ -131,12 +126,28 @@ func Serve() {
 	}
 
 	// prepare the message store
-	st, err = store.NewStore(gctx, c.Store, logger, testFlag)
+	st, err = store.NewStore(gctx, c.Store, logger)
 	if err != nil {
 		logger.Crit("Can't create the message Store", "error", err)
 		os.Exit(-1)
 	}
-	st.SendToKafka(c.Kafka)
+	forwarder := store.NewForwarder(testFlag, logger)
+	forwarderCtx, cancelForwarder := context.WithCancel(shutdownCtx)
+	go func() {
+		forwarder.Forward(forwarderCtx, st, c.Kafka)
+	}()
+
+	defer func() {
+		cancelForwarder()
+		// wait that the forwarder has been closed to shutdown the store
+		forwarder.WaitFinished()
+		close(st.Ack())
+		close(st.Nack())
+		gCancel()
+		// wait that the badger databases are correctly closed
+		st.WaitFinished()
+		time.Sleep(time.Second)
+	}()
 
 	metrics := metrics.SetupMetrics()
 
@@ -182,10 +193,17 @@ func Serve() {
 	}
 
 	Reload := func(newConf *conf.GConfig) {
-		st.StopSendToKafka()
-		st.SendToKafka(newConf.Kafka)
+		// reset the kafka forwarder
+		cancelForwarder()
+		forwarder.WaitFinished()
+		forwarderCtx, cancelForwarder = context.WithCancel(shutdownCtx)
+		go func() {
+			forwarder.Forward(forwarderCtx, st, newConf.Kafka)
+		}()
+
 		wg := &sync.WaitGroup{}
 
+		// reset the journald service
 		if journaldServer != nil {
 			wg.Add(1)
 			go func() {
@@ -196,11 +214,14 @@ func Serve() {
 			}()
 		}
 
+		// reset the RELP service
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			relpServer.Stop()
 		}()
+
+		// reset the TCP service
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -212,6 +233,8 @@ func Serve() {
 				logger.Error("Error starting the TCP server", "error", err)
 			}
 		}()
+
+		// reset the UDP service
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -230,6 +253,9 @@ func Serve() {
 		select {
 		case <-shutdownCtx.Done():
 			logger.Info("Shutting down")
+			if journaldServer != nil {
+				journaldServer.Stop()
+			}
 			relpServer.FinalStop()
 			tcpServer.Stop()
 			udpServer.Stop()
@@ -276,14 +302,18 @@ func Serve() {
 				logger.Warn("Unknown signal received", "signal", sig)
 			}
 
-		case <-st.FatalErrorChan:
+		case <-st.Errors():
 			logger.Warn("The store had a fatal error")
 			shutdown()
 
-		case <-st.KafkaErrorChan:
-			logger.Warn("Store has received a Kafka error: resetting connection to Kafka")
-			st.StopSendToKafka()
-			st.SendToKafka(c.Kafka)
+		case <-forwarder.ErrorChan():
+			logger.Warn("Forwarder has received a fatal Kafka error: resetting connection to Kafka")
+			cancelForwarder()
+			forwarder.WaitFinished()
+			forwarderCtx, cancelForwarder = context.WithCancel(shutdownCtx)
+			go func() {
+				forwarder.Forward(forwarderCtx, st, c.Kafka)
+			}()
 
 		case state := <-relpServer.StatusChan:
 			switch state {

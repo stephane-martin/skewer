@@ -39,9 +39,8 @@ to quickly create a Cobra application.`,
 
 		var err error
 		var c *conf.GConfig
-		var st *store.MessageStore
+		var st store.Store
 		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
 		logger := log15.New()
 		params := consul.ConnParams{Address: consulAddr, Datacenter: consulDC, Token: consulToken}
 
@@ -52,11 +51,17 @@ to quickly create a Cobra application.`,
 		}
 
 		// prepare the message store
-		st, err = store.NewStore(ctx, c.Store, logger, testFlag)
+		st, err = store.NewStore(ctx, c.Store, logger)
 		if err != nil {
 			fmt.Println("Can't create the message Store", "error", err)
 			return
 		}
+		defer func() {
+			close(st.Ack())
+			close(st.Nack())
+			cancel()
+			st.WaitFinished()
+		}()
 
 		readyMap, failedMap, sentMap := st.ReadAllBadgers()
 

@@ -71,7 +71,7 @@ func EntryToSyslog(entry map[string]string) *model.SyslogMessage {
 }
 
 type JournaldServer struct {
-	store     *store.MessageStore
+	store     store.Store
 	reader    journald.JournaldReader
 	metrics   *metrics.Metrics
 	logger    log15.Logger
@@ -83,7 +83,7 @@ type JournaldServer struct {
 
 func NewJournaldServer(
 	ctx context.Context, c conf.JournaldConfig,
-	st *store.MessageStore, generator chan ulid.ULID, metric *metrics.Metrics,
+	st store.Store, generator chan ulid.ULID, metric *metrics.Metrics,
 	logger log15.Logger,
 ) (*JournaldServer, error) {
 
@@ -113,7 +113,7 @@ func (s *JournaldServer) Start() {
 		// ???
 		return
 	}
-
+	inputs := s.store.Inputs()
 	s.wgroup.Add(1)
 	go func() {
 		defer s.wgroup.Done()
@@ -135,7 +135,7 @@ func (s *JournaldServer) Start() {
 						Uid:    uid.String(),
 						Parsed: parsedMessage,
 					}
-					s.store.Inputs <- &fullParsedMessage
+					inputs <- &fullParsedMessage
 				} else {
 					return
 				}

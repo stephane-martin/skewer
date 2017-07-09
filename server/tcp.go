@@ -27,7 +27,7 @@ type TcpServer struct {
 	StreamServer
 	status     TcpServerStatus
 	ClosedChan chan TcpServerStatus
-	store      *store.MessageStore
+	store      store.Store
 	metrics    *metrics.Metrics
 	generator  chan ulid.ULID
 }
@@ -36,7 +36,7 @@ func (s *TcpServer) init() {
 	s.StreamServer.init()
 }
 
-func NewTcpServer(c *conf.GConfig, st *store.MessageStore, generator chan ulid.ULID, metric *metrics.Metrics, logger log15.Logger) *TcpServer {
+func NewTcpServer(c *conf.GConfig, st store.Store, generator chan ulid.ULID, metric *metrics.Metrics, logger log15.Logger) *TcpServer {
 	s := TcpServer{
 		status:    TcpStopped,
 		store:     st,
@@ -136,6 +136,8 @@ func (h TcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 	logger.Info("New client")
 	s.metrics.ClientConnectionCounter.WithLabelValues(s.protocol, client, local_port_s, path).Inc()
 
+	inputs := s.store.Inputs()
+
 	// pull messages from raw_messages_chan, parse them and push them to the Store
 	s.wg.Add(1)
 	go func() {
@@ -161,7 +163,7 @@ func (h TcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 					Uid:    uid.String(),
 					ConfId: configId,
 				}
-				s.store.Inputs <- &parsed_msg
+				inputs <- &parsed_msg
 			} else {
 				logger.Info("Parsing error", "Message", m.Message, "error", err)
 			}

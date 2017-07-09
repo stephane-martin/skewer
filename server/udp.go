@@ -24,7 +24,7 @@ type UdpServer struct {
 	Server
 	status     UdpServerStatus
 	ClosedChan chan UdpServerStatus
-	store      *store.MessageStore
+	store      store.Store
 	handler    PacketHandler
 	metrics    *metrics.Metrics
 	generator  chan ulid.ULID
@@ -42,7 +42,7 @@ func (s *UdpServer) init() {
 	s.Server.init()
 }
 
-func NewUdpServer(c *conf.GConfig, st *store.MessageStore, generator chan ulid.ULID, metrics *metrics.Metrics, logger log15.Logger) *UdpServer {
+func NewUdpServer(c *conf.GConfig, st store.Store, generator chan ulid.ULID, metrics *metrics.Metrics, logger log15.Logger) *UdpServer {
 	s := UdpServer{status: UdpStopped, metrics: metrics, store: st, generator: generator}
 	s.logger = logger.New("class", "UdpServer")
 	s.init()
@@ -164,6 +164,8 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 
 	logger := s.logger.New("protocol", s.protocol, "local_port", local_port, "unix_socket_path", path)
 
+	inputs := s.store.Inputs()
+
 	// pull messages from raw_messages_chan, parse them and push them to the Store
 	s.wg.Add(1)
 	go func() {
@@ -189,7 +191,7 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 					Uid:    uid.String(),
 					ConfId: confId,
 				}
-				s.store.Inputs <- &parsed_msg
+				inputs <- &parsed_msg
 			} else {
 				logger.Info("Parsing error", "Message", m.Message, "error", err)
 			}
