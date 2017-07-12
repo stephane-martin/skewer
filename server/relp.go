@@ -203,21 +203,21 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 				logger.Error("Unknown parser")
 				continue
 			}
-			p, err := parser.Parse(m.Message, config.DontParseSD)
+			p, err := parser.Parse(m.Raw.Message, config.DontParseSD)
 			if err == nil {
 				parsed_msg := model.RelpParsedMessage{
-					Parsed: model.ParsedMessage{
+					Parsed: &model.ParsedMessage{
 						Fields:         p,
-						Client:         m.Client,
-						LocalPort:      m.LocalPort,
-						UnixSocketPath: m.UnixSocketPath,
+						Client:         m.Raw.Client,
+						LocalPort:      m.Raw.LocalPort,
+						UnixSocketPath: m.Raw.UnixSocketPath,
 					},
 					Txnr: m.Txnr,
 				}
 				parsed_messages_chan <- &parsed_msg
 			} else {
 				s.metrics.ParsingErrorCounter.WithLabelValues(config.Format, client).Inc()
-				logger.Warn("Parsing error", "message", m.Message, "error", err)
+				logger.Warn("Parsing error", "message", m.Raw.Message, "error", err)
 			}
 		}
 		close(parsed_messages_chan)
@@ -479,7 +479,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 				}
 				raw := model.RelpRawMessage{
 					Txnr: txnr,
-					RawMessage: model.RawMessage{
+					Raw: &model.RawMessage{
 						Message:   data,
 						Client:    client,
 						LocalPort: local_port,

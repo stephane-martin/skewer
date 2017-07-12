@@ -182,7 +182,7 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 			if err == nil {
 				uid := <-s.generator
 				parsed_msg := model.TcpUdpParsedMessage{
-					Parsed: model.ParsedMessage{
+					Parsed: &model.ParsedMessage{
 						Fields:         p,
 						Client:         m.Client,
 						LocalPort:      m.LocalPort,

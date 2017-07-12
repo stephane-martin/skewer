@@ -133,7 +133,7 @@ func (s *JournaldServer) Start() {
 					fullParsedMessage := model.TcpUdpParsedMessage{
 						ConfId: confId,
 						Uid:    uid.String(),
-						Parsed: parsedMessage,
+						Parsed: &parsedMessage,
 					}
 					inputs <- &fullParsedMessage
 					s.metrics.IncomingMsgsCounter.WithLabelValues("journald", "journald", "", "").Inc()

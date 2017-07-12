@@ -47,19 +47,19 @@ type ParsedMessage struct {
 }
 
 type TcpUdpParsedMessage struct {
-	Parsed ParsedMessage `json:"parsed"`
-	Uid    string        `json:"uid"`
-	ConfId string        `json:"conf_id"`
+	Parsed *ParsedMessage `json:"parsed"`
+	Uid    string         `json:"uid"`
+	ConfId string         `json:"conf_id"`
 }
 
 type RelpRawMessage struct {
-	RawMessage
+	Raw  *RawMessage
 	Txnr int
 }
 
 type RelpParsedMessage struct {
-	Parsed ParsedMessage `json:"parsed"`
-	Txnr   int           `json:"txnr"`
+	Parsed *ParsedMessage `json:"parsed"`
+	Txnr   int            `json:"txnr"`
 }
 
 func (m *ParsedMessage) ToKafkaMessage(partitionKey string, topic string) (km *sarama.ProducerMessage, err error) {

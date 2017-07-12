@@ -154,7 +154,7 @@ func (h TcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 			if err == nil {
 				uid := <-s.generator
 				parsed_msg := model.TcpUdpParsedMessage{
-					Parsed: model.ParsedMessage{
+					Parsed: &model.ParsedMessage{
 						Fields:         p,
 						Client:         m.Client,
 						LocalPort:      m.LocalPort,

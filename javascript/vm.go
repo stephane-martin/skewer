@@ -364,7 +364,6 @@ func (e *Environment) FilterMessage(m *model.SyslogMessage) (result *model.Syslo
 		return nil, FILTER_ERROR, &ConversionGoJsError{ExecutingJSErrorFactory(err, "NewSyslogMessage")}
 	}
 	resJsMessage, err = e.jsFilterMessages(nil, jsMessage)
-	_, err = e.jsFilterMessages(nil, jsMessage)
 	if err != nil {
 		return nil, FILTER_ERROR, ExecutingJSErrorFactory(err, "FilterMessages")
 	}
