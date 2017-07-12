@@ -28,6 +28,11 @@ type ConnParams struct {
 	Address    string
 	Datacenter string
 	Token      string
+	CAFile     string
+	CAPath     string
+	CertFile   string
+	KeyFile    string
+	Insecure   bool
 }
 
 func NewClient(params ConnParams) (*api.Client, error) {
@@ -40,6 +45,14 @@ func NewClient(params ConnParams) (*api.Client, error) {
 	} else if strings.HasPrefix(addr, "https://") {
 		config.Scheme = "https"
 		addr = addr[8:]
+		config.TLSConfig = api.TLSConfig{
+			Address:            addr,
+			CAFile:             params.CAFile,
+			CAPath:             params.CAPath,
+			CertFile:           params.CertFile,
+			KeyFile:            params.KeyFile,
+			InsecureSkipVerify: params.Insecure,
+		}
 	} else {
 		return nil, fmt.Errorf("consul addr must start with 'http://' or 'https://'")
 	}

@@ -116,7 +116,17 @@ func Serve() {
 	var c *conf.GConfig
 	var st store.Store
 	var updated chan bool
-	params := consul.ConnParams{Address: consulAddr, Datacenter: consulDC, Token: consulToken}
+
+	params := consul.ConnParams{
+		Address:    consulAddr,
+		Datacenter: consulDC,
+		Token:      consulToken,
+		CAFile:     consulCAFile,
+		CAPath:     consulCAPath,
+		CertFile:   consulCertFile,
+		KeyFile:    consulKeyFile,
+		Insecure:   consulInsecure,
+	}
 
 	// read configuration
 	for {

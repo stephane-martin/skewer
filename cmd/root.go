@@ -1,16 +1,3 @@
-// Copyright © 2017 NAME HERE <EMAIL ADDRESS>
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package cmd
 
 import (
@@ -25,6 +12,11 @@ var consulDC string
 var consulToken string
 var consulAddr string
 var consulPrefix string
+var consulCAFile string
+var consulCAPath string
+var consulCertFile string
+var consulKeyFile string
+var consulInsecure bool
 
 // RootCmd represents the base command when called without any subcommands
 var RootCmd = &cobra.Command{
@@ -61,4 +53,9 @@ func init() {
 	RootCmd.PersistentFlags().StringVar(&consulDC, "consul-dc", "", "Consul datacenter")
 	RootCmd.PersistentFlags().StringVar(&consulToken, "consul-token", "", "Consul token")
 	RootCmd.PersistentFlags().StringVar(&consulPrefix, "consul-prefix", "skewer", "Where to find configuration in Consul KV")
+	RootCmd.PersistentFlags().StringVar(&consulCAFile, "consul-ca-file", "", "optional path to the CA certificate used for Consul")
+	RootCmd.PersistentFlags().StringVar(&consulCAPath, "consul-ca-path", "", "optional path to a directory of CA certificates to use for Consul")
+	RootCmd.PersistentFlags().StringVar(&consulCertFile, "consul-cert-file", "", "optional path to the client certificate for Consul")
+	RootCmd.PersistentFlags().StringVar(&consulKeyFile, "consul-key-file", "", "optional path to the client private key for Consul")
+	RootCmd.PersistentFlags().BoolVar(&consulInsecure, "consul-insecure", false, "if set to true will disable TLS host verification")
 }

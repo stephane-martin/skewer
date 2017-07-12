@@ -1,16 +1,3 @@
-// Copyright © 2017 NAME HERE <EMAIL ADDRESS>
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package cmd
 
 import (
@@ -35,7 +22,18 @@ Cobra is a CLI library for Go that empowers applications.
 This application is a tool to generate the needed files
 to quickly create a Cobra application.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		params := consul.ConnParams{Address: consulAddr, Datacenter: consulDC, Token: consulToken}
+
+		params := consul.ConnParams{
+			Address:    consulAddr,
+			Datacenter: consulDC,
+			Token:      consulToken,
+			CAFile:     consulCAFile,
+			CAPath:     consulCAPath,
+			CertFile:   consulCertFile,
+			KeyFile:    consulKeyFile,
+			Insecure:   consulInsecure,
+		}
+
 		c, _, err := conf.InitLoad(context.Background(), configDirName, params, consulPrefix, log15.New())
 		if err != nil {
 			fmt.Printf("Error happened: %s\n", err)
