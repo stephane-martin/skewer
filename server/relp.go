@@ -187,8 +187,8 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 	path = strings.TrimSpace(path)
 	local_port_s := strconv.FormatInt(int64(local_port), 10)
 
-	logger := s.logger.New("protocol", s.protocol, "client", client, "local_port", local_port, "unix_socket_path", path)
-	logger.Info("New client")
+	logger := s.logger.New("protocol", s.protocol, "client", client, "local_port", local_port, "unix_socket_path", path, "format", config.Format)
+	logger.Info("New client connection")
 	s.metrics.ClientConnectionCounter.WithLabelValues(s.protocol, client, local_port_s, path).Inc()
 
 	// pull messages from raw_messages_chan and push them to parsed_messages_chan
@@ -197,9 +197,10 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 		defer s.wg.Done()
 		e := s.NewParsersEnv()
 		for m := range raw_messages_chan {
+
 			parser := e.GetParser(config.Format)
 			if parser == nil {
-				s.logger.Error("Unknown parser", "client", m.Client, "local_port", m.LocalPort, "path", m.UnixSocketPath, "format", config.Format)
+				logger.Error("Unknown parser")
 				continue
 			}
 			p, err := parser.Parse(m.Message, config.DontParseSD)
@@ -215,7 +216,8 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 				}
 				parsed_messages_chan <- &parsed_msg
 			} else {
-				logger.Info("Parsing error", "message", m.Message, "error", err)
+				s.metrics.ParsingErrorCounter.WithLabelValues(config.Format, client).Inc()
+				logger.Warn("Parsing error", "message", m.Message, "error", err)
 			}
 		}
 		close(parsed_messages_chan)
@@ -234,21 +236,27 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
-			more_other_succs := true
-			more_other_fails := true
-			var other_txnr int
 
-			for more_other_succs || more_other_fails {
+			for {
+				if other_successes_chan == nil && other_fails_chan == nil {
+					return
+				}
 				select {
-				case other_txnr, more_other_succs = <-other_successes_chan:
-					if more_other_succs {
+				case other_txnr, more := <-other_successes_chan:
+					if more {
 						answer := fmt.Sprintf("%d rsp 6 200 OK\n", other_txnr)
 						conn.Write([]byte(answer))
+						s.metrics.RelpAnswersCounter.WithLabelValues("200", client).Inc()
+					} else {
+						other_successes_chan = nil
 					}
-				case other_txnr, more_other_fails = <-other_fails_chan:
-					if more_other_fails {
+				case other_txnr, more := <-other_fails_chan:
+					if more {
 						answer := fmt.Sprintf("%d rsp 6 500 KO\n", other_txnr)
 						conn.Write([]byte(answer))
+						s.metrics.RelpAnswersCounter.WithLabelValues("500", client).Inc()
+					} else {
+						other_fails_chan = nil
 					}
 				}
 			}
@@ -257,6 +265,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 	} else {
 		producer, err = s.Conf.Kafka.GetAsyncProducer()
 		if err != nil {
+			s.metrics.KafkaConnectionErrorCounter.Inc()
 			logger.Warn("Can't get a kafka producer. Aborting handleConn.")
 			return
 		}
@@ -270,40 +279,47 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 			defer s.wg.Done()
 
 			fatal := false
-			more_succs := true
-			more_fails := true
-			more_other_succs := true
-			more_other_fails := true
-			var other_txnr int
-			var succ *sarama.ProducerMessage
-			var fail *sarama.ProducerError
 			successes := map[int]bool{}
 			failures := map[int]bool{}
+			successChan := producer.Successes()
+			failureChan := producer.Errors()
 			last_committed_txnr := 0
 
-			for more_succs || more_fails || more_other_succs || more_other_fails {
+			for {
+				if successChan == nil && failureChan == nil && other_successes_chan == nil && other_fails_chan == nil {
+					return
+				}
 				select {
-				case succ, more_succs = <-producer.Successes():
-					if more_succs {
+				case succ, more := <-successChan:
+					if more {
 						// forward the ACK to rsyslog
 						txnr := succ.Metadata.(int)
 						successes[txnr] = true
+						s.metrics.KafkaAckNackCounter.WithLabelValues("ack", succ.Topic).Inc()
+					} else {
+						successChan = nil
 					}
-				case fail, more_fails = <-producer.Errors():
-					if more_fails {
-						// inform rsyslog that the message was not delivered
+				case fail, more := <-failureChan:
+					if more {
 						txnr := fail.Msg.Metadata.(int)
 						failures[txnr] = true
 						logger.Info("NACK from Kafka", "error", fail.Error(), "txnr", txnr, "topic", fail.Msg.Topic)
 						fatal = model.IsFatalKafkaError(fail.Err)
+						s.metrics.KafkaAckNackCounter.WithLabelValues("nack", fail.Msg.Topic).Inc()
+					} else {
+						failureChan = nil
 					}
-				case other_txnr, more_other_succs = <-other_successes_chan:
-					if more_other_succs {
+				case other_txnr, more := <-other_successes_chan:
+					if more {
 						successes[other_txnr] = true
+					} else {
+						other_successes_chan = nil
 					}
-				case other_txnr, more_other_fails = <-other_fails_chan:
-					if more_other_fails {
+				case other_txnr, more := <-other_fails_chan:
+					if more {
 						failures[other_txnr] = true
+					} else {
+						other_fails_chan = nil
 					}
 				}
 
@@ -315,11 +331,13 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 						delete(successes, last_committed_txnr)
 						answer := fmt.Sprintf("%d rsp 6 200 OK\n", last_committed_txnr)
 						conn.Write([]byte(answer))
+						s.metrics.RelpAnswersCounter.WithLabelValues("200", client).Inc()
 					} else if _, ok := failures[last_committed_txnr+1]; ok {
 						last_committed_txnr++
 						delete(failures, last_committed_txnr)
 						answer := fmt.Sprintf("%d rsp 6 500 KO\n", last_committed_txnr)
 						conn.Write([]byte(answer))
+						s.metrics.RelpAnswersCounter.WithLabelValues("500", client).Inc()
 					} else {
 						break
 					}
@@ -365,11 +383,14 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 			switch filterResult {
 			case javascript.DROPPED:
 				other_successes_chan <- m.Txnr
+				s.metrics.MessageFilteringCounter.WithLabelValues("dropped", client).Inc()
 				continue ForParsedChan
 			case javascript.REJECTED:
 				other_fails_chan <- m.Txnr
+				s.metrics.MessageFilteringCounter.WithLabelValues("rejected", client).Inc()
 				continue ForParsedChan
 			case javascript.PASS:
+				s.metrics.MessageFilteringCounter.WithLabelValues("passing", client).Inc()
 				if tmsg == nil {
 					other_successes_chan <- m.Txnr
 					continue ForParsedChan
@@ -378,6 +399,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 				other_fails_chan <- m.Txnr
 				s.logger.Warn("Error happened processing message", "txnr", m.Txnr, "error", err)
 				// todo: log the faulty message to a specific log
+				s.metrics.MessageFilteringCounter.WithLabelValues("unknown", client).Inc()
 				continue ForParsedChan
 			}
 
@@ -432,6 +454,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 			case "open":
 				if relpIsOpen {
 					logger.Warn("Received open command twice")
+					s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
 					return
 				}
 				answer := fmt.Sprintf("%d rsp %d 200 OK\n%s\n", txnr, len(data)+7, data)
@@ -441,6 +464,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 			case "close":
 				if !relpIsOpen {
 					logger.Warn("Received close command before open")
+					s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
 					return
 				}
 				answer := fmt.Sprintf("%d rsp 0\n0 serverclose 0\n", txnr)
@@ -450,6 +474,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 			case "syslog":
 				if !relpIsOpen {
 					logger.Warn("Received syslog command before open")
+					s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
 					return
 				}
 				raw := model.RelpRawMessage{
@@ -464,6 +489,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 				raw_messages_chan <- &raw
 			default:
 				logger.Warn("Unknown RELP command", "command", command)
+				s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
 				return
 			}
 		} else {

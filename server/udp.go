@@ -162,7 +162,7 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 	path = strings.TrimSpace(path)
 	local_port_s := strconv.FormatInt(int64(local_port), 10)
 
-	logger := s.logger.New("protocol", s.protocol, "local_port", local_port, "unix_socket_path", path)
+	logger := s.logger.New("protocol", s.protocol, "local_port", local_port, "unix_socket_path", path, "format", config.Format)
 
 	inputs := s.store.Inputs()
 
@@ -174,7 +174,7 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 		for m := range raw_messages_chan {
 			parser := e.GetParser(config.Format)
 			if parser == nil {
-				s.logger.Error("Unknown parser", "client", m.Client, "local_port", m.LocalPort, "path", m.UnixSocketPath, "format", config.Format)
+				logger.Error("Unknown parser", "client", m.Client)
 				continue
 			}
 			p, err := parser.Parse(m.Message, config.DontParseSD)
@@ -193,7 +193,8 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 				}
 				inputs <- &parsed_msg
 			} else {
-				logger.Info("Parsing error", "Message", m.Message, "error", err)
+				s.metrics.ParsingErrorCounter.WithLabelValues(config.Format, m.Client).Inc()
+				logger.Info("Parsing error", "client", m.Client, "message", m.Message, "error", err)
 			}
 		}
 	}()

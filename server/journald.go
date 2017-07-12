@@ -110,7 +110,7 @@ func (s *JournaldServer) Start() {
 	}
 	confId, err := s.store.StoreSyslogConfig(&c)
 	if err != nil {
-		// ???
+		// todo: ???
 		return
 	}
 	inputs := s.store.Inputs()
@@ -136,6 +136,7 @@ func (s *JournaldServer) Start() {
 						Parsed: parsedMessage,
 					}
 					inputs <- &fullParsedMessage
+					s.metrics.IncomingMsgsCounter.WithLabelValues("journald", "journald", "", "").Inc()
 				} else {
 					return
 				}

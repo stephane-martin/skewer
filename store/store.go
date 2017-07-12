@@ -18,6 +18,7 @@ import (
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/javascript"
+	"github.com/stephane-martin/skewer/metrics"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
 )
@@ -80,14 +81,14 @@ type Forwarder interface {
 	WaitFinished()
 }
 
-func NewForwarder(test bool, logger log15.Logger) (fwder Forwarder) {
+func NewForwarder(test bool, m *metrics.Metrics, logger log15.Logger) (fwder Forwarder) {
 	if test {
-		dummy := dummyKafkaForwarder{logger: logger.New("class", "dummyKafkaForwarder")}
+		dummy := dummyKafkaForwarder{logger: logger.New("class", "dummyKafkaForwarder"), metrics: m}
 		dummy.errorChan = make(chan struct{})
 		dummy.wg = &sync.WaitGroup{}
 		fwder = &dummy
 	} else {
-		notdummy := kafkaForwarder{logger: logger.New("class", "kafkaForwarder")}
+		notdummy := kafkaForwarder{logger: logger.New("class", "kafkaForwarder"), metrics: m}
 		notdummy.errorChan = make(chan struct{})
 		notdummy.wg = &sync.WaitGroup{}
 		fwder = &notdummy
@@ -100,6 +101,7 @@ type kafkaForwarder struct {
 	errorChan  chan struct{}
 	wg         *sync.WaitGroup
 	forwarding int32
+	metrics    *metrics.Metrics
 }
 
 func (fwder *kafkaForwarder) ErrorChan() chan struct{} {
@@ -115,6 +117,7 @@ type dummyKafkaForwarder struct {
 	errorChan  chan struct{}
 	wg         *sync.WaitGroup
 	forwarding int32
+	metrics    *metrics.Metrics
 }
 
 func (fwder *dummyKafkaForwarder) ErrorChan() chan struct{} {
@@ -160,6 +163,7 @@ func (fwder *kafkaForwarder) doForward(ctx context.Context, from Store, to conf.
 			fwder.logger.Debug("Got a Kafka producer")
 			break
 		} else {
+			fwder.metrics.KafkaConnectionErrorCounter.Inc()
 			fwder.logger.Warn("Error getting a Kafka client", "error", err)
 			select {
 			case <-ctx.Done():
@@ -189,20 +193,20 @@ func (fwder *kafkaForwarder) doForward(ctx context.Context, from Store, to conf.
 			select {
 			case succ, more := <-succChan:
 				if more {
-					uid := succ.Metadata.(string)
-					ackChan <- uid
+					ackChan <- succ.Metadata.(string)
+					fwder.metrics.KafkaAckNackCounter.WithLabelValues("ack", succ.Topic).Inc()
 				} else {
 					succChan = nil
 				}
 
 			case fail, more := <-failChan:
 				if more {
-					uid := fail.Msg.Metadata.(string)
-					nackChan <- uid
+					nackChan <- fail.Msg.Metadata.(string)
 					fwder.logger.Info("Kafka producer error", "error", fail.Error())
 					if model.IsFatalKafkaError(fail.Err) {
 						once.Do(func() { close(fwder.errorChan) })
 					}
+					fwder.metrics.KafkaAckNackCounter.WithLabelValues("nack", fail.Msg.Topic).Inc()
 				} else {
 					failChan = nil
 				}
@@ -257,11 +261,14 @@ ForOutputs:
 			switch filterResult {
 			case javascript.DROPPED:
 				ackChan <- message.Uid
+				fwder.metrics.MessageFilteringCounter.WithLabelValues("dropped", message.Parsed.Client).Inc()
 				continue ForOutputs
 			case javascript.REJECTED:
+				fwder.metrics.MessageFilteringCounter.WithLabelValues("rejected", message.Parsed.Client).Inc()
 				nackChan <- message.Uid
 				continue ForOutputs
 			case javascript.PASS:
+				fwder.metrics.MessageFilteringCounter.WithLabelValues("passing", message.Parsed.Client).Inc()
 				if tmsg == nil {
 					ackChan <- message.Uid
 					continue ForOutputs
@@ -269,6 +276,7 @@ ForOutputs:
 			default:
 				nackChan <- message.Uid
 				fwder.logger.Warn("Error happened processing message", "uid", message.Uid, "error", err)
+				fwder.metrics.MessageFilteringCounter.WithLabelValues("unknown", message.Parsed.Client).Inc()
 				// todo: log the faulty message to a specific log
 				continue ForOutputs
 			}
@@ -350,11 +358,14 @@ ForOutputs:
 				switch filterResult {
 				case javascript.DROPPED:
 					ackChan <- message.Uid
+					fwder.metrics.MessageFilteringCounter.WithLabelValues("dropped", message.Parsed.Client).Inc()
 					continue ForOutputs
 				case javascript.REJECTED:
 					nackChan <- message.Uid
+					fwder.metrics.MessageFilteringCounter.WithLabelValues("rejected", message.Parsed.Client).Inc()
 					continue ForOutputs
 				case javascript.PASS:
+					fwder.metrics.MessageFilteringCounter.WithLabelValues("passing", message.Parsed.Client).Inc()
 					if tmsg == nil {
 						ackChan <- message.Uid
 						continue ForOutputs
@@ -362,6 +373,7 @@ ForOutputs:
 				default:
 					ackChan <- message.Uid
 					fwder.logger.Warn("Error happened when processing message", "uid", message.Uid, "error", err)
+					fwder.metrics.MessageFilteringCounter.WithLabelValues("unknown", message.Parsed.Client).Inc()
 					// todo: log the faulty message to a specific log
 					continue ForOutputs
 				}

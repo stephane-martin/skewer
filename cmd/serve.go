@@ -147,6 +147,8 @@ func Serve() {
 		}
 	}
 
+	metricStore := metrics.SetupMetrics()
+
 	// prepare the message store
 	st, err = store.NewStore(gctx, c.Store, logger)
 	if err != nil {
@@ -155,7 +157,7 @@ func Serve() {
 	}
 
 	// prepare the kafka forwarder
-	forwarder := store.NewForwarder(testFlag, logger)
+	forwarder := store.NewForwarder(testFlag, metricStore, logger)
 	forwarderMutex := &sync.Mutex{}
 	var cancelForwarder context.CancelFunc
 
@@ -195,13 +197,11 @@ func Serve() {
 		time.Sleep(time.Second)
 	}()
 
-	metrics := metrics.SetupMetrics()
-
 	// retrieve messages from journald
 	var journaldServer *server.JournaldServer
 	if c.Journald.Enabled {
 		logger.Info("Journald is enabled")
-		journaldServer, err = server.NewJournaldServer(gctx, c.Journald, st, generator, metrics, logger)
+		journaldServer, err = server.NewJournaldServer(gctx, c.Journald, st, generator, metricStore, logger)
 		if err == nil {
 			journaldServer.Start()
 		} else {
@@ -210,7 +210,7 @@ func Serve() {
 	}
 
 	// prepare the RELP service
-	relpServer := server.NewRelpServer(c, metrics, logger)
+	relpServer := server.NewRelpServer(c, metricStore, logger)
 	if testFlag {
 		relpServer.SetTest()
 	}
@@ -219,7 +219,7 @@ func Serve() {
 	relpServer.StatusChan <- server.Stopped // trigger the RELP service to start
 
 	// start the TCP service
-	tcpServer := server.NewTcpServer(c, st, generator, metrics, logger)
+	tcpServer := server.NewTcpServer(c, st, generator, metricStore, logger)
 	if testFlag {
 		tcpServer.SetTest()
 	}
@@ -231,7 +231,7 @@ func Serve() {
 	}
 
 	// start the UDP service
-	udpServer := server.NewUdpServer(c, st, generator, metrics, logger)
+	udpServer := server.NewUdpServer(c, st, generator, metricStore, logger)
 	if testFlag {
 		udpServer.SetTest()
 	}

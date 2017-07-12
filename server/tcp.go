@@ -132,7 +132,7 @@ func (h TcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 	path = strings.TrimSpace(path)
 	local_port_s := strconv.FormatInt(int64(local_port), 10)
 
-	logger := s.logger.New("protocol", s.protocol, "client", client, "local_port", local_port, "unix_socket_path", path)
+	logger := s.logger.New("protocol", s.protocol, "client", client, "local_port", local_port, "unix_socket_path", path, "format", config.Format)
 	logger.Info("New client")
 	s.metrics.ClientConnectionCounter.WithLabelValues(s.protocol, client, local_port_s, path).Inc()
 
@@ -146,7 +146,7 @@ func (h TcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 		for m := range raw_messages_chan {
 			parser := e.GetParser(config.Format)
 			if parser == nil {
-				s.logger.Error("Unknown parser", "client", m.Client, "local_port", m.LocalPort, "path", m.UnixSocketPath, "format", config.Format)
+				logger.Error("Unknown parser")
 				continue
 			}
 			p, err := parser.Parse(m.Message, config.DontParseSD)
@@ -165,6 +165,7 @@ func (h TcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 				}
 				inputs <- &parsed_msg
 			} else {
+				s.metrics.ParsingErrorCounter.WithLabelValues(config.Format, client).Inc()
 				logger.Info("Parsing error", "Message", m.Message, "error", err)
 			}
 		}
