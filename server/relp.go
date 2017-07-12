@@ -67,7 +67,6 @@ func (s *RelpServer) Start() error {
 		return nil
 	}
 	if !s.test {
-		s.logger.Debug("trying to reach kafka")
 		var err error
 		s.kafkaClient, err = s.Conf.Kafka.GetClient()
 		if err != nil {

@@ -153,17 +153,33 @@ func Serve() {
 		logger.Crit("Can't create the message Store", "error", err)
 		os.Exit(-1)
 	}
+
+	// prepare the kafka forwarder
 	forwarder := store.NewForwarder(testFlag, logger)
-	forwarderCtx, cancelForwarder := context.WithCancel(shutdownCtx)
-	go func() {
-		forwarder.Forward(forwarderCtx, st, c.Kafka)
-	}()
+	forwarderMutex := &sync.Mutex{}
+	var cancelForwarder context.CancelFunc
+
+	startForwarder := func(kafkaConf conf.KafkaConfig) {
+		forwarderMutex.Lock()
+		defer forwarderMutex.Unlock()
+		newForwarderCtx, newCancelForwarder := context.WithCancel(shutdownCtx)
+		if forwarder.Forward(newForwarderCtx, st, kafkaConf) {
+			cancelForwarder = newCancelForwarder
+		}
+	}
+	stopForwarder := func() {
+		forwarderMutex.Lock()
+		defer forwarderMutex.Unlock()
+		cancelForwarder()
+		forwarder.WaitFinished()
+	}
+
+	startForwarder(c.Kafka)
 
 	defer func() {
-		cancelForwarder()
 		// wait that the forwarder has been closed to shutdown the store
-		forwarder.WaitFinished()
-		// after WaitFinished() has returned, no more ACK/NACK will be sent to the store,
+		stopForwarder()
+		// after stopForwarder() has returned, no more ACK/NACK will be sent to the store,
 		// so we can close safely the channels
 		// closing the channels makes one of the store goroutine to return
 		close(st.Ack())
@@ -226,12 +242,8 @@ func Serve() {
 
 	Reload := func(newConf *conf.GConfig) {
 		// reset the kafka forwarder
-		cancelForwarder()
-		forwarder.WaitFinished()
-		forwarderCtx, cancelForwarder = context.WithCancel(shutdownCtx)
-		go func() {
-			forwarder.Forward(forwarderCtx, st, newConf.Kafka)
-		}()
+		stopForwarder()
+		startForwarder(newConf.Kafka)
 
 		wg := &sync.WaitGroup{}
 
@@ -346,11 +358,11 @@ func Serve() {
 
 		case <-forwarder.ErrorChan():
 			logger.Warn("Forwarder has received a fatal Kafka error: resetting connection to Kafka")
-			cancelForwarder()
-			forwarder.WaitFinished()
-			forwarderCtx, cancelForwarder = context.WithCancel(shutdownCtx)
+			kafkaConf := c.Kafka
+			stopForwarder()
 			go func() {
-				forwarder.Forward(forwarderCtx, st, c.Kafka)
+				time.Sleep(time.Second)
+				startForwarder(kafkaConf)
 			}()
 
 		case state := <-relpServer.StatusChan:

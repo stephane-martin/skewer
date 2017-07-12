@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	sarama "gopkg.in/Shopify/sarama.v1"
@@ -74,7 +75,7 @@ type Store interface {
 }
 
 type Forwarder interface {
-	Forward(ctx context.Context, from Store, to conf.KafkaConfig)
+	Forward(ctx context.Context, from Store, to conf.KafkaConfig) bool
 	ErrorChan() chan struct{}
 	WaitFinished()
 }
@@ -95,9 +96,10 @@ func NewForwarder(test bool, logger log15.Logger) (fwder Forwarder) {
 }
 
 type kafkaForwarder struct {
-	logger    log15.Logger
-	errorChan chan struct{}
-	wg        *sync.WaitGroup
+	logger     log15.Logger
+	errorChan  chan struct{}
+	wg         *sync.WaitGroup
+	forwarding int32
 }
 
 func (fwder *kafkaForwarder) ErrorChan() chan struct{} {
@@ -109,9 +111,10 @@ func (fwder *kafkaForwarder) WaitFinished() {
 }
 
 type dummyKafkaForwarder struct {
-	logger    log15.Logger
-	errorChan chan struct{}
-	wg        *sync.WaitGroup
+	logger     log15.Logger
+	errorChan  chan struct{}
+	wg         *sync.WaitGroup
+	forwarding int32
 }
 
 func (fwder *dummyKafkaForwarder) ErrorChan() chan struct{} {
@@ -122,7 +125,30 @@ func (fwder *dummyKafkaForwarder) WaitFinished() {
 	fwder.wg.Wait()
 }
 
-func (fwder *kafkaForwarder) Forward(ctx context.Context, from Store, to conf.KafkaConfig) {
+func (fwder *kafkaForwarder) Forward(ctx context.Context, from Store, to conf.KafkaConfig) bool {
+	// ensure Forward is only executing once
+	if !atomic.CompareAndSwapInt32(&fwder.forwarding, 0, 1) {
+		return false
+	}
+	go fwder.doForward(ctx, from, to)
+	return true
+}
+
+func (fwder *dummyKafkaForwarder) Forward(ctx context.Context, from Store, to conf.KafkaConfig) bool {
+	// ensure Forward is only executing once
+	if !atomic.CompareAndSwapInt32(&fwder.forwarding, 0, 1) {
+		return false
+	}
+	go fwder.doForward(ctx, from, to)
+	return true
+}
+
+func (fwder *kafkaForwarder) doForward(ctx context.Context, from Store, to conf.KafkaConfig) {
+
+	fwder.errorChan = make(chan struct{})
+	ackChan := from.Ack()
+	nackChan := from.Nack()
+	outputsChan := from.Outputs()
 
 	jsenvs := map[string]javascript.FilterEnvironment{}
 
@@ -144,19 +170,18 @@ func (fwder *kafkaForwarder) Forward(ctx context.Context, from Store, to conf.Ka
 	}
 	wg := &sync.WaitGroup{}
 	defer producer.AsyncClose()
-
-	ackChan := from.Ack()
-	nackChan := from.Nack()
-	outputsChan := from.Outputs()
+	succChan := producer.Successes()
+	failChan := producer.Errors()
+	once := &sync.Once{}
 
 	// listen for kafka responses
 	wg.Add(1)
 	go func() {
 		defer func() {
 			wg.Done()
+			atomic.StoreInt32(&fwder.forwarding, 0)
 		}()
-		succChan := producer.Successes()
-		failChan := producer.Errors()
+
 		for {
 			if succChan == nil && failChan == nil {
 				return
@@ -176,7 +201,7 @@ func (fwder *kafkaForwarder) Forward(ctx context.Context, from Store, to conf.Ka
 					nackChan <- uid
 					fwder.logger.Info("Kafka producer error", "error", fail.Error())
 					if model.IsFatalKafkaError(fail.Err) {
-						close(fwder.errorChan)
+						once.Do(func() { close(fwder.errorChan) })
 					}
 				} else {
 					failChan = nil
@@ -268,12 +293,14 @@ ForOutputs:
 	}
 }
 
-func (fwder *dummyKafkaForwarder) Forward(ctx context.Context, from Store, to conf.KafkaConfig) {
-
+func (fwder *dummyKafkaForwarder) doForward(ctx context.Context, from Store, to conf.KafkaConfig) {
+	fwder.errorChan = make(chan struct{})
 	jsenvs := map[string]javascript.FilterEnvironment{}
 	ackChan := from.Ack()
 	nackChan := from.Nack()
 	outputsChan := from.Outputs()
+
+	defer atomic.StoreInt32(&fwder.forwarding, 0)
 
 ForOutputs:
 	for {
