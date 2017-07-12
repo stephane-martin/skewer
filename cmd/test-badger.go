@@ -16,7 +16,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/dgraph-io/badger/badger"
+	"github.com/dgraph-io/badger"
 	"github.com/spf13/cobra"
 )
 

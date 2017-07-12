@@ -13,7 +13,7 @@ import (
 
 	sarama "gopkg.in/Shopify/sarama.v1"
 
-	"github.com/dgraph-io/badger/badger"
+	"github.com/dgraph-io/badger"
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/relp2kafka/conf"
 	"github.com/stephane-martin/relp2kafka/javascript"

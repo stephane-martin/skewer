@@ -18,6 +18,7 @@ package badger
 
 import (
 	"log"
+	"math"
 	"os"
 	"sync"
 	"time"
@@ -65,10 +66,11 @@ type Options struct {
 	ValueGCRunInterval time.Duration
 
 	// Size of single value log file.
-	ValueLogFileSize int
+	ValueLogFileSize int64
 
-	// The following affect value compression in value log.
-	ValueCompressionMinSize  int     // Minimal size in bytes of KV pair to be compressed.
+	// The following affect value compression in value log. Note that compression
+	// can significantly slow down the loading and lookup time.
+	ValueCompressionMinSize  int32   // Minimal size in bytes of KV pair to be compressed.
 	ValueCompressionMinRatio float64 // Minimal compression ratio of KV pair to be compressed.
 
 	// Sync all writes to disk. Setting this to true would slow down data loading significantly.
@@ -83,12 +85,15 @@ type Options struct {
 	maxBatchSize int64 // max batch size in bytes
 }
 
-// DefaultOptions sets a list of safe recommended options. Feel free to modify these to suit your needs.
+// DefaultOptions sets a list of recommended options for good performance.
+// Feel free to modify these to suit your needs.
 var DefaultOptions = Options{
-	DoNotCompact:             false,
-	LevelOneSize:             256 << 20,
-	LevelSizeMultiplier:      10,
-	MapTablesTo:              table.LoadToRAM,
+	DoNotCompact:        false,
+	LevelOneSize:        256 << 20,
+	LevelSizeMultiplier: 10,
+	MapTablesTo:         table.LoadToRAM,
+	// table.MemoryMap to mmap() the tables.
+	// table.Nothing to not preload the tables.
 	MaxLevels:                7,
 	MaxTableSize:             64 << 20,
 	NumCompactors:            3,
@@ -97,7 +102,7 @@ var DefaultOptions = Options{
 	NumMemtables:             5,
 	SyncWrites:               false,
 	ValueCompressionMinRatio: 2.0,
-	ValueCompressionMinSize:  1024,
+	ValueCompressionMinSize:  math.MaxInt32, // Turn off by default.
 	ValueGCRunInterval:       10 * time.Minute,
 	ValueGCThreshold:         0.5, // Set to zero to not run GC.
 	ValueLogFileSize:         1 << 30,
@@ -125,6 +130,10 @@ type KV struct {
 var ErrInvalidDir error = errors.New("Invalid Dir, directory does not exist")
 var ErrValueLogSize error = errors.New("Invalid ValueLogFileSize, must be between 1MB and 1GB")
 
+const (
+	kvWriteChCapacity = 1000
+)
+
 // NewKV returns a new KV object.
 func NewKV(opt *Options) (out *KV, err error) {
 	for _, path := range []string{opt.Dir, opt.ValueDir} {
@@ -143,7 +152,7 @@ func NewKV(opt *Options) (out *KV, err error) {
 	out = &KV{
 		imm:       make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan: make(chan flushTask, opt.NumMemtables),
-		writeCh:   make(chan *request, 1000),
+		writeCh:   make(chan *request, kvWriteChCapacity),
 		opt:       *opt, // Make a copy.
 		arenaPool: skl.NewArenaPool(opt.MaxTableSize+opt.maxBatchSize, opt.NumMemtables+5),
 		closer:    y.NewCloser(),
@@ -226,7 +235,7 @@ func NewKV(opt *Options) (out *KV, err error) {
 	}
 	lc.SignalAndWait() // Wait for replay to be applied first.
 
-	out.writeCh = make(chan *request, 1000)
+	out.writeCh = make(chan *request, kvWriteChCapacity)
 	lc = out.closer.Register("writes")
 	go out.doWrites(lc)
 
@@ -353,7 +362,7 @@ func (s *KV) fillItem(item *KVItem) error {
 	return nil
 }
 
-// getValueHelper returns the value in memtable or disk for given key.
+// get returns the value in memtable or disk for given key.
 // Note that value will include meta byte.
 func (s *KV) get(key []byte) (y.ValueStruct, error) {
 	tables, decr := s.getMemTables() // Lock should be released.
@@ -389,13 +398,32 @@ func (s *KV) Get(key []byte, item *KVItem) error {
 	return nil
 }
 
+// Touch looks for key, if it finds it then it returns
+// else it puts the key in the LSM tree.
+func (s *KV) Touch(key []byte) error {
+	exists, err := s.Exists(key)
+	if err != nil {
+		return err
+	}
+	// Found the key, return.
+	if exists {
+		return nil
+	}
+
+	e := &Entry{
+		Key:  key,
+		Meta: BitTouch,
+	}
+	return s.BatchSet([]*Entry{e})
+}
+
 // Exists looks if a key exists. Returns true if the
 // key exists otherwises return false. if err is not nil an error occurs during
 // the key lookup and the existence of the key is unknown
 func (s *KV) Exists(key []byte) (bool, error) {
 	vs, err := s.get(key)
 	if err != nil {
-		return false, errors.Wrapf(err, "KV::Get key: %q", key)
+		return false, err
 	}
 
 	if vs.Value == nil && vs.Meta == 0 {
@@ -449,6 +477,18 @@ func (s *KV) writeToLSM(b *request) error {
 			// No need to decode existing value. Just need old CAS counter.
 			if oldValue.CASCounter != entry.CASCounterCheck {
 				entry.Error = CasMismatch
+				continue
+			}
+		}
+
+		if entry.Meta == BitTouch {
+			// Someone else might have written a value, so lets check again if key exists.
+			exists, err := s.Exists(entry.Key)
+			if err != nil {
+				return err
+			}
+			// Value already exists, don't write.
+			if exists {
 				continue
 			}
 		}
@@ -528,36 +568,50 @@ func (s *KV) writeRequests(reqs []*request) error {
 	return nil
 }
 
+func writeRequestsOrLogError(s *KV, reqs []*request) {
+	if err := s.writeRequests(reqs); err != nil {
+		log.Printf("ERROR in Badger::writeRequests: %v", err)
+	}
+}
+
 func (s *KV) doWrites(lc *y.LevelCloser) {
 	defer lc.Done()
 
 	reqs := make([]*request, 0, 10)
 	for {
+		var r *request
 		select {
-		case r := <-s.writeCh:
-			reqs = append(reqs, r)
-
+		case r = <-s.writeCh:
 		case <-lc.HasBeenClosed():
-			close(s.writeCh)
-
-			for r := range s.writeCh { // Flush the channel.
-				reqs = append(reqs, r)
-			}
-			if err := s.writeRequests(reqs); err != nil {
-				log.Printf("ERROR in Badger::writeRequests: %v", err)
-			}
-			return
-
-		default:
-			if len(reqs) == 0 {
-				time.Sleep(time.Millisecond)
-				break
-			}
-			if err := s.writeRequests(reqs); err != nil {
-				log.Printf("ERROR in Badger::writeRequests: %v", err)
-			}
-			reqs = reqs[:0]
+			goto closedCase
 		}
+
+		for {
+			reqs = append(reqs, r)
+			if len(reqs) == kvWriteChCapacity {
+				goto defaultCase
+			}
+			select {
+			case r = <-s.writeCh:
+			case <-lc.HasBeenClosed():
+				goto closedCase
+			default:
+				goto defaultCase
+			}
+		}
+
+	closedCase:
+		close(s.writeCh)
+
+		for r := range s.writeCh { // Flush the channel.
+			reqs = append(reqs, r)
+		}
+		writeRequestsOrLogError(s, reqs)
+		return
+
+	defaultCase:
+		writeRequestsOrLogError(s, reqs)
+		reqs = reqs[:0]
 	}
 }
 

@@ -1,6 +1,6 @@
 package utils
 
-import "github.com/dgraph-io/badger/badger"
+import "github.com/dgraph-io/badger"
 
 type EncryptedDB struct {
 	db     *badger.KV

@@ -189,7 +189,7 @@ func randomHeight() int {
 // Returns the node found. The bool returned is true if the node has key equal to given key.
 func (s *Skiplist) findNear(key []byte, less bool, allowEqual bool) (*node, bool) {
 	x := s.head
-	level := int(s.height - 1)
+	level := int(s.Height() - 1)
 	for {
 		// Assume x.key < key.
 		next := x.getNext(level)
@@ -314,7 +314,7 @@ func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
 			// Successfully increased skiplist.height.
 			break
 		}
-		listHeight = s.height
+		listHeight = s.Height()
 	}
 
 	// We always insert from the base level and up. After you add a node in base level, we cannot
@@ -352,7 +352,7 @@ func (s *Skiplist) Put(key []byte, v y.ValueStruct) {
 // will NEVER return the head nodes.
 func (s *Skiplist) findLast() *node {
 	n := s.head
-	level := int(s.height) - 1
+	level := int(s.Height()) - 1
 	for {
 		next := n.getNext(level)
 		if next != nil {
