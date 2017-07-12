@@ -3,6 +3,7 @@ package conf
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"github.com/inconshreveable/log15"
 	"github.com/spf13/viper"
 	"github.com/stephane-martin/relp2kafka/consul"
+	"github.com/stephane-martin/relp2kafka/utils"
 )
 
 type BaseConfig struct {
@@ -164,30 +166,34 @@ func (l KafkaVersion) Greater(r KafkaVersion) bool {
 }
 
 type KafkaConfig struct {
-	Brokers                  []string                `mapstructure:"brokers" toml:"brokers"`
-	ClientID                 string                  `mapstructure:"client_id" toml:"client_id"`
-	Version                  string                  `mapstructure:"version" toml:"version"`
-	ChannelBufferSize        int                     `mapstructure:"channel_buffer_size" toml:"channel_buffer_size"`
-	MaxOpenRequests          int                     `mapstructure:"max_open_requests" toml:"max_open_requests"`
-	DialTimeout              time.Duration           `mapstructure:"dial_timeout" toml:"dial_timeout"`
-	ReadTimeout              time.Duration           `mapstructure:"read_timeout" toml:"read_timeout"`
-	WriteTimeout             time.Duration           `mapstructure:"write_timeout" toml:"write_timeout"`
-	KeepAlive                time.Duration           `mapstructure:"keepalive" toml:"keepalive"`
-	MetadataRetryMax         int                     `mapstructure:"metadata_retry_max" toml:"metadata_retry_max"`
-	MetadataRetryBackoff     time.Duration           `mapstructure:"metadata_retry_backoff" toml:"metadata_retry_backoff"`
-	MetadataRefreshFrequency time.Duration           `mapstructure:"metadata_refresh_frequency" toml:"metadata_refresh_frequency"`
-	MessageBytesMax          int                     `mapstructure:"message_bytes_max" toml:"message_bytes_max"`
-	RequiredAcks             int16                   `mapstructure:"required_acks" toml:"required_acks"`
-	ProducerTimeout          time.Duration           `mapstructure:"producer_timeout" toml:"producer_timeout"`
-	Compression              string                  `mapstructure:"compression" toml:"compression"`
-	FlushBytes               int                     `mapstructure:"flush_bytes" toml:"flush_bytes"`
-	FlushMessages            int                     `mapstructure:"flush_messages" toml:"flush_messages"`
-	FlushFrequency           time.Duration           `mapstructure:"flush_frequency" toml:"flush_frequency"`
-	FlushMessagesMax         int                     `mapstructure:"flush_messages_max" toml:"flush_messages_max"`
-	RetrySendMax             int                     `mapstructure:"retry_send_max" toml:"retry_send_max"`
-	RetrySendBackoff         time.Duration           `mapstructure:"retry_send_backoff" toml:"retry_send_backoff"`
-	pVersion                 sarama.KafkaVersion     `toml:"-"`
-	pCompression             sarama.CompressionCodec `toml:"-"`
+	Brokers                  []string      `mapstructure:"brokers" toml:"brokers"`
+	ClientID                 string        `mapstructure:"client_id" toml:"client_id"`
+	Version                  string        `mapstructure:"version" toml:"version"`
+	ChannelBufferSize        int           `mapstructure:"channel_buffer_size" toml:"channel_buffer_size"`
+	MaxOpenRequests          int           `mapstructure:"max_open_requests" toml:"max_open_requests"`
+	DialTimeout              time.Duration `mapstructure:"dial_timeout" toml:"dial_timeout"`
+	ReadTimeout              time.Duration `mapstructure:"read_timeout" toml:"read_timeout"`
+	WriteTimeout             time.Duration `mapstructure:"write_timeout" toml:"write_timeout"`
+	KeepAlive                time.Duration `mapstructure:"keepalive" toml:"keepalive"`
+	MetadataRetryMax         int           `mapstructure:"metadata_retry_max" toml:"metadata_retry_max"`
+	MetadataRetryBackoff     time.Duration `mapstructure:"metadata_retry_backoff" toml:"metadata_retry_backoff"`
+	MetadataRefreshFrequency time.Duration `mapstructure:"metadata_refresh_frequency" toml:"metadata_refresh_frequency"`
+	MessageBytesMax          int           `mapstructure:"message_bytes_max" toml:"message_bytes_max"`
+	RequiredAcks             int16         `mapstructure:"required_acks" toml:"required_acks"`
+	ProducerTimeout          time.Duration `mapstructure:"producer_timeout" toml:"producer_timeout"`
+	Compression              string        `mapstructure:"compression" toml:"compression"`
+	FlushBytes               int           `mapstructure:"flush_bytes" toml:"flush_bytes"`
+	FlushMessages            int           `mapstructure:"flush_messages" toml:"flush_messages"`
+	FlushFrequency           time.Duration `mapstructure:"flush_frequency" toml:"flush_frequency"`
+	FlushMessagesMax         int           `mapstructure:"flush_messages_max" toml:"flush_messages_max"`
+	RetrySendMax             int           `mapstructure:"retry_send_max" toml:"retry_send_max"`
+	RetrySendBackoff         time.Duration `mapstructure:"retry_send_backoff" toml:"retry_send_backoff"`
+	TLSEnabled               bool          `mapstructure:"tls_enabled" toml:"tls_enabled"`
+	CAFile                   string        `mapstructure:"ca_file" toml:"ca_file"`
+	CAPath                   string        `mapstructure:"ca_path" toml:"ca_path"`
+	KeyFile                  string        `mapstructure:"key_file" toml:"key_file"`
+	CertFile                 string        `mapstructure:"cert_file" toml:"cert_file"`
+	Insecure                 bool          `mapstructure:"insecure" toml:"insecure"`
 }
 
 type JournaldConfig struct {
@@ -214,8 +220,36 @@ type SyslogConfig struct {
 	KeepAlive       bool          `mapstructure:"keepalive" toml:"keepalive" json:"keepalive"`
 	KeepAlivePeriod time.Duration `mapstructure:"keepalive_period" toml:"keepalive_period" json:"keepalive_period"`
 	Timeout         time.Duration `mapstructure:"timeout" toml:"timeout" json:"timeout"`
+	TLSEnabled      bool          `mapstructure:"tls_enabled" toml:"tls_enabled"`
+	CAFile          string        `mapstructure:"ca_file" toml:"ca_file"`
+	CAPath          string        `mapstructure:"ca_path" toml:"ca_path"`
+	KeyFile         string        `mapstructure:"key_file" toml:"key_file"`
+	CertFile        string        `mapstructure:"cert_file" toml:"cert_file"`
+	ClientAuthType  string        `mapstructure:"client_auth_type" toml:"client_auth_type"`
+	// todo: Partitioner ?
+}
 
-	// Partitioner ?
+func (c *SyslogConfig) GetClientAuthType() tls.ClientAuthType {
+	s := strings.TrimSpace(c.ClientAuthType)
+	if len(s) == 0 {
+		return tls.NoClientCert
+	}
+	s = strings.ToLower(s)
+	s = strings.Replace(s, "_", "", -1)
+	switch s {
+	case "noclientcert":
+		return tls.NoClientCert
+	case "requestclientcert":
+		return tls.RequestClientCert
+	case "requireanyclientcert":
+		return tls.RequireAnyClientCert
+	case "verifyclientcertifgiven":
+		return tls.VerifyClientCertIfGiven
+	case "requireandverifyclientcert":
+		return tls.RequireAndVerifyClientCert
+	default:
+		return tls.NoClientCert
+	}
 }
 
 func (c *SyslogConfig) GetListenAddr() (string, error) {
@@ -261,7 +295,6 @@ func (c *KafkaConfig) GetSaramaConfig() *sarama.Config {
 	s.Producer.MaxMessageBytes = c.MessageBytesMax
 	s.Producer.RequiredAcks = sarama.RequiredAcks(c.RequiredAcks)
 	s.Producer.Timeout = c.ProducerTimeout
-	s.Producer.Compression = c.pCompression
 	s.Producer.Return.Errors = true
 	s.Producer.Return.Successes = true
 	s.Producer.Flush.Bytes = c.FlushBytes
@@ -272,7 +305,32 @@ func (c *KafkaConfig) GetSaramaConfig() *sarama.Config {
 	s.Producer.Retry.Max = c.RetrySendMax
 	s.ClientID = c.ClientID
 	s.ChannelBufferSize = c.ChannelBufferSize
-	s.Version = c.pVersion
+
+	v, _ := ParseVersion(c.Version) // the ignored error has been checked at launch
+	s.Version = v
+
+	switch c.Compression {
+	case "snappy":
+		s.Producer.Compression = sarama.CompressionSnappy
+	case "gzip":
+		s.Producer.Compression = sarama.CompressionGZIP
+	case "lz4":
+		s.Producer.Compression = sarama.CompressionLZ4
+	default:
+		s.Producer.Compression = sarama.CompressionNone
+	}
+
+	if c.TLSEnabled {
+		tlsConf, err := utils.NewTLSConfig("", c.CAFile, c.CAPath, c.CertFile, c.KeyFile, c.Insecure)
+		if err == nil {
+			s.Net.TLS.Enable = true
+			s.Net.TLS.Config = tlsConf
+		} else {
+			// todo
+		}
+
+	}
+
 	// MetricRegistry ?
 	// partitioner ?
 	return s
@@ -572,18 +630,7 @@ func (c *GConfig) Complete() (err error) {
 		}
 	}
 
-	switch c.Kafka.Compression {
-	case "snappy":
-		c.Kafka.pCompression = sarama.CompressionSnappy
-	case "gzip":
-		c.Kafka.pCompression = sarama.CompressionGZIP
-	case "lz4":
-		c.Kafka.pCompression = sarama.CompressionLZ4
-	default:
-		c.Kafka.pCompression = sarama.CompressionNone
-	}
-
-	c.Kafka.pVersion, err = ParseVersion(c.Kafka.Version)
+	_, err = ParseVersion(c.Kafka.Version)
 	if err != nil {
 		return ConfigurationCheckError{ErrString: "Kafka version can't be parsed", Err: err}
 	}

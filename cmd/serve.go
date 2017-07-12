@@ -153,12 +153,16 @@ func Serve() {
 		cancelForwarder()
 		// wait that the forwarder has been closed to shutdown the store
 		forwarder.WaitFinished()
+		// after WaitFinished() has returned, no more ACK/NACK will be sent to the store,
+		// so we can close safely the channels
+		// closing the channels makes one of the store goroutine to return
 		close(st.Ack())
 		close(st.Nack())
+		// stop the other Store goroutines
 		gCancel()
 		// wait that the badger databases are correctly closed
 		st.WaitFinished()
-		// wait that the services have been unregistered in Consul
+		// wait that the services have been unregistered from Consul
 		if registry != nil {
 			registry.WaitFinished()
 		}

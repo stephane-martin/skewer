@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"github.com/stephane-martin/relp2kafka/consul"
 	"github.com/stephane-martin/relp2kafka/javascript"
 	"github.com/stephane-martin/relp2kafka/model"
+	"github.com/stephane-martin/relp2kafka/utils"
 )
 
 type Parser interface {
@@ -276,8 +278,20 @@ func (s *StreamServer) AcceptTCP(lc *TCPListenerConf) {
 			if err != nil {
 				s.logger.Warn("Error setting TCP LINGER", "addr", lc.Conf.BindAddr)
 			}
-			s.wg.Add(1)
-			go s.handleConnection(conn, lc.Conf)
+			if lc.Conf.TLSEnabled {
+				tlsConf, err := utils.NewTLSConfig("", lc.Conf.CAFile, lc.Conf.CAPath, lc.Conf.CertFile, lc.Conf.KeyFile, false)
+				if err != nil {
+					s.logger.Warn("Error creating TLS configuration", "error", err)
+				} else {
+					tlsConf.ClientAuth = lc.Conf.GetClientAuthType()
+					s.wg.Add(1)
+					go s.handleConnection(tls.Server(conn, tlsConf), lc.Conf)
+				}
+
+			} else {
+				s.wg.Add(1)
+				go s.handleConnection(conn, lc.Conf)
+			}
 		}
 	}
 }
