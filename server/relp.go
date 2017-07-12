@@ -13,10 +13,10 @@ import (
 	sarama "gopkg.in/Shopify/sarama.v1"
 
 	"github.com/inconshreveable/log15"
-	"github.com/stephane-martin/relp2kafka/conf"
-	"github.com/stephane-martin/relp2kafka/javascript"
-	"github.com/stephane-martin/relp2kafka/metrics"
-	"github.com/stephane-martin/relp2kafka/model"
+	"github.com/stephane-martin/skewer/conf"
+	"github.com/stephane-martin/skewer/javascript"
+	"github.com/stephane-martin/skewer/metrics"
+	"github.com/stephane-martin/skewer/model"
 )
 
 type RelpServerStatus int

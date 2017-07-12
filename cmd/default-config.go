@@ -17,7 +17,7 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"github.com/stephane-martin/relp2kafka/conf"
+	"github.com/stephane-martin/skewer/conf"
 )
 
 // defaultConfigCmd represents the defaultConfig command

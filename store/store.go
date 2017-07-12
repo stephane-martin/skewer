@@ -15,10 +15,10 @@ import (
 
 	"github.com/dgraph-io/badger"
 	"github.com/inconshreveable/log15"
-	"github.com/stephane-martin/relp2kafka/conf"
-	"github.com/stephane-martin/relp2kafka/javascript"
-	"github.com/stephane-martin/relp2kafka/model"
-	"github.com/stephane-martin/relp2kafka/utils"
+	"github.com/stephane-martin/skewer/conf"
+	"github.com/stephane-martin/skewer/javascript"
+	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/utils"
 )
 
 type MessageStore struct {

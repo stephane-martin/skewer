@@ -9,7 +9,7 @@ import (
 
 	"github.com/dop251/goja"
 	"github.com/inconshreveable/log15"
-	"github.com/stephane-martin/relp2kafka/model"
+	"github.com/stephane-martin/skewer/model"
 )
 
 var jsSyslogMessage string = `function SyslogMessage(p, f, s, v, timer, timeg, host, app, proc, msgid, structured, msg, props) {

@@ -28,7 +28,7 @@ var consulPrefix string
 
 // RootCmd represents the base command when called without any subcommands
 var RootCmd = &cobra.Command{
-	Use:   "relp2kafka",
+	Use:   "skewer",
 	Short: "A brief description of your application",
 	Long: `A longer description that spans multiple lines and likely contains
 examples and usage of using your application. For example:
@@ -56,9 +56,9 @@ func init() {
 	// Here you will define your flags and configuration settings.
 	// Cobra supports persistent flags, which, if defined here,
 	// will be global for your application.
-	RootCmd.PersistentFlags().StringVar(&configDirName, "config", "/etc/relp2kafka", "configuration directory")
+	RootCmd.PersistentFlags().StringVar(&configDirName, "config", "/etc/skewer", "configuration directory")
 	RootCmd.PersistentFlags().StringVar(&consulAddr, "consul-addr", "", "Consul address (ex: http://127.0.0.1:8500)")
 	RootCmd.PersistentFlags().StringVar(&consulDC, "consul-dc", "", "Consul datacenter")
 	RootCmd.PersistentFlags().StringVar(&consulToken, "consul-token", "", "Consul token")
-	RootCmd.PersistentFlags().StringVar(&consulPrefix, "consul-prefix", "relp2kafka", "Where to find configuration in Consul KV")
+	RootCmd.PersistentFlags().StringVar(&consulPrefix, "consul-prefix", "skewer", "Where to find configuration in Consul KV")
 }

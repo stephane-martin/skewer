@@ -34,7 +34,7 @@ func SetKafkaDefaults(v *viper.Viper, prefixed bool) {
 		prefix = "kafka."
 	}
 	v.SetDefault(prefix+"brokers", []string{"kafka1", "kafka2", "kafka3"})
-	v.SetDefault(prefix+"client_id", "relp2kafka")
+	v.SetDefault(prefix+"client_id", "skewer")
 	v.SetDefault(prefix+"version", "0.10.1.0")
 	v.SetDefault(prefix+"channel_buffer_size", 256)
 	v.SetDefault(prefix+"max_open_requests", 5)
@@ -62,6 +62,6 @@ func SetStoreDefaults(v *viper.Viper, prefixed bool) {
 	if prefixed {
 		prefix = "store."
 	}
-	v.SetDefault(prefix+"dirname", "/var/lib/relp2kafka")
+	v.SetDefault(prefix+"dirname", "/var/lib/skewer")
 	v.SetDefault(prefix+"max_size", 64<<20)
 }

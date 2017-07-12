@@ -13,13 +13,13 @@ import (
 
 	"github.com/inconshreveable/log15"
 	"github.com/spf13/cobra"
-	"github.com/stephane-martin/relp2kafka/conf"
-	"github.com/stephane-martin/relp2kafka/consul"
-	"github.com/stephane-martin/relp2kafka/metrics"
-	"github.com/stephane-martin/relp2kafka/server"
-	"github.com/stephane-martin/relp2kafka/store"
-	"github.com/stephane-martin/relp2kafka/sys"
-	"github.com/stephane-martin/relp2kafka/utils"
+	"github.com/stephane-martin/skewer/conf"
+	"github.com/stephane-martin/skewer/consul"
+	"github.com/stephane-martin/skewer/metrics"
+	"github.com/stephane-martin/skewer/server"
+	"github.com/stephane-martin/skewer/store"
+	"github.com/stephane-martin/skewer/sys"
+	"github.com/stephane-martin/skewer/utils"
 )
 
 // serveCmd represents the serve command
@@ -68,7 +68,7 @@ func SetLogging() log15.Logger {
 		formatter = log15.LogfmtFormat()
 	}
 	if syslogFlag {
-		h, e := log15.SyslogHandler(syslog.LOG_LOCAL0|syslog.LOG_DEBUG, "relp2kafka", formatter)
+		h, e := log15.SyslogHandler(syslog.LOG_LOCAL0|syslog.LOG_DEBUG, "skewer", formatter)
 		if e != nil {
 			fmt.Printf("Error opening syslog file: %s\n", e)
 			os.Exit(-1)

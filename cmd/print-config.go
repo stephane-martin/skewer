@@ -20,8 +20,8 @@ import (
 
 	"github.com/inconshreveable/log15"
 	"github.com/spf13/cobra"
-	"github.com/stephane-martin/relp2kafka/conf"
-	"github.com/stephane-martin/relp2kafka/consul"
+	"github.com/stephane-martin/skewer/conf"
+	"github.com/stephane-martin/skewer/consul"
 )
 
 // printConfigCmd represents the printConfig command

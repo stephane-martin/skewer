@@ -19,9 +19,9 @@ import (
 
 	"github.com/inconshreveable/log15"
 	"github.com/spf13/cobra"
-	"github.com/stephane-martin/relp2kafka/conf"
-	"github.com/stephane-martin/relp2kafka/consul"
-	"github.com/stephane-martin/relp2kafka/store"
+	"github.com/stephane-martin/skewer/conf"
+	"github.com/stephane-martin/skewer/consul"
+	"github.com/stephane-martin/skewer/store"
 )
 
 // printStoreCmd represents the printStore command

@@ -19,7 +19,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"github.com/stephane-martin/relp2kafka/journald"
+	"github.com/stephane-martin/skewer/journald"
 )
 
 // testSystemdCmd represents the testSystemd command

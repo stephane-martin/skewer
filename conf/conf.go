@@ -18,8 +18,8 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/inconshreveable/log15"
 	"github.com/spf13/viper"
-	"github.com/stephane-martin/relp2kafka/consul"
-	"github.com/stephane-martin/relp2kafka/utils"
+	"github.com/stephane-martin/skewer/consul"
+	"github.com/stephane-martin/skewer/utils"
 )
 
 type BaseConfig struct {
@@ -358,7 +358,7 @@ func InitLoad(ctx context.Context, dirname string, params consul.ConnParams, pre
 
 	v := viper.New()
 	SetDefaults(v)
-	v.SetConfigName("relp2kafka")
+	v.SetConfigName("skewer")
 
 	dirname = strings.TrimSpace(dirname)
 	if len(dirname) > 0 {

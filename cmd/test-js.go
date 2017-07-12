@@ -18,8 +18,8 @@ import (
 	"time"
 
 	"github.com/inconshreveable/log15"
-	"github.com/stephane-martin/relp2kafka/javascript"
-	"github.com/stephane-martin/relp2kafka/model"
+	"github.com/stephane-martin/skewer/javascript"
+	"github.com/stephane-martin/skewer/model"
 
 	"github.com/spf13/cobra"
 )

@@ -1,1 +1,2 @@
-# relp2kafka
+# Skewer, a Syslog to Kafka gateway
+

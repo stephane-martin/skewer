@@ -10,10 +10,10 @@ import (
 
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
-	"github.com/stephane-martin/relp2kafka/conf"
-	"github.com/stephane-martin/relp2kafka/metrics"
-	"github.com/stephane-martin/relp2kafka/model"
-	"github.com/stephane-martin/relp2kafka/store"
+	"github.com/stephane-martin/skewer/conf"
+	"github.com/stephane-martin/skewer/metrics"
+	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/store"
 )
 
 type TcpServerStatus int
