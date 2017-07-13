@@ -110,7 +110,12 @@ func Serve() {
 	var err error
 	err = sys.SetNonDumpable()
 	if err != nil {
-		logger.Warn("Error setting PR_SET_DUMPABLE", "error", err)
+		logger.Info("Error setting PR_SET_DUMPABLE", "error", err)
+	}
+
+	err = sys.MlockAll()
+	if err != nil {
+		logger.Info("Error executing MlockAll()", "error", err)
 	}
 
 	var c *conf.GConfig
