@@ -373,12 +373,6 @@
 			"revisionTime": "2016-11-28T21:05:44Z"
 		},
 		{
-			"checksumSHA1": "MGg0FtcLtpZjLlklsGcFwIJTs5k=",
-			"path": "github.com/slackhq/go-audit",
-			"revision": "e194f88c0dd65c55a0744ed6d69f1e2cc97ef1c3",
-			"revisionTime": "2017-06-13T23:48:06Z"
-		},
-		{
 			"checksumSHA1": "lBehULzb2/kIK3wZ0gz2yNmHq9s=",
 			"path": "github.com/spf13/afero",
 			"revision": "9be650865eab0c12963d8753212f4f9c66cdcf12",
@@ -427,6 +421,12 @@
 			"revision": "0967fc9aceab2ce9da34061253ac10fb99bba5b2",
 			"revisionTime": "2017-04-17T08:08:15Z",
 			"tree": true
+		},
+		{
+			"checksumSHA1": "92sh2bSPbbeU4Lv8502X5ydld48=",
+			"path": "github.com/stephane-martin/go-audit",
+			"revision": "8be76eff08360ea7a103321b94a4230300806ed9",
+			"revisionTime": "2017-07-13T15:40:22Z"
 		},
 		{
 			"checksumSHA1": "MxLnUmfrP+r5HfCZM29+WPKebn8=",
