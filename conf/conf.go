@@ -56,13 +56,20 @@ func newConf() *GConfig {
 	return &conf
 }
 
-func Default() *GConfig {
+func Default() (*GConfig, error) {
 	v := viper.New()
 	SetDefaults(v)
-	c := newConf()
-	v.Unmarshal(c)
-	c.Complete()
-	return c
+	baseConf := newBaseConf()
+	err := v.Unmarshal(baseConf)
+	if err != nil {
+		return nil, ConfigurationSyntaxError{Err: err}
+	}
+	c := &GConfig{BaseConfig: *baseConf}
+	err = c.Complete()
+	if err != nil {
+		return nil, ConfigurationSyntaxError{Err: err}
+	}
+	return c, nil
 }
 
 func (c *GConfig) String() string {

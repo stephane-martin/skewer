@@ -14,13 +14,10 @@ import (
 // printConfigCmd represents the printConfig command
 var printConfigCmd = &cobra.Command{
 	Use:   "print-config",
-	Short: "A brief description of your command",
-	Long: `A longer description that spans multiple lines and likely contains examples
-and usage of using your command. For example:
-
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
+	Short: "Print skewer configuration as a TOML export",
+	Long: `With print-config you can have a TOML view of the current skewer
+configuration. The exported configuration will take Consul configuration in
+account, if you provide the necessary Consul flags on the command line.`,
 	Run: func(cmd *cobra.Command, args []string) {
 
 		params := consul.ConnParams{
@@ -45,14 +42,4 @@ to quickly create a Cobra application.`,
 
 func init() {
 	RootCmd.AddCommand(printConfigCmd)
-
-	// Here you will define your flags and configuration settings.
-
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// printConfigCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// printConfigCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 }

@@ -1,16 +1,3 @@
-// Copyright © 2017 NAME HERE <EMAIL ADDRESS>
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package cmd
 
 import (
@@ -25,13 +12,15 @@ import (
 // makeSecretCmd represents the makeSecret command
 var makeSecretCmd = &cobra.Command{
 	Use:   "make-secret",
-	Short: "A brief description of your command",
-	Long: `A longer description that spans multiple lines and likely contains examples
-and usage of using your command. For example:
+	Short: "Generate a random secret that suitable for store.secret configuration.",
+	Long: `The Store is an embedded database inside skewer that is used to
+temporarily persist syslog messages, before they can be forwarded to Kafka. If
+you want to avoid to store syslog messages "in the clear" on disk, you can
+ask for the Store to encrypt its database. For that you need to provide an
+encryption secret as the store.secret parameter.
 
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
+The make-secret command generates a suitable secret.`,
+
 	Run: func(cmd *cobra.Command, args []string) {
 		secretb := make([]byte, 32)
 		_, err := rand.Read(secretb)
@@ -47,14 +36,4 @@ to quickly create a Cobra application.`,
 
 func init() {
 	RootCmd.AddCommand(makeSecretCmd)
-
-	// Here you will define your flags and configuration settings.
-
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// makeSecretCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// makeSecretCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 }

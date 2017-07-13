@@ -25,7 +25,7 @@ func SetJournaldDefaults(v *viper.Viper, prefixed bool) {
 		v.SetDefault(prefix+"enabled", false)
 	}
 	v.SetDefault(prefix+"topic_tmpl", "journald-{{.Appname}}")
-	v.SetDefault(prefix+"partition_key_tmpl", "mypk-{{.Hostname}}")
+	v.SetDefault(prefix+"partition_key_tmpl", "pk-{{.Hostname}}")
 }
 
 func SetKafkaDefaults(v *viper.Viper, prefixed bool) {
