@@ -15,6 +15,7 @@ import (
 	sarama "gopkg.in/Shopify/sarama.v1"
 
 	"github.com/dgraph-io/badger"
+	"github.com/hashicorp/errwrap"
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/javascript"
@@ -24,23 +25,25 @@ import (
 )
 
 type MessageStore struct {
-	messagesDB      utils.DB
-	readyDB         *badger.KV
-	sentDB          *badger.KV
-	failedDB        *badger.KV
-	syslogConfigsDB *badger.KV
-	ready_mu        *sync.Mutex
-	failed_mu       *sync.Mutex
-	messages_mu     *sync.Mutex
-	wg              *sync.WaitGroup
-	ticker          *time.Ticker
-	logger          log15.Logger
-	closedChan      chan struct{}
-	FatalErrorChan  chan struct{}
-	InputsChan      chan *model.TcpUdpParsedMessage
-	OutputsChan     chan *model.TcpUdpParsedMessage
-	AckChan         chan string
-	NackChan        chan string
+	messagesDB           utils.DB
+	readyDB              *badger.KV
+	sentDB               *badger.KV
+	failedDB             *badger.KV
+	permerrorsDB         *badger.KV
+	syslogConfigsDB      *badger.KV
+	ready_mu             *sync.Mutex
+	failed_mu            *sync.Mutex
+	messages_mu          *sync.Mutex
+	wg                   *sync.WaitGroup
+	ticker               *time.Ticker
+	logger               log15.Logger
+	closedChan           chan struct{}
+	FatalErrorChan       chan struct{}
+	InputsChan           chan *model.TcpUdpParsedMessage
+	OutputsChan          chan *model.TcpUdpParsedMessage
+	AckChan              chan string
+	NackChan             chan string
+	ProcessingErrorsChan chan string
 }
 
 func (s *MessageStore) Inputs() chan *model.TcpUdpParsedMessage {
@@ -59,6 +62,10 @@ func (s *MessageStore) Nack() chan string {
 	return s.NackChan
 }
 
+func (s *MessageStore) ProcessingErrors() chan string {
+	return s.ProcessingErrorsChan
+}
+
 func (s *MessageStore) Errors() chan struct{} {
 	return s.FatalErrorChan
 }
@@ -68,6 +75,7 @@ type Store interface {
 	Outputs() chan *model.TcpUdpParsedMessage
 	Ack() chan string
 	Nack() chan string
+	ProcessingErrors() chan string
 	Errors() chan struct{}
 	WaitFinished()
 	GetSyslogConfig(configID string) (*conf.SyslogConfig, error)
@@ -151,6 +159,7 @@ func (fwder *kafkaForwarder) doForward(ctx context.Context, from Store, to conf.
 	fwder.errorChan = make(chan struct{})
 	ackChan := from.Ack()
 	nackChan := from.Nack()
+	processingErrorsChan := from.ProcessingErrors()
 	outputsChan := from.Outputs()
 
 	jsenvs := map[string]javascript.FilterEnvironment{}
@@ -227,7 +236,8 @@ ForOutputs:
 			if !ok {
 				config, err := from.GetSyslogConfig(message.ConfId)
 				if err != nil {
-					// todo: log
+					fwder.logger.Warn("Could not find the stored configuration for a message", "confId", message.ConfId, "msgId", message.Uid)
+					processingErrorsChan <- message.Uid
 					continue ForOutputs
 				}
 				jsenvs[message.ConfId] = javascript.NewFilterEnvironment(
@@ -252,7 +262,7 @@ ForOutputs:
 
 			if len(topic) == 0 || len(partitionKey) == 0 {
 				fwder.logger.Warn("Topic or PartitionKey could not be calculated", "uid", message.Uid)
-				nackChan <- message.Uid
+				processingErrorsChan <- message.Uid
 				continue ForOutputs
 			}
 
@@ -274,10 +284,9 @@ ForOutputs:
 					continue ForOutputs
 				}
 			default:
-				nackChan <- message.Uid
+				processingErrorsChan <- message.Uid
 				fwder.logger.Warn("Error happened processing message", "uid", message.Uid, "error", err)
 				fwder.metrics.MessageFilteringCounter.WithLabelValues("unknown", message.Parsed.Client).Inc()
-				// todo: log the faulty message to a specific log
 				continue ForOutputs
 			}
 
@@ -306,6 +315,7 @@ func (fwder *dummyKafkaForwarder) doForward(ctx context.Context, from Store, to 
 	jsenvs := map[string]javascript.FilterEnvironment{}
 	ackChan := from.Ack()
 	nackChan := from.Nack()
+	processingErrorsChan := from.ProcessingErrors()
 	outputsChan := from.Outputs()
 
 	defer atomic.StoreInt32(&fwder.forwarding, 0)
@@ -323,7 +333,8 @@ ForOutputs:
 			if !ok {
 				config, err := from.GetSyslogConfig(message.ConfId)
 				if err != nil {
-					// todo: log
+					fwder.logger.Warn("Could not find the stored configuration for a message", "confId", message.ConfId, "msgId", message.Uid)
+					processingErrorsChan <- message.Uid
 					continue ForOutputs
 				}
 				jsenvs[message.ConfId] = javascript.NewFilterEnvironment(
@@ -349,7 +360,7 @@ ForOutputs:
 
 				if len(topic) == 0 || len(partitionKey) == 0 {
 					fwder.logger.Warn("Topic or PartitionKey could not be calculated", "uid", message.Uid)
-					nackChan <- message.Uid
+					processingErrorsChan <- message.Uid
 					continue ForOutputs
 				}
 
@@ -371,10 +382,9 @@ ForOutputs:
 						continue ForOutputs
 					}
 				default:
-					ackChan <- message.Uid
+					processingErrorsChan <- message.Uid
 					fwder.logger.Warn("Error happened when processing message", "uid", message.Uid, "error", err)
 					fwder.metrics.MessageFilteringCounter.WithLabelValues("unknown", message.Parsed.Client).Inc()
-					// todo: log the faulty message to a specific log
 					continue ForOutputs
 				}
 
@@ -409,6 +419,7 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 	opts_ready := badger.DefaultOptions
 	opts_sent := badger.DefaultOptions
 	opts_failed := badger.DefaultOptions
+	opts_permerrors := badger.DefaultOptions
 	opts_configs := badger.DefaultOptions
 	opts_messages.Dir = path.Join(cfg.Dirname, "messages")
 	opts_messages.ValueDir = path.Join(cfg.Dirname, "messages")
@@ -418,6 +429,8 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 	opts_ready.ValueDir = path.Join(cfg.Dirname, "ready")
 	opts_failed.Dir = path.Join(cfg.Dirname, "failed")
 	opts_failed.ValueDir = path.Join(cfg.Dirname, "failed")
+	opts_permerrors.Dir = path.Join(cfg.Dirname, "permerrors")
+	opts_permerrors.ValueDir = path.Join(cfg.Dirname, "permerrors")
 	opts_configs.Dir = path.Join(cfg.Dirname, "configs")
 	opts_configs.ValueDir = path.Join(cfg.Dirname, "configs")
 
@@ -426,6 +439,7 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 	opts_ready.SyncWrites = cfg.FSync
 	opts_sent.SyncWrites = cfg.FSync
 	opts_failed.SyncWrites = cfg.FSync
+	opts_permerrors.SyncWrites = cfg.FSync
 	opts_configs.SyncWrites = true
 
 	err := os.MkdirAll(opts_messages.Dir, 0700)
@@ -441,6 +455,10 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 		return nil, err
 	}
 	err = os.MkdirAll(opts_failed.Dir, 0700)
+	if err != nil {
+		return nil, err
+	}
+	err = os.MkdirAll(opts_permerrors.Dir, 0700)
 	if err != nil {
 		return nil, err
 	}
@@ -479,6 +497,10 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 	if err != nil {
 		return nil, err
 	}
+	store.permerrorsDB, err = badger.NewKV(&opts_permerrors)
+	if err != nil {
+		return nil, err
+	}
 	store.syslogConfigsDB, err = badger.NewKV(&opts_configs)
 	if err != nil {
 		return nil, err
@@ -494,29 +516,44 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 	store.FatalErrorChan = make(chan struct{})
 	store.AckChan = make(chan string)
 	store.NackChan = make(chan string)
+	store.ProcessingErrorsChan = make(chan string)
 	store.ticker = time.NewTicker(time.Minute)
 
 	store.wg.Add(1)
 	go func() {
 		defer store.wg.Done()
 		for {
-			if store.AckChan == nil && store.NackChan == nil {
+			if store.AckChan == nil && store.NackChan == nil && store.ProcessingErrorsChan == nil {
 				return
 			}
 			select {
 			case uid, more := <-store.AckChan:
 				if more {
+					// message has been ACKed by Kafka, we can delete it from the Store
 					store.doACK(uid)
 				} else {
 					store.AckChan = nil
 				}
 			case uid, more := <-store.NackChan:
 				if more {
+					// message has been NACked by Kafka
+					// it will be retried later
 					store.doNACK(uid)
 				} else {
 					store.NackChan = nil
 				}
+			case uid, more := <-store.ProcessingErrorsChan:
+				if more {
+					// the message was not transmitted to Kafka, because the preprocessing failed
+					// it is a permanent error: if we retried, the same error would happen again
+					// so we move the message to a "permanent errors" DB
+					// it is the operator job to decide what to do with them (manually)
+					store.doPermanentError(uid)
+				} else {
+					store.ProcessingErrorsChan = nil
+				}
 			}
+
 		}
 	}()
 
@@ -655,14 +692,18 @@ func (s *MessageStore) pruneOrphaned() {
 
 	uids := s.messagesDB.ListKeys()
 
-	// check if the corresponding uid exists in "ready" or "failed"
+	// check if the corresponding uid exists in "ready" or "failed" or "permerrors"
 	orphaned_uids := []string{}
 	for _, uid := range uids {
-		e1, err1 := s.readyDB.Exists([]byte(uid))
+		id := []byte(uid)
+		e1, err1 := s.readyDB.Exists(id)
 		if err1 == nil && !e1 {
-			e2, err2 := s.failedDB.Exists([]byte(uid))
+			e2, err2 := s.failedDB.Exists(id)
 			if err2 == nil && !e2 {
-				orphaned_uids = append(orphaned_uids, uid)
+				e3, err3 := s.permerrorsDB.Exists(id)
+				if err3 == nil && !e3 {
+					orphaned_uids = append(orphaned_uids, uid)
+				}
 			}
 		}
 	}
@@ -674,6 +715,8 @@ func (s *MessageStore) pruneOrphaned() {
 }
 
 func (s *MessageStore) resetStuckInSent() {
+	// push back to "Ready" the messages that were sent out of the Store in the
+	// last execution of skewer, but never ACKed or NACKed
 	iter_opts := badger.IteratorOptions{
 		PrefetchSize: 1000,
 		FetchValues:  false,
@@ -729,7 +772,12 @@ func (s *MessageStore) ReadAllBadgers() (map[string]string, map[string]string, m
 }
 
 func (s *MessageStore) resetFailures() {
-	s.logger.Debug("resetFailures")
+	s.failed_mu.Lock()
+	s.ready_mu.Lock()
+	defer func() {
+		s.ready_mu.Unlock()
+		s.failed_mu.Unlock()
+	}()
 	// push back messages from "failed" to "ready"
 	iter_opts := badger.IteratorOptions{
 		PrefetchSize: 1000,
@@ -737,7 +785,6 @@ func (s *MessageStore) resetFailures() {
 		Reverse:      false,
 	}
 	for {
-		s.failed_mu.Lock()
 		now := time.Now()
 		iter := s.failedDB.NewIterator(iter_opts)
 		fetched := 0
@@ -757,11 +804,8 @@ func (s *MessageStore) resetFailures() {
 		iter.Close()
 
 		if len(uids) == 0 {
-			s.failed_mu.Unlock()
 			break
 		}
-
-		s.ready_mu.Lock()
 
 		deleteEntries := []*badger.Entry{}
 		setEntries := []*badger.Entry{}
@@ -781,45 +825,51 @@ func (s *MessageStore) resetFailures() {
 				s.logger.Debug("Messages pushed back from failed queue to ready queue", "nb_messages", len(uids))
 			}
 		}
-		s.ready_mu.Unlock()
-		s.failed_mu.Unlock()
 	}
 }
 
 func (s *MessageStore) stash(m *model.TcpUdpParsedMessage) error {
-
+	// we avoid "defer" as a performance optim
 	b, err := json.Marshal(m)
 	if err != nil {
 		s.logger.Warn("The store discarded a message that could not be JSON-marshalled", "error", err)
 		return nil
 	}
 	s.ready_mu.Lock()
-	defer s.ready_mu.Unlock()
 	s.messages_mu.Lock()
-	defer s.messages_mu.Unlock()
 	err = s.messagesDB.Set(m.Uid, b)
 	if err != nil {
-		return err
+		s.messages_mu.Unlock()
+		s.ready_mu.Unlock()
+		return errwrap.Wrapf("Error writing message content: {{err}}", err)
 	}
 	err = s.readyDB.Set([]byte(m.Uid), []byte("true"))
 	if err != nil {
-		s.logger.Warn("Error putting message to Ready", "error", err)
 		s.messagesDB.Delete(m.Uid)
-		return err
+		s.messages_mu.Unlock()
+		s.ready_mu.Unlock()
+		return errwrap.Wrapf("Error writing message to Ready: {{err}}", err)
 	}
+	s.messages_mu.Unlock()
+	s.ready_mu.Unlock()
 	return nil
 }
 
 func (s *MessageStore) retrieve(n int) (messages map[string]*model.TcpUdpParsedMessage) {
 	s.ready_mu.Lock()
-	defer s.ready_mu.Unlock()
+	s.messages_mu.Lock()
+	defer func() {
+		s.messages_mu.Unlock()
+		s.ready_mu.Unlock()
+	}()
+
 	messages = map[string]*model.TcpUdpParsedMessage{}
 	iter_opts := badger.IteratorOptions{
 		PrefetchSize: n,
 		FetchValues:  false,
 		Reverse:      false,
 	}
-	s.messages_mu.Lock()
+
 	iter := s.readyDB.NewIterator(iter_opts)
 	fetched := 0
 	invalidEntries := []string{}
@@ -850,11 +900,11 @@ func (s *MessageStore) retrieve(n int) (messages map[string]*model.TcpUdpParsedM
 		s.readyDB.Delete([]byte(uid))
 		s.messagesDB.Delete(uid)
 	}
-	s.messages_mu.Unlock()
 
 	if len(messages) == 0 {
 		return messages
 	}
+
 	deleteEntries := []*badger.Entry{}
 	setEntries := []*badger.Entry{}
 	for uid, _ := range messages {
@@ -863,35 +913,53 @@ func (s *MessageStore) retrieve(n int) (messages map[string]*model.TcpUdpParsedM
 	}
 	err := s.sentDB.BatchSet(setEntries)
 	if err != nil {
-		s.logger.Error("Error pushing ready messages to the sent queue!")
+		s.logger.Error("Error moving messages from Ready to Sent", "error", err)
 		return map[string]*model.TcpUdpParsedMessage{}
 	} else {
 		err := s.readyDB.BatchSet(deleteEntries)
 		if err != nil {
-			s.logger.Error("Error deleting ready messages!")
+			s.logger.Error("Error deleting messages from Ready", "error", err)
 		}
 	}
 	return messages
 }
 
 func (s *MessageStore) doACK(uid string) {
+	s.messages_mu.Lock()
 	err := s.sentDB.Delete([]byte(uid))
 	if err != nil {
-		s.logger.Warn("Error ACKing message", "uid", uid, "error", err)
+		s.logger.Warn("Error removing message from the Sent DB", "uid", uid, "error", err)
 	} else {
-		s.messages_mu.Lock()
 		err := s.messagesDB.Delete(uid)
-		s.messages_mu.Unlock()
 		if err != nil {
-			s.logger.Warn("Error ACKing message", "uid", uid, "error", err)
+			s.logger.Warn("Error removing message content from DB", "uid", uid, "error", err)
 		}
 	}
+	s.messages_mu.Unlock()
 }
 
-func (s *MessageStore) doNACK(id string) {
+func (s *MessageStore) doNACK(uid string) {
 	s.failed_mu.Lock()
-	defer s.failed_mu.Unlock()
-	s.logger.Debug("NACK", "uid", id)
-	s.sentDB.Delete([]byte(id))
-	s.failedDB.Set([]byte(id), []byte(time.Now().Format(time.RFC3339)))
+	err := s.failedDB.Set([]byte(uid), []byte(time.Now().Format(time.RFC3339)))
+	if err != nil {
+		s.logger.Warn("Error moving the message to the Failed DB", "uid", uid, "error", err)
+	} else {
+		err := s.sentDB.Delete([]byte(uid))
+		if err != nil {
+			s.logger.Warn("Error removing message from the Sent DB", "uid", uid, "error", err)
+		}
+	}
+	s.failed_mu.Unlock()
+}
+
+func (s *MessageStore) doPermanentError(uid string) {
+	err := s.permerrorsDB.Set([]byte(uid), []byte(time.Now().Format(time.RFC3339)))
+	if err != nil {
+		s.logger.Warn("Error moving the message to the Permanent Errors DB", "uid", uid, "error", err)
+	} else {
+		err := s.sentDB.Delete([]byte(uid))
+		if err != nil {
+			s.logger.Warn("Error removing message from the Sent DB", "uid", uid, "error", err)
+		}
+	}
 }

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hashicorp/errwrap"
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
 	"github.com/stephane-martin/skewer/conf"
@@ -99,7 +100,7 @@ func NewJournaldServer(
 	return &s, nil
 }
 
-func (s *JournaldServer) Start() {
+func (s *JournaldServer) Start() error {
 	s.stopchan = make(chan bool)
 	c := conf.SyslogConfig{
 		FilterFunc:    s.Conf.FilterFunc,
@@ -110,8 +111,7 @@ func (s *JournaldServer) Start() {
 	}
 	confId, err := s.store.StoreSyslogConfig(&c)
 	if err != nil {
-		// todo: ???
-		return
+		return errwrap.Wrapf("Error persisting the journald service configuration to the Store: {{err}}", err)
 	}
 	inputs := s.store.Inputs()
 	s.wgroup.Add(1)
@@ -145,6 +145,7 @@ func (s *JournaldServer) Start() {
 			}
 		}
 	}()
+	return nil
 }
 
 func (s *JournaldServer) Stop() {

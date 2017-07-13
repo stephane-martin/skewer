@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/hashicorp/consul/api"
+	"github.com/hashicorp/errwrap"
 	"github.com/inconshreveable/log15"
 )
 
@@ -33,7 +34,7 @@ type Service struct {
 	Tags     []string
 }
 
-func NewService(ip string, port int, check string, tags []string) *Service {
+func NewService(ip string, port int, check string, tags []string) (*Service, error) {
 	s := Service{
 		IP:    ip,
 		Port:  port,
@@ -48,8 +49,7 @@ func NewService(ip string, port int, check string, tags []string) *Service {
 
 	localIP, err := LocalIP()
 	if err != nil {
-		// todo: log
-		localIP = net.ParseIP("127.0.0.1")
+		return nil, errwrap.Wrapf("Error when trying to get a local IP: {{err}}", err)
 	}
 
 	var parsedIP net.IP
@@ -70,12 +70,11 @@ func NewService(ip string, port int, check string, tags []string) *Service {
 
 	hostname, err := os.Hostname()
 	if err != nil {
-		// todo
-		hostname = s.parsedIP.String()
+		return nil, errwrap.Wrapf("Error trying to get the hostname: {{err}}", err)
 	}
 
 	s.ID = fmt.Sprintf("skewer-%s-%s-%d", hostname, s.parsedIP.String(), port)
-	return &s
+	return &s, nil
 }
 
 type Registry struct {
@@ -124,28 +123,28 @@ func NewRegistry(ctx context.Context, params ConnParams, svcName string, logger 
 				svc := serviceAction.Service
 				if !svc.parsedIP.IsLoopback() {
 					if serviceAction.Action == REGISTER {
-						logger.Debug("Registering in consul", "ID", svc.ID, "IP", svc.IP, "port", svc.Port)
 						if r.registeredServicesIds[svc.ID] {
-							// todo: already registered
+							logger.Info("Service already registed in Consul", "ID", svc.ID)
 						} else {
 							err := doRegister(r.client, svc, r.svcName)
 							if err == nil {
+								logger.Debug("Registered in consul", "ID", svc.ID, "IP", svc.IP, "port", svc.Port)
 								r.registeredServicesIds[svc.ID] = true
 							} else {
-								// todo
+								logger.Warn("Failed to register service in Consul", "ID", svc.ID, "IP", svc.IP, "port", svc.Port)
 							}
 						}
 					} else {
 						if r.registeredServicesIds[svc.ID] {
-							logger.Debug("Unregistering from consul", "ID", svc.ID)
 							err := doUnregister(r.client, svc.ID)
 							if err == nil {
 								r.registeredServicesIds[svc.ID] = false
+								logger.Debug("Unregistered from consul", "ID", svc.ID)
 							} else {
-								// todo
+								logger.Warn("Failed to unregister service from Consul", "ID", svc.ID)
 							}
 						} else {
-							// todo: not registered
+							logger.Info("Service is not registered in Consul, and can not be unregistered", "ID", svc.ID)
 						}
 					}
 				}

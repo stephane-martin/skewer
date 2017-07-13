@@ -16,6 +16,7 @@ import (
 	sarama "gopkg.in/Shopify/sarama.v1"
 
 	"github.com/BurntSushi/toml"
+	"github.com/hashicorp/errwrap"
 	"github.com/inconshreveable/log15"
 	"github.com/spf13/viper"
 	"github.com/stephane-martin/skewer/consul"
@@ -282,7 +283,7 @@ func ImportSyslogConfig(data []byte) (*SyslogConfig, error) {
 	return &c, nil
 }
 
-func (c *KafkaConfig) GetSaramaConfig() *sarama.Config {
+func (c *KafkaConfig) GetSaramaConfig() (*sarama.Config, error) {
 	s := sarama.NewConfig()
 	s.Net.MaxOpenRequests = c.MaxOpenRequests
 	s.Net.DialTimeout = c.DialTimeout
@@ -326,18 +327,22 @@ func (c *KafkaConfig) GetSaramaConfig() *sarama.Config {
 			s.Net.TLS.Enable = true
 			s.Net.TLS.Config = tlsConf
 		} else {
-			// todo
+			return nil, errwrap.Wrapf("Error building the TLS configuration for Kafka: {{err}}", err)
 		}
 
 	}
 
 	// MetricRegistry ?
 	// partitioner ?
-	return s
+	return s, nil
 }
 
 func (c *KafkaConfig) GetAsyncProducer() (sarama.AsyncProducer, error) {
-	p, err := sarama.NewAsyncProducer(c.Brokers, c.GetSaramaConfig())
+	conf, err := c.GetSaramaConfig()
+	if err != nil {
+		return nil, err
+	}
+	p, err := sarama.NewAsyncProducer(c.Brokers, conf)
 	if err == nil {
 		return p, nil
 	}
@@ -345,7 +350,11 @@ func (c *KafkaConfig) GetAsyncProducer() (sarama.AsyncProducer, error) {
 }
 
 func (c *KafkaConfig) GetClient() (sarama.Client, error) {
-	cl, err := sarama.NewClient(c.Brokers, c.GetSaramaConfig())
+	conf, err := c.GetSaramaConfig()
+	if err != nil {
+		return nil, err
+	}
+	cl, err := sarama.NewClient(c.Brokers, conf)
 	if err == nil {
 		return cl, nil
 	}

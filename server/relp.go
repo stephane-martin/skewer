@@ -3,6 +3,7 @@ package server
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net"
 	"strconv"
@@ -365,15 +366,15 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 		for m := range parsed_messages_chan {
 			topic, errs := e.Topic(m.Parsed.Fields)
 			for _, err := range errs {
-				s.logger.Info("Error calculating topic", "error", err, "txnr", m.Txnr)
+				logger.Info("Error calculating topic", "error", err, "txnr", m.Txnr)
 			}
 			partitionKey, errs := e.PartitionKey(m.Parsed.Fields)
 			for _, err := range errs {
-				s.logger.Info("Error calculating the partition key", "error", err, "txnr", m.Txnr)
+				logger.Info("Error calculating the partition key", "error", err, "txnr", m.Txnr)
 			}
 
 			if len(topic) == 0 || len(partitionKey) == 0 {
-				s.logger.Warn("Topic or PartitionKey could not be calculated", "txnr", m.Txnr)
+				logger.Warn("Topic or PartitionKey could not be calculated", "txnr", m.Txnr)
 				other_fails_chan <- m.Txnr
 				continue ForParsedChan
 			}
@@ -397,8 +398,8 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 				}
 			default:
 				other_fails_chan <- m.Txnr
-				s.logger.Warn("Error happened processing message", "txnr", m.Txnr, "error", err)
-				// todo: log the faulty message to a specific log
+				content, _ := json.Marshal(m.Parsed.Fields)
+				logger.Warn("Error happened processing message", "txnr", m.Txnr, "message", content, "error", err)
 				s.metrics.MessageFilteringCounter.WithLabelValues("unknown", client).Inc()
 				continue ForParsedChan
 			}
@@ -411,7 +412,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 
 			kafkaMsg, err := nmsg.ToKafkaMessage(partitionKey, topic)
 			if err != nil {
-				s.logger.Warn("Error generating Kafka message", "error", err, "txnr", m.Txnr)
+				logger.Warn("Error generating Kafka message", "error", err, "txnr", m.Txnr)
 				other_fails_chan <- m.Txnr
 				continue ForParsedChan
 			}

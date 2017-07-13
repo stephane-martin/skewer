@@ -101,9 +101,13 @@ func (s *StreamServer) Register(r *consul.Registry) {
 		return
 	}
 	for _, lc := range s.tcpListeners {
-		svc := consul.NewService(lc.Conf.BindAddr, lc.Conf.Port, fmt.Sprintf("%s:%d", lc.Conf.BindAddr, lc.Conf.Port), []string{lc.Conf.Protocol})
-		action := consul.ServiceAction{Action: consul.REGISTER, Service: svc}
-		r.RegisterChan <- action
+		svc, err := consul.NewService(lc.Conf.BindAddr, lc.Conf.Port, fmt.Sprintf("%s:%d", lc.Conf.BindAddr, lc.Conf.Port), []string{lc.Conf.Protocol})
+		if err != nil {
+			s.logger.Error("Error building the service object. Check skewer rights on the OS.", "error", err)
+		} else {
+			action := consul.ServiceAction{Action: consul.REGISTER, Service: svc}
+			r.RegisterChan <- action
+		}
 	}
 }
 
@@ -112,9 +116,13 @@ func (s *StreamServer) Unregister(r *consul.Registry) {
 		return
 	}
 	for _, lc := range s.tcpListeners {
-		svc := consul.NewService(lc.Conf.BindAddr, lc.Conf.Port, fmt.Sprintf("%s:%d", lc.Conf.BindAddr, lc.Conf.Port), []string{lc.Conf.Protocol})
-		action := consul.ServiceAction{Action: consul.UNREGISTER, Service: svc}
-		r.RegisterChan <- action
+		svc, err := consul.NewService(lc.Conf.BindAddr, lc.Conf.Port, fmt.Sprintf("%s:%d", lc.Conf.BindAddr, lc.Conf.Port), []string{lc.Conf.Protocol})
+		if err != nil {
+			s.logger.Error("Error building the service object. Check skewer rights on the OS.", "error", err)
+		} else {
+			action := consul.ServiceAction{Action: consul.UNREGISTER, Service: svc}
+			r.RegisterChan <- action
+		}
 	}
 }
 

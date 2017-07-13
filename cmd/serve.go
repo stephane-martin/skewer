@@ -186,6 +186,7 @@ func Serve() {
 		// closing the channels makes one of the store goroutine to return
 		close(st.Ack())
 		close(st.Nack())
+		close(st.ProcessingErrors())
 		// stop the other Store goroutines
 		gCancel()
 		// wait that the badger databases are correctly closed
@@ -201,11 +202,18 @@ func Serve() {
 	var journaldServer *server.JournaldServer
 	if c.Journald.Enabled {
 		logger.Info("Journald is enabled")
-		journaldServer, err = server.NewJournaldServer(gctx, c.Journald, st, generator, metricStore, logger)
+		journalCtx, cancelJournal := context.WithCancel(gctx)
+		journaldServer, err = server.NewJournaldServer(journalCtx, c.Journald, st, generator, metricStore, logger)
 		if err == nil {
-			journaldServer.Start()
+			err = journaldServer.Start()
+			if err != nil {
+				cancelJournal()
+				journaldServer = nil
+				logger.Warn("Error starting the journald service", "error", err)
+			}
 		} else {
-			// todo: log
+			logger.Warn("Error initializing the journald service", "error", err)
+			journaldServer = nil
 		}
 	}
 

@@ -102,7 +102,7 @@ func (s *UdpServer) ListenPacket() int {
 		if syslogConf.Protocol == "udp" {
 			confId, err := s.store.StoreSyslogConfig(&syslogConf)
 			if err != nil {
-				// todo: log
+				s.logger.Error("Error persisting the syslog configuration to the Store", "error", err)
 				continue
 			}
 			if len(syslogConf.UnixSocketPath) > 0 {

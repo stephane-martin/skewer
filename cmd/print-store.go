@@ -56,6 +56,7 @@ to quickly create a Cobra application.`,
 		defer func() {
 			close(st.Ack())
 			close(st.Nack())
+			close(st.ProcessingErrors())
 			cancel()
 			st.WaitFinished()
 		}()
