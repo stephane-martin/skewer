@@ -18,19 +18,14 @@ var consulCertFile string
 var consulKeyFile string
 var consulInsecure bool
 
-// RootCmd represents the base command when called without any subcommands
 var RootCmd = &cobra.Command{
 	Use:   "skewer",
-	Short: "A brief description of your application",
-	Long: `A longer description that spans multiple lines and likely contains
-examples and usage of using your application. For example:
-
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
-	// Uncomment the following line if your bare application
-	// has an action associated with it:
-	//	Run: func(cmd *cobra.Command, args []string) { },
+	Short: "skewer is a Syslog server that forwards message to Kafka",
+	Long: `skewer is a Syslog server. It implements listening on TCP, UDP, and
+RELP. It can also retrieve messages from Journald on Linux. Syslog messages
+are forwarded to Kafka. Skewer configuration can be pulled from Consul. Skewer
+supports TLS for the Syslog services, for Consul connection and for Kafka
+connection.`,
 }
 
 // Execute adds all child commands to the root command sets flags appropriately.
@@ -43,11 +38,6 @@ func Execute() {
 }
 
 func init() {
-	//cobra.OnInitialize(initConfig)
-
-	// Here you will define your flags and configuration settings.
-	// Cobra supports persistent flags, which, if defined here,
-	// will be global for your application.
 	RootCmd.PersistentFlags().StringVar(&configDirName, "config", "/etc/skewer", "configuration directory")
 	RootCmd.PersistentFlags().StringVar(&consulAddr, "consul-addr", "", "Consul address (ex: http://127.0.0.1:8500)")
 	RootCmd.PersistentFlags().StringVar(&consulDC, "consul-dc", "", "Consul datacenter")
