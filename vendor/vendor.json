@@ -423,6 +423,12 @@
 			"tree": true
 		},
 		{
+			"checksumSHA1": "CwkPuBwdRowLTOdnjHOrULo5Tc8=",
+			"path": "github.com/syndtr/gocapability",
+			"revision": "db04d3cc01c8b54962a58ec7e491717d06cfcc16",
+			"revisionTime": "2017-07-04T07:02:18Z"
+		},
+		{
 			"checksumSHA1": "MxLnUmfrP+r5HfCZM29+WPKebn8=",
 			"path": "github.com/ugorji/go/codec",
 			"revision": "708a42d246822952f38190a8d8c4e6b16a0e600c",
