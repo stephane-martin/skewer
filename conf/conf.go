@@ -30,6 +30,7 @@ type BaseConfig struct {
 	Parsers  []ParserConfig  `mapstructure:"parser" toml:"parser"`
 	Watchers []WatcherConfig `mapstructure:"watcher" toml:"watcher"`
 	Journald JournaldConfig  `mapstructure:"journald" toml:"journald"`
+	Audit    AuditConfig     `mapstructure:"audit" toml:"audit"`
 }
 
 type GConfig struct {
@@ -211,6 +212,24 @@ type JournaldConfig struct {
 	PartitionTmpl string `mapstructure:"partition_key_tmpl" toml:"partition_key_tmpl"`
 	PartitionFunc string `mapstructure:"partition_key_func" toml:"partition_key_func"`
 	FilterFunc    string `mapstructure:"filter_func" toml:"filter_func"`
+}
+
+type AuditConfig struct {
+	Enabled         bool   `mapstructure:"enabled" toml:"enabled"`
+	SocketBuffer    int    `mapstructure:"socket_buffer" toml:"socket_buffer"`
+	EventsMin       int    `mapstructure:"events_min" toml:"events_min"`
+	EventsMax       int    `mapstructure:"events_max" toml:"events_max"`
+	MessageTracking bool   `mapstructure:"message_tracking" toml:"message_tracking"`
+	LogOutOfOrder   bool   `mapstructure:"log_out_of_order" toml:"log_out_of_order"`
+	MaxOutOfOrder   int    `mapstructure:"max_out_of_order" toml:"max_out_of_order"`
+	Appname         string `mapstructure:"appname" toml:"appname"`
+	Severity        int    `mapstructure:"severity" toml:"severity"`
+	Facility        int    `mapstructure:"facility" toml:"facility"`
+	TopicTmpl       string `mapstructure:"topic_tmpl" toml:"topic_tmpl"`
+	TopicFunc       string `mapstructure:"topic_function" toml:"topic_function"`
+	PartitionTmpl   string `mapstructure:"partition_key_tmpl" toml:"partition_key_tmpl"`
+	PartitionFunc   string `mapstructure:"partition_key_func" toml:"partition_key_func"`
+	FilterFunc      string `mapstructure:"filter_func" toml:"filter_func"`
 }
 
 type SyslogConfig struct {
@@ -475,6 +494,7 @@ func (c *GConfig) ParseParamsFromConsul(params map[string]string) error {
 	journaldConf := map[string]string{}
 	kafkaConf := map[string]string{}
 	storeConf := map[string]string{}
+	auditConf := map[string]string{}
 	parsersConfMap := map[string]map[string]string{}
 	prefixLen := len(c.ConsulPrefix)
 
@@ -494,6 +514,12 @@ func (c *GConfig) ParseParamsFromConsul(params map[string]string) error {
 		case "journald":
 			if len(splits) == 2 {
 				journaldConf[splits[1]] = v
+			} else {
+				c.Logger.Debug("Ignoring Consul KV", "key", k, "value", v)
+			}
+		case "audit":
+			if len(splits) == 2 {
+				auditConf[splits[1]] = v
 			} else {
 				c.Logger.Debug("Ignoring Consul KV", "key", k, "value", v)
 			}
@@ -568,6 +594,19 @@ func (c *GConfig) ParseParamsFromConsul(params map[string]string) error {
 		}
 	}
 
+	aconf := AuditConfig{}
+	if len(auditConf) > 0 {
+		vi = viper.New()
+		SetAuditDefaults(vi, false)
+		for k, v := range auditConf {
+			vi.Set(k, v)
+		}
+		err := vi.Unmarshal(&aconf)
+		if err != nil {
+			return err
+		}
+	}
+
 	kconf := KafkaConfig{}
 	if len(kafkaConf) > 0 {
 		vi = viper.New()
@@ -604,6 +643,9 @@ func (c *GConfig) ParseParamsFromConsul(params map[string]string) error {
 	}
 	if len(journaldConf) > 0 {
 		c.Journald = jconf
+	}
+	if len(auditConf) > 0 {
+		c.Audit = aconf
 	}
 
 	return nil

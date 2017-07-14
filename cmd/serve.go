@@ -13,8 +13,10 @@ import (
 
 	"github.com/inconshreveable/log15"
 	"github.com/spf13/cobra"
+	"github.com/stephane-martin/skewer/auditlogs"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/consul"
+	"github.com/stephane-martin/skewer/journald"
 	"github.com/stephane-martin/skewer/metrics"
 	"github.com/stephane-martin/skewer/server"
 	"github.com/stephane-martin/skewer/store"
@@ -200,23 +202,48 @@ func Serve() {
 		time.Sleep(time.Second)
 	}()
 
+	// retrieve linux audit logs
+
+	var auditService *server.AuditService
+	var auditCtx context.Context
+	var cancelAudit context.CancelFunc
+	if c.Audit.Enabled && auditlogs.Supported {
+		logger.Info("Linux audit logs are enabled")
+		auditCtx, cancelAudit = context.WithCancel(shutdownCtx)
+		auditService = server.NewAuditService(st, generator, metricStore, logger)
+		err := auditService.Start(auditCtx, c.Audit)
+		if err != nil {
+			logger.Warn("Error starting the linux audit service", "error", err)
+			cancelAudit()
+			auditService = nil
+		} else {
+			logger.Debug("Linux audit logs service is started")
+		}
+	} else {
+		logger.Info("Linux audit logs are disabled")
+	}
+
 	// retrieve messages from journald
 	var journaldServer *server.JournaldServer
-	if c.Journald.Enabled {
-		logger.Info("Journald is enabled")
+	if c.Journald.Enabled && journald.Supported {
+		logger.Info("Journald support is enabled")
 		journalCtx, cancelJournal := context.WithCancel(gctx)
 		journaldServer, err = server.NewJournaldServer(journalCtx, c.Journald, st, generator, metricStore, logger)
 		if err == nil {
 			err = journaldServer.Start()
 			if err != nil {
+				logger.Warn("Error starting the journald service", "error", err)
 				cancelJournal()
 				journaldServer = nil
-				logger.Warn("Error starting the journald service", "error", err)
+			} else {
+				logger.Debug("Journald service is started")
 			}
 		} else {
 			logger.Warn("Error initializing the journald service", "error", err)
 			journaldServer = nil
 		}
+	} else {
+		logger.Info("Journald support is disabled")
 	}
 
 	// prepare the RELP service
@@ -261,25 +288,41 @@ func Serve() {
 		if journaldServer != nil {
 			wg.Add(1)
 			go func() {
-				defer wg.Done()
 				journaldServer.Stop()
 				journaldServer.Conf = newConf.Journald
 				journaldServer.Start()
+				wg.Done()
+			}()
+		}
+
+		// reset the audit service
+		if auditService != nil {
+			wg.Add(1)
+			go func() {
+				cancelAudit()
+				auditService.WaitFinished()
+				auditCtx, cancelAudit = context.WithCancel(shutdownCtx)
+				err := auditService.Start(auditCtx, newConf.Audit)
+				if err != nil {
+					cancelAudit()
+					auditService = nil
+					logger.Warn("Error starting the linux audit service", "error", err)
+				}
+				wg.Done()
 			}()
 		}
 
 		// reset the RELP service
 		wg.Add(1)
 		go func() {
-			defer wg.Done()
 			relpServer.Unregister(registry)
 			relpServer.Stop()
+			wg.Done()
 		}()
 
 		// reset the TCP service
 		wg.Add(1)
 		go func() {
-			defer wg.Done()
 			tcpServer.Unregister(registry)
 			tcpServer.Stop()
 			<-tcpServer.ClosedChan
@@ -290,12 +333,12 @@ func Serve() {
 			} else {
 				logger.Error("Error starting the TCP server", "error", err)
 			}
+			wg.Done()
 		}()
 
 		// reset the UDP service
 		wg.Add(1)
 		go func() {
-			defer wg.Done()
 			udpServer.Stop()
 			<-udpServer.ClosedChan
 			udpServer.Conf = *newConf
@@ -303,10 +346,12 @@ func Serve() {
 			if err != nil {
 				logger.Error("Error starting the UDP server", "error", err)
 			}
+			wg.Done()
 		}()
 		wg.Wait()
 	}
 
+	logger.Debug("Main loop is starting")
 	for {
 		select {
 		case <-shutdownCtx.Done():
@@ -337,6 +382,8 @@ func Serve() {
 
 		case sig := <-sig_chan:
 			if sig == syscall.SIGHUP {
+				signal.Stop(sig_chan)
+				signal.Ignore(syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
 				select {
 				case <-shutdownCtx.Done():
 				default:
@@ -353,9 +400,14 @@ func Serve() {
 						newStopWatch()
 						logger.Error("Error reloading configuration. Configuration was left untouched.", "error", err)
 					}
+					sig_chan = make(chan os.Signal)
+					signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 				}
 
 			} else if sig == syscall.SIGTERM || sig == syscall.SIGINT {
+				signal.Stop(sig_chan)
+				signal.Ignore(syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
+				sig_chan = nil
 				logger.Info("Termination signal received", "signal", sig)
 				shutdown()
 			} else {

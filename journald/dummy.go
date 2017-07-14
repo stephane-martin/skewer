@@ -4,9 +4,7 @@ package journald
 
 import "context"
 
-func Dummy() bool {
-	return true
-}
+var Supported bool = false
 
 type JournaldReader interface {
 	Start()

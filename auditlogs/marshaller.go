@@ -1,7 +1,8 @@
-package audit
+// +build linux
+
+package auditlogs
 
 import (
-	"os"
 	"regexp"
 	"syscall"
 	"time"
@@ -13,7 +14,7 @@ const (
 
 type AuditMarshaller struct {
 	msgs          map[int]*AuditMessageGroup
-	writer        *AuditWriter
+	writer        chan *AuditMessageGroup
 	lastSeq       int
 	missed        map[int]bool
 	worstLag      int
@@ -22,7 +23,6 @@ type AuditMarshaller struct {
 	trackMessages bool
 	logOutOfOrder bool
 	maxOutOfOrder int
-	attempts      int
 	filters       map[string]map[uint16][]*regexp.Regexp // { syscall: { mtype: [regexp, ...] } }
 }
 
@@ -33,7 +33,7 @@ type AuditFilter struct {
 }
 
 // Create a new marshaller
-func NewAuditMarshaller(w *AuditWriter, eventMin uint16, eventMax uint16, trackMessages, logOOO bool, maxOOO int, filters []AuditFilter) *AuditMarshaller {
+func NewAuditMarshaller(w chan *AuditMessageGroup, eventMin uint16, eventMax uint16, trackMessages, logOOO bool, maxOOO int, filters []AuditFilter) *AuditMarshaller {
 	am := AuditMarshaller{
 		writer:        w,
 		msgs:          make(map[int]*AuditMessageGroup, 5), // It is not typical to have more than 2 message groups at any given time
@@ -122,10 +122,7 @@ func (a *AuditMarshaller) completeMessage(seq int) {
 		return
 	}
 
-	if err := a.writer.Write(msg); err != nil {
-		el.Println("Failed to write message. Error:", err)
-		os.Exit(1)
-	}
+	a.writer <- msg
 
 	delete(a.msgs, seq)
 }
@@ -145,7 +142,6 @@ func (a *AuditMarshaller) dropMessage(msg *AuditMessageGroup) bool {
 			}
 		}
 	}
-
 	return false
 }
 
@@ -166,11 +162,13 @@ func (a *AuditMarshaller) detectMissing(seq int) {
 			}
 
 			if a.logOutOfOrder {
-				el.Println("Got sequence", missedSeq, "after", lag, "messages. Worst lag so far", a.worstLag, "messages")
+				// el.Println("Got sequence", missedSeq, "after", lag, "messages. Worst lag so far", a.worstLag, "messages")
+				// todo
 			}
 			delete(a.missed, missedSeq)
 		} else if seq-missedSeq > a.maxOutOfOrder {
-			el.Printf("Likely missed sequence %d, current %d, worst message delay %d\n", missedSeq, seq, a.worstLag)
+			// el.Printf("Likely missed sequence %d, current %d, worst message delay %d\n", missedSeq, seq, a.worstLag)
+			// todo
 			delete(a.missed, missedSeq)
 		}
 	}

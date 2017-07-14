@@ -83,10 +83,12 @@ type JournaldServer struct {
 }
 
 func NewJournaldServer(
-	ctx context.Context, c conf.JournaldConfig,
-	st store.Store, generator chan ulid.ULID, metric *metrics.Metrics,
-	logger log15.Logger,
-) (*JournaldServer, error) {
+	ctx context.Context,
+	c conf.JournaldConfig,
+	st store.Store,
+	generator chan ulid.ULID,
+	metric *metrics.Metrics,
+	logger log15.Logger) (*JournaldServer, error) {
 
 	var err error
 	s := JournaldServer{Conf: c, store: st, metrics: metric, generator: generator}

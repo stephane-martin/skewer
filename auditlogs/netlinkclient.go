@@ -1,9 +1,11 @@
-package audit
+// +build linux
+
+package auditlogs
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
-	"errors"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -42,10 +44,10 @@ type NetlinkClient struct {
 }
 
 // NewNetlinkClient creates a new NetLinkClient and optionally tries to modify the netlink recv buffer
-func NewNetlinkClient(recvSize int) *NetlinkClient {
+func NewNetlinkClient(ctx context.Context, recvSize int) (*NetlinkClient, error) {
 	fd, err := syscall.Socket(syscall.AF_NETLINK, syscall.SOCK_RAW, syscall.NETLINK_AUDIT)
 	if err != nil {
-		el.Fatalln("Could not create a socket:", err)
+		return nil, err
 	}
 
 	n := &NetlinkClient{
@@ -56,29 +58,29 @@ func NewNetlinkClient(recvSize int) *NetlinkClient {
 
 	if err = syscall.Bind(fd, n.address); err != nil {
 		syscall.Close(fd)
-		el.Fatalln("Could not bind to netlink socket:", err)
+		return nil, err
 	}
 
 	// Set the buffer size if we were asked
 	if recvSize > 0 {
 		if err = syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_RCVBUF, recvSize); err != nil {
-			el.Println("Failed to set receive buffer size")
+			return nil, err
 		}
-	}
-
-	// Print the current receive buffer size
-	if v, err := syscall.GetsockoptInt(n.fd, syscall.SOL_SOCKET, syscall.SO_RCVBUF); err == nil {
-		l.Println("Socket receive buffer size:", v)
 	}
 
 	go func() {
 		for {
 			n.KeepConnection()
-			time.Sleep(time.Second * 5)
+			select {
+			case <-ctx.Done():
+				syscall.Close(fd)
+				return
+			case <-time.After(time.Second * 5):
+			}
 		}
 	}()
 
-	return n
+	return n, nil
 }
 
 // Send will send a packet and payload to the netlink socket without waiting for a response
@@ -101,22 +103,24 @@ func (n *NetlinkClient) Send(np *NetlinkPacket, a *AuditStatusPayload) error {
 		}
 	}
 
-	if err := syscall.Sendto(n.fd, buf.Bytes(), 0, n.address); err != nil {
-		return err
-	}
-
-	return nil
+	return syscall.Sendto(n.fd, buf.Bytes(), 0, n.address)
 }
 
 // Receive will receive a packet from a netlink socket
 func (n *NetlinkClient) Receive() (*syscall.NetlinkMessage, error) {
+	set := syscall.FdSet{}
+	set.Bits[n.fd/64] |= (1 << (uint(n.fd) % 64))
+	i, _ := syscall.Select(n.fd+1, &set, nil, nil, &syscall.Timeval{Usec: 1000000})
+	if i == 0 {
+		// select timeout
+		return nil, nil
+	}
 	nlen, _, err := syscall.Recvfrom(n.fd, n.buf, 0)
 	if err != nil {
 		return nil, err
 	}
-
 	if nlen < 1 {
-		return nil, errors.New("Got a 0 length packet")
+		return nil, nil
 	}
 
 	msg := &syscall.NetlinkMessage{
@@ -134,7 +138,7 @@ func (n *NetlinkClient) Receive() (*syscall.NetlinkMessage, error) {
 }
 
 // KeepConnection re-establishes our connection to the netlink socket
-func (n *NetlinkClient) KeepConnection() {
+func (n *NetlinkClient) KeepConnection() error {
 	payload := &AuditStatusPayload{
 		Mask:    4,
 		Enabled: 1,
@@ -148,8 +152,5 @@ func (n *NetlinkClient) KeepConnection() {
 		Pid:   uint32(syscall.Getpid()),
 	}
 
-	err := n.Send(packet, payload)
-	if err != nil {
-		el.Println("Error occurred while trying to keep the connection:", err)
-	}
+	return n.Send(packet, payload)
 }

@@ -423,12 +423,6 @@
 			"tree": true
 		},
 		{
-			"checksumSHA1": "92sh2bSPbbeU4Lv8502X5ydld48=",
-			"path": "github.com/stephane-martin/go-audit",
-			"revision": "8be76eff08360ea7a103321b94a4230300806ed9",
-			"revisionTime": "2017-07-13T15:40:22Z"
-		},
-		{
 			"checksumSHA1": "MxLnUmfrP+r5HfCZM29+WPKebn8=",
 			"path": "github.com/ugorji/go/codec",
 			"revision": "708a42d246822952f38190a8d8c4e6b16a0e600c",

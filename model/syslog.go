@@ -15,6 +15,18 @@ type Facility int
 type Severity int
 type Version int
 
+type AuditSubMessage struct {
+	Type uint16 `json:"type"`
+	Data string `json:"data"`
+}
+
+type AuditMessageGroup struct {
+	Seq       int                `json:"sequence"`
+	AuditTime string             `json:"timestamp"`
+	Msgs      []*AuditSubMessage `json:"messages"`
+	UidMap    map[string]string  `json:"uid_map"`
+}
+
 type SyslogMessage struct {
 	Priority      Priority               `json:"priority,string"`
 	Facility      Facility               `json:"facility,string"`
@@ -28,7 +40,7 @@ type SyslogMessage struct {
 	Msgid         string                 `json:"msgid"`
 	Structured    string                 `json:"structured"`
 	Message       string                 `json:"message"`
-	AuditMessage  interface{}            `json:"audit,omitempty"`
+	AuditMessage  []*AuditSubMessage     `json:"audit,omitempty"`
 	Properties    map[string]interface{} `json:"properties,omitempty"`
 }
 
@@ -163,12 +175,20 @@ func Parse(m string, format string, dont_parse_sd bool) (sm *SyslogMessage, err 
 	}
 	// special handling of JSON messages produced by go-audit
 	if sm.Appname == "go-audit" {
-		var auditMsg interface{}
+		var auditMsg AuditMessageGroup
 		err = json.Unmarshal([]byte(sm.Message), &auditMsg)
 		if err != nil {
 			return sm, nil
 		}
-		sm.AuditMessage = auditMsg
+		sm.AuditMessage = auditMsg.Msgs
+		if len(auditMsg.UidMap) > 0 {
+			if sm.Properties == nil {
+				sm.Properties = map[string]interface{}{}
+			}
+			props := map[string]map[string]string{}
+			props["uid_map"] = auditMsg.UidMap
+			sm.Properties["audit"] = props
+		}
 		sm.Message = ""
 	}
 	return sm, nil

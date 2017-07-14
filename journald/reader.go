@@ -10,9 +10,7 @@ import (
 	"github.com/coreos/go-systemd/sdjournal"
 )
 
-func Dummy() bool {
-	return false
-}
+var Supported bool = true
 
 type JournaldReader interface {
 	Start()

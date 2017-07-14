@@ -1,4 +1,6 @@
-package audit
+// +build linux
+
+package auditlogs
 
 import (
 	"bytes"
