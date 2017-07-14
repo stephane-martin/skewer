@@ -32,7 +32,7 @@ var testauditCmd = &cobra.Command{
 			Severity:      6,
 		}
 		logger := log15.New()
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, _ := context.WithCancel(context.Background())
 		generator := utils.Generator(ctx, logger)
 		auditsvc := server.NewAuditService(nil, generator, nil, logger)
 		err := auditsvc.Start(ctx, c)
