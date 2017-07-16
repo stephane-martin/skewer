@@ -14,7 +14,7 @@ func SetNonDumpable() error {
 	return NotLinuxError{}
 }
 
-func FixLinuxPrivileges(uid int, gid int) error {
+func FixLinuxPrivileges(uid string, gid string) error {
 	return nil
 }
 

@@ -2,7 +2,11 @@
 
 package journald
 
-import "context"
+import (
+	"context"
+
+	"github.com/inconshreveable/log15"
+)
 
 var Supported bool = false
 
@@ -16,7 +20,7 @@ type reader struct {
 	entries chan map[string]string
 }
 
-func NewReader(ctx context.Context) (JournaldReader, error) {
+func NewReader(ctx context.Context, logger log15.Logger) (JournaldReader, error) {
 	r := &reader{}
 	r.entries = make(chan map[string]string)
 	return r, nil
