@@ -23,5 +23,5 @@ func CanReadAuditLogs() bool {
 }
 
 func Predrop() error {
-
+	return nil
 }
