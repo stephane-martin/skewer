@@ -98,11 +98,10 @@ func FixLinuxPrivileges(uid string, gid string) error {
 	}
 	fmt.Fprintf(os.Stderr, "Starting with capabilities: %s\n", c.caps.StringCap(capability.EFFECTIVE))
 	if numuid == os.Getuid() && numgid == os.Getgid() && !c.NeedDrop() {
-		// we are already running under the right user, and we don't need to drop unneeded capabilities. all is good.
-		return NoNewPriv() // can't gain more privileges
-	} else {
-		return Drop(numuid, numgid)
+		NoNewPriv()
+		return nil
 	}
+	return Drop(numuid, numgid)
 }
 
 func CanReadAuditLogs() bool {
@@ -191,12 +190,16 @@ func Drop(uid int, gid int) error {
 		if err != nil {
 			return err
 		}
+		err = NoNewPriv()
+		if err != nil {
+			return err
+		}
 
 		fmt.Fprintf(os.Stderr, "Now running with capabilities: %s\n", c.caps.StringCap(capability.EFFECTIVE))
-		return NoNewPriv()
 
+		return nil
 	} else if !c.CanModifySecurebits() {
-		return fmt.Errorf("Asked to change UID/GID, but no way to set the correct capabilities (need SETPCAP)")
+		return fmt.Errorf("Asked to change UID/GID, but no way to set the correct capabilities")
 	} else {
 		// ensure the current goroutine stays on the same OS thread
 		runtime.LockOSThread()
