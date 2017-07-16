@@ -75,8 +75,7 @@ to quickly create a Cobra application.`,
 
 			*/
 
-			capquery, _ := sys.NewCapabilitiesQuery()
-			err = capquery.Drop(1000, 1000)
+			err = sys.Drop(1000, 1000)
 			if err != nil {
 				fmt.Println("dropping caps failed:", err)
 			}

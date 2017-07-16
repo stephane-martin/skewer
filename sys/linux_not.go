@@ -21,3 +21,7 @@ func FixLinuxPrivileges(uid string, gid string) error {
 func CanReadAuditLogs() bool {
 	return false
 }
+
+func Predrop() error {
+
+}

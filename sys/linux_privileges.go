@@ -48,6 +48,42 @@ func KeepCaps() error {
 	return unix.Prctl(unix.PR_SET_SECUREBITS, uintptr(5)|uintptr(3), 0, 0, 0)
 }
 
+func Predrop() error {
+	c, err := NewCapabilitiesQuery()
+	if err != nil {
+		return err
+	}
+	toKeepMap := map[capability.Cap]bool{}
+	for _, cap := range CAPS_TO_KEEP {
+		toKeepMap[cap] = true
+	}
+	toKeepMap[capability.CAP_SETUID] = true
+	toKeepMap[capability.CAP_SETGID] = true
+	toKeepMap[capability.CAP_SETPCAP] = true
+
+	for i := 0; i <= int(capability.CAP_LAST_CAP); i++ {
+		if toKeepMap[capability.Cap(i)] {
+			continue
+		}
+		if c.caps.Get(capability.EFFECTIVE, capability.Cap(i)) {
+			c.caps.Unset(capability.EFFECTIVE, capability.Cap(i))
+		}
+		if c.caps.Get(capability.PERMITTED, capability.Cap(i)) {
+			c.caps.Unset(capability.PERMITTED, capability.Cap(i))
+		}
+		if c.caps.Get(capability.BOUNDING, capability.Cap(i)) {
+			c.caps.Unset(capability.BOUNDING, capability.Cap(i))
+		}
+	}
+
+	err = c.caps.Apply(capability.BOUNDING)
+	if err != nil {
+		return err
+	}
+
+	return c.caps.Apply(capability.CAPS)
+}
+
 func FixLinuxPrivileges(uid string, gid string) error {
 
 	numuid, numgid, err := LookupUid(uid, gid)
@@ -63,7 +99,7 @@ func FixLinuxPrivileges(uid string, gid string) error {
 	if numuid == os.Getuid() && numgid == os.Getgid() && !c.NeedDrop() {
 		return nil
 	}
-	return c.Drop(numuid, numgid)
+	return Drop(numuid, numgid)
 }
 
 func CanReadAuditLogs() bool {
@@ -108,7 +144,12 @@ func (c *CapabilitiesQuery) NeedDrop() bool {
 	return false
 }
 
-func (c *CapabilitiesQuery) Drop(uid int, gid int) error {
+func Drop(uid int, gid int) error {
+	c, err := NewCapabilitiesQuery()
+	if err != nil {
+		return err
+	}
+
 	curUid := os.Getuid()
 	curGid := os.Getgid()
 	if (curUid != uid || curGid != gid) && !c.CanChangeUid() {
@@ -173,35 +214,12 @@ func (c *CapabilitiesQuery) Drop(uid int, gid int) error {
 				return err
 			}
 		*/
-		toKeepMap := map[capability.Cap]bool{}
-		for _, cap := range CAPS_TO_KEEP {
-			toKeepMap[cap] = true
-		}
-		toKeepMap[capability.CAP_SETUID] = true
-		toKeepMap[capability.CAP_SETGID] = true
-		toKeepMap[capability.CAP_SETPCAP] = true
-
-		for i := 0; i <= int(capability.CAP_LAST_CAP); i++ {
-			if toKeepMap[capability.Cap(i)] {
-				continue
-			}
-			if c.caps.Get(capability.EFFECTIVE, capability.Cap(i)) {
-				c.caps.Unset(capability.EFFECTIVE, capability.Cap(i))
-			}
-			if c.caps.Get(capability.PERMITTED, capability.Cap(i)) {
-				c.caps.Unset(capability.PERMITTED, capability.Cap(i))
-			}
-			if c.caps.Get(capability.BOUNDING, capability.Cap(i)) {
-				c.caps.Unset(capability.BOUNDING, capability.Cap(i))
-			}
-		}
-
-		err = c.caps.Apply(capability.BOUNDING)
+		err = Predrop()
 		if err != nil {
 			return err
 		}
 
-		err = c.caps.Apply(capability.CAPS)
+		c, err = NewCapabilitiesQuery()
 		if err != nil {
 			return err
 		}
