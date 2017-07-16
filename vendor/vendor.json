@@ -15,6 +15,12 @@
 			"revisionTime": "2017-03-28T06:15:53Z"
 		},
 		{
+			"checksumSHA1": "qtjd74+bErubh+qyv3s+lWmn9wc=",
+			"path": "github.com/StackExchange/wmi",
+			"revision": "ea383cf3ba6ec950874b8486cd72356d007c768f",
+			"revisionTime": "2017-04-10T19:29:09Z"
+		},
+		{
 			"checksumSHA1": "mEPx03tDisj6nvPDxzIeb1gt4xg=",
 			"path": "github.com/armon/consul-api",
 			"revision": "dcfedd50ed5334f96adee43fc88518a4f095e15c",
@@ -128,6 +134,18 @@
 			"path": "github.com/fsnotify/fsnotify",
 			"revision": "4da3e2cfbabc9f751898f250b49f2439785783a1",
 			"revisionTime": "2017-03-29T04:21:07Z"
+		},
+		{
+			"checksumSHA1": "IvHj/4iR2nYa/S3cB2GXoyDG/xQ=",
+			"path": "github.com/go-ole/go-ole",
+			"revision": "085abb85892dc1949567b726dff00fa226c60c45",
+			"revisionTime": "2017-07-12T17:44:59Z"
+		},
+		{
+			"checksumSHA1": "Q0ZOcJW0fqOefDzEdn+PJHOeSgI=",
+			"path": "github.com/go-ole/go-ole/oleutil",
+			"revision": "085abb85892dc1949567b726dff00fa226c60c45",
+			"revisionTime": "2017-07-12T17:44:59Z"
 		},
 		{
 			"checksumSHA1": "VcLNrvCcnZuSnebTxMRyNtzY3ZY=",
@@ -373,6 +391,21 @@
 			"revisionTime": "2016-11-28T21:05:44Z"
 		},
 		{
+			"checksumSHA1": "Fdwr+DDDCpcZNYjFmz8WOdqoGxo=",
+			"path": "github.com/shirou/gopsutil",
+			"revision": "aa0a3bce9d1f4efc710ed812f19f77851da2eedd",
+			"revisionTime": "2017-07-02T15:10:39Z",
+			"tree": true,
+			"version": "v2.17.06",
+			"versionExact": "v2.17.06"
+		},
+		{
+			"checksumSHA1": "Nve7SpDmjsv6+rhkXAkfg/UQx94=",
+			"path": "github.com/shirou/w32",
+			"revision": "bb4de0191aa41b5507caa14b0650cdbddcd9280b",
+			"revisionTime": "2016-09-30T03:27:40Z"
+		},
+		{
 			"checksumSHA1": "lBehULzb2/kIK3wZ0gz2yNmHq9s=",
 			"path": "github.com/spf13/afero",
 			"revision": "9be650865eab0c12963d8753212f4f9c66cdcf12",
@@ -423,8 +456,8 @@
 			"tree": true
 		},
 		{
-			"checksumSHA1": "CwkPuBwdRowLTOdnjHOrULo5Tc8=",
-			"path": "github.com/syndtr/gocapability",
+			"checksumSHA1": "PgEklGW56c5RLHqQhORxt6jS3fY=",
+			"path": "github.com/syndtr/gocapability/capability",
 			"revision": "db04d3cc01c8b54962a58ec7e491717d06cfcc16",
 			"revisionTime": "2017-07-04T07:02:18Z"
 		},
@@ -547,6 +580,12 @@
 			"path": "golang.org/x/sys/unix",
 			"revision": "0e0164865330d5cf1c00247be08330bf96e2f87c",
 			"revisionTime": "2017-07-02T08:00:08Z"
+		},
+		{
+			"checksumSHA1": "Pki0iA65Dtsjh4gtabPkp/lOa2I=",
+			"path": "golang.org/x/sys/windows",
+			"revision": "4cd6d1a821c7175768725b55ca82f14683a29ea4",
+			"revisionTime": "2017-07-14T13:21:52Z"
 		},
 		{
 			"checksumSHA1": "DoQpPb6ZhqN2gP7rNXfxHaTUgEs=",
