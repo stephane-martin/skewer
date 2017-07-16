@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/hashicorp/go-version"
+	"github.com/shirou/gopsutil/host"
 	"github.com/spf13/cobra"
 	"github.com/stephane-martin/skewer/sys"
 	"github.com/syndtr/gocapability/capability"
@@ -35,46 +37,6 @@ to quickly create a Cobra application.`,
 			fmt.Println("audit_read", caps.Get(capability.EFFECTIVE, capability.CAP_AUDIT_READ))
 			fmt.Println("lockmem", caps.Get(capability.EFFECTIVE, capability.CAP_IPC_LOCK))
 
-			/*
-				caps.Clear(capability.CAPS)
-				caps.Clear(capability.BOUNDS)
-				caps.Clear(capability.AMBS)
-				caps.Set(capability.CAPS|capability.BOUNDING, capability.CAP_NET_BIND_SERVICE, capability.CAP_SETUID, capability.CAP_SETGID, capability.CAP_SETPCAP)
-
-				err = caps.Apply(capability.BOUNDING)
-				if err != nil {
-					fmt.Println("apply caps bounding error", err)
-				}
-
-				err = caps.Apply(capability.CAPS)
-				if err != nil {
-					fmt.Println("apply caps effective error", err)
-				}
-
-				err = caps.Apply(capability.AMBIENT)
-				if err != nil {
-					fmt.Println("apply caps ambient error", err)
-				}
-
-				err = sys.KeepCaps()
-				if err != nil {
-					fmt.Println("keepcaps error", err)
-				}
-
-				err = sys.NoNewPriv()
-				if err != nil {
-					fmt.Println("nonewpriv error", err)
-				}
-
-				sys.Setuid(1000)
-				sys.Setgid(1000)
-
-				caps.Unset(capability.CAPS|capability.BOUNDING, capability.CAP_SETUID, capability.CAP_SETGID, capability.CAP_SETPCAP)
-				caps.Apply(capability.BOUNDING)
-				caps.Apply(capability.CAPS)
-
-			*/
-
 			err = sys.Drop(1000, 1000)
 			if err != nil {
 				fmt.Println("dropping caps failed:", err)
@@ -92,6 +54,13 @@ to quickly create a Cobra application.`,
 			fmt.Println("bind", caps.Get(capability.EFFECTIVE, capability.CAP_NET_BIND_SERVICE))
 
 			fmt.Println(os.Getuid(), os.Geteuid())
+			v, err := host.KernelVersion()
+			if err == nil {
+				fmt.Println(v)
+			}
+			curv := version.Must(version.NewVersion(v))
+			minv := version.Must(version.NewVersion("4.3"))
+			fmt.Println(curv.Compare(minv))
 
 		} else {
 			fmt.Println(err)
