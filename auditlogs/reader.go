@@ -6,13 +6,14 @@ import (
 	"context"
 	"syscall"
 
+	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 )
 
 var Supported bool = true
 
-func WriteAuditLogs(ctx context.Context, c conf.AuditConfig) (chan *model.AuditMessageGroup, error) {
+func WriteAuditLogs(ctx context.Context, c conf.AuditConfig, logger log15.Logger) (chan *model.AuditMessageGroup, error) {
 	// canceling the context will make the NetlinkClient to be closed, and
 	// client.Receive will return an error EBADF
 	client, err := NewNetlinkClient(ctx, c.SocketBuffer)
@@ -54,9 +55,10 @@ func WriteAuditLogs(ctx context.Context, c conf.AuditConfig) (chan *model.AuditM
 			msg, err := client.Receive()
 			if err != nil {
 				if err == syscall.EBADF {
+					logger.Debug("The audit Netlink returned EBADF")
 					break
 				} else {
-					// todo: log err
+					logger.Warn("Error when receiving from the audit Netlink", "error", err)
 				}
 			} else if msg != nil {
 				netlinkMsgChan <- msg

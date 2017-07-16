@@ -93,7 +93,7 @@ func NewJournaldServer(
 	var err error
 	s := JournaldServer{Conf: c, store: st, metrics: metric, generator: generator}
 	s.logger = logger.New("class", "journald")
-	s.reader, err = journald.NewReader(ctx)
+	s.reader, err = journald.NewReader(ctx, s.logger)
 	if err != nil {
 		return nil, err
 	}

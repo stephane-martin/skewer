@@ -39,7 +39,7 @@ func (s *AuditService) Start(ctx context.Context, c conf.AuditConfig) error {
 		return err
 	}
 
-	msgChan, err := auditlogs.WriteAuditLogs(ctx, c)
+	msgChan, err := auditlogs.WriteAuditLogs(ctx, c, s.logger)
 	if err != nil {
 		return err
 	}

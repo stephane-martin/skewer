@@ -403,7 +403,8 @@ ForOutputs:
 
 				v, _ := kafkaMsg.Value.Encode()
 				pkey, _ := kafkaMsg.Key.Encode()
-				fmt.Printf("pkey: '%s' topic:'%s' uid:'%s'\n", pkey, kafkaMsg.Topic, message.Uid)
+
+				fwder.logger.Info("Message", "partitionkey", string(pkey), "topic", kafkaMsg.Topic, "msgid", message.Uid)
 				fmt.Println(string(v))
 				fmt.Println()
 

@@ -32,6 +32,13 @@ var serveCmd = &cobra.Command{
 running process that listens to syslog messages according to the configuration,
 connects to Kafka, and forwards messages to Kafka.`,
 	Run: func(cmd *cobra.Command, args []string) {
+		if sys.CapabilitiesSupported {
+			err := sys.FixLinuxPrivileges(uidFlag, gidFlag)
+			if err != nil {
+				fmt.Println(err)
+				os.Exit(-1)
+			}
+		}
 		Serve()
 	},
 }
@@ -44,6 +51,8 @@ var logjsonFlag bool
 var pidFilenameFlag string
 var registerFlag bool
 var serviceName string
+var uidFlag string
+var gidFlag string
 
 func init() {
 	RootCmd.AddCommand(serveCmd)
@@ -55,6 +64,8 @@ func init() {
 	serveCmd.Flags().StringVar(&pidFilenameFlag, "pidfile", "", "If given, write PID to file")
 	serveCmd.Flags().BoolVar(&registerFlag, "register", false, "Register services in consul")
 	serveCmd.Flags().StringVar(&serviceName, "servicename", "skewer", "Service name to register in consul")
+	serveCmd.Flags().StringVar(&uidFlag, "uid", "", "Switch to this user ID")
+	serveCmd.Flags().StringVar(&gidFlag, "gid", "", "Switch to this group ID")
 }
 
 func SetLogging() log15.Logger {
@@ -208,19 +219,23 @@ func Serve() {
 	var auditCtx context.Context
 	var cancelAudit context.CancelFunc
 	if c.Audit.Enabled && auditlogs.Supported {
-		logger.Info("Linux audit logs are enabled")
-		auditCtx, cancelAudit = context.WithCancel(shutdownCtx)
-		auditService = server.NewAuditService(st, generator, metricStore, logger)
-		err := auditService.Start(auditCtx, c.Audit)
-		if err != nil {
-			logger.Warn("Error starting the linux audit service", "error", err)
-			cancelAudit()
-			auditService = nil
+		if !sys.CanReadAuditLogs() {
+			logger.Info("Audit logs are requested, but the needed Linux Capability is not present. Disabling.")
 		} else {
-			logger.Debug("Linux audit logs service is started")
+			logger.Info("Linux audit logs are enabled")
+			auditCtx, cancelAudit = context.WithCancel(shutdownCtx)
+			auditService = server.NewAuditService(st, generator, metricStore, logger)
+			err := auditService.Start(auditCtx, c.Audit)
+			if err != nil {
+				logger.Warn("Error starting the linux audit service", "error", err)
+				cancelAudit()
+				auditService = nil
+			} else {
+				logger.Debug("Linux audit logs service is started")
+			}
 		}
 	} else {
-		logger.Info("Linux audit logs are disabled")
+		logger.Info("Linux audit logs are disabled (not requested)")
 	}
 
 	// retrieve messages from journald
