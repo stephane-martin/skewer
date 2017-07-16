@@ -32,10 +32,25 @@ var serveCmd = &cobra.Command{
 running process that listens to syslog messages according to the configuration,
 connects to Kafka, and forwards messages to Kafka.`,
 	Run: func(cmd *cobra.Command, args []string) {
+
+		if !dumpableFlag {
+			err := sys.SetNonDumpable()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error setting PR_SET_DUMPABLE: %s\n", err)
+			}
+		}
+
+		if !noMlockFlag {
+			err := sys.MlockAll()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error executing MlockAll(): %s\n", err)
+			}
+		}
+
 		if sys.CapabilitiesSupported {
 			err := sys.FixLinuxPrivileges(uidFlag, gidFlag)
 			if err != nil {
-				fmt.Println(err)
+				fmt.Fprintln(os.Stderr, err)
 				os.Exit(-1)
 			}
 		}
@@ -53,6 +68,8 @@ var registerFlag bool
 var serviceName string
 var uidFlag string
 var gidFlag string
+var dumpableFlag bool
+var noMlockFlag bool
 
 func init() {
 	RootCmd.AddCommand(serveCmd)
@@ -66,6 +83,8 @@ func init() {
 	serveCmd.Flags().StringVar(&serviceName, "servicename", "skewer", "Service name to register in consul")
 	serveCmd.Flags().StringVar(&uidFlag, "uid", "", "Switch to this user ID")
 	serveCmd.Flags().StringVar(&gidFlag, "gid", "", "Switch to this group ID")
+	serveCmd.Flags().BoolVar(&dumpableFlag, "dumpable", false, "if set, the skewer process will be traceable/dumpable")
+	serveCmd.Flags().BoolVar(&noMlockFlag, "no-mlock", false, "if set, skewer will not mlock() its memory")
 }
 
 func SetLogging() log15.Logger {
@@ -117,17 +136,6 @@ func Serve() {
 	logger := SetLogging()
 	generator := utils.Generator(gctx, logger)
 
-	var err error
-	err = sys.SetNonDumpable()
-	if err != nil {
-		logger.Info("Error setting PR_SET_DUMPABLE", "error", err)
-	}
-
-	err = sys.MlockAll()
-	if err != nil {
-		logger.Info("Error executing MlockAll()", "error", err)
-	}
-
 	var c *conf.GConfig
 	var st store.Store
 	var updated chan bool
@@ -143,6 +151,7 @@ func Serve() {
 		Insecure:   consulInsecure,
 	}
 
+	var err error
 	// read configuration
 	for {
 		c, updated, err = conf.InitLoad(watchCtx, configDirName, params, consulPrefix, logger)
