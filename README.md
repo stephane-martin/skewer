@@ -78,7 +78,7 @@ The configuration must be given as a tree in Consul KV. For example:
 > 
 > skewer/syslog/B/bind_addr 0.0.0.0
 >
-> skewer/syslog/A/port 3514
+> skewer/syslog/B/port 3514
 > 
 > skewer/kafka/brokers ["kafka1","kafka2","kafka2"]
 
