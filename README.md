@@ -16,8 +16,7 @@ to post bugs and ask questions.
 -   Listens on TCP, UDP or RELP
 -   Can fetch log messages from Journald on Linux
 -   Can fetch audit logs from the kernel on Linux
--   Configuration can be provided as a configuration file, or fetched from Consul
--   Dynamic configuration with Consul
+-   Configuration can be provided as a configuration file, or optionally fetched from Consul
 -   Can register the TCP and RELP listeners as services in Consul
 -   Custom message parsers and filters can be defined through Javascript functions
 -   Works on Linux and MacOS (not tested on *BSD), does not work on Windows
@@ -74,9 +73,11 @@ is not dynamic).
 The configuration must be given as a tree in Consul KV. For example:
 
 > skewer/syslog/A/bind_addr 0.0.0.0
+>
 > skewer/syslog/A/port 2514
 > 
 > skewer/syslog/B/bind_addr 0.0.0.0
+>
 > skewer/syslog/A/port 3514
 > 
 > skewer/kafka/brokers ["kafka1","kafka2","kafka2"]
