@@ -42,9 +42,11 @@ to post bugs and ask questions.
     as we don't notify him. So in this case, there is no Store mechanism
     involved.
 
--   skewer uses a Netlink connection to fetch audit logs from the Linux Kernel
+-   skewer uses a Netlink connection to fetch audit logs from the Linux Kernel.
+    audit logs are then pushed in the Store, and afterwards sent to Kafka
 
--   skewer uses the C Journald API to fetch messages from Journald.
+-   skewer uses the C Journald API to fetch messages from Journald. Journald
+    messages are push to the Store, and afterwards sent to Kafka.
 
 
 ## Building
@@ -104,6 +106,16 @@ Flags are documented in the command line help.
 
     You can provide a `--test` command line flag to print the collected
     messages instead of sending them to Kafka.
+
+    Some capabilities are required to talk to the kernel for audits logs. The
+    supplementary unix group 'adm' is required to talk to Journald.
+
+    To make it simple it is possible to launch skewer as root. It will first drop the
+    unneeded privileges, switch to a normal user, and then start operations 
+    (see `sys/linux_privileges.go` for details about the privileges dropping).
+
+    `sudo skewer serve --uid nonprivuser --gid nonprivgroup`
+
 
 -   `skewer make-secret`
 
