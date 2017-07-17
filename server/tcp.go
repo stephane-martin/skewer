@@ -64,8 +64,9 @@ func (s *TcpServer) Start() error {
 	if nb > 0 {
 		s.status = TcpStarted
 		s.Listen()
+		s.logger.Info("Listening on TCP", "nb_services", nb)
 	} else {
-		s.logger.Info("TCP Server not started: no listening port")
+		s.logger.Debug("TCP Server not started: no listening port")
 		close(s.ClosedChan)
 	}
 	return nil
@@ -84,7 +85,7 @@ func (s *TcpServer) Stop() {
 	s.status = TcpStopped
 	s.ClosedChan <- TcpStopped
 	close(s.ClosedChan)
-	s.logger.Info("TCP server has stopped")
+	s.logger.Debug("TCP server has stopped")
 }
 
 type TcpHandler struct {

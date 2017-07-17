@@ -143,7 +143,7 @@ func (s *StreamServer) initTCPListeners() int {
 			}
 			l, err := net.ListenUnix("unix", unixAddr)
 			if err == nil {
-				s.logger.Info("Listener", "protocol", s.protocol, "path", syslogConf.UnixSocketPath, "format", syslogConf.Format)
+				s.logger.Debug("Listener", "protocol", s.protocol, "path", syslogConf.UnixSocketPath, "format", syslogConf.Format)
 				nb++
 				lc := UnixListenerConf{
 					Listener: l,
@@ -163,7 +163,7 @@ func (s *StreamServer) initTCPListeners() int {
 			}
 			l, err := net.ListenTCP("tcp", tcpAddr)
 			if err == nil {
-				s.logger.Info("Listener", "protocol", s.protocol, "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
+				s.logger.Debug("Listener", "protocol", s.protocol, "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
 				nb++
 				lc := TCPListenerConf{
 					Listener: l,
@@ -253,13 +253,13 @@ func (s *StreamServer) AcceptTCP(lc *TCPListenerConf) {
 	for {
 		conn, accept_err := lc.Listener.AcceptTCP()
 		if accept_err != nil {
-			s.logger.Info("AcceptTCP() error", "error", accept_err)
 			switch accept_err.(type) {
 			case *net.OpError:
-				return
+				s.logger.Info("AcceptTCP() OpError", "error", accept_err)
 			default:
-				// continue
+				s.logger.Warn("AcceptTCP() error", "error", accept_err)
 			}
+			return
 		} else if conn != nil {
 			if lc.Conf.KeepAlive {
 				err := conn.SetKeepAlive(true)

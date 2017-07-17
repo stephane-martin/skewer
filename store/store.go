@@ -685,7 +685,7 @@ func (s *MessageStore) closeBadgers() {
 	if err != nil {
 		s.logger.Warn("Error closing 'Failed' store", "error", err)
 	}
-	s.logger.Info("Badger databases are closed")
+	s.logger.Debug("Badger databases are closed")
 }
 
 func (s *MessageStore) pruneOrphaned() {
@@ -731,7 +731,7 @@ func (s *MessageStore) resetStuckInSent() {
 	}
 	iter.Close()
 
-	s.logger.Info("Pushing back stuck messages from Sent to Ready", "nb_messages", len(uids))
+	s.logger.Debug("Pushing back stuck messages from Sent to Ready", "nb_messages", len(uids))
 	for _, uid := range uids {
 		s.sentDB.Delete([]byte(uid))
 		s.readyDB.Set([]byte(uid), []byte("true"))

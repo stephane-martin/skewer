@@ -88,11 +88,11 @@ type ParserConfig struct {
 }
 
 type StoreConfig struct {
-	Dirname string
+	Dirname string   `mapstructure:"-" toml:"-"`
 	Maxsize int64    `mapstructure:"max_size" toml:"max_size"`
 	FSync   bool     `mapstructure:"fsync" toml:"fsync"`
 	Secret  string   `mapstructure:"secret" toml:"-"`
-	SecretB [32]byte `toml:"-"`
+	SecretB [32]byte `mapstructure:"-" toml:"-"`
 }
 
 type KafkaVersion [4]int

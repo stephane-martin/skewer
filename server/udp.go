@@ -70,8 +70,9 @@ func (s *UdpServer) Start() (err error) {
 	nb := s.ListenPacket()
 	if nb > 0 {
 		s.status = UdpStarted
+		s.logger.Info("Listening on UDP", "nb_services", nb)
 	} else {
-		s.logger.Info("The UDP service has not been started: no listening port")
+		s.logger.Debug("The UDP service has not been started: no listening port")
 		close(s.ClosedChan)
 	}
 	return
@@ -92,7 +93,7 @@ func (s *UdpServer) Stop() {
 	s.status = UdpStopped
 	s.ClosedChan <- UdpStopped
 	close(s.ClosedChan)
-	s.logger.Info("Udp server has stopped")
+	s.logger.Debug("Udp server has stopped")
 }
 
 func (s *UdpServer) ListenPacket() int {
@@ -109,9 +110,14 @@ func (s *UdpServer) ListenPacket() int {
 				addr, _ := net.ResolveUnixAddr("unixgram", syslogConf.UnixSocketPath)
 				conn, err := net.ListenUnixgram("unixgram", addr)
 				if err != nil {
-					s.logger.Warn("Error listening on datagram unix socket", "path", syslogConf.UnixSocketPath, "error", err)
+					switch err.(type) {
+					case *net.OpError:
+						s.logger.Info("Listen unixgram OpError", "error", err)
+					default:
+						s.logger.Warn("Listen unixgram error", "error", err)
+					}
 				} else if conn != nil {
-					s.logger.Info("Listener", "protocol", s.protocol, "path", syslogConf.UnixSocketPath, "format", syslogConf.Format)
+					s.logger.Debug("Listener", "protocol", s.protocol, "path", syslogConf.UnixSocketPath, "format", syslogConf.Format)
 					nb++
 					s.unixSocketPaths = append(s.unixSocketPaths, syslogConf.UnixSocketPath)
 					s.wg.Add(1)
@@ -121,9 +127,15 @@ func (s *UdpServer) ListenPacket() int {
 				listenAddr, _ := syslogConf.GetListenAddr()
 				conn, err := net.ListenPacket("udp", listenAddr)
 				if err != nil {
-					s.logger.Warn("Error listening on UDP", "addr", listenAddr, "error", err)
+					switch err.(type) {
+					case *net.OpError:
+						s.logger.Info("Listen UDP OpError", "error", err)
+					default:
+						s.logger.Warn("Listen UDP error", "error", err)
+					}
+
 				} else if conn != nil {
-					s.logger.Info("Listener", "protocol", s.protocol, "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
+					s.logger.Debug("Listener", "protocol", s.protocol, "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
 					nb++
 					s.wg.Add(1)
 					go s.handleConnection(conn, syslogConf, confId)
@@ -204,7 +216,7 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 		packet := make([]byte, 65536)
 		size, remote, err := conn.ReadFrom(packet)
 		if err != nil {
-			logger.Info("Error reading UDP", "error", err)
+			logger.Debug("Error reading UDP", "error", err)
 			return
 		}
 		client := ""

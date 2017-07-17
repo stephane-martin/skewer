@@ -64,8 +64,10 @@ func (s *RelpServer) Start() error {
 
 	nb := s.initTCPListeners()
 	if nb == 0 {
-		s.logger.Info("RELP service not started: no listening port")
+		s.logger.Debug("RELP service not started: no listening port")
 		return nil
+	} else {
+		s.logger.Info("Listening on RELP", "nb_services", nb)
 	}
 	if !s.test {
 		var err error

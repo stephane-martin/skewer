@@ -5,7 +5,7 @@ var mlockSupported bool
 type NotUnixError struct{}
 
 func (e NotUnixError) Error() string {
-	return "Only available on Unix"
+	return "MlockAll not available"
 }
 
 func MlockAll() error {

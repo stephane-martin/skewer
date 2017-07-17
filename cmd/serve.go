@@ -161,6 +161,7 @@ func Serve() {
 		logger.Error("Error getting configuration. Sleep and retry.", "error", err)
 		time.Sleep(30 * time.Second)
 	}
+	logger.Info("Store location", "path", c.Store.Dirname)
 
 	// create a consul registry
 	var registry *consul.Registry
@@ -244,7 +245,7 @@ func Serve() {
 			}
 		}
 	} else {
-		logger.Info("Linux audit logs are disabled (not requested)")
+		logger.Info("Linux audit logs are disabled (not requested or not Linux)")
 	}
 
 	// retrieve messages from journald
@@ -267,7 +268,7 @@ func Serve() {
 			journaldServer = nil
 		}
 	} else {
-		logger.Info("Journald support is disabled")
+		logger.Info("Journald support is disabled (not requested or not Linux)")
 	}
 
 	// prepare the RELP service
@@ -389,9 +390,9 @@ func Serve() {
 			tcpServer.Stop()
 			udpServer.Stop()
 			<-tcpServer.ClosedChan
-			logger.Info("The TCP service has been stopped")
+			logger.Debug("The TCP service has been stopped")
 			<-udpServer.ClosedChan
-			logger.Info("The UDP service has been stopped")
+			logger.Debug("The UDP service has been stopped")
 			return
 
 		case _, more := <-updated:
@@ -454,10 +455,10 @@ func Serve() {
 		case state := <-relpServer.StatusChan:
 			switch state {
 			case server.FinalStopped:
-				logger.Info("The RELP service has been definitely halted")
+				logger.Debug("The RELP service has been definitely halted")
 
 			case server.Stopped:
-				logger.Info("The RELP service has been stopped")
+				logger.Debug("The RELP service is stopped")
 				relpServer.Conf = *c
 				err := relpServer.Start()
 				if err != nil {
@@ -466,14 +467,14 @@ func Serve() {
 				}
 
 			case server.Waiting:
-				logger.Info("Waiting")
+				logger.Debug("RELP waiting")
 				go func() {
 					time.Sleep(time.Duration(30) * time.Second)
 					relpServer.EndWait()
 				}()
 
 			case server.Started:
-				logger.Info("The RELP service has been started")
+				logger.Debug("The RELP service has been started")
 				relpServer.Register(registry)
 			}
 
