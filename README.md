@@ -84,6 +84,9 @@ to post bugs and ask questions.
     messages.
 
 
+![Architecture](archi.png)
+
+
 ## Building
 
 
