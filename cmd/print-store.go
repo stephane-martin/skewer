@@ -35,7 +35,7 @@ var printStoreCmd = &cobra.Command{
 			Insecure:   consulInsecure,
 		}
 
-		c, _, err = conf.InitLoad(ctx, configDirName, params, consulPrefix, logger)
+		c, _, err = conf.InitLoad(ctx, configDirName, storeDirname, consulPrefix, params, logger)
 		if err != nil {
 			fmt.Println("bleh")
 			return

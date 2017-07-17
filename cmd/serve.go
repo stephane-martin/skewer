@@ -154,7 +154,7 @@ func Serve() {
 	var err error
 	// read configuration
 	for {
-		c, updated, err = conf.InitLoad(watchCtx, configDirName, params, consulPrefix, logger)
+		c, updated, err = conf.InitLoad(watchCtx, configDirName, storeDirname, consulPrefix, params, logger)
 		if err == nil {
 			break
 		}

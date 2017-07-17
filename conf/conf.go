@@ -88,7 +88,7 @@ type ParserConfig struct {
 }
 
 type StoreConfig struct {
-	Dirname string   `mapstructure:"dirname" toml:"dirname"`
+	Dirname string
 	Maxsize int64    `mapstructure:"max_size" toml:"max_size"`
 	FSync   bool     `mapstructure:"fsync" toml:"fsync"`
 	Secret  string   `mapstructure:"secret" toml:"-"`
@@ -387,7 +387,7 @@ func (c *KafkaConfig) GetClient() (sarama.Client, error) {
 	return nil, KafkaError{Err: err}
 }
 
-func InitLoad(ctx context.Context, dirname string, params consul.ConnParams, prefix string, logger log15.Logger) (c *GConfig, updated chan bool, err error) {
+func InitLoad(ctx context.Context, confDir, storeDir, prefix string, params consul.ConnParams, logger log15.Logger) (c *GConfig, updated chan bool, err error) {
 	var firstResults map[string]string
 	var consulResults chan map[string]string
 
@@ -395,11 +395,11 @@ func InitLoad(ctx context.Context, dirname string, params consul.ConnParams, pre
 	SetDefaults(v)
 	v.SetConfigName("skewer")
 
-	dirname = strings.TrimSpace(dirname)
-	if len(dirname) > 0 {
-		v.AddConfigPath(dirname)
+	confDir = strings.TrimSpace(confDir)
+	if len(confDir) > 0 {
+		v.AddConfigPath(confDir)
 	}
-	if dirname != "/nonexistent" {
+	if confDir != "/nonexistent" {
 		v.AddConfigPath("/etc")
 	}
 
@@ -421,7 +421,8 @@ func InitLoad(ctx context.Context, dirname string, params consul.ConnParams, pre
 
 	c = &GConfig{BaseConfig: *baseConf}
 
-	c.Dirname = dirname
+	c.Dirname = confDir
+	c.Store.Dirname = storeDir
 	c.ConsulParams = params
 	c.ConsulPrefix = prefix
 	c.Logger = logger
@@ -652,11 +653,11 @@ func (c *GConfig) ParseParamsFromConsul(params map[string]string) error {
 }
 
 func (c *GConfig) Reload(ctx context.Context) (newConf *GConfig, updated chan bool, err error) {
-	newConf, updated, err = InitLoad(ctx, c.Dirname, c.ConsulParams, c.ConsulPrefix, c.Logger)
+	newConf, updated, err = InitLoad(ctx, c.Dirname, c.Store.Dirname, c.ConsulPrefix, c.ConsulParams, c.Logger)
 	if err != nil {
 		return nil, nil, err
 	}
-	newConf.Store = c.Store // we don't change the location of the badger databases when doing a reload
+	newConf.Store = c.Store // we don't change the parameters of the badger databases when doing a reload
 	return newConf, updated, nil
 }
 

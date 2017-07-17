@@ -31,7 +31,7 @@ account, if you provide the necessary Consul flags on the command line.`,
 			Insecure:   consulInsecure,
 		}
 
-		c, _, err := conf.InitLoad(context.Background(), configDirName, params, consulPrefix, log15.New())
+		c, _, err := conf.InitLoad(context.Background(), configDirName, storeDirname, consulPrefix, params, log15.New())
 		if err != nil {
 			fmt.Printf("Error happened: %s\n", err)
 			os.Exit(-1)
