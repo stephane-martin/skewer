@@ -73,16 +73,16 @@ var noMlockFlag bool
 
 func init() {
 	RootCmd.AddCommand(serveCmd)
-	serveCmd.Flags().BoolVar(&testFlag, "test", false, "Print to stdout instead of sending to Kafka")
-	serveCmd.Flags().BoolVar(&syslogFlag, "syslog", false, "Send logs to the local syslog")
+	serveCmd.Flags().BoolVar(&testFlag, "test", false, "Print messages to stdout instead of sending to Kafka")
+	serveCmd.Flags().BoolVar(&syslogFlag, "syslog", false, "Send logs to the local syslog (are you sure you wan't to do that ?)")
 	serveCmd.Flags().StringVar(&loglevelFlag, "loglevel", "info", "Set logging level")
 	serveCmd.Flags().StringVar(&logfilenameFlag, "logfilename", "", "Write logs to a file instead of stderr")
-	serveCmd.Flags().BoolVar(&logjsonFlag, "json", false, "Write logs in JSON format")
+	serveCmd.Flags().BoolVar(&logjsonFlag, "logjson", false, "Write logs in JSON format")
 	serveCmd.Flags().StringVar(&pidFilenameFlag, "pidfile", "", "If given, write PID to file")
 	serveCmd.Flags().BoolVar(&registerFlag, "register", false, "Register services in consul")
 	serveCmd.Flags().StringVar(&serviceName, "servicename", "skewer", "Service name to register in consul")
-	serveCmd.Flags().StringVar(&uidFlag, "uid", "", "Switch to this user ID")
-	serveCmd.Flags().StringVar(&gidFlag, "gid", "", "Switch to this group ID")
+	serveCmd.Flags().StringVar(&uidFlag, "uid", "", "Switch to this user ID (when launched as root)")
+	serveCmd.Flags().StringVar(&gidFlag, "gid", "", "Switch to this group ID (when launched as root)")
 	serveCmd.Flags().BoolVar(&dumpableFlag, "dumpable", false, "if set, the skewer process will be traceable/dumpable")
 	serveCmd.Flags().BoolVar(&noMlockFlag, "no-mlock", false, "if set, skewer will not mlock() its memory")
 }

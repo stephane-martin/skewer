@@ -39,7 +39,7 @@ func Execute() {
 }
 
 func init() {
-	RootCmd.PersistentFlags().StringVar(&configDirName, "config", "/etc/skewer", "configuration directory")
+	RootCmd.PersistentFlags().StringVar(&configDirName, "config", "/etc", "configuration directory")
 	RootCmd.PersistentFlags().StringVar(&storeDirname, "store", "/var/lib/skewer", "store directory")
 	RootCmd.PersistentFlags().StringVar(&consulAddr, "consul-addr", "", "Consul address (ex: http://127.0.0.1:8500)")
 	RootCmd.PersistentFlags().StringVar(&consulDC, "consul-dc", "", "Consul datacenter")

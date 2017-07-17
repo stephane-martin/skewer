@@ -1,0 +1,158 @@
+# syslog sections define the TCP/UDP/RELP services we want to listen on
+[[syslog]]
+  # bind to this IP address, or "0.0.0.0" for all interfaces.
+  bind_addr = "0.0.0.0"
+
+  # provide either unix_socket_path or port
+  unix_socket_path = ""
+  port = 1414
+ 
+  # the format of syslog input messages (rfc5424, rfc3164, json, or "auto")
+  format = "auto"
+
+  # this golang text/template is used to calculate the destination kafka topic
+  topic_tmpl = "syslog-{{.Appname}}"
+  # fields you can use:
+  # Priority, Facility, Severity (integers)
+  # TimeReported, TimeGenerated (time.Time)
+  # Hostname, Appname, Procid, Msgid, Message (strings)
+
+  # Alternatively you can provide a Javascript function to calculate the topic.
+  # It must be named "Topic". The same fields are available as properties of
+  # the msg argument. The times are provided as Javascript times.
+  topic_function = """function Topic(msg) { return "topic-" + msg.Appname; }`"""
+
+  # Same principles for the Kafka partition key
+  partition_key_tmpl = "mypk-{{.Hostname}}"
+  partition_key_func = ""
+
+  # Messages can be modified and filtered on the fly with a Javascript function.
+  filter_func = """function FilterMessages(msg) { msg.Message="bla"; return FILTER.DROPPED; }"""
+  # It must be name "FilterMessages".
+  # You can modify the current message fields.
+  # The function must return:
+  # FILTER.PASS (send the msg to Kafka),
+  # or FILTER.DROPPED (silently drop the message),
+  # or FILTER.REJECTED (something terribly wrong happened: do not send the message to Kafka, retry later).
+
+  # tcp, udp, or relp
+  protocol = "relp"
+  # if true, don't parse the structured data part of RFC5424 messages
+  dont_parse_structured_data = false
+  # Enable TCP keepalives
+  keepalive = false
+  keepalive_period = "30s"
+
+  # client timeout: disconnect the client if it does not talk. 0 means no timeout.
+  timeout = "60s"
+
+  # should we listen on TLS
+  tls_enabled = false
+  # certificate authority path (file
+  ca_file = ""
+  # certificate authority path (directory)
+  ca_path = ""
+  # private key file
+  key_file = ""
+  # server certificate file
+  cert_file = ""
+  # noclientcert, requestclientcert, requireanyclientcert, verifyclientcertifgiven, requireandverifyclientcert
+  client_auth_type = ""
+
+# here we define another syslog service. It listens on TCP but uses a custom
+# parser to understand the input format.
+[[syslog]]
+  port = 2514
+  bind_addr = "127.0.0.1"
+  format = "Zog"
+  protocol = "tcp"
+
+[[parser]]
+  name = "Zog"
+  # the func received the RAW message as a string argument.
+  # NewEmptySyslogMessage is a provided function that creates an empty
+  # syslog message.
+  func = """function Zog(raw) {
+    var m = NewEmptySyslogMessage();
+	m.Appname = "zogzog";
+	m.Message = raw;
+	return m;
+  }"""
+
+# listens on a unix socket
+[[syslog]]
+  unix_socket_path = "/Users/stef/truc.sock"
+  format = "auto"
+  protocol = "udp"
+
+# kafka configuration
+# most of paramaters come from the Sarama library.
+[kafka]
+  brokers = ["kafka1", "kafka2", "kafka3"]
+  client_id = "skewer"
+  version = "0.10.1.0"
+  channel_buffer_size = 256
+  max_open_requests = 5
+  dial_timeout = 30000000000
+  read_timeout = 30000000000
+  write_timeout = 30000000000
+  keepalive = 0
+  metadata_retry_max = 3
+  metadata_retry_backoff = 250000000
+  metadata_refresh_frequency = 600000000000
+  message_bytes_max = 1000000
+  required_acks = -1
+  producer_timeout = 10000000000
+  compression = "snappy"
+  flush_bytes = 0
+  flush_messages = 0
+  flush_frequency = 0
+  flush_messages_max = 0
+  retry_send_max = 3
+  retry_send_backoff = 100000000
+  tls_enabled = false
+  ca_file = ""
+  ca_path = ""
+  key_file = ""
+  cert_file = ""
+  insecure = false
+
+[store]
+  # store max size in bytes.
+  max_size = 67108864
+  # should writes to the store use fsync
+  fsync = false
+  # secret to encrypt the store content.
+  # GENERATE ANOTHER ONE WITH skewer make-secret AND CHANGE IT
+  # empty secret means no encryption
+  secret = "iCx2Ai0pUyxIU_be2H1oCcf8n2mtOKnpjbJ4ylMaz8o="
+
+
+# linux only. the user skewer runs on needs to be a member of "adm" unix group.
+[journald]
+  enabled = false
+  topic_tmpl = "journald-{{.Appname}}"
+  topic_function = ""
+  partition_key_tmpl = "pk-{{.Hostname}}"
+  partition_key_func = ""
+  filter_func = ""
+
+# linux only. the user skewer runs on needs the CAP_AUDIT_CONTROL and CAP_AUDIT_READ capabilities.
+# the code is similar to what the "go-audit" utility does.
+[audit]
+  enabled = false
+  socket_buffer = 0
+  events_min = 1300
+  events_max = 1399
+  message_tracking = true
+  log_out_of_order = false
+  max_out_of_order = 500
+  appname = "audit"
+  severity = 6
+  facility = 0
+  topic_tmpl = "linux-audit-topic"
+  topic_function = ""
+  partition_key_tmpl = "pk-{{.Hostname}}"
+  partition_key_func = ""
+  filter_func = ""
+
