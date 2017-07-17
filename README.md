@@ -14,12 +14,41 @@ to post bugs and ask questions.
 
 
 -   Listens on TCP, UDP or RELP
--   Can fetch log messages from Journald on Linux
--   Can fetch audit logs from the kernel on Linux
+
+-   Can fetch log messages from Journald (on Linux)
+
+-   Can fetch audit logs from the kernel (on Linux)
+
 -   Configuration can be provided as a configuration file, or optionally fetched from Consul
+
 -   Can register the TCP and RELP listeners as services in Consul
+
 -   Custom message parsers and filters can be defined through Javascript functions
+
+-   The client connections to Consul and Kafka can be secured with TLS
+
+-   The TCP and RELP services can be secured in TLS
+
 -   Works on Linux and MacOS (not tested on *BSD), does not work on Windows
+
+
+## Use cases
+
+
+-   Locally, between rsyslog (or syslog-ng) and Kafka. On Linux, on each server rsyslog
+    is usually the system syslog daemon. You can run skewer on each server,
+    alongside rsyslog, to push messages to Kafka. To ensure that no message gets
+    lost, use RELP between rsyslog and skewer.
+
+-   Centrally, between rsyslog (or syslog-ng) and Kafka. If the log trafic is not so
+    big, you can run a single skewer instance centrally. Each local rsyslog
+    sends the messages to the central skewer, using RELP. The central skewer forwards
+    messages to the Kafka cluster. (As rsyslog has a failover capability for log
+    forwarding, you could also install a pair of skewers on different machines.)
+
+-   Locally, as the unique system syslog server. Well. Don't do it right now.
+    Skewer is not enough tested for that, and does not *yet* have a local export
+    function to write logs to /var/log. But that's definitely on the roadmap.
 
 
 ## How it works
@@ -30,16 +59,16 @@ to post bugs and ask questions.
     When receiving a message on TCP and UDP, there is no way to notify the
     emitter that the message has been correctly received. To avoid message
     loss, such messages are first stored in an embedded database (the Store),
-    that's persisted on disk. The messages are removed from the Store only
+    persisted on disk. The messages are removed from the Store only
     after Kafka has acknowledged them. When some message fails to be transfered
-    to Kafka, skewer keeps it and retries later.
+    to Kafka, `skewer` keeps it and retries later.
 
 -   skewer implements the RELP (aka reliable syslog) protocol that was defined
     by rsyslog. 
 
-    With RELP, we can inform the emitter when a message has been correctly
+    With RELP, we can inform the emitter (`Rsyslog`) when a message has been correctly
     received by Kafka. The emitter is responsible to keep the message as long
-    as we don't notify him. So in this case, there is no Store mechanism
+    as we don't notify him. So in this case, there is no 'Store' mechanism
     involved.
 
 -   skewer uses a Netlink connection to fetch audit logs from the Linux Kernel.
@@ -47,6 +76,12 @@ to post bugs and ask questions.
 
 -   skewer uses the C Journald API to fetch messages from Journald. Journald
     messages are push to the Store, and afterwards sent to Kafka.
+
+-   Each RELP service owns a Kafka client (`sarama` go library) and independantly
+    forwards its messages to Kafka.
+
+-   The Store owns a single Kafka client to forward TCP/UDP/Journald/Audit
+    messages.
 
 
 ## Building
