@@ -2,65 +2,220 @@ package utils
 
 import "github.com/dgraph-io/badger"
 
-type EncryptedDB struct {
-	db     *badger.KV
-	secret [32]byte
+type PartitionKeyIterator interface {
+	Close()
+	Next()
+	Rewind()
+	Valid() bool
+	Key() string
 }
 
-type NonEncryptedDB struct {
-	db *badger.KV
+type PartitionKeyValueIterator interface {
+	Close()
+	Next()
+	Rewind()
+	Valid() bool
+	Key() string
+	Value() []byte
 }
 
-type DB interface {
-	Close() error
+type Partition interface {
 	ListKeys() []string
 	Delete(key string) error
 	DeleteKeys(keys []string) error
 	Set(key string, value []byte) error
 	Get(key string) ([]byte, error)
+	Exists(key string) (bool, error)
+	KeyIterator(prefetchSize int) PartitionKeyIterator
+	KeyValueIterator(prefetchSize int) PartitionKeyValueIterator
 }
 
-func NewEncryptedDB(opts *badger.Options, secret [32]byte) (DB, error) {
-	kv, err := badger.NewKV(opts)
+type partitionImpl struct {
+	parent *badger.KV
+	prefix string
+}
+
+func (p *partitionImpl) Get(key string) ([]byte, error) {
+	item := &badger.KVItem{}
+	err := p.parent.Get([]byte(p.prefix+key), item)
 	if err != nil {
 		return nil, err
 	}
-	return &EncryptedDB{db: kv, secret: secret}, nil
-}
-
-func (encDB *EncryptedDB) Close() error {
-	return encDB.db.Close()
-}
-
-func (encDB *EncryptedDB) ListKeys() []string {
-	iter_opts := badger.IteratorOptions{
-		PrefetchSize: 1000,
-		FetchValues:  false,
-		Reverse:      false,
+	if item == nil {
+		return nil, nil
 	}
-
-	keys := []string{}
-	iter := encDB.db.NewIterator(iter_opts)
-	for iter.Rewind(); iter.Valid(); iter.Next() {
-		keys = append(keys, string(iter.Item().Key()))
-	}
-	iter.Close()
-	return keys
+	return item.Value(), nil
 }
 
-func (encDB *EncryptedDB) Delete(key string) error {
-	return encDB.db.Delete([]byte(key))
+func (p *partitionImpl) Set(key string, value []byte) error {
+	return p.parent.Set([]byte(p.prefix+key), value)
 }
 
-func (encDB *EncryptedDB) DeleteKeys(keys []string) error {
+func (p *partitionImpl) Exists(key string) (bool, error) {
+	return p.parent.Exists([]byte(p.prefix + key))
+}
+
+func (p *partitionImpl) Delete(key string) error {
+	return p.parent.Delete([]byte(p.prefix + key))
+}
+
+func (p *partitionImpl) DeleteKeys(keys []string) error {
 	if len(keys) == 0 {
 		return nil
 	}
 	entries := make([]*badger.Entry, 0, len(keys))
 	for _, key := range keys {
-		entries = badger.EntriesDelete(entries, []byte(key))
+		entries = badger.EntriesDelete(entries, []byte(p.prefix+key))
 	}
-	return encDB.db.BatchSet(entries)
+	return p.parent.BatchSet(entries)
+}
+
+func (p *partitionImpl) ListKeys() []string {
+	l := []string{}
+	iter := p.KeyIterator(1000)
+	for iter.Rewind(); iter.Valid(); iter.Next() {
+		l = append(l, iter.Key())
+	}
+	iter.Close()
+	return l
+}
+
+func (p *partitionImpl) KeyIterator(prefetchSize int) PartitionKeyIterator {
+	opts := badger.IteratorOptions{
+		FetchValues:  false,
+		PrefetchSize: prefetchSize,
+		Reverse:      false,
+	}
+	iter := p.parent.NewIterator(opts)
+	return &partitionIterImpl{partition: p, iterator: iter}
+}
+
+func (p *partitionImpl) KeyValueIterator(prefetchSize int) PartitionKeyValueIterator {
+	opts := badger.IteratorOptions{
+		FetchValues:  true,
+		PrefetchSize: prefetchSize,
+		Reverse:      false,
+	}
+	iter := p.parent.NewIterator(opts)
+	return &partitionIterImpl{partition: p, iterator: iter}
+}
+
+type partitionIterImpl struct {
+	partition *partitionImpl
+	iterator  *badger.Iterator
+}
+
+func (i *partitionIterImpl) Close() {
+	i.iterator.Close()
+}
+
+func (i *partitionIterImpl) Rewind() {
+	i.iterator.Seek([]byte(i.partition.prefix))
+}
+
+func (i *partitionIterImpl) Next() {
+	i.iterator.Next()
+}
+
+func (i *partitionIterImpl) Valid() bool {
+	return i.iterator.ValidForPrefix([]byte(i.partition.prefix))
+}
+
+func (i *partitionIterImpl) Key() string {
+	item := i.iterator.Item()
+	if item == nil {
+		return ""
+	} else {
+		key := item.Key()
+		if key == nil {
+			return ""
+		} else {
+			return string(key)[len(i.partition.prefix):]
+		}
+	}
+}
+
+func (i *partitionIterImpl) Value() []byte {
+	item := i.iterator.Item()
+	if item == nil {
+		return nil
+	} else {
+		return item.Value()
+	}
+}
+
+func NewPartition(parent *badger.KV, prefix string) Partition {
+	return &partitionImpl{parent: parent, prefix: prefix}
+}
+
+type EncryptedDB struct {
+	db     Partition
+	secret [32]byte
+}
+
+type encryptedIterator struct {
+	iter PartitionKeyValueIterator
+	db   *EncryptedDB
+}
+
+func (i *encryptedIterator) Close() {
+	i.iter.Close()
+}
+
+func (i *encryptedIterator) Key() string {
+	return i.iter.Key()
+}
+
+func (i *encryptedIterator) Next() {
+	i.iter.Next()
+}
+
+func (i *encryptedIterator) Rewind() {
+	i.iter.Rewind()
+}
+
+func (i *encryptedIterator) Valid() bool {
+	return i.iter.Valid()
+}
+
+func (i *encryptedIterator) Value() []byte {
+	encVal := i.iter.Value()
+	if encVal == nil {
+		return nil
+	}
+	decValue, err := Decrypt(encVal, i.db.secret)
+	if err != nil {
+		return nil
+	}
+	return decValue
+}
+
+func NewEncryptedPartition(db Partition, secret [32]byte) Partition {
+	return &EncryptedDB{db: db, secret: secret}
+}
+
+func (encDB *EncryptedDB) KeyIterator(prefetchSize int) PartitionKeyIterator {
+	return encDB.db.KeyIterator(prefetchSize)
+}
+
+func (encDB *EncryptedDB) KeyValueIterator(prefetchSize int) PartitionKeyValueIterator {
+	return &encryptedIterator{iter: encDB.db.KeyValueIterator(prefetchSize), db: encDB}
+}
+
+func (encDB *EncryptedDB) Exists(key string) (bool, error) {
+	return encDB.db.Exists(key)
+}
+
+func (encDB *EncryptedDB) ListKeys() []string {
+	return encDB.db.ListKeys()
+}
+
+func (encDB *EncryptedDB) Delete(key string) error {
+	return encDB.db.Delete(key)
+}
+
+func (encDB *EncryptedDB) DeleteKeys(keys []string) error {
+	return encDB.db.DeleteKeys(keys)
 }
 
 func (encDB *EncryptedDB) Set(key string, value []byte) error {
@@ -68,74 +223,17 @@ func (encDB *EncryptedDB) Set(key string, value []byte) error {
 	if err != nil {
 		return err
 	}
-	return encDB.db.Set([]byte(key), encValue)
+	return encDB.db.Set(key, encValue)
 }
 
 func (encDB *EncryptedDB) Get(key string) ([]byte, error) {
-	enckv := &badger.KVItem{}
-	err := encDB.db.Get([]byte(key), enckv)
+	encVal, err := encDB.db.Get(key)
 	if err != nil {
 		return nil, err
 	}
-	decValue, err := Decrypt(enckv.Value(), encDB.secret)
+	decValue, err := Decrypt(encVal, encDB.secret)
 	if err != nil {
 		return nil, err
 	}
 	return decValue, nil
-}
-
-func NewNonEncryptedDB(opts *badger.Options) (DB, error) {
-	kv, err := badger.NewKV(opts)
-	if err != nil {
-		return nil, err
-	}
-	return &NonEncryptedDB{db: kv}, nil
-}
-
-func (nDB *NonEncryptedDB) Close() error {
-	return nDB.db.Close()
-}
-
-func (nDB *NonEncryptedDB) ListKeys() []string {
-	iter_opts := badger.IteratorOptions{
-		PrefetchSize: 1000,
-		FetchValues:  false,
-		Reverse:      false,
-	}
-
-	keys := []string{}
-	iter := nDB.db.NewIterator(iter_opts)
-	for iter.Rewind(); iter.Valid(); iter.Next() {
-		keys = append(keys, string(iter.Item().Key()))
-	}
-	iter.Close()
-	return keys
-}
-
-func (nDB *NonEncryptedDB) Delete(key string) error {
-	return nDB.db.Delete([]byte(key))
-}
-
-func (nDB *NonEncryptedDB) DeleteKeys(keys []string) error {
-	if len(keys) == 0 {
-		return nil
-	}
-	entries := make([]*badger.Entry, 0, len(keys))
-	for _, key := range keys {
-		entries = badger.EntriesDelete(entries, []byte(key))
-	}
-	return nDB.db.BatchSet(entries)
-}
-
-func (nDB *NonEncryptedDB) Set(key string, value []byte) error {
-	return nDB.db.Set([]byte(key), value)
-}
-
-func (nDB *NonEncryptedDB) Get(key string) ([]byte, error) {
-	nkv := &badger.KVItem{}
-	err := nDB.db.Get([]byte(key), nkv)
-	if err != nil {
-		return nil, err
-	}
-	return nkv.Value(), nil
 }

@@ -197,7 +197,7 @@ func (h TcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 			s.metrics.IncomingMsgsCounter.WithLabelValues(s.protocol, client, local_port_s, path).Inc()
 			raw_messages_chan <- &raw
 		} else {
-			logger.Info("Scanning the TCP stream has ended", "error", scanner.Err())
+			logger.Info("End of TCP client connection", "error", scanner.Err())
 			return
 		}
 	}

@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -25,12 +24,13 @@ import (
 )
 
 type MessageStore struct {
-	messagesDB           utils.DB
-	readyDB              *badger.KV
-	sentDB               *badger.KV
-	failedDB             *badger.KV
-	permerrorsDB         *badger.KV
-	syslogConfigsDB      *badger.KV
+	badger               *badger.KV
+	messagesDB           utils.Partition
+	readyDB              utils.Partition
+	sentDB               utils.Partition
+	failedDB             utils.Partition
+	permerrorsDB         utils.Partition
+	syslogConfigsDB      utils.Partition
 	ready_mu             *sync.Mutex
 	failed_mu            *sync.Mutex
 	messages_mu          *sync.Mutex
@@ -416,54 +416,13 @@ ForOutputs:
 
 func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store, error) {
 
-	opts_messages := badger.DefaultOptions
-	opts_ready := badger.DefaultOptions
-	opts_sent := badger.DefaultOptions
-	opts_failed := badger.DefaultOptions
-	opts_permerrors := badger.DefaultOptions
-	opts_configs := badger.DefaultOptions
-	opts_messages.Dir = path.Join(cfg.Dirname, "messages")
-	opts_messages.ValueDir = path.Join(cfg.Dirname, "messages")
-	opts_sent.Dir = path.Join(cfg.Dirname, "sent")
-	opts_sent.ValueDir = path.Join(cfg.Dirname, "sent")
-	opts_ready.Dir = path.Join(cfg.Dirname, "ready")
-	opts_ready.ValueDir = path.Join(cfg.Dirname, "ready")
-	opts_failed.Dir = path.Join(cfg.Dirname, "failed")
-	opts_failed.ValueDir = path.Join(cfg.Dirname, "failed")
-	opts_permerrors.Dir = path.Join(cfg.Dirname, "permerrors")
-	opts_permerrors.ValueDir = path.Join(cfg.Dirname, "permerrors")
-	opts_configs.Dir = path.Join(cfg.Dirname, "configs")
-	opts_configs.ValueDir = path.Join(cfg.Dirname, "configs")
+	badgerOpts := badger.DefaultOptions
+	badgerOpts.Dir = cfg.Dirname
+	badgerOpts.ValueDir = cfg.Dirname
+	badgerOpts.MaxTableSize = cfg.Maxsize
+	badgerOpts.SyncWrites = cfg.FSync
 
-	opts_messages.MaxTableSize = cfg.Maxsize
-	opts_messages.SyncWrites = cfg.FSync
-	opts_ready.SyncWrites = cfg.FSync
-	opts_sent.SyncWrites = cfg.FSync
-	opts_failed.SyncWrites = cfg.FSync
-	opts_permerrors.SyncWrites = cfg.FSync
-	opts_configs.SyncWrites = true
-
-	err := os.MkdirAll(opts_messages.Dir, 0700)
-	if err != nil {
-		return nil, err
-	}
-	err = os.MkdirAll(opts_sent.Dir, 0700)
-	if err != nil {
-		return nil, err
-	}
-	err = os.MkdirAll(opts_ready.Dir, 0700)
-	if err != nil {
-		return nil, err
-	}
-	err = os.MkdirAll(opts_failed.Dir, 0700)
-	if err != nil {
-		return nil, err
-	}
-	err = os.MkdirAll(opts_permerrors.Dir, 0700)
-	if err != nil {
-		return nil, err
-	}
-	err = os.MkdirAll(opts_configs.Dir, 0700)
+	err := os.MkdirAll(cfg.Dirname, 0700)
 	if err != nil {
 		return nil, err
 	}
@@ -476,36 +435,23 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 	store.wg = &sync.WaitGroup{}
 	store.closedChan = make(chan struct{})
 
-	if len(cfg.Secret) > 0 {
-		store.logger.Info("The Store is encrypted")
-		store.messagesDB, err = utils.NewEncryptedDB(&opts_messages, cfg.SecretB)
-	} else {
-		store.messagesDB, err = utils.NewNonEncryptedDB(&opts_messages)
-	}
+	kv, err := badger.NewKV(&badgerOpts)
 	if err != nil {
 		return nil, err
+	}
+	store.badger = kv
+
+	store.messagesDB = utils.NewPartition(kv, "messages")
+	if len(cfg.Secret) > 0 {
+		store.messagesDB = utils.NewEncryptedPartition(store.messagesDB, cfg.SecretB)
+		store.logger.Info("The Store is encrypted")
 	}
 
-	store.readyDB, err = badger.NewKV(&opts_ready)
-	if err != nil {
-		return nil, err
-	}
-	store.sentDB, err = badger.NewKV(&opts_sent)
-	if err != nil {
-		return nil, err
-	}
-	store.failedDB, err = badger.NewKV(&opts_failed)
-	if err != nil {
-		return nil, err
-	}
-	store.permerrorsDB, err = badger.NewKV(&opts_permerrors)
-	if err != nil {
-		return nil, err
-	}
-	store.syslogConfigsDB, err = badger.NewKV(&opts_configs)
-	if err != nil {
-		return nil, err
-	}
+	store.readyDB = utils.NewPartition(kv, "ready")
+	store.sentDB = utils.NewPartition(kv, "sent")
+	store.failedDB = utils.NewPartition(kv, "failed")
+	store.permerrorsDB = utils.NewPartition(kv, "permerrors")
+	store.syslogConfigsDB = utils.NewPartition(kv, "configs")
 
 	// only once, push back messages from previous run that may have been stuck in the sent queue
 	store.resetStuckInSent()
@@ -636,28 +582,25 @@ func (s *MessageStore) WaitFinished() {
 func (s *MessageStore) StoreSyslogConfig(config *conf.SyslogConfig) (configID string, err error) {
 	data := config.Export()
 	h := sha512.Sum512(data)
-	hs := h[:]
-	exists, err := s.syslogConfigsDB.Exists(hs)
+	confID := base64.StdEncoding.EncodeToString(h[:])
+	exists, err := s.syslogConfigsDB.Exists(confID)
 	if err != nil {
 		return "", err
 	}
 	if !exists {
-		err := s.syslogConfigsDB.Set(hs, data)
+		err := s.syslogConfigsDB.Set(confID, data)
 		if err != nil {
 			return "", err
 		}
 	}
-	return base64.StdEncoding.EncodeToString(hs), nil
+	return confID, nil
 }
 
-func (s *MessageStore) GetSyslogConfig(configID string) (*conf.SyslogConfig, error) {
-	ident, err := base64.StdEncoding.DecodeString(configID)
+func (s *MessageStore) GetSyslogConfig(confID string) (*conf.SyslogConfig, error) {
+	data, err := s.syslogConfigsDB.Get(confID)
 	if err != nil {
-		return nil, fmt.Errorf("The id can't be decoded")
+		return nil, err
 	}
-	kv := badger.KVItem{}
-	s.syslogConfigsDB.Get(ident, &kv)
-	data := kv.Value()
 	if data == nil {
 		return nil, fmt.Errorf("Unknown syslog configuration id")
 	}
@@ -669,21 +612,9 @@ func (s *MessageStore) GetSyslogConfig(configID string) (*conf.SyslogConfig, err
 }
 
 func (s *MessageStore) closeBadgers() {
-	err := s.messagesDB.Close()
+	err := s.badger.Close()
 	if err != nil {
-		s.logger.Warn("Error closing 'Messages' store", "error", err)
-	}
-	err = s.readyDB.Close()
-	if err != nil {
-		s.logger.Warn("Error closing 'Ready' store", "error", err)
-	}
-	err = s.sentDB.Close()
-	if err != nil {
-		s.logger.Warn("Error closing 'Sent' store", "error", err)
-	}
-	err = s.failedDB.Close()
-	if err != nil {
-		s.logger.Warn("Error closing 'Failed' store", "error", err)
+		s.logger.Warn("Error closing the badger", "error", err)
 	}
 	s.logger.Debug("Badger databases are closed")
 }
@@ -696,12 +627,11 @@ func (s *MessageStore) pruneOrphaned() {
 	// check if the corresponding uid exists in "ready" or "failed" or "permerrors"
 	orphaned_uids := []string{}
 	for _, uid := range uids {
-		id := []byte(uid)
-		e1, err1 := s.readyDB.Exists(id)
+		e1, err1 := s.readyDB.Exists(uid)
 		if err1 == nil && !e1 {
-			e2, err2 := s.failedDB.Exists(id)
+			e2, err2 := s.failedDB.Exists(uid)
 			if err2 == nil && !e2 {
-				e3, err3 := s.permerrorsDB.Exists(id)
+				e3, err3 := s.permerrorsDB.Exists(uid)
 				if err3 == nil && !e3 {
 					orphaned_uids = append(orphaned_uids, uid)
 				}
@@ -718,58 +648,17 @@ func (s *MessageStore) pruneOrphaned() {
 func (s *MessageStore) resetStuckInSent() {
 	// push back to "Ready" the messages that were sent out of the Store in the
 	// last execution of skewer, but never ACKed or NACKed
-	iter_opts := badger.IteratorOptions{
-		PrefetchSize: 1000,
-		FetchValues:  false,
-		Reverse:      false,
-	}
-
-	uids := []string{}
-	iter := s.sentDB.NewIterator(iter_opts)
-	for iter.Rewind(); iter.Valid(); iter.Next() {
-		uids = append(uids, string(iter.Item().Key()))
-	}
-	iter.Close()
-
+	uids := s.sentDB.ListKeys()
 	s.logger.Debug("Pushing back stuck messages from Sent to Ready", "nb_messages", len(uids))
+	s.sentDB.DeleteKeys(uids)
 	for _, uid := range uids {
-		s.sentDB.Delete([]byte(uid))
-		s.readyDB.Set([]byte(uid), []byte("true"))
+		s.readyDB.Set(uid, []byte("true"))
 	}
 
 }
 
 func (s *MessageStore) ReadAllBadgers() (map[string]string, map[string]string, map[string]string) {
-	iter_opts := badger.IteratorOptions{
-		FetchValues: true,
-		Reverse:     false,
-	}
-
-	readyMap := map[string]string{}
-	iter := s.readyDB.NewIterator(iter_opts)
-	for iter.Rewind(); iter.Valid(); iter.Next() {
-		item := iter.Item()
-		readyMap[string(item.Key())] = string(item.Value())
-	}
-	iter.Close()
-
-	failedMap := map[string]string{}
-	iter = s.failedDB.NewIterator(iter_opts)
-	for iter.Rewind(); iter.Valid(); iter.Next() {
-		item := iter.Item()
-		failedMap[string(item.Key())] = string(item.Value())
-	}
-	iter.Close()
-
-	sentMap := map[string]string{}
-	iter = s.sentDB.NewIterator(iter_opts)
-	for iter.Rewind(); iter.Valid(); iter.Next() {
-		item := iter.Item()
-		sentMap[string(item.Key())] = string(item.Value())
-	}
-	iter.Close()
-
-	return readyMap, failedMap, sentMap
+	return nil, nil, nil // FIXME
 }
 
 func (s *MessageStore) resetFailures() {
@@ -780,50 +669,38 @@ func (s *MessageStore) resetFailures() {
 		s.failed_mu.Unlock()
 	}()
 	// push back messages from "failed" to "ready"
-	iter_opts := badger.IteratorOptions{
-		PrefetchSize: 1000,
-		FetchValues:  true,
-		Reverse:      false,
-	}
 	for {
 		now := time.Now()
-		iter := s.failedDB.NewIterator(iter_opts)
-		fetched := 0
+		iter := s.failedDB.KeyValueIterator(1000)
 		uids := []string{}
-		for iter.Rewind(); iter.Valid() && fetched < 1000; iter.Next() {
-			item := iter.Item()
-			uid := string(item.Key())
-			time_s := string(item.Value())
+		for iter.Rewind(); iter.Valid(); iter.Next() {
+			uid := iter.Key()
+			time_s := string(iter.Value())
 			t, err := time.Parse(time.RFC3339, time_s)
 			if err == nil {
 				if now.Sub(t) >= time.Minute {
 					// messages that failed to be delivered to Kafka should be tried again after 1 minute
 					uids = append(uids, uid)
 				}
+			} else {
+				// todo
 			}
 		}
 		iter.Close()
 
 		if len(uids) == 0 {
-			break
+			return
 		}
 
-		deleteEntries := []*badger.Entry{}
-		setEntries := []*badger.Entry{}
 		for _, uid := range uids {
-			s.logger.Debug("Will retry failed message", "uid", uid)
-			deleteEntries = badger.EntriesDelete(deleteEntries, []byte(uid))
-			setEntries = badger.EntriesSet(setEntries, []byte(uid), []byte("true"))
-		}
-		err := s.readyDB.BatchSet(setEntries)
-		if err != nil {
-			s.logger.Error("Error pushing entries from failed queue to ready queue!")
-		} else {
-			err := s.failedDB.BatchSet(deleteEntries)
+			err := s.readyDB.Set(uid, []byte("true"))
 			if err != nil {
-				s.logger.Error("Error deleting entries from failed queue!")
+				s.logger.Warn("Error pushing entry from failed queue to ready queue", "uid", uid, "error", err)
 			} else {
-				s.logger.Debug("Messages pushed back from failed queue to ready queue", "nb_messages", len(uids))
+				err := s.failedDB.Delete(uid)
+				if err != nil {
+					s.logger.Warn("Error deleting entry from failed queue", "uid", uid, "error", err)
+				}
 			}
 		}
 	}
@@ -844,7 +721,7 @@ func (s *MessageStore) stash(m *model.TcpUdpParsedMessage) error {
 		s.ready_mu.Unlock()
 		return errwrap.Wrapf("Error writing message content: {{err}}", err)
 	}
-	err = s.readyDB.Set([]byte(m.Uid), []byte("true"))
+	err = s.readyDB.Set(m.Uid, []byte("true"))
 	if err != nil {
 		s.messagesDB.Delete(m.Uid)
 		s.messages_mu.Unlock()
@@ -865,40 +742,35 @@ func (s *MessageStore) retrieve(n int) (messages map[string]*model.TcpUdpParsedM
 	}()
 
 	messages = map[string]*model.TcpUdpParsedMessage{}
-	iter_opts := badger.IteratorOptions{
-		PrefetchSize: n,
-		FetchValues:  false,
-		Reverse:      false,
-	}
 
-	iter := s.readyDB.NewIterator(iter_opts)
-	fetched := 0
+	iter := s.readyDB.KeyIterator(n)
+	var fetched int = 0
 	invalidEntries := []string{}
 	for iter.Rewind(); iter.Valid() && fetched < n; iter.Next() {
-		uid := iter.Item().Key()
-		message_b, err := s.messagesDB.Get(string(uid))
+		uid := iter.Key()
+		message_b, err := s.messagesDB.Get(uid)
 		if err == nil {
 			if message_b != nil {
 				message := model.TcpUdpParsedMessage{}
 				err := json.Unmarshal(message_b, &message)
 				if err == nil {
-					messages[string(uid)] = &message
+					messages[uid] = &message
 					fetched++
 				} else {
-					invalidEntries = append(invalidEntries, string(uid))
+					invalidEntries = append(invalidEntries, uid)
 				}
 			} else {
-				invalidEntries = append(invalidEntries, string(uid))
+				invalidEntries = append(invalidEntries, uid)
 			}
 		} else {
-			s.logger.Warn("Error getting message content from message queue", "uid", string(uid))
+			s.logger.Warn("Error getting message content from message queue", "uid", uid)
 		}
 	}
 	iter.Close()
 
 	for _, uid := range invalidEntries {
 		s.logger.Debug("Deleting invalid entry", "uid", string(uid))
-		s.readyDB.Delete([]byte(uid))
+		s.readyDB.Delete(uid)
 		s.messagesDB.Delete(uid)
 	}
 
@@ -906,28 +778,30 @@ func (s *MessageStore) retrieve(n int) (messages map[string]*model.TcpUdpParsedM
 		return messages
 	}
 
-	deleteEntries := []*badger.Entry{}
-	setEntries := []*badger.Entry{}
+	var err error
+	uidsKO := []string{}
 	for uid, _ := range messages {
-		deleteEntries = badger.EntriesDelete(deleteEntries, []byte(uid))
-		setEntries = badger.EntriesSet(setEntries, []byte(uid), []byte("true"))
-	}
-	err := s.sentDB.BatchSet(setEntries)
-	if err != nil {
-		s.logger.Error("Error moving messages from Ready to Sent", "error", err)
-		return map[string]*model.TcpUdpParsedMessage{}
-	} else {
-		err := s.readyDB.BatchSet(deleteEntries)
+		// todo: batch
+		err = s.sentDB.Set(uid, []byte("true"))
 		if err != nil {
-			s.logger.Error("Error deleting messages from Ready", "error", err)
+			s.logger.Warn("Error copying messages from Ready to Sent", "uid", uid, "error", err)
+			uidsKO = append(uidsKO, uid)
+		} else {
+			err = s.readyDB.Delete(uid)
+			if err != nil {
+				s.logger.Warn("Error deleting messages from Ready", "uid", uid, "error", err)
+			}
 		}
+	}
+	for _, uid := range uidsKO {
+		delete(messages, uid)
 	}
 	return messages
 }
 
 func (s *MessageStore) doACK(uid string) {
 	s.messages_mu.Lock()
-	err := s.sentDB.Delete([]byte(uid))
+	err := s.sentDB.Delete(uid)
 	if err != nil {
 		s.logger.Warn("Error removing message from the Sent DB", "uid", uid, "error", err)
 	} else {
@@ -941,11 +815,11 @@ func (s *MessageStore) doACK(uid string) {
 
 func (s *MessageStore) doNACK(uid string) {
 	s.failed_mu.Lock()
-	err := s.failedDB.Set([]byte(uid), []byte(time.Now().Format(time.RFC3339)))
+	err := s.failedDB.Set(uid, []byte(time.Now().Format(time.RFC3339)))
 	if err != nil {
 		s.logger.Warn("Error moving the message to the Failed DB", "uid", uid, "error", err)
 	} else {
-		err := s.sentDB.Delete([]byte(uid))
+		err := s.sentDB.Delete(uid)
 		if err != nil {
 			s.logger.Warn("Error removing message from the Sent DB", "uid", uid, "error", err)
 		}
@@ -954,11 +828,11 @@ func (s *MessageStore) doNACK(uid string) {
 }
 
 func (s *MessageStore) doPermanentError(uid string) {
-	err := s.permerrorsDB.Set([]byte(uid), []byte(time.Now().Format(time.RFC3339)))
+	err := s.permerrorsDB.Set(uid, []byte(time.Now().Format(time.RFC3339)))
 	if err != nil {
 		s.logger.Warn("Error moving the message to the Permanent Errors DB", "uid", uid, "error", err)
 	} else {
-		err := s.sentDB.Delete([]byte(uid))
+		err := s.sentDB.Delete(uid)
 		if err != nil {
 			s.logger.Warn("Error removing message from the Sent DB", "uid", uid, "error", err)
 		}
