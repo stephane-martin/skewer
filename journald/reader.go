@@ -109,7 +109,6 @@ func (r *reader) Start() {
 					if err != nil {
 						r.logger.Warn("journal.Next() error", "error", err)
 					} else if nb == 0 {
-						r.logger.Debug("0 entry in the journal")
 						break LoopGetEntries
 					} else {
 						entry, err = r.journal.GetEntry()
@@ -123,14 +122,12 @@ func (r *reader) Start() {
 			}
 
 			// wait that journald has more entries
-			r.logger.Debug("Waiting for more journal entries")
 			events := r.wait()
 			select {
 			case <-events:
 			case <-r.stopchan:
 				return
 			}
-			r.logger.Debug("There are more journal entries")
 		}
 	}()
 }
