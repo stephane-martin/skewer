@@ -182,7 +182,7 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		e := s.NewParsersEnv()
+		e := NewParsersEnv(s.Conf.Parsers, s.logger)
 		for m := range raw_messages_chan {
 			parser := e.GetParser(config.Format)
 			if parser == nil {

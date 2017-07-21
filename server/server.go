@@ -76,12 +76,12 @@ type ParsersEnv struct {
 	jsenv javascript.ParsersEnvironment
 }
 
-func (s *Server) NewParsersEnv() *ParsersEnv {
-	p := javascript.NewParsersEnvironment(s.logger)
-	for _, parserConf := range s.Conf.Parsers {
+func NewParsersEnv(parsersConf []conf.ParserConfig, logger log15.Logger) *ParsersEnv {
+	p := javascript.NewParsersEnvironment(logger)
+	for _, parserConf := range parsersConf {
 		err := p.AddParser(parserConf.Name, parserConf.Func)
 		if err != nil {
-			s.logger.Warn("Error initializing parser", "name", parserConf.Name, "error", err)
+			logger.Warn("Error initializing parser", "name", parserConf.Name, "error", err)
 		}
 	}
 	return &ParsersEnv{p}

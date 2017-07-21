@@ -9,7 +9,8 @@ import (
 )
 
 func main() {
-	fmt.Fprintf(os.Stderr, "[arg: %s]\n", os.Args[0])
+	prgName := os.Args[0]
+	fmt.Fprintf(os.Stderr, "[program name: %s]\n", prgName)
 	if ssys.CapabilitiesSupported {
 		ssys.Predrop()
 	}

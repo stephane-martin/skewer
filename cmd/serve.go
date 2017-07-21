@@ -24,7 +24,6 @@ import (
 	"github.com/stephane-martin/skewer/utils"
 )
 
-// serveCmd represents the serve command
 var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start listening for Syslog messages and forward them to Kafka",
@@ -54,6 +53,7 @@ connects to Kafka, and forwards messages to Kafka.`,
 				os.Exit(-1)
 			}
 		}
+
 		Serve()
 	},
 }

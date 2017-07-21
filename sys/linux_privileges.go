@@ -305,14 +305,11 @@ func Drop(uid int, gid int) error {
 		if err != nil {
 			return err
 		}
-		// the parent process can not gain new privileges
-		NoNewPriv()
-		// so that signals only notify the child
-		signal.Ignore(syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT)
-		// wait that the child dies
-		cmd.Process.Wait()
-		// exit the parent
-		os.Exit(0)
+
+		NoNewPriv()                                                    // the parent process can not gain new privileges
+		signal.Ignore(syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT) // so that signals only notify the child
+		cmd.Process.Wait()                                             // wait that the child dies
+		os.Exit(0)                                                     // exit the parent
 		return nil
 	}
 
