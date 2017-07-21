@@ -1,11 +1,17 @@
 package main
 
-import "github.com/stephane-martin/skewer/cmd"
-import "github.com/stephane-martin/skewer/sys"
+import (
+	"fmt"
+	"os"
+
+	"github.com/stephane-martin/skewer/cmd"
+	ssys "github.com/stephane-martin/skewer/sys"
+)
 
 func main() {
-	if sys.CapabilitiesSupported {
-		sys.Predrop()
+	fmt.Fprintf(os.Stderr, "[arg: %s]\n", os.Args[0])
+	if ssys.CapabilitiesSupported {
+		ssys.Predrop()
 	}
 	cmd.Execute()
 }

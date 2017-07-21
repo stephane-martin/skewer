@@ -292,9 +292,10 @@ func Drop(uid int, gid int) error {
 		if err != nil {
 			return err
 		}
-
+		args := []string{"child"}
+		args = append(args, os.Args[1:]...)
 		cmd := exec.Cmd{
-			Args:   os.Args,
+			Args:   args,
 			Path:   exe,
 			Stdin:  nil,
 			Stdout: os.Stdout,
@@ -306,7 +307,7 @@ func Drop(uid int, gid int) error {
 		}
 		// the parent process can not gain new privileges
 		NoNewPriv()
-		// so that SIGs only notify the child
+		// so that signals only notify the child
 		signal.Ignore(syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT)
 		// wait that the child dies
 		cmd.Process.Wait()

@@ -12,6 +12,8 @@ import (
 	"github.com/stephane-martin/skewer/model"
 )
 
+// TODO: ensure that all the fields of the go SyslogMessage struct are passed back and forth to JS
+
 var jsSyslogMessage string = `function SyslogMessage(p, f, s, v, timer, timeg, host, app, proc, msgid, structured, msg, props) {
 	this.Priority = p;
 	this.Facility = f;

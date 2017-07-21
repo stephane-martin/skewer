@@ -104,6 +104,9 @@ func NewForwarder(test bool, m *metrics.Metrics, logger log15.Logger) (fwder For
 	return fwder
 }
 
+// TODO: merge kafkaForwarder and dummyKafkaForwarder
+// TODO: metrics about what's in the store
+
 type kafkaForwarder struct {
 	logger     log15.Logger
 	errorChan  chan struct{}

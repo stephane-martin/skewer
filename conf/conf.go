@@ -388,6 +388,8 @@ func (c *KafkaConfig) GetClient() (sarama.Client, error) {
 }
 
 func InitLoad(ctx context.Context, confDir, storeDir, prefix string, params consul.ConnParams, logger log15.Logger) (c *GConfig, updated chan bool, err error) {
+	// TODO: recover from potential panic in viper
+
 	var firstResults map[string]string
 	var consulResults chan map[string]string
 
