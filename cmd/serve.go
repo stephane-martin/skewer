@@ -47,14 +47,28 @@ connects to Kafka, and forwards messages to Kafka.`,
 		}
 
 		if sys.CapabilitiesSupported {
-			err := sys.FixLinuxPrivileges(uidFlag, gidFlag)
+			fix, err := sys.NeedFixLinuxPrivileges(uidFlag, gidFlag)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				os.Exit(-1)
+			} else if fix {
+				err = sys.FixLinuxPrivileges(uidFlag, gidFlag) // should not return, but re-exec self
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(-1)
+				} else {
+					os.Exit(0)
+				}
+			} else {
+				// we have the appropriate privileges
+				Serve()
+				os.Exit(0)
 			}
+		} else {
+			// not Linux
+			Serve()
+			os.Exit(0)
 		}
-
-		Serve()
 	},
 }
 

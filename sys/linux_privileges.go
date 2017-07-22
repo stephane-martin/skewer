@@ -87,24 +87,25 @@ func Predrop() error {
 	return c.caps.Apply(capability.CAPS)
 }
 
-func FixLinuxPrivileges(uid string, gid string) error {
+func NeedFixLinuxPrivileges(uid, gid string) (bool, error) {
+	numuid, numgid, err := LookupUid(uid, gid)
+	if err != nil {
+		return false, err
+	}
+	c, err := NewCapabilitiesQuery()
+	if err != nil {
+		return false, err
+	}
+	return numuid != os.Getuid() || numgid != os.Getgid() || c.NeedDrop(), nil
+}
 
+func FixLinuxPrivileges(uid, gid string) error {
 	numuid, numgid, err := LookupUid(uid, gid)
 	if err != nil {
 		return err
 	}
 
-	c, err := NewCapabilitiesQuery()
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(os.Stderr, "Starting with capabilities: %s\n", c.caps.StringCap(capability.EFFECTIVE))
-	if numuid == os.Getuid() && numgid == os.Getgid() && !c.NeedDrop() {
-		// we are already running under the right user, and we don't need to drop unneeded capabilities. all is good.
-		return NoNewPriv() // can't gain more privileges
-	} else {
-		return Drop(numuid, numgid)
-	}
+	return Drop(numuid, numgid)
 }
 
 func CanReadAuditLogs() bool {
