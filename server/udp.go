@@ -11,6 +11,7 @@ import (
 	"github.com/stephane-martin/skewer/metrics"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/store"
+	"github.com/stephane-martin/skewer/sys"
 )
 
 type UdpServerStatus int
@@ -42,9 +43,10 @@ func (s *UdpServer) init() {
 	s.Server.init()
 }
 
-func NewUdpServer(c *conf.GConfig, st store.Store, generator chan ulid.ULID, metrics *metrics.Metrics, logger log15.Logger) *UdpServer {
-	s := UdpServer{status: UdpStopped, metrics: metrics, store: st, generator: generator}
-	s.logger = logger.New("class", "UdpServer")
+func NewUdpServer(c *conf.GConfig, st store.Store, gen chan ulid.ULID, b *sys.BinderClient, m *metrics.Metrics, l log15.Logger) *UdpServer {
+	s := UdpServer{status: UdpStopped, metrics: m, store: st, generator: gen}
+	s.logger = l.New("class", "UdpServer")
+	s.binder = b
 	s.init()
 	s.protocol = "udp"
 	s.Conf = *c
@@ -107,16 +109,24 @@ func (s *UdpServer) ListenPacket() int {
 				continue
 			}
 			if len(syslogConf.UnixSocketPath) > 0 {
-				addr, _ := net.ResolveUnixAddr("unixgram", syslogConf.UnixSocketPath)
-				conn, err := net.ListenUnixgram("unixgram", addr)
+				conn, err := net.ListenPacket("unixgram", syslogConf.UnixSocketPath)
 				if err != nil {
 					switch err.(type) {
 					case *net.OpError:
-						s.logger.Info("Listen unixgram OpError", "error", err)
+						if s.binder == nil {
+							s.logger.Warn("Listen unixgram OpError", "error", err)
+						} else {
+							s.logger.Info("Listen unixgram OpError. Retrying as root.", "error", err)
+							conn, err = s.binder.ListenPacket("unixgram", syslogConf.UnixSocketPath)
+							if err != nil {
+								s.logger.Warn("Listen unixgram OpError", "error", err)
+							}
+						}
 					default:
 						s.logger.Warn("Listen unixgram error", "error", err)
 					}
-				} else if conn != nil {
+				}
+				if conn != nil && err == nil {
 					s.logger.Debug("Listener", "protocol", s.protocol, "path", syslogConf.UnixSocketPath, "format", syslogConf.Format)
 					nb++
 					s.unixSocketPaths = append(s.unixSocketPaths, syslogConf.UnixSocketPath)
@@ -129,12 +139,22 @@ func (s *UdpServer) ListenPacket() int {
 				if err != nil {
 					switch err.(type) {
 					case *net.OpError:
-						s.logger.Info("Listen UDP OpError", "error", err)
+						if s.binder == nil || syslogConf.Port > 1024 {
+							s.logger.Warn("Listen UDP OpError", "error", err)
+						} else {
+							s.logger.Info("Listen unixgram OpError. Retrying as root.", "error", err)
+							conn, err = s.binder.ListenPacket("udp", listenAddr)
+							if err != nil {
+								s.logger.Warn("Listen UDP OpError", "error", err)
+
+							}
+						}
 					default:
 						s.logger.Warn("Listen UDP error", "error", err)
 					}
 
-				} else if conn != nil {
+				}
+				if conn != nil && err == nil {
 					s.logger.Debug("Listener", "protocol", s.protocol, "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
 					nb++
 					s.wg.Add(1)

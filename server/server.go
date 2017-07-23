@@ -12,6 +12,7 @@ import (
 	"github.com/stephane-martin/skewer/consul"
 	"github.com/stephane-martin/skewer/javascript"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/sys"
 	"github.com/stephane-martin/skewer/utils"
 )
 
@@ -30,6 +31,7 @@ type Connection interface {
 type Server struct {
 	Conf            conf.GConfig
 	logger          log15.Logger
+	binder          *sys.BinderClient
 	unixSocketPaths []string
 	test            bool
 	wg              *sync.WaitGroup
@@ -48,12 +50,12 @@ func (s *Server) init() {
 }
 
 type TCPListenerConf struct {
-	Listener *net.TCPListener
+	Listener net.Listener
 	Conf     conf.SyslogConfig
 }
 
 type UnixListenerConf struct {
-	Listener *net.UnixListener
+	Listener net.Listener
 	Conf     conf.SyslogConfig
 }
 
@@ -136,44 +138,40 @@ func (s *StreamServer) initTCPListeners() int {
 			continue
 		}
 		if len(syslogConf.UnixSocketPath) > 0 {
-			unixAddr, err := net.ResolveUnixAddr("unix", syslogConf.UnixSocketPath)
+			l, err := net.Listen("unix", syslogConf.UnixSocketPath)
 			if err != nil {
-				s.logger.Warn("Error resolving Unix socket address", "path", syslogConf.UnixSocketPath, "error", err)
-				continue
-			}
-			l, err := net.ListenUnix("unix", unixAddr)
-			if err == nil {
-				s.logger.Debug("Listener", "protocol", s.protocol, "path", syslogConf.UnixSocketPath, "format", syslogConf.Format)
-				nb++
-				lc := UnixListenerConf{
-					Listener: l,
-					Conf:     syslogConf,
+				if s.binder == nil {
+					s.logger.Warn("Error listening on stream unix socket", "path", syslogConf.UnixSocketPath, "error", err)
+					continue
 				}
-				s.unixListeners = append(s.unixListeners, &lc)
-			} else {
-				s.logger.Error("Error listening on stream unix socket", "path", syslogConf.UnixSocketPath, "error", err)
-				continue
+				s.logger.Info("Error listening on stream unix socket. Retrying as root.", "path", syslogConf.UnixSocketPath, "error", err)
+				l, _ = s.binder.Listen("unix", syslogConf.UnixSocketPath)
 			}
+			s.logger.Debug("Listener", "protocol", s.protocol, "path", syslogConf.UnixSocketPath, "format", syslogConf.Format)
+			nb++
+			lc := UnixListenerConf{
+				Listener: l,
+				Conf:     syslogConf,
+			}
+			s.unixListeners = append(s.unixListeners, &lc)
 		} else {
 			listenAddr, _ := syslogConf.GetListenAddr()
-			tcpAddr, err := net.ResolveTCPAddr("tcp", listenAddr)
+			l, err := net.Listen("tcp", listenAddr)
 			if err != nil {
-				s.logger.Warn("Error resolving TCP address", "address", listenAddr, "error", err)
-				continue
-			}
-			l, err := net.ListenTCP("tcp", tcpAddr)
-			if err == nil {
-				s.logger.Debug("Listener", "protocol", s.protocol, "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
-				nb++
-				lc := TCPListenerConf{
-					Listener: l,
-					Conf:     syslogConf,
+				if s.binder == nil || syslogConf.Port > 1024 {
+					s.logger.Warn("Error listening on stream (TCP or RELP)", "listen_addr", listenAddr, "error", err)
+					continue
 				}
-				s.tcpListeners = append(s.tcpListeners, &lc)
-			} else {
-				s.logger.Error("Error listening on stream (TCP or RELP)", "listen_addr", listenAddr, "error", err)
-				continue
+				s.logger.Info("Error listening on stream (TCP or RELP). Retrying as root.", "listen_addr", listenAddr, "error", err)
+				l, _ = s.binder.Listen("tcp", listenAddr)
 			}
+			s.logger.Debug("Listener", "protocol", s.protocol, "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
+			nb++
+			lc := TCPListenerConf{
+				Listener: l,
+				Conf:     syslogConf,
+			}
+			s.tcpListeners = append(s.tcpListeners, &lc)
 		}
 	}
 	return nb
@@ -230,15 +228,15 @@ func (s *StreamServer) AcceptUnix(lc *UnixListenerConf) {
 	defer s.wg.Done()
 	defer s.acceptsWg.Done()
 	for {
-		conn, accept_err := lc.Listener.AcceptUnix()
+		conn, accept_err := lc.Listener.Accept()
 		if accept_err != nil {
-			s.logger.Info("AcceptUnix() error", "error", accept_err)
 			switch accept_err.(type) {
 			case *net.OpError:
-				return
+				s.logger.Info("AcceptUnix() OpError", "error", accept_err)
 			default:
-				// continue
+				s.logger.Warn("AcceptUnix() error", "error", accept_err)
 			}
+			return
 		} else if conn != nil {
 			s.wg.Add(1)
 			go s.handleConnection(conn, lc.Conf)
@@ -251,7 +249,7 @@ func (s *StreamServer) AcceptTCP(lc *TCPListenerConf) {
 	defer s.wg.Done()
 	defer s.acceptsWg.Done()
 	for {
-		conn, accept_err := lc.Listener.AcceptTCP()
+		c, accept_err := lc.Listener.Accept()
 		if accept_err != nil {
 			switch accept_err.(type) {
 			case *net.OpError:
@@ -260,31 +258,33 @@ func (s *StreamServer) AcceptTCP(lc *TCPListenerConf) {
 				s.logger.Warn("AcceptTCP() error", "error", accept_err)
 			}
 			return
-		} else if conn != nil {
-			if lc.Conf.KeepAlive {
-				err := conn.SetKeepAlive(true)
-				if err == nil {
-					err := conn.SetKeepAlivePeriod(lc.Conf.KeepAlivePeriod)
-					if err != nil {
-						s.logger.Warn("Error setting keepalive period", "addr", lc.Conf.BindAddr, "period", lc.Conf.KeepAlivePeriod)
+		} else if c != nil {
+			if conn, ok := c.(*net.TCPConn); ok {
+				if lc.Conf.KeepAlive {
+					err := conn.SetKeepAlive(true)
+					if err == nil {
+						err := conn.SetKeepAlivePeriod(lc.Conf.KeepAlivePeriod)
+						if err != nil {
+							s.logger.Warn("Error setting keepalive period", "addr", lc.Conf.BindAddr, "period", lc.Conf.KeepAlivePeriod)
+						}
+					} else {
+						s.logger.Warn("Error setting keepalive", "addr", lc.Conf.BindAddr)
 					}
-				} else {
-					s.logger.Warn("Error setting keepalive", "addr", lc.Conf.BindAddr)
-				}
 
-			} else {
-				err := conn.SetKeepAlive(false)
-				if err != nil {
-					s.logger.Warn("Error disabling keepalive", "addr", lc.Conf.BindAddr)
+				} else {
+					err := conn.SetKeepAlive(false)
+					if err != nil {
+						s.logger.Warn("Error disabling keepalive", "addr", lc.Conf.BindAddr)
+					}
 				}
-			}
-			err := conn.SetNoDelay(true)
-			if err != nil {
-				s.logger.Warn("Error setting TCP NODELAY", "addr", lc.Conf.BindAddr)
-			}
-			err = conn.SetLinger(-1)
-			if err != nil {
-				s.logger.Warn("Error setting TCP LINGER", "addr", lc.Conf.BindAddr)
+				err := conn.SetNoDelay(true)
+				if err != nil {
+					s.logger.Warn("Error setting TCP NODELAY", "addr", lc.Conf.BindAddr)
+				}
+				err = conn.SetLinger(-1)
+				if err != nil {
+					s.logger.Warn("Error setting TCP LINGER", "addr", lc.Conf.BindAddr)
+				}
 			}
 			if lc.Conf.TLSEnabled {
 				tlsConf, err := utils.NewTLSConfig("", lc.Conf.CAFile, lc.Conf.CAPath, lc.Conf.CertFile, lc.Conf.KeyFile, false)
@@ -293,12 +293,12 @@ func (s *StreamServer) AcceptTCP(lc *TCPListenerConf) {
 				} else {
 					tlsConf.ClientAuth = lc.Conf.GetClientAuthType()
 					s.wg.Add(1)
-					go s.handleConnection(tls.Server(conn, tlsConf), lc.Conf)
+					go s.handleConnection(tls.Server(c, tlsConf), lc.Conf)
 				}
 
 			} else {
 				s.wg.Add(1)
-				go s.handleConnection(conn, lc.Conf)
+				go s.handleConnection(c, lc.Conf)
 			}
 		}
 	}

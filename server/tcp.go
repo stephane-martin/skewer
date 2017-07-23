@@ -14,6 +14,7 @@ import (
 	"github.com/stephane-martin/skewer/metrics"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/store"
+	"github.com/stephane-martin/skewer/sys"
 )
 
 type TcpServerStatus int
@@ -36,14 +37,15 @@ func (s *TcpServer) init() {
 	s.StreamServer.init()
 }
 
-func NewTcpServer(c *conf.GConfig, st store.Store, generator chan ulid.ULID, metric *metrics.Metrics, logger log15.Logger) *TcpServer {
+func NewTcpServer(c *conf.GConfig, st store.Store, gen chan ulid.ULID, b *sys.BinderClient, m *metrics.Metrics, l log15.Logger) *TcpServer {
 	s := TcpServer{
 		status:    TcpStopped,
 		store:     st,
-		metrics:   metric,
-		generator: generator,
+		metrics:   m,
+		generator: gen,
 	}
-	s.logger = logger.New("class", "TcpServer")
+	s.logger = l.New("class", "TcpServer")
+	s.binder = b
 	s.protocol = "tcp"
 	s.Conf = *c
 	s.init()

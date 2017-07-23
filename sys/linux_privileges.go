@@ -96,7 +96,11 @@ func NeedFixLinuxPrivileges(uid, gid string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return numuid != os.Getuid() || numgid != os.Getgid() || c.NeedDrop(), nil
+	res := numuid != os.Getuid() || numgid != os.Getgid() || c.NeedDrop()
+	if !res {
+		NoNewPriv()
+	}
+	return res, nil
 }
 
 func FixLinuxPrivileges(uid, gid string) error {

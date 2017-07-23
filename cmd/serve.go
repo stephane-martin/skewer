@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/syslog"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"sync"
@@ -47,6 +48,7 @@ connects to Kafka, and forwards messages to Kafka.`,
 		}
 
 		if sys.CapabilitiesSupported {
+			// Linux
 			fix, err := sys.NeedFixLinuxPrivileges(uidFlag, gidFlag)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
@@ -61,13 +63,74 @@ connects to Kafka, and forwards messages to Kafka.`,
 				}
 			} else {
 				// we have the appropriate privileges
-				Serve()
+				Serve(false)
 				os.Exit(0)
 			}
 		} else {
 			// not Linux
-			Serve()
-			os.Exit(0)
+			if os.Getuid() != 0 {
+				fmt.Fprintf(os.Stderr, "cur uid: %d, cur gid: %d\n", os.Getuid(), os.Getgid())
+				Serve(true)
+				fmt.Fprintln(os.Stderr, "end of child")
+				os.Exit(0)
+
+			} else {
+				numuid, numgid, err := sys.LookupUid(uidFlag, gidFlag)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(-1)
+				}
+				childFD, parentFD, err := sys.SocketPair()
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(-1)
+				}
+
+				fmt.Fprintf(os.Stderr, "target uid: %d, target gid: %d\n", numuid, numgid)
+
+				// execute ourself under the new user
+				exe, err := os.Executable()
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(-1)
+				}
+				childProcess := exec.Cmd{
+					Args:       os.Args,
+					Path:       exe,
+					Stdin:      nil,
+					Stdout:     os.Stdout,
+					Stderr:     os.Stderr,
+					ExtraFiles: []*os.File{os.NewFile(uintptr(childFD), "child_file")},
+				}
+				if os.Getuid() != numuid {
+					childProcess.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uint32(numuid), Gid: uint32(numgid)}}
+				}
+				err = childProcess.Start()
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(-1)
+				}
+				sig_chan := make(chan os.Signal, 1)
+				go func() {
+					for sig := range sig_chan {
+						fmt.Fprintln(os.Stderr, "parent received signal", sig)
+					}
+				}()
+				signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT)
+				//signal.Ignore(syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT) // so that signals only notify the child
+				fmt.Fprintf(os.Stderr, "Parent PID: %d, Child PID: %d\n", os.Getpid(), childProcess.Process.Pid)
+
+				err = sys.Binder(parentFD)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(-1)
+				}
+				childProcess.Process.Wait()
+				fmt.Fprintln(os.Stderr, "end of parent")
+				os.Exit(0)
+
+			}
+
 		}
 	},
 }
@@ -114,18 +177,18 @@ func SetLogging() log15.Logger {
 		h, e := log15.SyslogHandler(syslog.LOG_LOCAL0|syslog.LOG_DEBUG, "skewer", formatter)
 		if e != nil {
 			fmt.Printf("Error opening syslog file: %s\n", e)
-			os.Exit(-1)
+		} else {
+			log_handlers = append(log_handlers, h)
 		}
-		log_handlers = append(log_handlers, h)
 	}
 	logfilenameFlag = strings.TrimSpace(logfilenameFlag)
 	if len(logfilenameFlag) > 0 {
 		h, e := log15.FileHandler(logfilenameFlag, formatter)
 		if e != nil {
 			fmt.Printf("Error opening log file '%s': %s\n", logfilenameFlag, e)
-			os.Exit(-1)
+		} else {
+			log_handlers = append(log_handlers, h)
 		}
-		log_handlers = append(log_handlers, h)
 	}
 	if len(log_handlers) == 0 {
 		log_handlers = []log15.Handler{log15.StderrHandler}
@@ -142,7 +205,18 @@ func SetLogging() log15.Logger {
 	return logger
 }
 
-func Serve() {
+func Serve(hasBinder bool) error {
+	var binderClient *sys.BinderClient
+	if hasBinder {
+		var err error
+		binderClient, err = sys.NewBinderClient()
+		if err != nil {
+			binderClient = nil
+		} else {
+			defer binderClient.Quit()
+		}
+	}
+
 	gctx, gCancel := context.WithCancel(context.Background())
 	shutdownCtx, shutdown := context.WithCancel(gctx)
 	watchCtx, stopWatch := context.WithCancel(shutdownCtx)
@@ -192,7 +266,7 @@ func Serve() {
 	st, err = store.NewStore(gctx, c.Store, logger)
 	if err != nil {
 		logger.Crit("Can't create the message Store", "error", err)
-		os.Exit(-1)
+		return err
 	}
 
 	// prepare the kafka forwarder
@@ -295,7 +369,7 @@ func Serve() {
 	relpServer.StatusChan <- server.Stopped // trigger the RELP service to start
 
 	// start the TCP service
-	tcpServer := server.NewTcpServer(c, st, generator, metricStore, logger)
+	tcpServer := server.NewTcpServer(c, st, generator, binderClient, metricStore, logger)
 	if testFlag {
 		tcpServer.SetTest()
 	}
@@ -307,7 +381,7 @@ func Serve() {
 	}
 
 	// start the UDP service
-	udpServer := server.NewUdpServer(c, st, generator, metricStore, logger)
+	udpServer := server.NewUdpServer(c, st, generator, binderClient, metricStore, logger)
 	if testFlag {
 		udpServer.SetTest()
 	}
@@ -407,7 +481,7 @@ func Serve() {
 			logger.Debug("The TCP service has been stopped")
 			<-udpServer.ClosedChan
 			logger.Debug("The UDP service has been stopped")
-			return
+			return nil
 
 		case _, more := <-updated:
 			if more {
