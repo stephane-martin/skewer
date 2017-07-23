@@ -80,6 +80,10 @@ connects to Kafka, and forwards messages to Kafka.`,
 					fmt.Fprintln(os.Stderr, err)
 					os.Exit(-1)
 				}
+				if numuid == 0 {
+					fmt.Fprintln(os.Stderr, "Provide a non-privileged user with --uid flag")
+					os.Exit(-1)
+				}
 				childFD, parentFD, err := sys.SocketPair()
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
@@ -89,7 +93,7 @@ connects to Kafka, and forwards messages to Kafka.`,
 				fmt.Fprintf(os.Stderr, "target uid: %d, target gid: %d\n", numuid, numgid)
 
 				// execute ourself under the new user
-				exe, err := os.Executable()
+				exe, err := sys.Executable()
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					os.Exit(-1)
