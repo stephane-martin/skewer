@@ -70,7 +70,7 @@ connects to Kafka, and forwards messages to Kafka.`,
 			// not Linux
 			if os.Getuid() != 0 {
 				fmt.Fprintf(os.Stderr, "cur uid: %d, cur gid: %d\n", os.Getuid(), os.Getgid())
-				Serve(true)
+				Serve(os.Getenv("SKEWER_ROOT_PARENT") == "TRUE")
 				fmt.Fprintln(os.Stderr, "end of child")
 				os.Exit(0)
 
@@ -105,6 +105,7 @@ connects to Kafka, and forwards messages to Kafka.`,
 					Stdout:     os.Stdout,
 					Stderr:     os.Stderr,
 					ExtraFiles: []*os.File{os.NewFile(uintptr(childFD), "child_file")},
+					Env:        []string{"SKEWER_ROOT_PARENT=TRUE"},
 				}
 				if os.Getuid() != numuid {
 					childProcess.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uint32(numuid), Gid: uint32(numgid)}}
@@ -226,6 +227,7 @@ func Serve(hasBinder bool) error {
 	watchCtx, stopWatch := context.WithCancel(shutdownCtx)
 
 	logger := SetLogging()
+	logger.Debug("using root binder", "use", hasBinder)
 	generator := utils.Generator(gctx, logger)
 
 	var c *conf.GConfig
