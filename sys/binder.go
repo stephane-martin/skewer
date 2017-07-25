@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+
+	"github.com/inconshreveable/log15"
 )
 
 func IsStream(lnet string) bool {
@@ -57,7 +59,7 @@ type BinderClient struct {
 	ipacketMu          *sync.Mutex
 }
 
-func NewBinderClient() (*BinderClient, error) {
+func NewBinderClient(logger log15.Logger) (*BinderClient, error) {
 	f := os.NewFile(3, "toparent")
 	genconn, err := net.FileConn(f)
 	if err != nil {
@@ -76,6 +78,7 @@ func NewBinderClient() (*BinderClient, error) {
 			oob := make([]byte, syscall.CmsgSpace(4))
 			n, oobn, _, _, err := c.parentConn.ReadMsgUnix(buf, oob)
 			if err != nil {
+				logger.Error("Error reading message from parent binder", "error", err)
 				for _, ichan := range c.IncomingConn {
 					close(ichan)
 				}
@@ -87,6 +90,7 @@ func NewBinderClient() (*BinderClient, error) {
 			}
 			if n > 0 {
 				msg := strings.Trim(string(buf[:n]), " \r\n")
+				logger.Debug("received message from root parent", "message", msg)
 				if strings.HasPrefix(msg, "error ") {
 					parts := strings.SplitN(msg, " ", 3)
 					addr := parts[1]
@@ -111,8 +115,9 @@ func NewBinderClient() (*BinderClient, error) {
 						}
 						c.ipacketMu.Unlock()
 					}
+				}
 
-				} else if strings.HasPrefix(msg, "newconn ") && oobn > 0 {
+				if strings.HasPrefix(msg, "newconn ") && oobn > 0 {
 					parts := strings.SplitN(msg, " ", 3)
 					uid := parts[1]
 					addr := parts[2]
@@ -121,7 +126,7 @@ func NewBinderClient() (*BinderClient, error) {
 						fds, err := syscall.ParseUnixRights(&cmsgs[0])
 						if err == nil {
 							for _, fd := range fds {
-								fmt.Fprintf(os.Stderr, "received conn (fd %d, uid %s, addr %s)\n", fd, uid, addr)
+								logger.Debug("Received a new connection from root parent", "uid", uid, "addr", addr)
 								lnet := strings.SplitN(addr, ":", 2)[0]
 								rf := os.NewFile(uintptr(fd), "newconn")
 								if IsStream(lnet) {
@@ -149,7 +154,11 @@ func NewBinderClient() (*BinderClient, error) {
 									}
 								}
 							}
+						} else {
+							logger.Warn("ParseUnixRights() error", "error", err)
 						}
+					} else {
+						logger.Warn("ParseSocketControlMessage() error", "error", err)
 					}
 				}
 			}

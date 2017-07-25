@@ -33,14 +33,7 @@ running process that listens to syslog messages according to the configuration,
 connects to Kafka, and forwards messages to Kafka.`,
 	Run: func(cmd *cobra.Command, args []string) {
 
-		if !dumpableFlag {
-			err := sys.SetNonDumpable()
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error setting PR_SET_DUMPABLE: %s\n", err)
-			}
-		}
-
-		if !noMlockFlag {
+		if sys.MlockSupported && !noMlockFlag {
 			err := sys.MlockAll()
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error executing MlockAll(): %s\n", err)
@@ -49,6 +42,13 @@ connects to Kafka, and forwards messages to Kafka.`,
 
 		if sys.CapabilitiesSupported {
 			// Linux
+			if !dumpableFlag {
+				err := sys.SetNonDumpable()
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Error setting PR_SET_DUMPABLE: %s\n", err)
+				}
+			}
+
 			fix, err := sys.NeedFixLinuxPrivileges(uidFlag, gidFlag)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
@@ -69,35 +69,37 @@ connects to Kafka, and forwards messages to Kafka.`,
 		} else {
 			// not Linux
 			if os.Getuid() != 0 {
-				fmt.Fprintf(os.Stderr, "cur uid: %d, cur gid: %d\n", os.Getuid(), os.Getgid())
 				Serve(os.Getenv("SKEWER_ROOT_PARENT") == "TRUE")
-				fmt.Fprintln(os.Stderr, "end of child")
 				os.Exit(0)
 
 			} else {
+				logfilenameFlag = ""
+				logger := SetLogging().New("class", "parent")
+
 				numuid, numgid, err := sys.LookupUid(uidFlag, gidFlag)
 				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
+					logger.Crit("Error looking up uid", "error", err, "uid", uidFlag, "gid", gidFlag)
 					os.Exit(-1)
 				}
 				if numuid == 0 {
-					fmt.Fprintln(os.Stderr, "Provide a non-privileged user with --uid flag")
+					logger.Crit("Provide a non-privileged user with --uid flag")
 					os.Exit(-1)
 				}
 				childFD, parentFD, err := sys.SocketPair()
 				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
+					logger.Crit("SocketPair() error", "error", err)
 					os.Exit(-1)
 				}
 
-				fmt.Fprintf(os.Stderr, "target uid: %d, target gid: %d\n", numuid, numgid)
+				logger.Debug("Target user", "uid", numuid, "gid", numgid)
 
 				// execute ourself under the new user
 				exe, err := sys.Executable()
 				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
+					logger.Crit("Error getting executable name", "error", err)
 					os.Exit(-1)
 				}
+
 				childProcess := exec.Cmd{
 					Args:       os.Args,
 					Path:       exe,
@@ -112,26 +114,26 @@ connects to Kafka, and forwards messages to Kafka.`,
 				}
 				err = childProcess.Start()
 				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
+					logger.Crit("Error starting child", "error", err)
 					os.Exit(-1)
 				}
 				sig_chan := make(chan os.Signal, 1)
 				go func() {
 					for sig := range sig_chan {
-						fmt.Fprintln(os.Stderr, "parent received signal", sig)
+						logger.Debug("parent received signal", "signal", sig)
 					}
 				}()
 				signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT)
-				//signal.Ignore(syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT) // so that signals only notify the child
-				fmt.Fprintf(os.Stderr, "Parent PID: %d, Child PID: %d\n", os.Getpid(), childProcess.Process.Pid)
+				signal.Ignore(syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT) // so that signals only notify the child
+				logger.Debug("PIDs", "parent", os.Getpid(), "child", childProcess.Process.Pid)
 
-				err = sys.Binder(parentFD)
+				err = sys.Binder(parentFD, logger)
 				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
+					logger.Crit("Error setting the root binder", "error", err)
+					childProcess.Process.Signal(syscall.SIGTERM)
 					os.Exit(-1)
 				}
 				childProcess.Process.Wait()
-				fmt.Fprintln(os.Stderr, "end of parent")
 				os.Exit(0)
 
 			}
@@ -181,7 +183,7 @@ func SetLogging() log15.Logger {
 	if syslogFlag {
 		h, e := log15.SyslogHandler(syslog.LOG_LOCAL0|syslog.LOG_DEBUG, "skewer", formatter)
 		if e != nil {
-			fmt.Printf("Error opening syslog file: %s\n", e)
+			fmt.Fprintf(os.Stderr, "Error opening syslog file: %s\n", e)
 		} else {
 			log_handlers = append(log_handlers, h)
 		}
@@ -190,7 +192,7 @@ func SetLogging() log15.Logger {
 	if len(logfilenameFlag) > 0 {
 		h, e := log15.FileHandler(logfilenameFlag, formatter)
 		if e != nil {
-			fmt.Printf("Error opening log file '%s': %s\n", logfilenameFlag, e)
+			fmt.Fprintf(os.Stderr, "Error opening log file '%s': %s\n", logfilenameFlag, e)
 		} else {
 			log_handlers = append(log_handlers, h)
 		}
@@ -211,11 +213,15 @@ func SetLogging() log15.Logger {
 }
 
 func Serve(hasBinder bool) error {
+	logger := SetLogging()
+	logger.Debug("Serve() runs under user", "uid", os.Getuid(), "gid", os.Getgid())
+	logger.Debug("Whether we use a root binder", "use", hasBinder)
 	var binderClient *sys.BinderClient
 	if hasBinder {
 		var err error
-		binderClient, err = sys.NewBinderClient()
+		binderClient, err = sys.NewBinderClient(logger)
 		if err != nil {
+			logger.Error("Error binding to the root parent socket", "error", err)
 			binderClient = nil
 		} else {
 			defer binderClient.Quit()
@@ -226,8 +232,6 @@ func Serve(hasBinder bool) error {
 	shutdownCtx, shutdown := context.WithCancel(gctx)
 	watchCtx, stopWatch := context.WithCancel(shutdownCtx)
 
-	logger := SetLogging()
-	logger.Debug("using root binder", "use", hasBinder)
 	generator := utils.Generator(gctx, logger)
 
 	var c *conf.GConfig

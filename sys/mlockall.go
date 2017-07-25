@@ -6,7 +6,7 @@ import "syscall"
 import "golang.org/x/sys/unix"
 
 func init() {
-	mlockSupported = true
+	MlockSupported = true
 }
 
 func mlockall() error {

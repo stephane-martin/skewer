@@ -26,7 +26,7 @@ type BinderPacketConn struct {
 	Addr string
 }
 
-func BinderListen(ctx context.Context, schan chan *BinderConn, generator chan ulid.ULID, addr string) (net.Listener, error) {
+func BinderListen(ctx context.Context, logger log15.Logger, schan chan *BinderConn, generator chan ulid.ULID, addr string) (net.Listener, error) {
 	parts := strings.SplitN(addr, ":", 2)
 	lnet := parts[0]
 	laddr := parts[1]
@@ -53,9 +53,11 @@ func BinderListen(ctx context.Context, schan chan *BinderConn, generator chan ul
 			c, err := l.Accept()
 			if err == nil {
 				uid := <-generator
-				schan <- &BinderConn{Uid: uid.String(), Conn: c, Addr: addr}
+				uids := uid.String()
+				logger.Debug("New accepted connection", "uid", uids, "addr", addr)
+				schan <- &BinderConn{Uid: uids, Conn: c, Addr: addr}
 			} else {
-				fmt.Fprintf(os.Stderr, "accept error: %s\n", err.Error())
+				logger.Warn("Accept error", "error", err, "addr", addr)
 				cancel()
 				return
 			}
@@ -83,8 +85,8 @@ func BinderPacket(addr string) (net.PacketConn, error) {
 	return conn, nil
 }
 
-func Binder(parentFD int) error {
-	var msg string
+func Binder(parentFD int, logger log15.Logger) error {
+	logger = logger.New("class", "binder")
 	parentFile := os.NewFile(uintptr(parentFD), "parent_file")
 	defer parentFile.Close()
 
@@ -100,12 +102,13 @@ func Binder(parentFD int) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	generator := utils.Generator(ctx, log15.New())
+	generator := utils.Generator(ctx, logger)
 
 	schan := make(chan *BinderConn)
 	pchan := make(chan *BinderPacketConn)
 
 	go func() {
+		var smsg string
 		connections := map[string]net.Conn{}
 		packetconnections := map[string]net.PacketConn{}
 		connfiles := map[string]*os.File{}
@@ -154,8 +157,9 @@ func Binder(parentFD int) error {
 						packetconnections[bc.Uid] = bc.Conn
 						connfiles[bc.Uid] = connFile
 						rights := syscall.UnixRights(int(connFile.Fd()))
-						msg := fmt.Sprintf("newconn %s %s\n", bc.Uid, bc.Addr)
-						childConn.WriteMsgUnix([]byte(msg), rights, nil)
+						logger.Debug("Sending new connection to child", "uid", bc.Uid, "addr", bc.Addr)
+						smsg = fmt.Sprintf("newconn %s %s\n", bc.Uid, bc.Addr)
+						childConn.WriteMsgUnix([]byte(smsg), rights, nil)
 					}
 				}
 			case bc := <-schan:
@@ -196,8 +200,11 @@ func Binder(parentFD int) error {
 						connections[bc.Uid] = bc.Conn
 						connfiles[bc.Uid] = connFile
 						rights := syscall.UnixRights(int(connFile.Fd()))
-						msg := fmt.Sprintf("newconn %s %s\n", bc.Uid, bc.Addr)
-						childConn.WriteMsgUnix([]byte(msg), rights, nil)
+						logger.Debug("Sending new connection to child", "uid", bc.Uid, "addr", bc.Addr)
+						smsg = fmt.Sprintf("newconn %s %s\n", bc.Uid, bc.Addr)
+						childConn.WriteMsgUnix([]byte(smsg), rights, nil)
+					} else {
+						logger.Warn("conn.File() error", "error", err)
 					}
 				}
 			}
@@ -205,22 +212,24 @@ func Binder(parentFD int) error {
 	}()
 
 	listeners := map[string]net.Listener{}
+	var rmsg string
 	for scanner.Scan() {
-		msg = strings.Trim(scanner.Text(), " \r\n")
-		command := strings.SplitN(msg, " ", 2)[0]
-		args := strings.Trim(msg[len(command):], " \r\n")
-		fmt.Fprintf(os.Stderr, "parent received: '%s'\n", msg)
+		rmsg = strings.Trim(scanner.Text(), " \r\n")
+		command := strings.SplitN(rmsg, " ", 2)[0]
+		args := strings.Trim(rmsg[len(command):], " \r\n")
+		logger.Debug("Received message", "message", rmsg)
 
 		switch command {
 		case "listen":
-			fmt.Fprintf(os.Stderr, "will listen on: %s\n", args)
+			logger.Debug("asked to listen", "addr", args)
 			for _, addr := range strings.Split(args, " ") {
 				lnet := strings.SplitN(addr, ":", 2)[0]
 				if IsStream(lnet) {
-					l, err := BinderListen(ctx, schan, generator, addr)
+					l, err := BinderListen(ctx, logger, schan, generator, addr)
 					if err == nil {
 						listeners[addr] = l
 					} else {
+						logger.Warn("Listen error", "error", err, "addr", addr)
 						childConn.Write([]byte(fmt.Sprintf("error %s %s", addr, err.Error())))
 					}
 				} else {
@@ -229,7 +238,7 @@ func Binder(parentFD int) error {
 						uid := <-generator
 						pchan <- &BinderPacketConn{Addr: addr, Conn: c, Uid: uid.String()}
 					} else {
-						fmt.Fprintf(os.Stderr, "ListenPacket error for %s: %s\n", addr, err.Error())
+						logger.Warn("ListenPacket error", "error", err, "addr", addr)
 						childConn.Write([]byte(fmt.Sprintf("error %s %s", addr, err.Error())))
 					}
 				}
@@ -244,6 +253,7 @@ func Binder(parentFD int) error {
 				l.Close()
 				delete(listeners, args)
 			}
+			logger.Debug("Asked to stop listening", "addr", args)
 			childConn.Write([]byte(fmt.Sprintf("stopped %s\n", args)))
 		case "reset":
 			for _, l := range listeners {
@@ -261,7 +271,7 @@ func Binder(parentFD int) error {
 	}
 	err = scanner.Err()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		logger.Debug("Scanner error", "error", err)
 	}
 	return nil
 }

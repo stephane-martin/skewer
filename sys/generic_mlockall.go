@@ -1,6 +1,6 @@
 package sys
 
-var mlockSupported bool
+var MlockSupported bool
 
 type NotUnixError struct{}
 
@@ -9,7 +9,7 @@ func (e NotUnixError) Error() string {
 }
 
 func MlockAll() error {
-	if mlockSupported {
+	if MlockSupported {
 		return mlockall()
 	} else {
 		return NotUnixError{}

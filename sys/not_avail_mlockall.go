@@ -3,7 +3,7 @@
 package sys
 
 func init() {
-	mlockSupported = false
+	MlockSupported = false
 }
 
 func mlockall() error {
