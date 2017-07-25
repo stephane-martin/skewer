@@ -96,11 +96,14 @@ func NeedFixLinuxPrivileges(uid, gid string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	res := numuid != os.Getuid() || numgid != os.Getgid() || c.NeedDrop()
-	if !res {
+	if numuid == 0 {
+		return false, fmt.Errorf("Please use --uid flag to specify a non-root user")
+	}
+	needfix := numuid != os.Getuid() || numgid != os.Getgid() || c.NeedDrop()
+	if !needfix {
 		NoNewPriv()
 	}
-	return res, nil
+	return needfix, nil
 }
 
 func FixLinuxPrivileges(uid, gid string) error {
@@ -200,7 +203,11 @@ func Drop(uid int, gid int) error {
 		}
 
 		fmt.Fprintf(os.Stderr, "Now running with capabilities: %s\n", c.caps.StringCap(capability.EFFECTIVE))
-		return NoNewPriv()
+		err = NoNewPriv()
+		if err != nil {
+			return err
+		}
+		return ExecOurself()
 
 	} else if !c.CanModifySecurebits() {
 		return fmt.Errorf("Asked to change UID/GID, but no way to set the correct capabilities (need SETPCAP)")
@@ -291,33 +298,33 @@ func Drop(uid int, gid int) error {
 		if err != nil {
 			return err
 		}
-
-		// execute ourself under the new user
-		exe, err := os.Executable()
-		if err != nil {
-			return err
-		}
-		args := []string{"child"}
-		args = append(args, os.Args[1:]...)
-		cmd := exec.Cmd{
-			Args:   args,
-			Path:   exe,
-			Stdin:  nil,
-			Stdout: os.Stdout,
-			Stderr: os.Stderr,
-		}
-		err = cmd.Start()
-		if err != nil {
-			return err
-		}
-
-		NoNewPriv()                                                    // the parent process can not gain new privileges
-		signal.Ignore(syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT) // so that signals only notify the child
-		cmd.Process.Wait()                                             // wait that the child dies
-		os.Exit(0)                                                     // exit the parent
-		return nil
+		return ExecOurself()
 	}
 
+}
+
+func ExecOurself() error {
+	// execute ourself under the new user
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	cmd := exec.Cmd{
+		Args:   os.Args,
+		Path:   exe,
+		Stdin:  nil,
+		Stdout: os.Stdout,
+		Stderr: os.Stderr,
+	}
+	err = cmd.Start()
+	if err != nil {
+		return err
+	}
+
+	NoNewPriv()                                                    // the parent process can not gain new privileges
+	signal.Ignore(syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT) // so that signals only notify the child
+	cmd.Process.Wait()
+	return nil
 }
 
 func (c *CapabilitiesQuery) NeedMore() bool {

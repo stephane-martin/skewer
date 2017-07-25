@@ -62,7 +62,6 @@ connects to Kafka, and forwards messages to Kafka.`,
 					os.Exit(0)
 				}
 			} else {
-				// we have the appropriate privileges
 				Serve(false)
 				os.Exit(0)
 			}
