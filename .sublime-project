@@ -1,0 +1,10 @@
+{
+    "settings": {
+        "GoSublime": {
+            "env": {
+                "GOPATH": "/Users/stef/Documents/Seafile/dev/golang/skewer"
+            }
+        }
+    },
+    "folders": []
+}
