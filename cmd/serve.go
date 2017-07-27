@@ -33,6 +33,7 @@ running process that listens to syslog messages according to the configuration,
 connects to Kafka, and forwards messages to Kafka.`,
 	Run: func(cmd *cobra.Command, args []string) {
 
+		// try to set mlock and non-dumpable for both child and parent
 		if sys.MlockSupported && !noMlockFlag {
 			err := sys.MlockAll()
 			if err != nil {
@@ -40,102 +41,152 @@ connects to Kafka, and forwards messages to Kafka.`,
 			}
 		}
 
+		if sys.CapabilitiesSupported && !dumpableFlag {
+			err := sys.SetNonDumpable()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error setting PR_SET_DUMPABLE: %s\n", err)
+			}
+		}
+
+		if os.Getenv("SKEWER_CHILD") == "TRUE" {
+			// we are in the child
+			sys.NoNewPriv()
+			Serve(os.Getenv("SKEWER_HAS_PARENT") == "TRUE", os.Getenv("SKEWER_HAS_ROOT_PARENT") == "TRUE")
+			os.Exit(0)
+		}
+
+		// we are in the parent
+		logfilenameFlag = ""
+		logger := SetLogging().New("class", "parent")
+
+		numuid, numgid, err := sys.LookupUid(uidFlag, gidFlag)
+		if err != nil {
+			logger.Crit("Error looking up uid", "error", err, "uid", uidFlag, "gid", gidFlag)
+			os.Exit(-1)
+		}
+		if numuid == 0 {
+			logger.Crit("Provide a non-privileged user with --uid flag")
+			os.Exit(-1)
+		}
+
 		if sys.CapabilitiesSupported {
 			// Linux
-			if !dumpableFlag {
-				err := sys.SetNonDumpable()
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "Error setting PR_SET_DUMPABLE: %s\n", err)
-				}
-			}
 
-			fix, err := sys.NeedFixLinuxPrivileges(uidFlag, gidFlag)
+			need_fix, err := sys.NeedFixLinuxPrivileges(uidFlag, gidFlag)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				os.Exit(-1)
-			} else if fix {
+			}
+			if need_fix {
 				err = sys.FixLinuxPrivileges(uidFlag, gidFlag) // should not return, but re-exec self
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					os.Exit(-1)
-				} else {
-					os.Exit(0)
 				}
+				sys.NoNewPriv()
+				exe, err := os.Executable()
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(-1)
+				}
+				err = syscall.Exec(exe, os.Args, []string{"SKEWER_CHILD=TRUE"})
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(-1)
+				}
+				/*
+					cmd := exec.Cmd{
+						Args:   os.Args,
+						Path:   exe,
+						Stdin:  nil,
+						Stdout: os.Stdout,
+						Stderr: os.Stderr,
+						Env:    []string{"SKEWER_CHILD=TRUE"},
+					}
+					err = cmd.Start()
+					if err != nil {
+						fmt.Fprintln(os.Stderr, err)
+						os.Exit(-1)
+					}
+
+					sys.NoNewPriv()                                                // the parent process can not gain new privileges
+					signal.Ignore(syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT) // so that signals only notify the child
+					cmd.Process.Wait()
+					os.Exit(0)
+				*/
+
 			} else {
-				Serve(false)
+				sys.NoNewPriv()
+				Serve(false, false)
 				os.Exit(0)
 			}
 		} else {
 			// not Linux
-			if os.Getuid() != 0 {
-				Serve(os.Getenv("SKEWER_ROOT_PARENT") == "TRUE")
-				os.Exit(0)
 
-			} else {
-				logfilenameFlag = ""
-				logger := SetLogging().New("class", "parent")
-
-				numuid, numgid, err := sys.LookupUid(uidFlag, gidFlag)
-				if err != nil {
-					logger.Crit("Error looking up uid", "error", err, "uid", uidFlag, "gid", gidFlag)
-					os.Exit(-1)
-				}
-				if numuid == 0 {
-					logger.Crit("Provide a non-privileged user with --uid flag")
-					os.Exit(-1)
-				}
-				childFD, parentFD, err := sys.SocketPair()
-				if err != nil {
-					logger.Crit("SocketPair() error", "error", err)
-					os.Exit(-1)
-				}
-
-				logger.Debug("Target user", "uid", numuid, "gid", numgid)
-
-				// execute ourself under the new user
-				exe, err := sys.Executable()
-				if err != nil {
-					logger.Crit("Error getting executable name", "error", err)
-					os.Exit(-1)
-				}
-
-				childProcess := exec.Cmd{
-					Args:       os.Args,
-					Path:       exe,
-					Stdin:      nil,
-					Stdout:     os.Stdout,
-					Stderr:     os.Stderr,
-					ExtraFiles: []*os.File{os.NewFile(uintptr(childFD), "child_file")},
-					Env:        []string{"SKEWER_ROOT_PARENT=TRUE"},
-				}
-				if os.Getuid() != numuid {
-					childProcess.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uint32(numuid), Gid: uint32(numgid)}}
-				}
-				err = childProcess.Start()
-				if err != nil {
-					logger.Crit("Error starting child", "error", err)
-					os.Exit(-1)
-				}
-				sig_chan := make(chan os.Signal, 1)
-				go func() {
-					for sig := range sig_chan {
-						logger.Debug("parent received signal", "signal", sig)
-					}
-				}()
-				signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT)
-				signal.Ignore(syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT) // so that signals only notify the child
-				logger.Debug("PIDs", "parent", os.Getpid(), "child", childProcess.Process.Pid)
-
-				err = sys.Binder(parentFD, logger)
-				if err != nil {
-					logger.Crit("Error setting the root binder", "error", err)
-					childProcess.Process.Signal(syscall.SIGTERM)
-					os.Exit(-1)
-				}
-				childProcess.Process.Wait()
-				os.Exit(0)
-
+			binderChildFD, binderParentFD, err := sys.SocketPair()
+			if err != nil {
+				logger.Crit("SocketPair() error", "error", err)
+				os.Exit(-1)
 			}
+
+			loggerChildFD, loggerParentFD, err := sys.SocketPair()
+			if err != nil {
+				logger.Crit("SocketPair() error", "error", err)
+				os.Exit(-1)
+			}
+
+			logger.Debug("Target user", "uid", numuid, "gid", numgid)
+
+			// execute ourself under the new user
+			exe, err := sys.Executable() // custom Executable function to support OpenBSD
+			if err != nil {
+				logger.Crit("Error getting executable name", "error", err)
+				os.Exit(-1)
+			}
+
+			env := []string{"SKEWER_CHILD=TRUE", "SKEWER_HAS_PARENT=TRUE"}
+			if os.Getuid() == 0 {
+				env = append(env, "SKEWER_HAS_ROOT_PARENT=TRUE")
+			}
+
+			childProcess := exec.Cmd{
+				Args:   os.Args,
+				Path:   exe,
+				Stdin:  nil,
+				Stdout: os.Stdout,
+				Stderr: os.Stderr,
+				ExtraFiles: []*os.File{
+					os.NewFile(uintptr(binderChildFD), "child_binder_file"),
+					os.NewFile(uintptr(loggerChildFD), "child_logger_file"),
+				},
+				Env: env,
+			}
+			if os.Getuid() != numuid {
+				childProcess.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uint32(numuid), Gid: uint32(numgid)}}
+			}
+			err = childProcess.Start()
+			if err != nil {
+				logger.Crit("Error starting child", "error", err)
+				os.Exit(-1)
+			}
+			sig_chan := make(chan os.Signal, 1)
+			go func() {
+				for sig := range sig_chan {
+					logger.Debug("parent received signal (ignored)", "signal", sig)
+				}
+			}()
+			signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT)
+			logger.Debug("PIDs", "parent", os.Getpid(), "child", childProcess.Process.Pid)
+
+			err = sys.Binder(binderParentFD, logger) // returns immediately
+			if err != nil {
+				logger.Crit("Error setting the root binder", "error", err)
+				childProcess.Process.Signal(syscall.SIGTERM)
+				os.Exit(-1)
+			}
+			sys.LoggerServer(loggerParentFD)
+			childProcess.Process.Wait()
+			os.Exit(0)
 
 		}
 	},
@@ -211,12 +262,21 @@ func SetLogging() log15.Logger {
 	return logger
 }
 
-func Serve(hasBinder bool) error {
-	logger := SetLogging()
+func Serve(hasParent bool, parentIsRoot bool) error {
+	var logger log15.Logger
+
+	if hasParent {
+		logger = SetLogging()
+		// forward our skewer logs to the parent process
+	} else {
+		logger = SetLogging()
+	}
+
 	logger.Debug("Serve() runs under user", "uid", os.Getuid(), "gid", os.Getgid())
-	logger.Debug("Whether we use a root binder", "use", hasBinder)
+	logger.Debug("Whether we use a root binder", "use", parentIsRoot)
+
 	var binderClient *sys.BinderClient
-	if hasBinder {
+	if parentIsRoot {
 		var err error
 		binderClient, err = sys.NewBinderClient(logger)
 		if err != nil {

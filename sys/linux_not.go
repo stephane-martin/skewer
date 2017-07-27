@@ -29,3 +29,7 @@ func CanReadAuditLogs() bool {
 func Predrop() error {
 	return nil
 }
+
+func NoNewPriv() error {
+	return nil
+}

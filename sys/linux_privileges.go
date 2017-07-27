@@ -10,12 +10,9 @@ import "C"
 import (
 	"fmt"
 	"os"
-	"os/exec"
-	"os/signal"
 	"os/user"
 	"runtime"
 	"strconv"
-	"syscall"
 
 	"github.com/hashicorp/go-version"
 	"github.com/shirou/gopsutil/host"
@@ -96,13 +93,7 @@ func NeedFixLinuxPrivileges(uid, gid string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if numuid == 0 {
-		return false, fmt.Errorf("Please use --uid flag to specify a non-root user")
-	}
 	needfix := numuid != os.Getuid() || numgid != os.Getgid() || c.NeedDrop()
-	if !needfix {
-		NoNewPriv()
-	}
 	return needfix, nil
 }
 
@@ -197,17 +188,7 @@ func Drop(uid int, gid int) error {
 		if err != nil {
 			return err
 		}
-		err = c.caps.Apply(capability.CAPS)
-		if err != nil {
-			return err
-		}
-
-		fmt.Fprintf(os.Stderr, "Now running with capabilities: %s\n", c.caps.StringCap(capability.EFFECTIVE))
-		err = NoNewPriv()
-		if err != nil {
-			return err
-		}
-		return ExecOurself()
+		return c.caps.Apply(capability.CAPS)
 
 	} else if !c.CanModifySecurebits() {
 		return fmt.Errorf("Asked to change UID/GID, but no way to set the correct capabilities (need SETPCAP)")
@@ -294,37 +275,9 @@ func Drop(uid int, gid int) error {
 			return err
 		}
 
-		err = c.caps.Apply(capability.AMBIENT)
-		if err != nil {
-			return err
-		}
-		return ExecOurself()
+		return c.caps.Apply(capability.AMBIENT)
 	}
 
-}
-
-func ExecOurself() error {
-	// execute ourself under the new user
-	exe, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	cmd := exec.Cmd{
-		Args:   os.Args,
-		Path:   exe,
-		Stdin:  nil,
-		Stdout: os.Stdout,
-		Stderr: os.Stderr,
-	}
-	err = cmd.Start()
-	if err != nil {
-		return err
-	}
-
-	NoNewPriv()                                                    // the parent process can not gain new privileges
-	signal.Ignore(syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT) // so that signals only notify the child
-	cmd.Process.Wait()
-	return nil
 }
 
 func (c *CapabilitiesQuery) NeedMore() bool {

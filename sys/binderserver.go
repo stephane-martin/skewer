@@ -88,19 +88,15 @@ func BinderPacket(addr string) (net.PacketConn, error) {
 func Binder(parentFD int, logger log15.Logger) error {
 	logger = logger.New("class", "binder")
 	parentFile := os.NewFile(uintptr(parentFD), "parent_file")
-	defer parentFile.Close()
 
 	c, err := net.FileConn(parentFile)
 	if err != nil {
+		parentFile.Close()
 		return err
 	}
-	defer c.Close()
-
 	childConn := c.(*net.UnixConn)
-	scanner := bufio.NewScanner(childConn)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	generator := utils.Generator(ctx, logger)
 
@@ -211,67 +207,76 @@ func Binder(parentFD int, logger log15.Logger) error {
 		}
 	}()
 
-	listeners := map[string]net.Listener{}
-	var rmsg string
-	for scanner.Scan() {
-		rmsg = strings.Trim(scanner.Text(), " \r\n")
-		command := strings.SplitN(rmsg, " ", 2)[0]
-		args := strings.Trim(rmsg[len(command):], " \r\n")
-		logger.Debug("Received message", "message", rmsg)
+	go func() {
+		defer func() {
+			//c.Close()
+			//parentFile.Close()
+			cancel()
+		}()
+		scanner := bufio.NewScanner(childConn)
 
-		switch command {
-		case "listen":
-			logger.Debug("asked to listen", "addr", args)
-			for _, addr := range strings.Split(args, " ") {
-				lnet := strings.SplitN(addr, ":", 2)[0]
-				if IsStream(lnet) {
-					l, err := BinderListen(ctx, logger, schan, generator, addr)
-					if err == nil {
-						listeners[addr] = l
+		listeners := map[string]net.Listener{}
+		var rmsg string
+		for scanner.Scan() {
+			rmsg = strings.Trim(scanner.Text(), " \r\n")
+			command := strings.SplitN(rmsg, " ", 2)[0]
+			args := strings.Trim(rmsg[len(command):], " \r\n")
+			logger.Debug("Received message", "message", rmsg)
+
+			switch command {
+			case "listen":
+				logger.Debug("asked to listen", "addr", args)
+				for _, addr := range strings.Split(args, " ") {
+					lnet := strings.SplitN(addr, ":", 2)[0]
+					if IsStream(lnet) {
+						l, err := BinderListen(ctx, logger, schan, generator, addr)
+						if err == nil {
+							listeners[addr] = l
+						} else {
+							logger.Warn("Listen error", "error", err, "addr", addr)
+							childConn.Write([]byte(fmt.Sprintf("error %s %s", addr, err.Error())))
+						}
 					} else {
-						logger.Warn("Listen error", "error", err, "addr", addr)
-						childConn.Write([]byte(fmt.Sprintf("error %s %s", addr, err.Error())))
-					}
-				} else {
-					c, err := BinderPacket(addr)
-					if err == nil {
-						uid := <-generator
-						pchan <- &BinderPacketConn{Addr: addr, Conn: c, Uid: uid.String()}
-					} else {
-						logger.Warn("ListenPacket error", "error", err, "addr", addr)
-						childConn.Write([]byte(fmt.Sprintf("error %s %s", addr, err.Error())))
+						c, err := BinderPacket(addr)
+						if err == nil {
+							uid := <-generator
+							pchan <- &BinderPacketConn{Addr: addr, Conn: c, Uid: uid.String()}
+						} else {
+							logger.Warn("ListenPacket error", "error", err, "addr", addr)
+							childConn.Write([]byte(fmt.Sprintf("error %s %s", addr, err.Error())))
+						}
 					}
 				}
-			}
-		case "closeconn":
-			schan <- &BinderConn{Uid: args}
-			pchan <- &BinderPacketConn{Uid: args}
+			case "closeconn":
+				schan <- &BinderConn{Uid: args}
+				pchan <- &BinderPacketConn{Uid: args}
 
-		case "stoplisten":
-			l, ok := listeners[args]
-			if ok {
-				l.Close()
-				delete(listeners, args)
-			}
-			logger.Debug("Asked to stop listening", "addr", args)
-			childConn.Write([]byte(fmt.Sprintf("stopped %s\n", args)))
-		case "reset":
-			for _, l := range listeners {
-				l.Close()
-			}
-			listeners = map[string]net.Listener{}
-			schan <- &BinderConn{}
-			pchan <- &BinderPacketConn{}
+			case "stoplisten":
+				l, ok := listeners[args]
+				if ok {
+					l.Close()
+					delete(listeners, args)
+				}
+				logger.Debug("Asked to stop listening", "addr", args)
+				childConn.Write([]byte(fmt.Sprintf("stopped %s\n", args)))
+			case "reset":
+				for _, l := range listeners {
+					l.Close()
+				}
+				listeners = map[string]net.Listener{}
+				schan <- &BinderConn{}
+				pchan <- &BinderPacketConn{}
 
-		case "byebye":
-			return nil
+			case "byebye":
+				return
 
-		default:
+			default:
+			}
 		}
-	}
-	err = scanner.Err()
-	if err != nil {
-		logger.Debug("Scanner error", "error", err)
-	}
+		err = scanner.Err()
+		if err != nil {
+			logger.Debug("Scanner error", "error", err)
+		}
+	}()
 	return nil
 }
