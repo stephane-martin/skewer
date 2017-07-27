@@ -94,26 +94,6 @@ connects to Kafka, and forwards messages to Kafka.`,
 					fmt.Fprintln(os.Stderr, err)
 					os.Exit(-1)
 				}
-				/*
-					cmd := exec.Cmd{
-						Args:   os.Args,
-						Path:   exe,
-						Stdin:  nil,
-						Stdout: os.Stdout,
-						Stderr: os.Stderr,
-						Env:    []string{"SKEWER_CHILD=TRUE"},
-					}
-					err = cmd.Start()
-					if err != nil {
-						fmt.Fprintln(os.Stderr, err)
-						os.Exit(-1)
-					}
-
-					sys.NoNewPriv()                                                // the parent process can not gain new privileges
-					signal.Ignore(syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT) // so that signals only notify the child
-					cmd.Process.Wait()
-					os.Exit(0)
-				*/
 
 			} else {
 				sys.NoNewPriv()
