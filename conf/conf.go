@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
@@ -388,7 +389,25 @@ func (c *KafkaConfig) GetClient() (sarama.Client, error) {
 }
 
 func InitLoad(ctx context.Context, confDir, storeDir, prefix string, params consul.ConnParams, logger log15.Logger) (c *GConfig, updated chan bool, err error) {
-	// TODO: recover from potential panic in viper
+	defer func() {
+		// sometimes viper panics... let's catch that
+		if r := recover(); r != nil {
+			// find out exactly what the error was and set err
+			switch x := r.(type) {
+			case string:
+				err = errors.New(x)
+			case error:
+				err = x
+			default:
+				err = errors.New("Unknown panic")
+			}
+			logger.Error("Recovered in conf.InitLoad()", "error", err)
+		}
+		if err != nil {
+			c = nil
+			updated = nil
+		}
+	}()
 
 	var firstResults map[string]string
 	var consulResults chan map[string]string
