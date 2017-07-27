@@ -28,20 +28,20 @@ type AuditMessageGroup struct {
 }
 
 type SyslogMessage struct {
-	Priority      Priority               `json:"priority,string"`
-	Facility      Facility               `json:"facility,string"`
-	Severity      Severity               `json:"severity,string"`
-	Version       Version                `json:"version,string"`
-	TimeReported  time.Time              `json:"timereported,omitempty"`
-	TimeGenerated time.Time              `json:"timegenerated,omitempty"`
-	Hostname      string                 `json:"hostname"`
-	Appname       string                 `json:"appname"`
-	Procid        string                 `json:"procid"`
-	Msgid         string                 `json:"msgid"`
-	Structured    string                 `json:"structured"`
-	Message       string                 `json:"message"`
-	AuditMessage  []*AuditSubMessage     `json:"audit,omitempty"`
-	Properties    map[string]interface{} `json:"properties,omitempty"`
+	Priority         Priority               `json:"priority,string"`
+	Facility         Facility               `json:"facility,string"`
+	Severity         Severity               `json:"severity,string"`
+	Version          Version                `json:"version,string"`
+	TimeReported     time.Time              `json:"timereported,omitempty"`
+	TimeGenerated    time.Time              `json:"timegenerated,omitempty"`
+	Hostname         string                 `json:"hostname"`
+	Appname          string                 `json:"appname"`
+	Procid           string                 `json:"procid"`
+	Msgid            string                 `json:"msgid"`
+	Structured       string                 `json:"structured"`
+	Message          string                 `json:"message"`
+	AuditSubMessages []*AuditSubMessage     `json:"audit,omitempty"`
+	Properties       map[string]interface{} `json:"properties,omitempty"`
 }
 
 type RawMessage struct {
@@ -100,6 +100,7 @@ ProcID: %s
 MsgID: %s
 Structured: %s
 Message: %s
+AuditSubMessages: %s
 Properties: %s`
 
 func (m *SyslogMessage) String() string {
@@ -107,6 +108,11 @@ func (m *SyslogMessage) String() string {
 	b, err := json.Marshal(m.Properties)
 	if err == nil {
 		props = string(b)
+	}
+	subs := ""
+	b, err = json.Marshal(m.AuditSubMessages)
+	if err == nil {
+		subs = string(b)
 	}
 	return fmt.Sprintf(
 		SyslogMessageFmt,
@@ -121,6 +127,7 @@ func (m *SyslogMessage) String() string {
 		m.Msgid,
 		m.Structured,
 		m.Message,
+		subs,
 		props,
 	)
 }
@@ -180,7 +187,7 @@ func Parse(m string, format string, dont_parse_sd bool) (sm *SyslogMessage, err 
 		if err != nil {
 			return sm, nil
 		}
-		sm.AuditMessage = auditMsg.Msgs
+		sm.AuditSubMessages = auditMsg.Msgs
 		if len(auditMsg.UidMap) > 0 {
 			if sm.Properties == nil {
 				sm.Properties = map[string]interface{}{}

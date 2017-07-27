@@ -30,14 +30,24 @@ var testjsCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Println("testjs called")
 		logger := log15.New()
-		ffunc := `function FilterMessages(m) { m.Message="bla"; return FILTER.DROPPED; }`
+		ffunc := `function FilterMessages(m) { m.Message="bla"; return FILTER.PASS; }`
 		tfunc := `function Topic(m) { return "topic-" + m.Appname; }`
 		env := javascript.NewFilterEnvironment(ffunc, tfunc, "", "", "", logger)
 		m := model.SyslogMessage{}
 		m.TimeReported = time.Now()
+		m.TimeGenerated = time.Now().Add(time.Hour)
+		m.Facility = 5
+		m.Severity = 2
+		m.Priority = 11
+		m.Version = 3
+		m.Hostname = "myhostname"
+		m.Procid = "myprocid"
+		m.Msgid = "mymsgid"
 		m.Appname = "myapp"
+		m.Message = "orig message"
 		ma := map[string]string{"zog": "zogzog"}
 		m.Properties = map[string]interface{}{"foo": "bar", "ma": ma}
+		m.AuditSubMessages = []*model.AuditSubMessage{&model.AuditSubMessage{Type: 12, Data: "zob"}}
 		m2, result, err := env.FilterMessage(&m)
 		fmt.Println(err)
 		fmt.Println(result)

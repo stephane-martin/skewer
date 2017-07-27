@@ -3,6 +3,7 @@ package javascript
 import (
 	"bytes"
 	"fmt"
+	"strconv"
 	"strings"
 	"text/template"
 	"time"
@@ -12,9 +13,7 @@ import (
 	"github.com/stephane-martin/skewer/model"
 )
 
-// TODO: ensure that all the fields of the go SyslogMessage struct are passed back and forth to JS
-
-var jsSyslogMessage string = `function SyslogMessage(p, f, s, v, timer, timeg, host, app, proc, msgid, structured, msg, props) {
+var jsSyslogMessage string = `function SyslogMessage(p, f, s, v, timer, timeg, host, app, proc, msgid, structured, msg, subs, props) {
 	this.Priority = p;
 	this.Facility = f;
 	this.Severity = s;
@@ -27,20 +26,21 @@ var jsSyslogMessage string = `function SyslogMessage(p, f, s, v, timer, timeg, h
 	this.Msgid = msgid;
 	this.Structured = structured;
 	this.Message = msg;
+	this.SubMessages = subs;
 	this.Properties = props;
 }
 
-function NewSyslogMessage(p, f, s, v, timer, timeg, host, app, proc, msgid, structured, msg, props) {
-	return new SyslogMessage(p, f, s, v, timer, timeg, host, app, proc, msgid, structured, msg, props);
+function NewSyslogMessage(p, f, s, v, timer, timeg, host, app, proc, msgid, structured, msg, subs, props) {
+	return new SyslogMessage(p, f, s, v, timer, timeg, host, app, proc, msgid, structured, msg, subs, props);
 }
 
 function NewEmptySyslogMessage() {
 	var n = Date.now()
-	return new SyslogMessage(0, 0, 0, 1, n, n, "", "", "", "", "", "", {});
+	return new SyslogMessage(0, 0, 0, 1, n, n, "", "", "", "", "", "", [], {});
 }
 
 function SyslogMessageToGo(m) {
-	return new SyslogMessage(m.Priority, m.Facility, m.Severity, m.Version, m.TimeReported.getTime(), m.TimeGenerated.getTime(), m.Hostname, m.Appname, m.Procid, m.Msgid, m.Structured, m.Message, m.Properties);
+	return new SyslogMessage(m.Priority, m.Facility, m.Severity, m.Version, m.TimeReported.getTime(), m.TimeGenerated.getTime(), m.Hostname, m.Appname, m.Procid, m.Msgid, m.Structured, m.Message, m.SubMessages, m.Properties);
 }
 
 var FILTER = {
@@ -73,6 +73,7 @@ type iSyslogMessage struct {
 	Msgid         string
 	Structured    string
 	Message       string
+	SubMessages   []string
 	Properties    map[string]interface{}
 }
 
@@ -406,7 +407,13 @@ func (e *Environment) toJsMessage(m *model.SyslogMessage) (sm goja.Value, err er
 	msg := e.runtime.ToValue(m.Message)
 	props := e.runtime.ToValue(m.Properties)
 
-	sm, err = e.jsNewSyslogMessage(nil, p, f, s, v, timer, timeg, host, app, proc, msgid, structured, msg, props)
+	subs := make([]string, 0, len(m.AuditSubMessages))
+	for _, sub := range m.AuditSubMessages {
+		subs = append(subs, fmt.Sprintf("%d:%s", sub.Type, sub.Data))
+	}
+	jsSubs := e.runtime.ToValue(&subs)
+
+	sm, err = e.jsNewSyslogMessage(nil, p, f, s, v, timer, timeg, host, app, proc, msgid, structured, msg, jsSubs, props)
 	if err != nil {
 		return nil, err
 	}
@@ -427,20 +434,37 @@ func (e *Environment) fromJsMessage(sm goja.Value) (m *model.SyslogMessage, err 
 	if err != nil {
 		return nil, err
 	}
+
+	var parts []string
+	var t int
+	var sub string
+	subMessages := make([]*model.AuditSubMessage, 0, len(imsg.SubMessages))
+
+	for _, sub = range imsg.SubMessages {
+		parts = strings.SplitN(sub, ":", 2)
+		if len(parts) == 2 {
+			t, err = strconv.Atoi(parts[0])
+			if err == nil {
+				subMessages = append(subMessages, &model.AuditSubMessage{Data: parts[1], Type: uint16(t)})
+			}
+		}
+	}
+
 	msg := model.SyslogMessage{
-		Priority:      model.Priority(imsg.Priority),
-		Facility:      model.Facility(imsg.Facility),
-		Severity:      model.Severity(imsg.Severity),
-		Version:       model.Version(imsg.Version),
-		TimeGenerated: time.Unix(0, imsg.TimeGenerated*1000000),
-		TimeReported:  time.Unix(0, imsg.TimeReported*1000000),
-		Hostname:      imsg.Hostname,
-		Appname:       imsg.Appname,
-		Procid:        imsg.Procid,
-		Msgid:         imsg.Msgid,
-		Structured:    imsg.Structured,
-		Message:       imsg.Message,
-		Properties:    imsg.Properties,
+		Priority:         model.Priority(imsg.Priority),
+		Facility:         model.Facility(imsg.Facility),
+		Severity:         model.Severity(imsg.Severity),
+		Version:          model.Version(imsg.Version),
+		TimeGenerated:    time.Unix(0, imsg.TimeGenerated*1000000),
+		TimeReported:     time.Unix(0, imsg.TimeReported*1000000),
+		Hostname:         imsg.Hostname,
+		Appname:          imsg.Appname,
+		Procid:           imsg.Procid,
+		Msgid:            imsg.Msgid,
+		Structured:       imsg.Structured,
+		Message:          imsg.Message,
+		AuditSubMessages: subMessages,
+		Properties:       imsg.Properties,
 	}
 	return &msg, nil
 }

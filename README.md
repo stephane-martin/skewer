@@ -14,21 +14,13 @@ to post bugs and ask questions.
 
 
 -   Listens on TCP, UDP or RELP
-
 -   Can fetch log messages from Journald (on Linux)
-
 -   Can fetch audit logs from the kernel (on Linux)
-
 -   Configuration can be provided as a configuration file, or optionally fetched from Consul
-
 -   Can register the TCP and RELP listeners as services in Consul
-
 -   Custom message parsers and filters can be defined through Javascript functions
-
 -   The client connections to Consul and Kafka can be secured with TLS
-
 -   The TCP and RELP services can be secured in TLS
-
 -   Works on Linux and MacOS (not tested on *BSD), does not work on Windows
 
 

@@ -70,16 +70,16 @@ func (s *AuditService) Start(ctx context.Context, c conf.AuditConfig) error {
 		}
 
 		m := model.SyslogMessage{
-			Appname:       c.Appname,
-			Facility:      model.Facility(c.Facility),
-			Severity:      model.Severity(c.Severity),
-			Priority:      model.Priority(8*c.Facility + c.Severity),
-			Hostname:      hostname,
-			TimeReported:  treported,
-			TimeGenerated: tgenerated,
-			Msgid:         strconv.FormatInt(int64(auditMsg.Seq), 10),
-			Procid:        "",
-			AuditMessage:  auditMsg.Msgs,
+			Appname:          c.Appname,
+			Facility:         model.Facility(c.Facility),
+			Severity:         model.Severity(c.Severity),
+			Priority:         model.Priority(8*c.Facility + c.Severity),
+			Hostname:         hostname,
+			TimeReported:     treported,
+			TimeGenerated:    tgenerated,
+			Msgid:            strconv.FormatInt(int64(auditMsg.Seq), 10),
+			Procid:           "",
+			AuditSubMessages: auditMsg.Msgs,
 		}
 
 		if len(auditMsg.UidMap) > 0 {
