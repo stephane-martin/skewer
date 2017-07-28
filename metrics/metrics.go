@@ -19,6 +19,7 @@ type Metrics struct {
 	KafkaConnectionErrorCounter prometheus.Counter
 	KafkaAckNackCounter         *prometheus.CounterVec
 	MessageFilteringCounter     *prometheus.CounterVec
+	server                      *http.Server
 }
 
 func SetupMetrics(c conf.MetricsConfig) *Metrics {
@@ -105,17 +106,24 @@ func SetupMetrics(c conf.MetricsConfig) *Metrics {
 	prometheus.MustRegister(m.KafkaAckNackCounter)
 	prometheus.MustRegister(m.MessageFilteringCounter)
 
-	mux := http.NewServeMux()
-	mux.Handle(c.Path, promhttp.Handler())
-	server := &http.Server{
-		Addr:    fmt.Sprintf("127.0.0.1:%d", c.Port),
-		Handler: mux,
+	m.NewConf(c)
+	return &m
+}
+
+func (m *Metrics) NewConf(c conf.MetricsConfig) {
+	if m.server != nil {
+		m.server.Close()
 	}
 	if c.Enabled {
+		mux := http.NewServeMux()
+		mux.Handle(c.Path, promhttp.Handler())
+		m.server = &http.Server{
+			Addr:    fmt.Sprintf("127.0.0.1:%d", c.Port),
+			Handler: mux,
+		}
+
 		go func() {
-			server.ListenAndServe()
+			m.server.ListenAndServe()
 		}()
 	}
-
-	return &m
 }

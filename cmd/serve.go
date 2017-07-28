@@ -404,6 +404,7 @@ func Serve(hasParent bool, parentIsRoot bool) error {
 	}
 
 	Reload := func(newConf *conf.GConfig) {
+		metricStore.NewConf(newConf.Metrics)
 		// reset the kafka forwarder
 		stopForwarder()
 		startForwarder(newConf.Kafka)
