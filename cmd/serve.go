@@ -109,11 +109,22 @@ connects to Kafka, and forwards messages to Kafka.`,
 				os.Exit(-1)
 			}
 
+			err = sys.Binder(binderParentFD, logger) // returns immediately
+
+			if err != nil {
+				logger.Crit("Error setting the root binder", "error", err)
+				os.Exit(-1)
+			}
+
 			loggerChildFD, loggerParentFD, err := sys.SocketPair(syscall.SOCK_DGRAM)
 			if err != nil {
 				logger.Crit("SocketPair() error", "error", err)
 				os.Exit(-1)
 			}
+
+			loggerF := os.NewFile(uintptr(loggerParentFD), "logger")
+			loggerConn, _ := net.FileConn(loggerF)
+			utils.LogReceiver(context.Background(), loggerConn, rootlogger)
 
 			logger.Debug("Target user", "uid", numuid, "gid", numgid)
 
@@ -158,17 +169,6 @@ connects to Kafka, and forwards messages to Kafka.`,
 			signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT)
 			logger.Debug("PIDs", "parent", os.Getpid(), "child", childProcess.Process.Pid)
 
-			err = sys.Binder(binderParentFD, logger) // returns immediately
-
-			loggerF := os.NewFile(uintptr(loggerParentFD), "logger")
-			loggerConn, _ := net.FileConn(loggerF)
-			utils.LogReceiver(context.Background(), loggerConn, rootlogger)
-
-			if err != nil {
-				logger.Crit("Error setting the root binder", "error", err)
-				childProcess.Process.Signal(syscall.SIGTERM)
-				os.Exit(-1)
-			}
 			childProcess.Process.Wait()
 			os.Exit(0)
 
@@ -273,10 +273,10 @@ func Serve(hasParent bool, parentIsRoot bool) error {
 		}
 	}
 
-	metricStore := metrics.SetupMetrics()
+	metricStore := metrics.SetupMetrics(c.Metrics)
 
 	// prepare the message store
-	st, err = store.NewStore(gctx, c.Store, logger)
+	st, err = store.NewStore(gctx, c.Store, metricStore, logger)
 	if err != nil {
 		logger.Crit("Can't create the message Store", "error", err)
 		return err

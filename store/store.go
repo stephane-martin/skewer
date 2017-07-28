@@ -31,6 +31,7 @@ type MessageStore struct {
 	failedDB             utils.Partition
 	permerrorsDB         utils.Partition
 	syslogConfigsDB      utils.Partition
+	metrics              *metrics.Metrics
 	ready_mu             *sync.Mutex
 	failed_mu            *sync.Mutex
 	messages_mu          *sync.Mutex
@@ -105,7 +106,6 @@ func NewForwarder(test bool, m *metrics.Metrics, logger log15.Logger) (fwder For
 }
 
 // TODO: merge kafkaForwarder and dummyKafkaForwarder
-// TODO: metrics about what's in the store
 
 type kafkaForwarder struct {
 	logger     log15.Logger
@@ -417,7 +417,7 @@ ForOutputs:
 	}
 }
 
-func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store, error) {
+func NewStore(ctx context.Context, cfg conf.StoreConfig, m *metrics.Metrics, l log15.Logger) (Store, error) {
 
 	badgerOpts := badger.DefaultOptions
 	badgerOpts.Dir = cfg.Dirname
@@ -430,7 +430,7 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 		return nil, err
 	}
 
-	store := &MessageStore{}
+	store := &MessageStore{metrics: m}
 	store.logger = l.New("class", "MessageStore")
 	store.ready_mu = &sync.Mutex{}
 	store.failed_mu = &sync.Mutex{}
@@ -447,7 +447,7 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 	store.messagesDB = utils.NewPartition(kv, "messages")
 	if len(cfg.Secret) > 0 {
 		store.messagesDB = utils.NewEncryptedPartition(store.messagesDB, cfg.SecretB)
-		store.logger.Info("The Store is encrypted")
+		store.logger.Info("The badger store is encrypted")
 	}
 
 	store.readyDB = utils.NewPartition(kv, "ready")
@@ -461,6 +461,9 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 
 	// prune orphaned messages
 	store.pruneOrphaned()
+
+	// count existing messages in badger and report to metrics
+	store.initGauge()
 
 	store.InputsChan = make(chan *model.TcpUdpParsedMessage, 10000)
 	store.FatalErrorChan = make(chan struct{})
@@ -591,10 +594,11 @@ func (s *MessageStore) StoreSyslogConfig(config *conf.SyslogConfig) (configID st
 		return "", err
 	}
 	if !exists {
-		err := s.syslogConfigsDB.Set(confID, data)
+		err = s.syslogConfigsDB.Set(confID, data)
 		if err != nil {
 			return "", err
 		}
+		s.metrics.BadgerGauge.WithLabelValues("syslogconf").Inc()
 	}
 	return confID, nil
 }
@@ -612,6 +616,15 @@ func (s *MessageStore) GetSyslogConfig(confID string) (*conf.SyslogConfig, error
 		return nil, fmt.Errorf("Can't unmarshal the syslog config: %s", err.Error())
 	}
 	return c, nil
+}
+
+func (s *MessageStore) initGauge() {
+	s.metrics.BadgerGauge.WithLabelValues("messages").Set(float64(s.messagesDB.Count()))
+	s.metrics.BadgerGauge.WithLabelValues("ready").Set(float64(s.readyDB.Count()))
+	s.metrics.BadgerGauge.WithLabelValues("sent").Set(float64(s.sentDB.Count()))
+	s.metrics.BadgerGauge.WithLabelValues("failed").Set(float64(s.failedDB.Count()))
+	s.metrics.BadgerGauge.WithLabelValues("permerrors").Set(float64(s.permerrorsDB.Count()))
+	s.metrics.BadgerGauge.WithLabelValues("syslogconf").Set(float64(s.syslogConfigsDB.Count()))
 }
 
 func (s *MessageStore) closeBadgers() {
@@ -700,9 +713,12 @@ func (s *MessageStore) resetFailures() {
 			if err != nil {
 				s.logger.Warn("Error pushing entry from failed queue to ready queue", "uid", uid, "error", err)
 			} else {
+				s.metrics.BadgerGauge.WithLabelValues("ready").Inc()
 				err := s.failedDB.Delete(uid)
 				if err != nil {
 					s.logger.Warn("Error deleting entry from failed queue", "uid", uid, "error", err)
+				} else {
+					s.metrics.BadgerGauge.WithLabelValues("failed").Dec()
 				}
 			}
 		}
@@ -724,6 +740,7 @@ func (s *MessageStore) stash(m *model.TcpUdpParsedMessage) error {
 		s.ready_mu.Unlock()
 		return errwrap.Wrapf("Error writing message content: {{err}}", err)
 	}
+	s.metrics.BadgerGauge.WithLabelValues("messages").Inc()
 	err = s.readyDB.Set(m.Uid, []byte("true"))
 	if err != nil {
 		s.messagesDB.Delete(m.Uid)
@@ -731,6 +748,7 @@ func (s *MessageStore) stash(m *model.TcpUdpParsedMessage) error {
 		s.ready_mu.Unlock()
 		return errwrap.Wrapf("Error writing message to Ready: {{err}}", err)
 	}
+	s.metrics.BadgerGauge.WithLabelValues("ready").Inc()
 	s.messages_mu.Unlock()
 	s.ready_mu.Unlock()
 	return nil
@@ -773,8 +791,14 @@ func (s *MessageStore) retrieve(n int) (messages map[string]*model.TcpUdpParsedM
 
 	for _, uid := range invalidEntries {
 		s.logger.Debug("Deleting invalid entry", "uid", string(uid))
-		s.readyDB.Delete(uid)
-		s.messagesDB.Delete(uid)
+		err := s.readyDB.Delete(uid)
+		if err == nil {
+			s.metrics.BadgerGauge.WithLabelValues("ready").Dec()
+			err = s.messagesDB.Delete(uid)
+			if err == nil {
+				s.metrics.BadgerGauge.WithLabelValues("messages").Dec()
+			}
+		}
 	}
 
 	if len(messages) == 0 {
@@ -790,9 +814,12 @@ func (s *MessageStore) retrieve(n int) (messages map[string]*model.TcpUdpParsedM
 			s.logger.Warn("Error copying messages from Ready to Sent", "uid", uid, "error", err)
 			uidsKO = append(uidsKO, uid)
 		} else {
+			s.metrics.BadgerGauge.WithLabelValues("sent").Inc()
 			err = s.readyDB.Delete(uid)
 			if err != nil {
 				s.logger.Warn("Error deleting messages from Ready", "uid", uid, "error", err)
+			} else {
+				s.metrics.BadgerGauge.WithLabelValues("ready").Dec()
 			}
 		}
 	}
@@ -808,9 +835,12 @@ func (s *MessageStore) doACK(uid string) {
 	if err != nil {
 		s.logger.Warn("Error removing message from the Sent DB", "uid", uid, "error", err)
 	} else {
+		s.metrics.BadgerGauge.WithLabelValues("sent").Dec()
 		err := s.messagesDB.Delete(uid)
 		if err != nil {
 			s.logger.Warn("Error removing message content from DB", "uid", uid, "error", err)
+		} else {
+			s.metrics.BadgerGauge.WithLabelValues("messages").Dec()
 		}
 	}
 	s.messages_mu.Unlock()
@@ -822,9 +852,12 @@ func (s *MessageStore) doNACK(uid string) {
 	if err != nil {
 		s.logger.Warn("Error moving the message to the Failed DB", "uid", uid, "error", err)
 	} else {
+		s.metrics.BadgerGauge.WithLabelValues("failed").Inc()
 		err := s.sentDB.Delete(uid)
 		if err != nil {
 			s.logger.Warn("Error removing message from the Sent DB", "uid", uid, "error", err)
+		} else {
+			s.metrics.BadgerGauge.WithLabelValues("sent").Dec()
 		}
 	}
 	s.failed_mu.Unlock()
@@ -835,9 +868,12 @@ func (s *MessageStore) doPermanentError(uid string) {
 	if err != nil {
 		s.logger.Warn("Error moving the message to the Permanent Errors DB", "uid", uid, "error", err)
 	} else {
+		s.metrics.BadgerGauge.WithLabelValues("permerrors").Inc()
 		err := s.sentDB.Delete(uid)
 		if err != nil {
 			s.logger.Warn("Error removing message from the Sent DB", "uid", uid, "error", err)
+		} else {
+			s.metrics.BadgerGauge.WithLabelValues("sent").Dec()
 		}
 	}
 }

@@ -21,6 +21,7 @@ type PartitionKeyValueIterator interface {
 
 type Partition interface {
 	ListKeys() []string
+	Count() int
 	Delete(key string) error
 	DeleteKeys(keys []string) error
 	Set(key string, value []byte) error
@@ -75,6 +76,16 @@ func (p *partitionImpl) ListKeys() []string {
 	iter := p.KeyIterator(1000)
 	for iter.Rewind(); iter.Valid(); iter.Next() {
 		l = append(l, iter.Key())
+	}
+	iter.Close()
+	return l
+}
+
+func (p *partitionImpl) Count() int {
+	var l int
+	iter := p.KeyIterator(1000)
+	for iter.Rewind(); iter.Valid(); iter.Next() {
+		l++
 	}
 	iter.Close()
 	return l
@@ -208,6 +219,10 @@ func (encDB *EncryptedDB) Exists(key string) (bool, error) {
 
 func (encDB *EncryptedDB) ListKeys() []string {
 	return encDB.db.ListKeys()
+}
+
+func (encDB *EncryptedDB) Count() int {
+	return encDB.db.Count()
 }
 
 func (encDB *EncryptedDB) Delete(key string) error {

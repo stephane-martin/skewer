@@ -32,6 +32,7 @@ type BaseConfig struct {
 	Watchers []WatcherConfig `mapstructure:"watcher" toml:"watcher"`
 	Journald JournaldConfig  `mapstructure:"journald" toml:"journald"`
 	Audit    AuditConfig     `mapstructure:"audit" toml:"audit"`
+	Metrics  MetricsConfig   `mapstructure:"metrics" toml:"metrics"`
 }
 
 type GConfig struct {
@@ -76,6 +77,12 @@ func Default() (*GConfig, error) {
 
 func (c *GConfig) String() string {
 	return c.Export()
+}
+
+type MetricsConfig struct {
+	Enabled bool   `mapstructure:"enabled" toml:"enabled"`
+	Path    string `mapstructure:"path" toml:"path"`
+	Port    int    `mapstructure:"port" toml:"port"`
 }
 
 type WatcherConfig struct {
@@ -517,6 +524,7 @@ func (c *GConfig) ParseParamsFromConsul(params map[string]string) error {
 	kafkaConf := map[string]string{}
 	storeConf := map[string]string{}
 	auditConf := map[string]string{}
+	metricsConf := map[string]string{}
 	parsersConfMap := map[string]map[string]string{}
 	prefixLen := len(c.ConsulPrefix)
 
@@ -563,6 +571,12 @@ func (c *GConfig) ParseParamsFromConsul(params map[string]string) error {
 					parsersConfMap[splits[1]] = map[string]string{}
 				}
 				parsersConfMap[splits[1]][splits[2]] = v
+			} else {
+				c.Logger.Debug("Ignoring Consul KV", "key", k, "value", v)
+			}
+		case "metrics":
+			if len(splits) == 2 {
+				metricsConf[splits[1]] = v
 			} else {
 				c.Logger.Debug("Ignoring Consul KV", "key", k, "value", v)
 			}
@@ -655,6 +669,19 @@ func (c *GConfig) ParseParamsFromConsul(params map[string]string) error {
 		}
 	}
 
+	mconf := MetricsConfig{}
+	if len(metricsConf) > 0 {
+		vi = viper.New()
+		SetMetricsDefaults(vi, false)
+		for k, v := range metricsConf {
+			vi.Set(k, v)
+		}
+		err := vi.Unmarshal(&mconf)
+		if err != nil {
+			return err
+		}
+	}
+
 	c.Syslog = append(c.Syslog, syslogConfs...)
 	c.Parsers = append(c.Parsers, parsersConf...)
 	if len(kafkaConf) > 0 {
@@ -668,6 +695,9 @@ func (c *GConfig) ParseParamsFromConsul(params map[string]string) error {
 	}
 	if len(auditConf) > 0 {
 		c.Audit = aconf
+	}
+	if len(metricsConf) > 0 {
+		c.Metrics = mconf
 	}
 
 	return nil

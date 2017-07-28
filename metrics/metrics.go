@@ -1,13 +1,16 @@
 package metrics
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/stephane-martin/skewer/conf"
 )
 
 type Metrics struct {
+	BadgerGauge                 *prometheus.GaugeVec
 	IncomingMsgsCounter         *prometheus.CounterVec
 	ClientConnectionCounter     *prometheus.CounterVec
 	ParsingErrorCounter         *prometheus.CounterVec
@@ -18,8 +21,16 @@ type Metrics struct {
 	MessageFilteringCounter     *prometheus.CounterVec
 }
 
-func SetupMetrics() *Metrics {
+func SetupMetrics(c conf.MetricsConfig) *Metrics {
 	m := Metrics{}
+
+	m.BadgerGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "badger_entries_gauge",
+			Help: "number of messages stored in the badger database",
+		},
+		[]string{"partition"},
+	)
 
 	m.IncomingMsgsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -84,6 +95,7 @@ func SetupMetrics() *Metrics {
 		[]string{"status", "client"},
 	)
 
+	prometheus.MustRegister(m.BadgerGauge)
 	prometheus.MustRegister(m.IncomingMsgsCounter)
 	prometheus.MustRegister(m.ClientConnectionCounter)
 	prometheus.MustRegister(m.ParsingErrorCounter)
@@ -94,15 +106,16 @@ func SetupMetrics() *Metrics {
 	prometheus.MustRegister(m.MessageFilteringCounter)
 
 	mux := http.NewServeMux()
+	mux.Handle(c.Path, promhttp.Handler())
 	server := &http.Server{
-		Addr:    "127.0.0.1:8080",
+		Addr:    fmt.Sprintf("127.0.0.1:%d", c.Port),
 		Handler: mux,
 	}
-	mux.Handle("/metrics", promhttp.Handler())
-
-	go func() {
-		server.ListenAndServe()
-	}()
+	if c.Enabled {
+		go func() {
+			server.ListenAndServe()
+		}()
+	}
 
 	return &m
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/consul"
+	"github.com/stephane-martin/skewer/metrics"
 	"github.com/stephane-martin/skewer/store"
 )
 
@@ -41,8 +42,9 @@ var printStoreCmd = &cobra.Command{
 			return
 		}
 
+		metricStore := metrics.SetupMetrics(c.Metrics)
 		// prepare the message store
-		st, err = store.NewStore(ctx, c.Store, logger)
+		st, err = store.NewStore(ctx, c.Store, metricStore, logger)
 		if err != nil {
 			fmt.Println("Can't create the message Store", "error", err)
 			return
