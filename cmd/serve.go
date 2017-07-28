@@ -3,11 +3,10 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"log/syslog"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -57,7 +56,8 @@ connects to Kafka, and forwards messages to Kafka.`,
 
 		// we are in the parent
 		logfilenameFlag = ""
-		logger := SetLogging().New("class", "parent")
+		rootlogger := utils.SetLogging(loglevelFlag, logjsonFlag, syslogFlag, logfilenameFlag)
+		logger := rootlogger.New("proc", "parent")
 
 		numuid, numgid, err := sys.LookupUid(uidFlag, gidFlag)
 		if err != nil {
@@ -103,13 +103,13 @@ connects to Kafka, and forwards messages to Kafka.`,
 		} else {
 			// not Linux
 
-			binderChildFD, binderParentFD, err := sys.SocketPair()
+			binderChildFD, binderParentFD, err := sys.SocketPair(syscall.SOCK_STREAM)
 			if err != nil {
 				logger.Crit("SocketPair() error", "error", err)
 				os.Exit(-1)
 			}
 
-			loggerChildFD, loggerParentFD, err := sys.SocketPair()
+			loggerChildFD, loggerParentFD, err := sys.SocketPair(syscall.SOCK_DGRAM)
 			if err != nil {
 				logger.Crit("SocketPair() error", "error", err)
 				os.Exit(-1)
@@ -159,12 +159,16 @@ connects to Kafka, and forwards messages to Kafka.`,
 			logger.Debug("PIDs", "parent", os.Getpid(), "child", childProcess.Process.Pid)
 
 			err = sys.Binder(binderParentFD, logger) // returns immediately
+
+			loggerF := os.NewFile(uintptr(loggerParentFD), "logger")
+			loggerConn, _ := net.FileConn(loggerF)
+			utils.LogReceiver(context.Background(), loggerConn, rootlogger)
+
 			if err != nil {
 				logger.Crit("Error setting the root binder", "error", err)
 				childProcess.Process.Signal(syscall.SIGTERM)
 				os.Exit(-1)
 			}
-			sys.LoggerServer(loggerParentFD)
 			childProcess.Process.Wait()
 			os.Exit(0)
 
@@ -201,59 +205,23 @@ func init() {
 	serveCmd.Flags().BoolVar(&noMlockFlag, "no-mlock", false, "if set, skewer will not mlock() its memory")
 }
 
-func SetLogging() log15.Logger {
-	logger := log15.New()
-	log_handlers := []log15.Handler{}
-	var formatter log15.Format
-	if logjsonFlag {
-		formatter = log15.JsonFormat()
-	} else {
-		formatter = log15.LogfmtFormat()
-	}
-	if syslogFlag {
-		h, e := log15.SyslogHandler(syslog.LOG_LOCAL0|syslog.LOG_DEBUG, "skewer", formatter)
-		if e != nil {
-			fmt.Fprintf(os.Stderr, "Error opening syslog file: %s\n", e)
-		} else {
-			log_handlers = append(log_handlers, h)
-		}
-	}
-	logfilenameFlag = strings.TrimSpace(logfilenameFlag)
-	if len(logfilenameFlag) > 0 {
-		h, e := log15.FileHandler(logfilenameFlag, formatter)
-		if e != nil {
-			fmt.Fprintf(os.Stderr, "Error opening log file '%s': %s\n", logfilenameFlag, e)
-		} else {
-			log_handlers = append(log_handlers, h)
-		}
-	}
-	if len(log_handlers) == 0 {
-		log_handlers = []log15.Handler{log15.StderrHandler}
-	}
-	handler := log15.MultiHandler(log_handlers...)
-
-	lvl, e := log15.LvlFromString(loglevelFlag)
-	if e != nil {
-		lvl = log15.LvlInfo
-	}
-	handler = log15.LvlFilterHandler(lvl, handler)
-
-	logger.SetHandler(handler)
-	return logger
-}
-
 func Serve(hasParent bool, parentIsRoot bool) error {
+	gctx, gCancel := context.WithCancel(context.Background())
+	shutdownCtx, shutdown := context.WithCancel(gctx)
+	watchCtx, stopWatch := context.WithCancel(shutdownCtx)
 	var logger log15.Logger
 
 	if hasParent {
-		logger = SetLogging()
-		// forward our skewer logs to the parent process
+		loggerF := os.NewFile(4, "logger")
+		loggerConn, _ := net.FileConn(loggerF)
+		logger = utils.NewRemoteLogger(gctx, loggerConn).New("proc", "child")
 	} else {
-		logger = SetLogging()
+		logger = utils.SetLogging(loglevelFlag, logjsonFlag, syslogFlag, logfilenameFlag).New("proc", "child")
 	}
 
 	logger.Debug("Serve() runs under user", "uid", os.Getuid(), "gid", os.Getgid())
-	logger.Debug("Whether we use a root binder", "use", parentIsRoot)
+	logger.Debug("Whether we have a master process", "master", hasParent)
+	logger.Debug("Whether we use a root binder", "root_binder", parentIsRoot)
 
 	var binderClient *sys.BinderClient
 	if parentIsRoot {
@@ -266,10 +234,6 @@ func Serve(hasParent bool, parentIsRoot bool) error {
 			defer binderClient.Quit()
 		}
 	}
-
-	gctx, gCancel := context.WithCancel(context.Background())
-	shutdownCtx, shutdown := context.WithCancel(gctx)
-	watchCtx, stopWatch := context.WithCancel(shutdownCtx)
 
 	generator := utils.Generator(gctx, logger)
 
