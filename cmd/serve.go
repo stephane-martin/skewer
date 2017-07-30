@@ -310,10 +310,10 @@ func Serve(hasParent bool, parentIsRoot bool) error {
 		// after stopForwarder() has returned, no more ACK/NACK will be sent to the store,
 		// so we can close safely the channels
 		// closing the channels makes one of the store goroutine to return
-		close(st.Ack())
-		close(st.Nack())
-		close(st.ProcessingErrors())
-		// stop the other Store goroutines
+		//close(st.Ack())
+		//close(st.Nack())
+		//close(st.ProcessingErrors())
+		// stop the other Store goroutines (close the inputs channel)
 		gCancel()
 		// wait that the badger databases are correctly closed
 		st.WaitFinished()
@@ -483,11 +483,22 @@ func Serve(hasParent bool, parentIsRoot bool) error {
 		select {
 		case <-shutdownCtx.Done():
 			logger.Info("Shutting down")
+			relpServer.Unregister(registry)
+			relpServer.FinalStop()
+			_, more := <-relpServer.StatusChan
+			for more {
+				_, more = <-relpServer.StatusChan
+			}
+			logger.Debug("The RELP service has been stopped")
+
 			if journaldServer != nil {
 				journaldServer.Stop()
 			}
-			relpServer.Unregister(registry)
-			relpServer.FinalStop()
+			if auditService != nil {
+				cancelAudit()
+				auditService.WaitFinished()
+			}
+
 			tcpServer.Unregister(registry)
 			tcpServer.Stop()
 			udpServer.Stop()

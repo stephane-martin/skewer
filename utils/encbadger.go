@@ -23,8 +23,9 @@ type Partition interface {
 	ListKeys() []string
 	Count() int
 	Delete(key string) error
-	DeleteKeys(keys []string) error
+	DeleteMany(keys []string) ([]string, error)
 	Set(key string, value []byte) error
+	AddMany(m map[string][]byte) ([]string, error)
 	Get(key string) ([]byte, error)
 	Exists(key string) (bool, error)
 	KeyIterator(prefetchSize int) PartitionKeyIterator
@@ -52,6 +53,27 @@ func (p *partitionImpl) Set(key string, value []byte) error {
 	return p.parent.Set([]byte(p.prefix+key), value)
 }
 
+func (p *partitionImpl) AddMany(m map[string][]byte) (errors []string, err error) {
+	errors = []string{}
+	if len(m) == 0 {
+		return
+	}
+	entries := make([]*badger.Entry, 0, len(m))
+	for k, v := range m {
+		entries = badger.EntriesSet(entries, []byte(p.prefix+k), v)
+	}
+	err = p.parent.BatchSet(entries)
+	if err == nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.Error != nil {
+			errors = append(errors, string(entry.Key)[len(p.prefix):])
+		}
+	}
+	return
+}
+
 func (p *partitionImpl) Exists(key string) (bool, error) {
 	return p.parent.Exists([]byte(p.prefix + key))
 }
@@ -60,15 +82,25 @@ func (p *partitionImpl) Delete(key string) error {
 	return p.parent.Delete([]byte(p.prefix + key))
 }
 
-func (p *partitionImpl) DeleteKeys(keys []string) error {
+func (p *partitionImpl) DeleteMany(keys []string) (errors []string, err error) {
+	errors = []string{}
 	if len(keys) == 0 {
-		return nil
+		return
 	}
 	entries := make([]*badger.Entry, 0, len(keys))
 	for _, key := range keys {
 		entries = badger.EntriesDelete(entries, []byte(p.prefix+key))
 	}
-	return p.parent.BatchSet(entries)
+	err = p.parent.BatchSet(entries)
+	if err == nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.Error != nil {
+			errors = append(errors, string(entry.Key)[len(p.prefix):])
+		}
+	}
+	return
 }
 
 func (p *partitionImpl) ListKeys() []string {
@@ -229,8 +261,8 @@ func (encDB *EncryptedDB) Delete(key string) error {
 	return encDB.db.Delete(key)
 }
 
-func (encDB *EncryptedDB) DeleteKeys(keys []string) error {
-	return encDB.db.DeleteKeys(keys)
+func (encDB *EncryptedDB) DeleteMany(keys []string) ([]string, error) {
+	return encDB.db.DeleteMany(keys)
 }
 
 func (encDB *EncryptedDB) Set(key string, value []byte) error {
@@ -239,6 +271,27 @@ func (encDB *EncryptedDB) Set(key string, value []byte) error {
 		return err
 	}
 	return encDB.db.Set(key, encValue)
+}
+
+func (encDB *EncryptedDB) AddMany(m map[string][]byte) (errors []string, err error) {
+	var encValue []byte
+	errors = []string{}
+	encm := map[string][]byte{}
+
+	for k, v := range m {
+		encValue, err = Encrypt(v, encDB.secret)
+		if err != nil {
+			errors = append(errors, k)
+		} else {
+			encm[k] = encValue
+		}
+	}
+	otherErrors, otherErr := encDB.db.AddMany(encm)
+	errors = append(errors, otherErrors...)
+	if otherErr != nil {
+		err = otherErr
+	}
+	return
 }
 
 func (encDB *EncryptedDB) Get(key string) ([]byte, error) {

@@ -196,8 +196,6 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 
 	logger := s.logger.New("protocol", s.protocol, "local_port", local_port, "unix_socket_path", path, "format", config.Format)
 
-	inputs := s.store.Inputs()
-
 	// pull messages from raw_messages_chan, parse them and push them to the Store
 	s.wg.Add(1)
 	go func() {
@@ -223,7 +221,7 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 					Uid:    uid.String(),
 					ConfId: confId,
 				}
-				inputs <- &parsed_msg
+				s.store.Stash(&parsed_msg)
 			} else {
 				s.metrics.ParsingErrorCounter.WithLabelValues(config.Format, m.Client).Inc()
 				logger.Info("Parsing error", "client", m.Client, "message", m.Message, "error", err)

@@ -115,7 +115,6 @@ func (s *JournaldServer) Start() error {
 	if err != nil {
 		return errwrap.Wrapf("Error persisting the journald service configuration to the Store: {{err}}", err)
 	}
-	inputs := s.store.Inputs()
 	s.wgroup.Add(1)
 	go func() {
 		defer s.wgroup.Done()
@@ -137,7 +136,9 @@ func (s *JournaldServer) Start() error {
 						Uid:    uid.String(),
 						Parsed: &parsedMessage,
 					}
-					inputs <- &fullParsedMessage
+					if s.store != nil {
+						s.store.Stash(&fullParsedMessage)
+					}
 					s.metrics.IncomingMsgsCounter.WithLabelValues("journald", "journald", "", "").Inc()
 				} else {
 					return

@@ -92,11 +92,6 @@ func (s *AuditService) Start(ctx context.Context, c conf.AuditConfig) error {
 		return &m
 	}
 
-	var inputsChan chan *model.TcpUdpParsedMessage
-	if s.store != nil {
-		inputsChan = s.store.Inputs()
-	}
-
 	s.wgroup = &sync.WaitGroup{}
 	s.wgroup.Add(1)
 	go func() {
@@ -114,8 +109,8 @@ func (s *AuditService) Start(ctx context.Context, c conf.AuditConfig) error {
 				Uid:    uid.String(),
 				Parsed: parsed,
 			}
-			if inputsChan != nil {
-				inputsChan <- full
+			if s.store != nil {
+				s.store.Stash(full)
 			} else {
 				marsh, _ := json.Marshal(full)
 				fmt.Println(string(marsh))

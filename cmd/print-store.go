@@ -50,9 +50,6 @@ var printStoreCmd = &cobra.Command{
 			return
 		}
 		defer func() {
-			close(st.Ack())
-			close(st.Nack())
-			close(st.ProcessingErrors())
 			cancel()
 			st.WaitFinished()
 		}()

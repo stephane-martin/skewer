@@ -139,8 +139,6 @@ func (h TcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 	logger.Info("New client")
 	s.metrics.ClientConnectionCounter.WithLabelValues(s.protocol, client, local_port_s, path).Inc()
 
-	inputs := s.store.Inputs()
-
 	// pull messages from raw_messages_chan, parse them and push them to the Store
 	s.wg.Add(1)
 	go func() {
@@ -166,7 +164,7 @@ func (h TcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 					Uid:    uid.String(),
 					ConfId: configId,
 				}
-				inputs <- &parsed_msg
+				s.store.Stash(&parsed_msg)
 			} else {
 				s.metrics.ParsingErrorCounter.WithLabelValues(config.Format, client).Inc()
 				logger.Info("Parsing error", "Message", m.Message, "error", err)

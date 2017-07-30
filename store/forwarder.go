@@ -85,9 +85,6 @@ func (fwder *dummyKafkaForwarder) Forward(ctx context.Context, from Store, to co
 func (fwder *kafkaForwarder) doForward(ctx context.Context, from Store, to conf.KafkaConfig) {
 
 	fwder.errorChan = make(chan struct{})
-	ackChan := from.Ack()
-	nackChan := from.Nack()
-	processingErrorsChan := from.ProcessingErrors()
 	outputsChan := from.Outputs()
 
 	jsenvs := map[string]javascript.FilterEnvironment{}
@@ -130,7 +127,7 @@ func (fwder *kafkaForwarder) doForward(ctx context.Context, from Store, to conf.
 			select {
 			case succ, more := <-succChan:
 				if more {
-					ackChan <- succ.Metadata.(string)
+					from.ACK(succ.Metadata.(string))
 					fwder.metrics.KafkaAckNackCounter.WithLabelValues("ack", succ.Topic).Inc()
 				} else {
 					succChan = nil
@@ -138,7 +135,7 @@ func (fwder *kafkaForwarder) doForward(ctx context.Context, from Store, to conf.
 
 			case fail, more := <-failChan:
 				if more {
-					nackChan <- fail.Msg.Metadata.(string)
+					from.NACK(fail.Msg.Metadata.(string))
 					fwder.logger.Info("Kafka producer error", "error", fail.Error())
 					if model.IsFatalKafkaError(fail.Err) {
 						once.Do(func() { close(fwder.errorChan) })
@@ -165,7 +162,7 @@ ForOutputs:
 				config, err := from.GetSyslogConfig(message.ConfId)
 				if err != nil {
 					fwder.logger.Warn("Could not find the stored configuration for a message", "confId", message.ConfId, "msgId", message.Uid)
-					processingErrorsChan <- message.Uid
+					from.PermError(message.Uid)
 					continue ForOutputs
 				}
 				jsenvs[message.ConfId] = javascript.NewFilterEnvironment(
@@ -190,7 +187,7 @@ ForOutputs:
 
 			if len(topic) == 0 || len(partitionKey) == 0 {
 				fwder.logger.Warn("Topic or PartitionKey could not be calculated", "uid", message.Uid)
-				processingErrorsChan <- message.Uid
+				from.PermError(message.Uid)
 				continue ForOutputs
 			}
 
@@ -198,21 +195,21 @@ ForOutputs:
 
 			switch filterResult {
 			case javascript.DROPPED:
-				ackChan <- message.Uid
+				from.ACK(message.Uid)
 				fwder.metrics.MessageFilteringCounter.WithLabelValues("dropped", message.Parsed.Client).Inc()
 				continue ForOutputs
 			case javascript.REJECTED:
 				fwder.metrics.MessageFilteringCounter.WithLabelValues("rejected", message.Parsed.Client).Inc()
-				nackChan <- message.Uid
+				from.NACK(message.Uid)
 				continue ForOutputs
 			case javascript.PASS:
 				fwder.metrics.MessageFilteringCounter.WithLabelValues("passing", message.Parsed.Client).Inc()
 				if tmsg == nil {
-					ackChan <- message.Uid
+					from.ACK(message.Uid)
 					continue ForOutputs
 				}
 			default:
-				processingErrorsChan <- message.Uid
+				from.PermError(message.Uid)
 				fwder.logger.Warn("Error happened processing message", "uid", message.Uid, "error", err)
 				fwder.metrics.MessageFilteringCounter.WithLabelValues("unknown", message.Parsed.Client).Inc()
 				continue ForOutputs
@@ -228,7 +225,7 @@ ForOutputs:
 			kafkaMsg, err := nmsg.ToKafkaMessage(partitionKey, topic)
 			if err != nil {
 				fwder.logger.Warn("Error generating Kafka message", "error", err, "uid", message.Uid)
-				nackChan <- message.Uid
+				from.PermError(message.Uid)
 				continue ForOutputs
 			}
 
@@ -241,9 +238,6 @@ ForOutputs:
 func (fwder *dummyKafkaForwarder) doForward(ctx context.Context, from Store, to conf.KafkaConfig) {
 	fwder.errorChan = make(chan struct{})
 	jsenvs := map[string]javascript.FilterEnvironment{}
-	ackChan := from.Ack()
-	nackChan := from.Nack()
-	processingErrorsChan := from.ProcessingErrors()
 	outputsChan := from.Outputs()
 
 	defer atomic.StoreInt32(&fwder.forwarding, 0)
@@ -262,7 +256,7 @@ ForOutputs:
 				config, err := from.GetSyslogConfig(message.ConfId)
 				if err != nil {
 					fwder.logger.Warn("Could not find the stored configuration for a message", "confId", message.ConfId, "msgId", message.Uid)
-					processingErrorsChan <- message.Uid
+					from.PermError(message.Uid)
 					continue ForOutputs
 				}
 				jsenvs[message.ConfId] = javascript.NewFilterEnvironment(
@@ -288,7 +282,7 @@ ForOutputs:
 
 				if len(topic) == 0 || len(partitionKey) == 0 {
 					fwder.logger.Warn("Topic or PartitionKey could not be calculated", "uid", message.Uid)
-					processingErrorsChan <- message.Uid
+					from.PermError(message.Uid)
 					continue ForOutputs
 				}
 
@@ -296,21 +290,21 @@ ForOutputs:
 
 				switch filterResult {
 				case javascript.DROPPED:
-					ackChan <- message.Uid
+					from.ACK(message.Uid)
 					fwder.metrics.MessageFilteringCounter.WithLabelValues("dropped", message.Parsed.Client).Inc()
 					continue ForOutputs
 				case javascript.REJECTED:
-					nackChan <- message.Uid
+					from.NACK(message.Uid)
 					fwder.metrics.MessageFilteringCounter.WithLabelValues("rejected", message.Parsed.Client).Inc()
 					continue ForOutputs
 				case javascript.PASS:
 					fwder.metrics.MessageFilteringCounter.WithLabelValues("passing", message.Parsed.Client).Inc()
 					if tmsg == nil {
-						ackChan <- message.Uid
+						from.ACK(message.Uid)
 						continue ForOutputs
 					}
 				default:
-					processingErrorsChan <- message.Uid
+					from.PermError(message.Uid)
 					fwder.logger.Warn("Error happened when processing message", "uid", message.Uid, "error", err)
 					fwder.metrics.MessageFilteringCounter.WithLabelValues("unknown", message.Parsed.Client).Inc()
 					continue ForOutputs
@@ -325,7 +319,7 @@ ForOutputs:
 				kafkaMsg, err := nmsg.ToKafkaMessage(partitionKey, topic)
 				if err != nil {
 					fwder.logger.Warn("Error generating Kafka message", "error", err, "uid", message.Uid)
-					nackChan <- message.Uid
+					from.PermError(message.Uid)
 					continue ForOutputs
 				}
 
@@ -335,8 +329,7 @@ ForOutputs:
 				fwder.logger.Info("Message", "partitionkey", string(pkey), "topic", kafkaMsg.Topic, "msgid", message.Uid)
 				fmt.Println(string(v))
 				fmt.Println()
-
-				ackChan <- message.Uid
+				from.ACK(message.Uid)
 			}
 		}
 	}

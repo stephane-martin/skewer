@@ -8,11 +8,11 @@ import (
 )
 
 type Store interface {
-	Inputs() chan *model.TcpUdpParsedMessage
+	Stash(m *model.TcpUdpParsedMessage)
 	Outputs() chan *model.TcpUdpParsedMessage
-	Ack() chan string
-	Nack() chan string
-	ProcessingErrors() chan string
+	ACK(uid string)
+	NACK(uid string)
+	PermError(uid string)
 	Errors() chan struct{}
 	WaitFinished()
 	GetSyslogConfig(configID string) (*conf.SyslogConfig, error)

@@ -117,12 +117,13 @@ func (s *RelpServer) doStop(final bool, wait bool, mu *sync.Mutex) {
 		if s.status != FinalStopped {
 			s.status = FinalStopped
 			s.StatusChan <- FinalStopped
+			close(s.StatusChan)
 		}
 		return
 	}
 
 	if s.status == Stopped || s.status == FinalStopped || s.status == Waiting {
-		if s.status != Waiting && wait {
+		if s.status == Stopped && wait {
 			s.status = Waiting
 			s.StatusChan <- Waiting
 		}
@@ -141,6 +142,7 @@ func (s *RelpServer) doStop(final bool, wait bool, mu *sync.Mutex) {
 	if final {
 		s.status = FinalStopped
 		s.StatusChan <- FinalStopped
+		close(s.StatusChan)
 	} else if wait {
 		s.status = Waiting
 		s.StatusChan <- Waiting
