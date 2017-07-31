@@ -329,24 +329,32 @@ func Serve(hasParent bool, parentIsRoot bool) error {
 	var auditService *server.AuditService
 	var auditCtx context.Context
 	var cancelAudit context.CancelFunc
-	if c.Audit.Enabled && auditlogs.Supported {
-		if !sys.CanReadAuditLogs() {
-			logger.Info("Audit logs are requested, but the needed Linux Capability is not present. Disabling.")
-		} else {
-			logger.Info("Linux audit logs are enabled")
-			auditCtx, cancelAudit = context.WithCancel(shutdownCtx)
-			auditService = server.NewAuditService(st, generator, metricStore, logger)
-			err := auditService.Start(auditCtx, c.Audit)
-			if err != nil {
-				logger.Warn("Error starting the linux audit service", "error", err)
-				cancelAudit()
-				auditService = nil
+	if auditlogs.Supported {
+		logger.Info("Linux audit logs are supported")
+		if c.Audit.Enabled {
+			if !sys.CanReadAuditLogs() {
+				logger.Info("Audit logs are requested, but the needed Linux Capability is not present. Disabling.")
+			} else if sys.HasAnyProcess([]string{"go-audit", "auditd"}) {
+				logger.Warn("Audit logs are requested, but go-audit or auditd process is already running, so we disable audit logs")
 			} else {
-				logger.Debug("Linux audit logs service is started")
+				logger.Info("Linux audit logs are enabled")
+				auditCtx, cancelAudit = context.WithCancel(shutdownCtx)
+				auditService = server.NewAuditService(st, generator, metricStore, logger)
+				err := auditService.Start(auditCtx, c.Audit)
+				if err != nil {
+					logger.Warn("Error starting the linux audit service", "error", err)
+					cancelAudit()
+					auditService = nil
+				} else {
+					logger.Debug("Linux audit logs service is started")
+				}
+
 			}
+		} else {
+			logger.Info("Linux audit logs are disabled (not requested or not Linux)")
 		}
 	} else {
-		logger.Info("Linux audit logs are disabled (not requested or not Linux)")
+		logger.Info("Linux audit logs are not supported")
 	}
 
 	// retrieve messages from journald
