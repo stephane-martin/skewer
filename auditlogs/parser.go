@@ -76,8 +76,18 @@ func parseAuditHeader(msg *syscall.NetlinkMessage) (time string, seq int) {
 	if header[:HEADER_START_POS] == "audit(" {
 		//TODO: out of range check, possibly fully binary?
 		sep := strings.IndexByte(header, headerSepChar)
-		time = header[HEADER_START_POS:sep]
-		seq, _ = strconv.Atoi(header[sep+1:])
+		if sep == -1 {
+			return
+		} else {
+			var err error
+			time = header[HEADER_START_POS:sep]
+			seq, err = strconv.Atoi(header[sep+1:])
+			if err != nil {
+				time = ""
+				seq = 0
+				return
+			}
+		}
 
 		// Remove the header from data
 		msg.Data = msg.Data[headerStop+3:]
