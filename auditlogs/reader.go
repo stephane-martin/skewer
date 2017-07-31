@@ -21,6 +21,8 @@ func WriteAuditLogs(ctx context.Context, c conf.AuditConfig, logger log15.Logger
 		return nil, err
 	}
 
+	logger = logger.New("class", "audit")
+
 	// buffered chan, in case of audit messages bursts
 	netlinkMsgChan := make(chan *syscall.NetlinkMessage, 1000)
 	interChan := make(chan *AuditMessageGroup)
@@ -34,6 +36,7 @@ func WriteAuditLogs(ctx context.Context, c conf.AuditConfig, logger log15.Logger
 		c.LogOutOfOrder,
 		c.MaxOutOfOrder,
 		[]AuditFilter{},
+		logger,
 	)
 
 	go func() {

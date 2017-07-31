@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"syscall"
 	"time"
+
+	"github.com/inconshreveable/log15"
 )
 
 const (
@@ -24,6 +26,7 @@ type AuditMarshaller struct {
 	logOutOfOrder bool
 	maxOutOfOrder int
 	filters       map[string]map[uint16][]*regexp.Regexp // { syscall: { mtype: [regexp, ...] } }
+	logger        log15.Logger
 }
 
 type AuditFilter struct {
@@ -33,7 +36,7 @@ type AuditFilter struct {
 }
 
 // Create a new marshaller
-func NewAuditMarshaller(w chan *AuditMessageGroup, eventMin uint16, eventMax uint16, trackMessages, logOOO bool, maxOOO int, filters []AuditFilter) *AuditMarshaller {
+func NewAuditMarshaller(w chan *AuditMessageGroup, eventMin, eventMax uint16, trackMessages, logOOO bool, maxOOO int, filters []AuditFilter, l log15.Logger) *AuditMarshaller {
 	am := AuditMarshaller{
 		writer:        w,
 		msgs:          make(map[int]*AuditMessageGroup, 5), // It is not typical to have more than 2 message groups at any given time
@@ -44,6 +47,7 @@ func NewAuditMarshaller(w chan *AuditMessageGroup, eventMin uint16, eventMax uin
 		logOutOfOrder: logOOO,
 		maxOutOfOrder: maxOOO,
 		filters:       make(map[string]map[uint16][]*regexp.Regexp),
+		logger:        l,
 	}
 
 	for _, filter := range filters {
@@ -113,7 +117,7 @@ func (a *AuditMarshaller) completeMessage(seq int) {
 	var ok bool
 
 	if msg, ok = a.msgs[seq]; !ok {
-		//TODO: attempted to complete a missing message, log?
+		a.logger.Debug("Missing audit message", "seq", seq)
 		return
 	}
 
@@ -162,13 +166,11 @@ func (a *AuditMarshaller) detectMissing(seq int) {
 			}
 
 			if a.logOutOfOrder {
-				// el.Println("Got sequence", missedSeq, "after", lag, "messages. Worst lag so far", a.worstLag, "messages")
-				// todo
+				a.logger.Warn("Out of order audit message detected", "sequence", missedSeq, "after_n_messages", lag, "worst_lag", a.worstLag)
 			}
 			delete(a.missed, missedSeq)
 		} else if seq-missedSeq > a.maxOutOfOrder {
-			// el.Printf("Likely missed sequence %d, current %d, worst message delay %d\n", missedSeq, seq, a.worstLag)
-			// todo
+			a.logger.Warn("Likely missed audit sequence", "missed_sequence", missedSeq, "current_sequence", seq, "worst_lag", a.worstLag)
 			delete(a.missed, missedSeq)
 		}
 	}
