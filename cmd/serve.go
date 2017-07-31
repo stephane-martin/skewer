@@ -89,7 +89,7 @@ connects to Kafka, and forwards messages to Kafka.`,
 					fmt.Fprintln(os.Stderr, err)
 					os.Exit(-1)
 				}
-				err = syscall.Exec(exe, os.Args, []string{"SKEWER_CHILD=TRUE"})
+				err = syscall.Exec(exe, os.Args, []string{"SKEWER_CHILD=TRUE", "PATH=/bin:/usr/bin"})
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					os.Exit(-1)
@@ -351,25 +351,31 @@ func Serve(hasParent bool, parentIsRoot bool) error {
 
 	// retrieve messages from journald
 	var journaldServer *server.JournaldServer
-	if c.Journald.Enabled && journald.Supported {
-		logger.Info("Journald support is enabled")
-		journalCtx, cancelJournal := context.WithCancel(gctx)
-		journaldServer, err = server.NewJournaldServer(journalCtx, c.Journald, st, generator, metricStore, logger)
-		if err == nil {
-			err = journaldServer.Start()
-			if err != nil {
-				logger.Warn("Error starting the journald service", "error", err)
-				cancelJournal()
-				journaldServer = nil
+	if journald.Supported {
+		logger.Info("Journald is supported")
+		if c.Journald.Enabled {
+			logger.Info("Journald service is enabled")
+
+			journalCtx, cancelJournal := context.WithCancel(gctx)
+			journaldServer, err = server.NewJournaldServer(journalCtx, c.Journald, st, generator, metricStore, logger)
+			if err == nil {
+				err = journaldServer.Start()
+				if err != nil {
+					logger.Warn("Error starting the journald service", "error", err)
+					cancelJournal()
+					journaldServer = nil
+				} else {
+					logger.Debug("Journald service is started")
+				}
 			} else {
-				logger.Debug("Journald service is started")
+				logger.Warn("Error initializing the journald service", "error", err)
+				journaldServer = nil
 			}
 		} else {
-			logger.Warn("Error initializing the journald service", "error", err)
-			journaldServer = nil
+			logger.Info("Journald service is disabled")
 		}
 	} else {
-		logger.Info("Journald support is disabled (not requested or not Linux)")
+		logger.Info("Journald not supported")
 	}
 
 	// prepare the RELP service
@@ -492,14 +498,19 @@ func Serve(hasParent bool, parentIsRoot bool) error {
 			logger.Debug("The RELP service has been stopped")
 
 			if journaldServer != nil {
+				logger.Debug("Stopping journald service")
 				journaldServer.Stop()
+				logger.Debug("Stopped journald service")
 			}
 			if auditService != nil {
+				logger.Debug("Stopping audit service")
 				cancelAudit()
 				auditService.WaitFinished()
+				logger.Debug("Stopped audit service")
 			}
 
 			tcpServer.Unregister(registry)
+			logger.Debug("Stopping tcp and udp services")
 			tcpServer.Stop()
 			udpServer.Stop()
 			<-tcpServer.ClosedChan
