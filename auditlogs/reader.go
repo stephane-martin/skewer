@@ -58,7 +58,11 @@ func WriteAuditLogs(ctx context.Context, c conf.AuditConfig, logger log15.Logger
 			msg, err := client.Receive()
 			if err != nil {
 				if err == syscall.EBADF {
+					// happens when the context is canceled
 					logger.Debug("The audit Netlink returned EBADF")
+					break
+				} else if err == syscall.ENOTSOCK {
+					logger.Error("The audit Netlink returned ENOTSOCK")
 					break
 				} else {
 					logger.Warn("Error when receiving from the audit Netlink", "error", err)
