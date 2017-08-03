@@ -36,9 +36,9 @@ type SyslogMessage struct {
 	TimeGenerated    time.Time              `json:"timegenerated,omitempty"`
 	Hostname         string                 `json:"hostname"`
 	Appname          string                 `json:"appname"`
-	Procid           string                 `json:"procid"`
-	Msgid            string                 `json:"msgid"`
-	Structured       string                 `json:"structured"`
+	Procid           string                 `json:"procid,omitempty"`
+	Msgid            string                 `json:"msgid,omitempty"`
+	Structured       string                 `json:"structured,omitempty"`
 	Message          string                 `json:"message"`
 	AuditSubMessages []*AuditSubMessage     `json:"audit,omitempty"`
 	Properties       map[string]interface{} `json:"properties,omitempty"`
@@ -53,9 +53,9 @@ type RawMessage struct {
 
 type ParsedMessage struct {
 	Fields         *SyslogMessage `json:"fields"`
-	Client         string         `json:"client"`
+	Client         string         `json:"client,omitempty"`
 	LocalPort      int            `json:"local_port,string"`
-	UnixSocketPath string         `json:"unix_socket_path"`
+	UnixSocketPath string         `json:"unix_socket_path,omitempty"`
 }
 
 type TcpUdpParsedMessage struct {
