@@ -11,6 +11,7 @@ import (
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
 	"github.com/stephane-martin/skewer/conf"
+	"github.com/stephane-martin/skewer/consul"
 	"github.com/stephane-martin/skewer/metrics"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/store"
@@ -24,21 +25,30 @@ const (
 	TcpStarted
 )
 
-type TcpServer struct {
+type TcpServer interface {
+	Start() error
+	Stop()
+	Register(r *consul.Registry)
+	Unregister(r *consul.Registry)
+	WaitClosed()
+	SetConf(c conf.GConfig)
+}
+
+type tcpServerImpl struct {
 	StreamServer
 	status     TcpServerStatus
-	ClosedChan chan TcpServerStatus
+	statusChan chan TcpServerStatus
 	store      store.Store
 	metrics    *metrics.Metrics
 	generator  chan ulid.ULID
 }
 
-func (s *TcpServer) init() {
+func (s *tcpServerImpl) init() {
 	s.StreamServer.init()
 }
 
-func NewTcpServer(c *conf.GConfig, st store.Store, gen chan ulid.ULID, b *sys.BinderClient, m *metrics.Metrics, l log15.Logger) *TcpServer {
-	s := TcpServer{
+func NewTcpServer(c *conf.GConfig, st store.Store, gen chan ulid.ULID, b *sys.BinderClient, m *metrics.Metrics, l log15.Logger) TcpServer {
+	s := tcpServerImpl{
 		status:    TcpStopped,
 		store:     st,
 		metrics:   m,
@@ -49,17 +59,25 @@ func NewTcpServer(c *conf.GConfig, st store.Store, gen chan ulid.ULID, b *sys.Bi
 	s.protocol = "tcp"
 	s.Conf = *c
 	s.init()
-	s.handler = TcpHandler{Server: &s}
+	s.handler = tcpHandler{Server: &s}
 	return &s
 }
 
-func (s *TcpServer) Start() error {
+func (s *tcpServerImpl) WaitClosed() {
+	<-s.statusChan
+}
+
+func (s *tcpServerImpl) SetConf(c conf.GConfig) {
+	s.Conf = c
+}
+
+func (s *tcpServerImpl) Start() error {
 	s.statusMutex.Lock()
 	defer s.statusMutex.Unlock()
 	if s.status != TcpStopped {
 		return ServerNotStopped
 	}
-	s.ClosedChan = make(chan TcpServerStatus, 1)
+	s.statusChan = make(chan TcpServerStatus, 1)
 
 	// start listening on the required ports
 	nb := s.initTCPListeners()
@@ -69,12 +87,12 @@ func (s *TcpServer) Start() error {
 		s.logger.Info("Listening on TCP", "nb_services", nb)
 	} else {
 		s.logger.Debug("TCP Server not started: no listening port")
-		close(s.ClosedChan)
+		close(s.statusChan)
 	}
 	return nil
 }
 
-func (s *TcpServer) Stop() {
+func (s *tcpServerImpl) Stop() {
 	s.statusMutex.Lock()
 	defer s.statusMutex.Unlock()
 	if s.status != TcpStarted {
@@ -85,16 +103,16 @@ func (s *TcpServer) Stop() {
 	s.logger.Debug("TcpServer goroutines have ended")
 
 	s.status = TcpStopped
-	s.ClosedChan <- TcpStopped
-	close(s.ClosedChan)
+	s.statusChan <- TcpStopped
+	close(s.statusChan)
 	s.logger.Debug("TCP server has stopped")
 }
 
-type TcpHandler struct {
-	Server *TcpServer
+type tcpHandler struct {
+	Server *tcpServerImpl
 }
 
-func (h TcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
+func (h tcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 
 	var local_port int
 

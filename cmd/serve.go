@@ -460,8 +460,8 @@ func Serve(hasParent bool, parentIsRoot bool) error {
 		go func() {
 			tcpServer.Unregister(registry)
 			tcpServer.Stop()
-			<-tcpServer.ClosedChan
-			tcpServer.Conf = *newConf
+			tcpServer.WaitClosed()
+			tcpServer.SetConf(*newConf)
 			err := tcpServer.Start()
 			if err == nil {
 				tcpServer.Register(registry)
@@ -515,7 +515,7 @@ func Serve(hasParent bool, parentIsRoot bool) error {
 			logger.Debug("Stopping tcp and udp services")
 			tcpServer.Stop()
 			udpServer.Stop()
-			<-tcpServer.ClosedChan
+			tcpServer.WaitClosed()
 			logger.Debug("The TCP service has been stopped")
 			<-udpServer.ClosedChan
 			logger.Debug("The UDP service has been stopped")
