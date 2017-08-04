@@ -33,7 +33,6 @@ type Server struct {
 	logger          log15.Logger
 	binder          *sys.BinderClient
 	unixSocketPaths []string
-	test            bool
 	wg              *sync.WaitGroup
 	protocol        string
 	connections     map[Connection]bool
@@ -186,10 +185,6 @@ func (s *StreamServer) resetTCPListeners() {
 	}
 	s.tcpListeners = []*TCPListenerConf{}
 	s.unixListeners = []*UnixListenerConf{}
-}
-
-func (s *Server) SetTest() {
-	s.test = true
 }
 
 func (s *Server) AddConnection(conn Connection) {

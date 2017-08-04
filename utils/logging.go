@@ -18,36 +18,38 @@ const timeKey = "t"
 const lvlKey = "lvl"
 const msgKey = "msg"
 
-func LogReceiver(ctx context.Context, c net.Conn, l log15.Logger) {
-	decoder := gob.NewDecoder(c)
-	h := l.GetHandler()
+func receive(ctx context.Context, l log15.Logger, c net.Conn) {
 	keyNames := log15.RecordKeyNames{
 		Time: timeKey,
 		Msg:  msgKey,
 		Lvl:  lvlKey,
 	}
-
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				break
-			default:
-				r := Record{}
-				c.SetReadDeadline(time.Now().Add(time.Second))
-				if decoder.Decode(&r) == nil {
-					logr := log15.Record{Lvl: log15.Lvl(r.Lvl), Msg: r.Msg, Time: r.Time, KeyNames: keyNames}
-					logr.Ctx = make([]interface{}, 0, 2*len(r.Ctx))
-					for k, v := range r.Ctx {
-						logr.Ctx = append(logr.Ctx, k)
-						logr.Ctx = append(logr.Ctx, v)
-					}
-					h.Log(&logr)
+	decoder := gob.NewDecoder(c)
+	h := l.GetHandler()
+	for {
+		select {
+		case <-ctx.Done():
+			break
+		default:
+			r := Record{}
+			c.SetReadDeadline(time.Now().Add(time.Second))
+			if decoder.Decode(&r) == nil {
+				logr := log15.Record{Lvl: log15.Lvl(r.Lvl), Msg: r.Msg, Time: r.Time, KeyNames: keyNames}
+				logr.Ctx = make([]interface{}, 0, 2*len(r.Ctx))
+				for k, v := range r.Ctx {
+					logr.Ctx = append(logr.Ctx, k)
+					logr.Ctx = append(logr.Ctx, v)
 				}
+				h.Log(&logr)
 			}
 		}
-	}()
+	}
+}
 
+func LogReceiver(ctx context.Context, l log15.Logger, connections []net.Conn) {
+	for _, c := range connections {
+		go receive(ctx, l, c)
+	}
 }
 
 type Record struct {

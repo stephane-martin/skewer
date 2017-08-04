@@ -35,14 +35,15 @@ type RelpServer struct {
 	StatusChan  chan RelpServerStatus
 	kafkaClient sarama.Client
 	metrics     *metrics.Metrics
+	test        bool
 }
 
 func (s *RelpServer) init() {
 	s.StreamServer.init()
 }
 
-func NewRelpServer(c *conf.GConfig, metrics *metrics.Metrics, logger log15.Logger) *RelpServer {
-	s := RelpServer{status: Stopped, metrics: metrics}
+func NewRelpServer(c *conf.GConfig, test bool, metrics *metrics.Metrics, logger log15.Logger) *RelpServer {
+	s := RelpServer{status: Stopped, metrics: metrics, test: test}
 	s.logger = logger.New("class", "RelpServer")
 	s.init()
 	s.protocol = "relp"

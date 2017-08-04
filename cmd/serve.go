@@ -124,7 +124,7 @@ connects to Kafka, and forwards messages to Kafka.`,
 
 			loggerF := os.NewFile(uintptr(loggerParentFD), "logger")
 			loggerConn, _ := net.FileConn(loggerF)
-			utils.LogReceiver(context.Background(), loggerConn, rootlogger)
+			utils.LogReceiver(context.Background(), rootlogger, []net.Conn{loggerConn})
 
 			logger.Debug("Target user", "uid", numuid, "gid", numgid)
 
@@ -160,6 +160,9 @@ connects to Kafka, and forwards messages to Kafka.`,
 				logger.Crit("Error starting child", "error", err)
 				os.Exit(-1)
 			}
+			syscall.Close(binderChildFD)
+			syscall.Close(loggerChildFD)
+
 			sig_chan := make(chan os.Signal, 1)
 			go func() {
 				for sig := range sig_chan {
@@ -387,19 +390,13 @@ func Serve(hasParent bool, parentIsRoot bool) error {
 	}
 
 	// prepare the RELP service
-	relpServer := server.NewRelpServer(c, metricStore, logger)
-	if testFlag {
-		relpServer.SetTest()
-	}
+	relpServer := server.NewRelpServer(c, testFlag, metricStore, logger)
 	sig_chan := make(chan os.Signal)
 	signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 	relpServer.StatusChan <- server.Stopped // trigger the RELP service to start
 
 	// start the TCP service
 	tcpServer := server.NewTcpServer(c, st, generator, binderClient, metricStore, logger)
-	if testFlag {
-		tcpServer.SetTest()
-	}
 	err = tcpServer.Start()
 	if err == nil {
 		tcpServer.Register(registry)
@@ -409,9 +406,6 @@ func Serve(hasParent bool, parentIsRoot bool) error {
 
 	// start the UDP service
 	udpServer := server.NewUdpServer(c, st, generator, binderClient, metricStore, logger)
-	if testFlag {
-		udpServer.SetTest()
-	}
 	err = udpServer.Start()
 	if err != nil {
 		logger.Error("Error starting the UDP server", "error", err)
