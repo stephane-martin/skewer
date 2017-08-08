@@ -10,7 +10,6 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/metrics"
 	"github.com/stephane-martin/skewer/model"
-	"github.com/stephane-martin/skewer/store"
 	"github.com/stephane-martin/skewer/sys"
 )
 
@@ -25,14 +24,14 @@ type UdpServer struct {
 	Server
 	status     UdpServerStatus
 	ClosedChan chan UdpServerStatus
-	store      store.Store
+	stasher    model.Stasher
 	handler    PacketHandler
 	metrics    *metrics.Metrics
 	generator  chan ulid.ULID
 }
 
 type PacketHandler interface {
-	HandleConnection(conn net.PacketConn, config conf.SyslogConfig, confId string)
+	HandleConnection(conn net.PacketConn, config *conf.SyslogConfig)
 }
 
 type UdpHandler struct {
@@ -43,8 +42,8 @@ func (s *UdpServer) init() {
 	s.Server.init()
 }
 
-func NewUdpServer(c *conf.GConfig, st store.Store, gen chan ulid.ULID, b *sys.BinderClient, m *metrics.Metrics, l log15.Logger) *UdpServer {
-	s := UdpServer{status: UdpStopped, metrics: m, store: st, generator: gen}
+func NewUdpServer(c *conf.GConfig, stasher model.Stasher, gen chan ulid.ULID, b *sys.BinderClient, m *metrics.Metrics, l log15.Logger) *UdpServer {
+	s := UdpServer{status: UdpStopped, metrics: m, stasher: stasher, generator: gen}
 	s.logger = l.New("class", "UdpServer")
 	s.binder = b
 	s.init()
@@ -55,8 +54,8 @@ func NewUdpServer(c *conf.GConfig, st store.Store, gen chan ulid.ULID, b *sys.Bi
 	return &s
 }
 
-func (s *UdpServer) handleConnection(conn net.PacketConn, config conf.SyslogConfig, confId string) {
-	s.handler.HandleConnection(conn, config, confId)
+func (s *UdpServer) handleConnection(conn net.PacketConn, config *conf.SyslogConfig) {
+	s.handler.HandleConnection(conn, config)
 }
 
 func (s *UdpServer) Start() (err error) {
@@ -103,11 +102,6 @@ func (s *UdpServer) ListenPacket() int {
 	nb := 0
 	for _, syslogConf := range s.Conf.Syslog {
 		if syslogConf.Protocol == "udp" {
-			confId, err := s.store.StoreSyslogConfig(&syslogConf)
-			if err != nil {
-				s.logger.Error("Error persisting the syslog configuration to the Store", "error", err)
-				continue
-			}
 			if len(syslogConf.UnixSocketPath) > 0 {
 				conn, err := net.ListenPacket("unixgram", syslogConf.UnixSocketPath)
 				if err != nil {
@@ -131,7 +125,7 @@ func (s *UdpServer) ListenPacket() int {
 					nb++
 					s.unixSocketPaths = append(s.unixSocketPaths, syslogConf.UnixSocketPath)
 					s.wg.Add(1)
-					go s.handleConnection(conn, syslogConf, confId)
+					go s.handleConnection(conn, syslogConf)
 				}
 			} else {
 				listenAddr, _ := syslogConf.GetListenAddr()
@@ -158,7 +152,7 @@ func (s *UdpServer) ListenPacket() int {
 					s.logger.Debug("Listener", "protocol", s.protocol, "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
 					nb++
 					s.wg.Add(1)
-					go s.handleConnection(conn, syslogConf, confId)
+					go s.handleConnection(conn, syslogConf)
 				}
 			}
 		}
@@ -166,7 +160,7 @@ func (s *UdpServer) ListenPacket() int {
 	return nb
 }
 
-func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConfig, confId string) {
+func (h UdpHandler) HandleConnection(conn net.PacketConn, config *conf.SyslogConfig) {
 	var local_port int
 	var err error
 
@@ -219,9 +213,9 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 						UnixSocketPath: m.UnixSocketPath,
 					},
 					Uid:    uid.String(),
-					ConfId: confId,
+					ConfId: config.ConfID,
 				}
-				s.store.Stash(&parsed_msg)
+				s.stasher.Stash(&parsed_msg)
 			} else {
 				s.metrics.ParsingErrorCounter.WithLabelValues(config.Format, m.Client).Inc()
 				logger.Info("Parsing error", "client", m.Client, "message", m.Message, "error", err)

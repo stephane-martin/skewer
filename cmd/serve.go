@@ -265,6 +265,11 @@ func Serve() error {
 		logger.Crit("Can't create the message Store", "error", err)
 		return err
 	}
+	err = st.StoreAllSyslogConfigs(c)
+	if err != nil {
+		logger.Crit("Can't store the syslog configurations", "error", err)
+		return err
+	}
 
 	// prepare the kafka forwarder
 	forwarder := store.NewForwarder(testFlag, metricStore, logger)
@@ -290,20 +295,11 @@ func Serve() error {
 
 	defer func() {
 		// wait that the forwarder has been closed to shutdown the store
-		stopForwarder()
-		// after stopForwarder() has returned, no more ACK/NACK will be sent to the store,
-		// so we can close safely the channels
-		// closing the channels makes one of the store goroutine to return
-		//close(st.Ack())
-		//close(st.Nack())
-		//close(st.ProcessingErrors())
-		// stop the other Store goroutines (close the inputs channel)
-		gCancel()
-		// wait that the badger databases are correctly closed
-		st.WaitFinished()
-		// wait that the services have been unregistered from Consul
+		stopForwarder()   // after stopForwarder() has returned, no more ACK/NACK will be sent to the store
+		gCancel()         // stop the Store goroutines (close the inputs channel)
+		st.WaitFinished() // wait that the badger databases are correctly closed
 		if registry != nil {
-			registry.WaitFinished()
+			registry.WaitFinished() // wait that the services have been unregistered from Consul
 		}
 		time.Sleep(time.Second)
 	}()
@@ -393,6 +389,11 @@ func Serve() error {
 	}
 
 	Reload := func(newConf *conf.GConfig) {
+		err := st.StoreAllSyslogConfigs(newConf)
+		if err != nil {
+			logger.Crit("Can't store the syslog configurations", "error", err)
+		}
+
 		metricStore.NewConf(newConf.Metrics)
 		// reset the kafka forwarder
 		stopForwarder()

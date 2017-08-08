@@ -15,6 +15,10 @@ type Facility int
 type Severity int
 type Version int
 
+type Stasher interface {
+	Stash(m *TcpUdpParsedMessage)
+}
+
 type AuditSubMessage struct {
 	Type uint16 `json:"type"`
 	Data string `json:"data"`

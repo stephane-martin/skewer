@@ -16,7 +16,8 @@ type Store interface {
 	Errors() chan struct{}
 	WaitFinished()
 	GetSyslogConfig(configID string) (*conf.SyslogConfig, error)
-	StoreSyslogConfig(config *conf.SyslogConfig) (string, error)
+	//StoreSyslogConfig(config *conf.SyslogConfig) error
+	StoreAllSyslogConfigs(c *conf.GConfig) error
 	ReadAllBadgers() (map[string]string, map[string]string, map[string]string)
 }
 

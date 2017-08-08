@@ -7,14 +7,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hashicorp/errwrap"
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/journald"
 	"github.com/stephane-martin/skewer/metrics"
 	"github.com/stephane-martin/skewer/model"
-	"github.com/stephane-martin/skewer/store"
 )
 
 func EntryToSyslog(entry map[string]string) *model.SyslogMessage {
@@ -72,26 +70,26 @@ func EntryToSyslog(entry map[string]string) *model.SyslogMessage {
 }
 
 type JournaldServer struct {
-	store     store.Store
+	stasher   model.Stasher
 	reader    journald.JournaldReader
 	metrics   *metrics.Metrics
 	logger    log15.Logger
 	stopchan  chan bool
-	Conf      conf.JournaldConfig
+	Conf      *conf.JournaldConfig
 	wgroup    *sync.WaitGroup
 	generator chan ulid.ULID
 }
 
 func NewJournaldServer(
 	ctx context.Context,
-	c conf.JournaldConfig,
-	st store.Store,
+	c *conf.JournaldConfig,
+	stasher model.Stasher,
 	generator chan ulid.ULID,
 	metric *metrics.Metrics,
 	logger log15.Logger) (*JournaldServer, error) {
 
 	var err error
-	s := JournaldServer{Conf: c, store: st, metrics: metric, generator: generator}
+	s := JournaldServer{Conf: c, stasher: stasher, metrics: metric, generator: generator}
 	s.logger = logger.New("class", "journald")
 	s.reader, err = journald.NewReader(ctx, s.logger)
 	if err != nil {
@@ -104,17 +102,6 @@ func NewJournaldServer(
 
 func (s *JournaldServer) Start() error {
 	s.stopchan = make(chan bool)
-	c := conf.SyslogConfig{
-		FilterFunc:    s.Conf.FilterFunc,
-		TopicFunc:     s.Conf.TopicFunc,
-		TopicTmpl:     s.Conf.TopicTmpl,
-		PartitionFunc: s.Conf.PartitionFunc,
-		PartitionTmpl: s.Conf.PartitionTmpl,
-	}
-	confId, err := s.store.StoreSyslogConfig(&c)
-	if err != nil {
-		return errwrap.Wrapf("Error persisting the journald service configuration to the Store: {{err}}", err)
-	}
 	s.wgroup.Add(1)
 	go func() {
 		defer s.wgroup.Done()
@@ -132,12 +119,12 @@ func (s *JournaldServer) Start() error {
 						Fields:         message,
 					}
 					fullParsedMessage := model.TcpUdpParsedMessage{
-						ConfId: confId,
+						ConfId: s.Conf.ConfID,
 						Uid:    uid.String(),
 						Parsed: &parsedMessage,
 					}
-					if s.store != nil {
-						s.store.Stash(&fullParsedMessage)
+					if s.stasher != nil {
+						s.stasher.Stash(&fullParsedMessage)
 					}
 					s.metrics.IncomingMsgsCounter.WithLabelValues("journald", "journald", "", "").Inc()
 				} else {

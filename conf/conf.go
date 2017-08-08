@@ -25,13 +25,13 @@ import (
 )
 
 type BaseConfig struct {
-	Syslog   []SyslogConfig  `mapstructure:"syslog" toml:"syslog"`
+	Syslog   []*SyslogConfig `mapstructure:"syslog" toml:"syslog"`
 	Kafka    KafkaConfig     `mapstructure:"kafka" toml:"kafka"`
 	Store    StoreConfig     `mapstructure:"store" toml:"store"`
 	Parsers  []ParserConfig  `mapstructure:"parser" toml:"parser"`
 	Watchers []WatcherConfig `mapstructure:"watcher" toml:"watcher"`
-	Journald JournaldConfig  `mapstructure:"journald" toml:"journald"`
-	Audit    AuditConfig     `mapstructure:"audit" toml:"audit"`
+	Journald *JournaldConfig `mapstructure:"journald" toml:"journald"`
+	Audit    *AuditConfig    `mapstructure:"audit" toml:"audit"`
 	Metrics  MetricsConfig   `mapstructure:"metrics" toml:"metrics"`
 }
 
@@ -46,7 +46,7 @@ type GConfig struct {
 func newBaseConf() *BaseConfig {
 	brokers := []string{}
 	kafka := KafkaConfig{Brokers: brokers}
-	syslog := []SyslogConfig{}
+	syslog := []*SyslogConfig{}
 	parsers := []ParserConfig{}
 	baseConf := BaseConfig{Syslog: syslog, Kafka: kafka, Parsers: parsers}
 	return &baseConf
@@ -220,6 +220,7 @@ type JournaldConfig struct {
 	PartitionTmpl string `mapstructure:"partition_key_tmpl" toml:"partition_key_tmpl"`
 	PartitionFunc string `mapstructure:"partition_key_func" toml:"partition_key_func"`
 	FilterFunc    string `mapstructure:"filter_func" toml:"filter_func"`
+	ConfID        string `mapstructure:"-" toml:"-"`
 }
 
 type AuditConfig struct {
@@ -238,6 +239,7 @@ type AuditConfig struct {
 	PartitionTmpl   string `mapstructure:"partition_key_tmpl" toml:"partition_key_tmpl"`
 	PartitionFunc   string `mapstructure:"partition_key_func" toml:"partition_key_func"`
 	FilterFunc      string `mapstructure:"filter_func" toml:"filter_func"`
+	ConfID          string `mapstructure:"-" toml:"-"`
 }
 
 type SyslogConfig struct {
@@ -261,6 +263,7 @@ type SyslogConfig struct {
 	KeyFile         string        `mapstructure:"key_file" toml:"key_file"`
 	CertFile        string        `mapstructure:"cert_file" toml:"cert_file"`
 	ClientAuthType  string        `mapstructure:"client_auth_type" toml:"client_auth_type"`
+	ConfID          string        `mapstructure:"-" toml:"-"`
 	// todo: Partitioner ?
 }
 
@@ -587,14 +590,14 @@ func (c *GConfig) ParseParamsFromConsul(params map[string]string) error {
 
 	var vi *viper.Viper
 
-	syslogConfs := []SyslogConfig{}
+	syslogConfs := []*SyslogConfig{}
 	for _, syslogConf := range syslogConfMap {
 		vi = viper.New()
 		for k, v := range syslogConf {
 			vi.Set(k, v)
 		}
-		sconf := SyslogConfig{}
-		err := vi.Unmarshal(&sconf)
+		sconf := &SyslogConfig{}
+		err := vi.Unmarshal(sconf)
 		if err == nil {
 			syslogConfs = append(syslogConfs, sconf)
 		} else {
@@ -691,10 +694,10 @@ func (c *GConfig) ParseParamsFromConsul(params map[string]string) error {
 		c.Store = sconf
 	}
 	if len(journaldConf) > 0 {
-		c.Journald = jconf
+		c.Journald = &jconf
 	}
 	if len(auditConf) > 0 {
-		c.Audit = aconf
+		c.Audit = &aconf
 	}
 	if len(metricsConf) > 0 {
 		c.Metrics = mconf
@@ -754,7 +757,7 @@ func (c *GConfig) Complete() (err error) {
 			TopicTmpl:     "rsyslog-{{.Appname}}",
 			PartitionTmpl: "mypk-{{.Hostname}}",
 		}
-		c.Syslog = []SyslogConfig{syslogConf}
+		c.Syslog = []*SyslogConfig{&syslogConf}
 	}
 
 	for i, syslogConf := range c.Syslog {

@@ -14,7 +14,6 @@ import (
 	"github.com/stephane-martin/skewer/consul"
 	"github.com/stephane-martin/skewer/metrics"
 	"github.com/stephane-martin/skewer/model"
-	"github.com/stephane-martin/skewer/store"
 	"github.com/stephane-martin/skewer/sys"
 )
 
@@ -34,11 +33,19 @@ type TcpServer interface {
 	SetConf(c conf.GConfig)
 }
 
+type TcpServerPlugin struct {
+
+}
+
+func (s *TcpServerPlugin) Start() error {
+
+}
+
 type tcpServerImpl struct {
 	StreamServer
 	status     TcpServerStatus
 	statusChan chan TcpServerStatus
-	store      store.Store
+	stasher    model.Stasher
 	metrics    *metrics.Metrics
 	generator  chan ulid.ULID
 }
@@ -47,10 +54,10 @@ func (s *tcpServerImpl) init() {
 	s.StreamServer.init()
 }
 
-func NewTcpServer(c *conf.GConfig, st store.Store, gen chan ulid.ULID, b *sys.BinderClient, m *metrics.Metrics, l log15.Logger) TcpServer {
+func NewTcpServer(c *conf.GConfig, stasher model.Stasher, gen chan ulid.ULID, b *sys.BinderClient, m *metrics.Metrics, l log15.Logger) TcpServer {
 	s := tcpServerImpl{
 		status:    TcpStopped,
-		store:     st,
+		stasher:   stasher,
 		metrics:   m,
 		generator: gen,
 	}
@@ -112,7 +119,7 @@ type tcpHandler struct {
 	Server *tcpServerImpl
 }
 
-func (h tcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
+func (h tcpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) {
 
 	var local_port int
 
@@ -126,12 +133,6 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 		s.RemoveConnection(conn)
 		s.wg.Done()
 	}()
-
-	configId, err := s.store.StoreSyslogConfig(&config)
-	if err != nil {
-		s.logger.Error("Error storing configuration", "error", err)
-		return
-	}
 
 	client := ""
 	path := ""
@@ -180,9 +181,9 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 						UnixSocketPath: m.UnixSocketPath,
 					},
 					Uid:    uid.String(),
-					ConfId: configId,
+					ConfId: config.ConfID,
 				}
-				s.store.Stash(&parsed_msg)
+				s.stasher.Stash(&parsed_msg)
 			} else {
 				s.metrics.ParsingErrorCounter.WithLabelValues(config.Format, client).Inc()
 				logger.Info("Parsing error", "Message", m.Message, "error", err)

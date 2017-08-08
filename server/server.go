@@ -22,7 +22,7 @@ type Parser interface {
 }
 
 type StreamHandler interface {
-	HandleConnection(conn net.Conn, config conf.SyslogConfig)
+	HandleConnection(conn net.Conn, config *conf.SyslogConfig)
 }
 
 type Connection interface {
@@ -51,12 +51,12 @@ func (s *Server) init() {
 
 type TCPListenerConf struct {
 	Listener net.Listener
-	Conf     conf.SyslogConfig
+	Conf     *conf.SyslogConfig
 }
 
 type UnixListenerConf struct {
 	Listener net.Listener
-	Conf     conf.SyslogConfig
+	Conf     *conf.SyslogConfig
 }
 
 type StreamServer struct {
@@ -233,7 +233,7 @@ func (s *Server) CloseConnections() {
 	s.unixSocketPaths = []string{}
 }
 
-func (s *StreamServer) handleConnection(conn net.Conn, config conf.SyslogConfig) {
+func (s *StreamServer) handleConnection(conn net.Conn, config *conf.SyslogConfig) {
 	s.handler.HandleConnection(conn, config)
 }
 

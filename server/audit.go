@@ -9,31 +9,29 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hashicorp/errwrap"
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
 	"github.com/stephane-martin/skewer/auditlogs"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/metrics"
 	"github.com/stephane-martin/skewer/model"
-	"github.com/stephane-martin/skewer/store"
 )
 
 type AuditService struct {
-	store     store.Store
+	stasher   model.Stasher
 	metrics   *metrics.Metrics
 	logger    log15.Logger
 	wgroup    *sync.WaitGroup
 	generator chan ulid.ULID
 }
 
-func NewAuditService(st store.Store, generator chan ulid.ULID, metric *metrics.Metrics, logger log15.Logger) *AuditService {
-	s := AuditService{store: st, metrics: metric, generator: generator}
+func NewAuditService(stasher model.Stasher, generator chan ulid.ULID, metric *metrics.Metrics, logger log15.Logger) *AuditService {
+	s := AuditService{stasher: stasher, metrics: metric, generator: generator}
 	s.logger = logger.New("class", "audit")
 	return &s
 }
 
-func (s *AuditService) Start(ctx context.Context, c conf.AuditConfig) error {
+func (s *AuditService) Start(ctx context.Context, c *conf.AuditConfig) error {
 	hostname, err := os.Hostname()
 	if err != nil {
 		return err
@@ -42,22 +40,6 @@ func (s *AuditService) Start(ctx context.Context, c conf.AuditConfig) error {
 	msgChan, err := auditlogs.WriteAuditLogs(ctx, c, s.logger)
 	if err != nil {
 		return err
-	}
-
-	syslogConf := &conf.SyslogConfig{
-		FilterFunc:    c.FilterFunc,
-		TopicFunc:     c.TopicFunc,
-		TopicTmpl:     c.TopicTmpl,
-		PartitionFunc: c.PartitionFunc,
-		PartitionTmpl: c.PartitionTmpl,
-	}
-
-	confId := "fakeConfId"
-	if s.store != nil {
-		confId, err = s.store.StoreSyslogConfig(syslogConf)
-		if err != nil {
-			return errwrap.Wrapf("Error persisting the audit service configuration to the Store: {{err}}", err)
-		}
 	}
 
 	auditToSyslog := func(auditMsg *model.AuditMessageGroup) *model.SyslogMessage {
@@ -105,12 +87,12 @@ func (s *AuditService) Start(ctx context.Context, c conf.AuditConfig) error {
 				UnixSocketPath: "",
 			}
 			full := &model.TcpUdpParsedMessage{
-				ConfId: confId,
+				ConfId: c.ConfID,
 				Uid:    uid.String(),
 				Parsed: parsed,
 			}
-			if s.store != nil {
-				s.store.Stash(full)
+			if s.stasher != nil {
+				s.stasher.Stash(full)
 			} else {
 				marsh, _ := json.Marshal(full)
 				fmt.Println(string(marsh))

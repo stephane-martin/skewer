@@ -157,7 +157,7 @@ type RelpHandler struct {
 	Server *RelpServer
 }
 
-func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
+func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) {
 	// http://www.rsyslog.com/doc/relp.html
 
 	var local_port int

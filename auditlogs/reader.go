@@ -13,7 +13,7 @@ import (
 
 var Supported bool = true
 
-func WriteAuditLogs(ctx context.Context, c conf.AuditConfig, logger log15.Logger) (chan *model.AuditMessageGroup, error) {
+func WriteAuditLogs(ctx context.Context, c *conf.AuditConfig, logger log15.Logger) (chan *model.AuditMessageGroup, error) {
 	// canceling the context will make the NetlinkClient to be closed, and
 	// client.Receive will return an error EBADF
 	client, err := NewNetlinkClient(ctx, c.SocketBuffer)

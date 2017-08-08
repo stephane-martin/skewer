@@ -12,7 +12,7 @@ import (
 
 var Supported bool = false
 
-func WriteAuditLogs(ctx context.Context, c conf.AuditConfig, logger log15.Logger) (chan *model.AuditMessageGroup, error) {
+func WriteAuditLogs(ctx context.Context, c *conf.AuditConfig, logger log15.Logger) (chan *model.AuditMessageGroup, error) {
 	resultsChan := make(chan *model.AuditMessageGroup)
 
 	go func() {

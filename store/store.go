@@ -298,22 +298,60 @@ func (s *MessageStore) WaitFinished() {
 	<-s.closedChan
 }
 
-func (s *MessageStore) StoreSyslogConfig(config *conf.SyslogConfig) (configID string, err error) {
+func (s *MessageStore) StoreAllSyslogConfigs(c *conf.GConfig) (err error) {
+	for _, config := range c.Syslog {
+		err = s.StoreSyslogConfig(config)
+		if err != nil {
+			return err
+		}
+	}
+
+	auditSyslogConf := conf.SyslogConfig{
+		TopicTmpl:     c.Audit.TopicTmpl,
+		TopicFunc:     c.Audit.TopicFunc,
+		PartitionTmpl: c.Audit.PartitionTmpl,
+		PartitionFunc: c.Audit.PartitionFunc,
+		FilterFunc:    c.Audit.FilterFunc,
+	}
+	err = s.StoreSyslogConfig(&auditSyslogConf)
+	if err != nil {
+		return err
+	}
+	c.Audit.ConfID = auditSyslogConf.ConfID
+
+	journalSyslogConf := conf.SyslogConfig{
+		TopicTmpl:     c.Journald.TopicTmpl,
+		TopicFunc:     c.Journald.TopicFunc,
+		PartitionTmpl: c.Journald.PartitionTmpl,
+		PartitionFunc: c.Journald.PartitionFunc,
+		FilterFunc:    c.Journald.FilterFunc,
+	}
+	err = s.StoreSyslogConfig(&journalSyslogConf)
+	if err != nil {
+		return err
+	}
+	c.Journald.ConfID = journalSyslogConf.ConfID
+
+	return nil
+}
+
+func (s *MessageStore) StoreSyslogConfig(config *conf.SyslogConfig) error {
 	data := config.Export()
 	h := sha512.Sum512(data)
 	confID := base64.StdEncoding.EncodeToString(h[:])
 	exists, err := s.syslogConfigsDB.Exists(confID)
 	if err != nil {
-		return "", err
+		return err
 	}
 	if !exists {
 		err = s.syslogConfigsDB.Set(confID, data)
 		if err != nil {
-			return "", err
+			return err
 		}
 		s.metrics.BadgerGauge.WithLabelValues("syslogconf").Inc()
 	}
-	return confID, nil
+	config.ConfID = confID
+	return nil
 }
 
 func (s *MessageStore) GetSyslogConfig(confID string) (*conf.SyslogConfig, error) {
