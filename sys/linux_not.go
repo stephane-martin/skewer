@@ -26,6 +26,10 @@ func DropNetBind() error {
 	return nil
 }
 
+func GetCaps() string {
+	return ""
+}
+
 func CanReadAuditLogs() bool {
 	return false
 }

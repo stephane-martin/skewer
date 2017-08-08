@@ -212,6 +212,9 @@ func Serve() error {
 	logger = utils.NewRemoteLogger(gctx, loggerConn).New("proc", "child")
 
 	logger.Debug("Serve() runs under user", "uid", os.Getuid(), "gid", os.Getgid())
+	if sys.CapabilitiesSupported {
+		logger.Debug("Capabilities", "caps", sys.GetCaps())
+	}
 
 	binderClient, err := sys.NewBinderClient(logger)
 	if err != nil {

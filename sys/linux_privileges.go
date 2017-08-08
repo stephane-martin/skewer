@@ -13,6 +13,7 @@ import (
 	"os/user"
 	"runtime"
 	"strconv"
+	"strings"
 
 	"github.com/hashicorp/go-version"
 	"github.com/shirou/gopsutil/host"
@@ -154,8 +155,15 @@ func DropNetBind() error {
 		return err
 	}
 	c.caps.Unset(capability.CAPS, capability.CAP_NET_BIND_SERVICE)
-
 	return c.caps.Apply(capability.CAPS)
+}
+
+func GetCaps() string {
+	c, err := NewCapabilitiesQuery()
+	if err == nil {
+		return strings.Replace(c.caps.String(), "\"", "'", -1)
+	}
+	return ""
 }
 
 func Drop(uid int, gid int) error {
