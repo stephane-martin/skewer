@@ -49,6 +49,7 @@ connects to Kafka, and forwards messages to Kafka.`,
 
 		if os.Getenv("SKEWER_CHILD") == "TRUE" {
 			// we are in the child
+			sys.DropNetBind()
 			sys.NoNewPriv()
 			Serve()
 			os.Exit(0)
@@ -143,7 +144,7 @@ connects to Kafka, and forwards messages to Kafka.`,
 				os.NewFile(uintptr(binderChildFD), "child_binder_file"),
 				os.NewFile(uintptr(loggerChildFD), "child_logger_file"),
 			},
-			Env: []string{"SKEWER_CHILD=TRUE"},
+			Env: []string{"SKEWER_CHILD=TRUE", "PATH=/bin:/usr/bin"},
 		}
 		if os.Getuid() != numuid {
 			childProcess.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uint32(numuid), Gid: uint32(numgid)}}

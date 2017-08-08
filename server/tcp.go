@@ -34,11 +34,10 @@ type TcpServer interface {
 }
 
 type TcpServerPlugin struct {
-
 }
 
 func (s *TcpServerPlugin) Start() error {
-
+	return nil
 }
 
 type tcpServerImpl struct {

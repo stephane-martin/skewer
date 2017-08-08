@@ -22,6 +22,10 @@ func FixLinuxPrivileges(uid string, gid string) error {
 	return nil
 }
 
+func DropNetBind() error {
+	return nil
+}
+
 func CanReadAuditLogs() bool {
 	return false
 }

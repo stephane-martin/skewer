@@ -148,6 +148,16 @@ func (c *CapabilitiesQuery) NeedDrop() bool {
 	return false
 }
 
+func DropNetBind() error {
+	c, err := NewCapabilitiesQuery()
+	if err != nil {
+		return err
+	}
+	c.caps.Unset(capability.CAPS, capability.CAP_NET_BIND_SERVICE)
+
+	return c.caps.Apply(capability.CAPS)
+}
+
 func Drop(uid int, gid int) error {
 	c, err := NewCapabilitiesQuery()
 	if err != nil {
