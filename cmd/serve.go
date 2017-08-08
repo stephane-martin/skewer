@@ -47,12 +47,35 @@ connects to Kafka, and forwards messages to Kafka.`,
 			}
 		}
 
-		if os.Getenv("SKEWER_CHILD") == "TRUE" {
-			// we are in the child
-			sys.DropNetBind()
+		if os.Getenv("SKEWER_LINUX_CHILD") == "TRUE" {
+			// we are in the final child on linux
 			sys.NoNewPriv()
 			Serve()
 			os.Exit(0)
+		}
+
+		if os.Getenv("SKEWER_CHILD") == "TRUE" {
+			// we are in the child
+			if sys.CapabilitiesSupported {
+				// another execve is necessary on Linux to ensure that
+				// the following capability drop will be effective on
+				// all go threads
+				sys.DropNetBind()
+				exe, err := os.Executable()
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(-1)
+				}
+				err = syscall.Exec(exe, os.Args, []string{"PATH=/bin:/usr/bin", "SKEWER_LINUX_CHILD=TRUE"})
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(-1)
+				}
+			} else {
+				sys.NoNewPriv()
+				Serve()
+				os.Exit(0)
+			}
 		}
 
 		// we are in the parent

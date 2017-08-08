@@ -154,7 +154,10 @@ func DropNetBind() error {
 	if err != nil {
 		return err
 	}
+
+	c.caps.Unset(capability.AMBIENT, capability.CAP_NET_BIND_SERVICE)
 	c.caps.Unset(capability.CAPS, capability.CAP_NET_BIND_SERVICE)
+	c.caps.Apply(capability.AMBIENT)
 	return c.caps.Apply(capability.CAPS)
 }
 
