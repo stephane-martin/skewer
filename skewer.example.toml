@@ -81,7 +81,7 @@
 
 # listens on a unix socket
 [[syslog]]
-  unix_socket_path = "/Users/stef/truc.sock"
+  unix_socket_path = "/tmp/stuff.sock"
   format = "auto"
   protocol = "udp"
 

@@ -39,6 +39,7 @@ func BinderListen(ctx context.Context, logger log15.Logger, schan chan *BinderCo
 
 	if lnet == "unix" || lnet == "unixpacket" {
 		os.Chmod(laddr, 0777)
+		l.(*net.UnixListener).SetUnlinkOnClose(true)
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -118,7 +119,14 @@ func Binder(parentFD int, logger log15.Logger) error {
 			case bc := <-pchan:
 				if bc.Conn == nil {
 					if len(bc.Uid) == 0 {
+						// close all UDP connections
 						for uid := range packetconnections {
+							if unixc, unixok := packetconnections[uid].(*net.UnixConn); unixok {
+								path := unixc.LocalAddr().String()
+								if !strings.HasPrefix(path, "@") {
+									os.Remove(path)
+								}
+							}
 							packetconnections[uid].Close()
 							if f, ok := connfiles[uid]; ok {
 								f.Close()
@@ -127,6 +135,7 @@ func Binder(parentFD int, logger log15.Logger) error {
 						}
 						packetconnections = map[string]net.PacketConn{}
 					} else {
+						// close one UDP connection
 						f, ok := connfiles[bc.Uid]
 						if ok {
 							delete(connfiles, bc.Uid)
@@ -134,6 +143,12 @@ func Binder(parentFD int, logger log15.Logger) error {
 						}
 						conn, ok := packetconnections[bc.Uid]
 						if ok {
+							if unixc, unixok := conn.(*net.UnixConn); unixok {
+								path := unixc.LocalAddr().String()
+								if !strings.HasPrefix(path, "@") {
+									os.Remove(path)
+								}
+							}
 							delete(packetconnections, bc.Uid)
 							conn.Close()
 						}
@@ -232,6 +247,7 @@ func Binder(parentFD int, logger log15.Logger) error {
 						l, err := BinderListen(ctx, logger, schan, generator, addr)
 						if err == nil {
 							listeners[addr] = l
+							childConn.Write([]byte(fmt.Sprintf("confirmlisten %s", addr)))
 						} else {
 							logger.Warn("Listen error", "error", err, "addr", addr)
 							childConn.Write([]byte(fmt.Sprintf("error %s %s", addr, err.Error())))

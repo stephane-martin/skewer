@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/inconshreveable/log15"
@@ -141,36 +142,51 @@ func (s *StreamServer) initTCPListeners() int {
 			if err != nil {
 				if s.binder == nil {
 					s.logger.Warn("Error listening on stream unix socket", "path", syslogConf.UnixSocketPath, "error", err)
-					continue
+					l = nil
+				} else {
+					s.logger.Info("Error listening on stream unix socket. Retrying as root.", "path", syslogConf.UnixSocketPath, "error", err)
+					l, err = s.binder.Listen("unix", syslogConf.UnixSocketPath)
+					if err != nil {
+						s.logger.Warn("Parent could not listen either", "path", syslogConf.UnixSocketPath, "error", err)
+						l = nil
+					}
 				}
-				s.logger.Info("Error listening on stream unix socket. Retrying as root.", "path", syslogConf.UnixSocketPath, "error", err)
-				l, _ = s.binder.Listen("unix", syslogConf.UnixSocketPath)
 			}
-			s.logger.Debug("Listener", "protocol", s.protocol, "path", syslogConf.UnixSocketPath, "format", syslogConf.Format)
-			nb++
-			lc := UnixListenerConf{
-				Listener: l,
-				Conf:     syslogConf,
+			if l != nil {
+				s.logger.Debug("Listener", "protocol", s.protocol, "path", syslogConf.UnixSocketPath, "format", syslogConf.Format)
+				nb++
+				lc := UnixListenerConf{
+					Listener: l,
+					Conf:     syslogConf,
+				}
+				s.unixListeners = append(s.unixListeners, &lc)
+				s.unixSocketPaths = append(s.unixSocketPaths, syslogConf.UnixSocketPath)
 			}
-			s.unixListeners = append(s.unixListeners, &lc)
 		} else {
 			listenAddr, _ := syslogConf.GetListenAddr()
 			l, err := net.Listen("tcp", listenAddr)
 			if err != nil {
 				if s.binder == nil || syslogConf.Port > 1024 {
 					s.logger.Warn("Error listening on stream (TCP or RELP)", "listen_addr", listenAddr, "error", err)
-					continue
+					l = nil
+				} else {
+					s.logger.Info("Error listening on stream (TCP or RELP). Retrying as root.", "listen_addr", listenAddr, "error", err)
+					l, err = s.binder.Listen("tcp", listenAddr)
+					if err != nil {
+						s.logger.Warn("Parent could not listen either", "listen_addr", listenAddr, "error", err)
+						l = nil
+					}
 				}
-				s.logger.Info("Error listening on stream (TCP or RELP). Retrying as root.", "listen_addr", listenAddr, "error", err)
-				l, _ = s.binder.Listen("tcp", listenAddr)
 			}
-			s.logger.Debug("Listener", "protocol", s.protocol, "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
-			nb++
-			lc := TCPListenerConf{
-				Listener: l,
-				Conf:     syslogConf,
+			if l != nil {
+				s.logger.Debug("Listener", "protocol", s.protocol, "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
+				nb++
+				lc := TCPListenerConf{
+					Listener: l,
+					Conf:     syslogConf,
+				}
+				s.tcpListeners = append(s.tcpListeners, &lc)
 			}
-			s.tcpListeners = append(s.tcpListeners, &lc)
 		}
 	}
 	return nb
@@ -209,7 +225,9 @@ func (s *Server) CloseConnections() {
 		conn.Close()
 	}
 	for _, path := range s.unixSocketPaths {
-		os.Remove(path)
+		if !strings.HasPrefix(path, "@") {
+			os.Remove(path)
+		}
 	}
 	s.connections = map[Connection]bool{}
 	s.unixSocketPaths = []string{}

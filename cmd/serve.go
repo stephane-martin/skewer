@@ -50,12 +50,44 @@ connects to Kafka, and forwards messages to Kafka.`,
 		if os.Getenv("SKEWER_CHILD") == "TRUE" {
 			// we are in the child
 			sys.NoNewPriv()
-			Serve(os.Getenv("SKEWER_HAS_PARENT") == "TRUE", os.Getenv("SKEWER_HAS_ROOT_PARENT") == "TRUE")
+			Serve()
 			os.Exit(0)
 		}
 
 		// we are in the parent
-		logfilenameFlag = ""
+
+		if sys.CapabilitiesSupported {
+			// under Linux, re-exec ourself immediately with fewer privileges
+
+			need_fix, err := sys.NeedFixLinuxPrivileges(uidFlag, gidFlag)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(-1)
+			}
+			if need_fix {
+				if os.Getenv("SKEWER_DROPPED") == "TRUE" {
+					fmt.Fprintln(os.Stderr, "Dropping privileges failed!")
+					os.Exit(-1)
+				}
+				err = sys.FixLinuxPrivileges(uidFlag, gidFlag)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(-1)
+				}
+				sys.NoNewPriv()
+				exe, err := os.Executable()
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(-1)
+				}
+				err = syscall.Exec(exe, os.Args, []string{"PATH=/bin:/usr/bin", "SKEWER_DROPPED=TRUE"})
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(-1)
+				}
+			}
+		}
+
 		rootlogger := utils.SetLogging(loglevelFlag, logjsonFlag, syslogFlag, logfilenameFlag)
 		logger := rootlogger.New("proc", "parent")
 
@@ -69,113 +101,73 @@ connects to Kafka, and forwards messages to Kafka.`,
 			os.Exit(-1)
 		}
 
-		if sys.CapabilitiesSupported {
-			// Linux
-
-			need_fix, err := sys.NeedFixLinuxPrivileges(uidFlag, gidFlag)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				os.Exit(-1)
-			}
-			if need_fix {
-				err = sys.FixLinuxPrivileges(uidFlag, gidFlag) // should not return, but re-exec self
-				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					os.Exit(-1)
-				}
-				sys.NoNewPriv()
-				exe, err := os.Executable()
-				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					os.Exit(-1)
-				}
-				err = syscall.Exec(exe, os.Args, []string{"SKEWER_CHILD=TRUE", "PATH=/bin:/usr/bin"})
-				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					os.Exit(-1)
-				}
-
-			} else {
-				sys.NoNewPriv()
-				Serve(false, false)
-				os.Exit(0)
-			}
-		} else {
-			// not Linux
-
-			binderChildFD, binderParentFD, err := sys.SocketPair(syscall.SOCK_STREAM)
-			if err != nil {
-				logger.Crit("SocketPair() error", "error", err)
-				os.Exit(-1)
-			}
-
-			err = sys.Binder(binderParentFD, logger) // returns immediately
-
-			if err != nil {
-				logger.Crit("Error setting the root binder", "error", err)
-				os.Exit(-1)
-			}
-
-			loggerChildFD, loggerParentFD, err := sys.SocketPair(syscall.SOCK_DGRAM)
-			if err != nil {
-				logger.Crit("SocketPair() error", "error", err)
-				os.Exit(-1)
-			}
-
-			loggerF := os.NewFile(uintptr(loggerParentFD), "logger")
-			loggerConn, _ := net.FileConn(loggerF)
-			utils.LogReceiver(context.Background(), rootlogger, []net.Conn{loggerConn})
-
-			logger.Debug("Target user", "uid", numuid, "gid", numgid)
-
-			// execute ourself under the new user
-			exe, err := sys.Executable() // custom Executable function to support OpenBSD
-			if err != nil {
-				logger.Crit("Error getting executable name", "error", err)
-				os.Exit(-1)
-			}
-
-			env := []string{"SKEWER_CHILD=TRUE", "SKEWER_HAS_PARENT=TRUE"}
-			if os.Getuid() == 0 {
-				env = append(env, "SKEWER_HAS_ROOT_PARENT=TRUE")
-			}
-
-			childProcess := exec.Cmd{
-				Args:   os.Args,
-				Path:   exe,
-				Stdin:  nil,
-				Stdout: os.Stdout,
-				Stderr: os.Stderr,
-				ExtraFiles: []*os.File{
-					os.NewFile(uintptr(binderChildFD), "child_binder_file"),
-					os.NewFile(uintptr(loggerChildFD), "child_logger_file"),
-				},
-				Env: env,
-			}
-			if os.Getuid() != numuid {
-				childProcess.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uint32(numuid), Gid: uint32(numgid)}}
-			}
-			err = childProcess.Start()
-			if err != nil {
-				logger.Crit("Error starting child", "error", err)
-				os.Exit(-1)
-			}
-			syscall.Close(binderChildFD)
-			syscall.Close(loggerChildFD)
-
-			sig_chan := make(chan os.Signal, 1)
-			go func() {
-				for sig := range sig_chan {
-					logger.Debug("parent received signal (ignored)", "signal", sig)
-				}
-			}()
-			signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT)
-			logger.Debug("PIDs", "parent", os.Getpid(), "child", childProcess.Process.Pid)
-
-			childProcess.Process.Wait()
-			os.Exit(0)
-
+		binderChildFD, binderParentFD, err := sys.SocketPair(syscall.SOCK_STREAM)
+		if err != nil {
+			logger.Crit("SocketPair() error", "error", err)
+			os.Exit(-1)
 		}
+
+		err = sys.Binder(binderParentFD, logger) // returns immediately
+
+		if err != nil {
+			logger.Crit("Error setting the root binder", "error", err)
+			os.Exit(-1)
+		}
+
+		loggerChildFD, loggerParentFD, err := sys.SocketPair(syscall.SOCK_DGRAM)
+		if err != nil {
+			logger.Crit("SocketPair() error", "error", err)
+			os.Exit(-1)
+		}
+
+		loggerF := os.NewFile(uintptr(loggerParentFD), "logger")
+		loggerConn, _ := net.FileConn(loggerF)
+		utils.LogReceiver(context.Background(), rootlogger, []net.Conn{loggerConn})
+
+		logger.Debug("Target user", "uid", numuid, "gid", numgid)
+
+		// execute child under the new user
+		exe, err := sys.Executable() // custom Executable function to support OpenBSD
+		if err != nil {
+			logger.Crit("Error getting executable name", "error", err)
+			os.Exit(-1)
+		}
+
+		childProcess := exec.Cmd{
+			Args:   os.Args,
+			Path:   exe,
+			Stdin:  nil,
+			Stdout: os.Stdout,
+			Stderr: os.Stderr,
+			ExtraFiles: []*os.File{
+				os.NewFile(uintptr(binderChildFD), "child_binder_file"),
+				os.NewFile(uintptr(loggerChildFD), "child_logger_file"),
+			},
+			Env: []string{"SKEWER_CHILD=TRUE"},
+		}
+		if os.Getuid() != numuid {
+			childProcess.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uint32(numuid), Gid: uint32(numgid)}}
+		}
+		err = childProcess.Start()
+		if err != nil {
+			logger.Crit("Error starting child", "error", err)
+			os.Exit(-1)
+		}
+		syscall.Close(binderChildFD)
+		syscall.Close(loggerChildFD)
+
+		sig_chan := make(chan os.Signal, 1)
+		go func() {
+			for sig := range sig_chan {
+				logger.Debug("parent received signal (ignored)", "signal", sig)
+			}
+		}()
+		signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT)
+		logger.Debug("PIDs", "parent", os.Getpid(), "child", childProcess.Process.Pid)
+
+		childProcess.Process.Wait()
+		os.Exit(0)
+
 	},
 }
 
@@ -208,34 +200,24 @@ func init() {
 	serveCmd.Flags().BoolVar(&noMlockFlag, "no-mlock", false, "if set, skewer will not mlock() its memory")
 }
 
-func Serve(hasParent bool, parentIsRoot bool) error {
+func Serve() error {
 	gctx, gCancel := context.WithCancel(context.Background())
 	shutdownCtx, shutdown := context.WithCancel(gctx)
 	watchCtx, stopWatch := context.WithCancel(shutdownCtx)
 	var logger log15.Logger
 
-	if hasParent {
-		loggerF := os.NewFile(4, "logger")
-		loggerConn, _ := net.FileConn(loggerF)
-		logger = utils.NewRemoteLogger(gctx, loggerConn).New("proc", "child")
-	} else {
-		logger = utils.SetLogging(loglevelFlag, logjsonFlag, syslogFlag, logfilenameFlag).New("proc", "child")
-	}
+	loggerF := os.NewFile(4, "logger")
+	loggerConn, _ := net.FileConn(loggerF)
+	logger = utils.NewRemoteLogger(gctx, loggerConn).New("proc", "child")
 
 	logger.Debug("Serve() runs under user", "uid", os.Getuid(), "gid", os.Getgid())
-	logger.Debug("Whether we have a master process", "master", hasParent)
-	logger.Debug("Whether we use a root binder", "root_binder", parentIsRoot)
 
-	var binderClient *sys.BinderClient
-	if parentIsRoot {
-		var err error
-		binderClient, err = sys.NewBinderClient(logger)
-		if err != nil {
-			logger.Error("Error binding to the root parent socket", "error", err)
-			binderClient = nil
-		} else {
-			defer binderClient.Quit()
-		}
+	binderClient, err := sys.NewBinderClient(logger)
+	if err != nil {
+		logger.Error("Error binding to the root parent socket", "error", err)
+		binderClient = nil
+	} else {
+		defer binderClient.Quit()
 	}
 
 	generator := utils.Generator(gctx, logger)
@@ -255,7 +237,6 @@ func Serve(hasParent bool, parentIsRoot bool) error {
 		Insecure:   consulInsecure,
 	}
 
-	var err error
 	// read configuration
 	for {
 		c, updated, err = conf.InitLoad(watchCtx, configDirName, storeDirname, consulPrefix, params, logger)

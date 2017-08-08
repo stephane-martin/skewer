@@ -26,6 +26,7 @@ type FileConn struct {
 	uid        string
 	parentConn *net.UnixConn
 	err        string
+	confirmed  bool
 }
 
 func (c *FileConn) Close() error {
@@ -101,7 +102,7 @@ func NewBinderClient(logger log15.Logger) (*BinderClient, error) {
 						c.iconnMu.Lock()
 						if i, ok := c.IncomingConn[addr]; ok {
 							if i != nil {
-								i <- &FileConn{err: errorstr, parentConn: c.parentConn}
+								i <- &FileConn{err: errorstr, parentConn: c.parentConn, confirmed: false}
 							}
 						}
 						c.iconnMu.Unlock()
@@ -115,6 +116,18 @@ func NewBinderClient(logger log15.Logger) (*BinderClient, error) {
 						}
 						c.ipacketMu.Unlock()
 					}
+				}
+
+				if strings.HasPrefix(msg, "confirmlisten ") {
+					parts := strings.SplitN(msg, " ", 2)
+					addr := parts[1]
+					c.iconnMu.Lock()
+					if i, ok := c.IncomingConn[addr]; ok {
+						if i != nil {
+							i <- &FileConn{parentConn: c.parentConn, confirmed: true}
+						}
+					}
+					c.iconnMu.Unlock()
 				}
 
 				if strings.HasPrefix(msg, "newconn ") && oobn > 0 {
@@ -221,12 +234,22 @@ func (l *BinderListener) Addr() net.Addr {
 func (c *BinderClient) Listen(lnet string, laddr string) (net.Listener, error) {
 	addr := fmt.Sprintf("%s:%s", lnet, laddr)
 	c.iconnMu.Lock()
-	if _, ok := c.IncomingConn[addr]; !ok {
+	ichan, ok := c.IncomingConn[addr]
+	if !ok {
 		c.IncomingConn[addr] = make(chan *FileConn)
+		ichan = c.IncomingConn[addr]
 	}
 	c.iconnMu.Unlock()
 	c.parentConn.Write([]byte(fmt.Sprintf("listen %s\n", addr)))
-	return &BinderListener{addr: addr, client: c}, nil
+
+	confirmation, more := <-ichan
+	if !more {
+		return nil, &net.OpError{Err: fmt.Errorf("Closed ichan?!"), Op: "Listen"}
+	} else if len(confirmation.err) > 0 {
+		return nil, &net.OpError{Err: fmt.Errorf(confirmation.err), Op: "Listen"}
+	} else {
+		return &BinderListener{addr: addr, client: c}, nil
+	}
 }
 
 func (c *BinderClient) ListenPacket(lnet string, laddr string) (net.PacketConn, error) {
