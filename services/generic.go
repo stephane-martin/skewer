@@ -1,21 +1,41 @@
-package server
+package services
 
 import (
 	"crypto/tls"
-	"fmt"
 	"net"
 	"os"
 	"strings"
 	"sync"
 
 	"github.com/inconshreveable/log15"
+	"github.com/oklog/ulid"
 	"github.com/stephane-martin/skewer/conf"
-	"github.com/stephane-martin/skewer/consul"
 	"github.com/stephane-martin/skewer/javascript"
+	"github.com/stephane-martin/skewer/metrics"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/sys"
 	"github.com/stephane-martin/skewer/utils"
 )
+
+type NetworkService interface {
+	Start(test bool) ([]*model.ListenerInfo, error)
+	Stop()
+	WaitClosed()
+	SetConf(sc []*conf.SyslogConfig, pc []conf.ParserConfig)
+	SetKafkaConf(kc *conf.KafkaConfig)
+}
+
+func NewNetworkService(t string, stasher model.Stasher, gen chan ulid.ULID, b *sys.BinderClient, m *metrics.Metrics, l log15.Logger) NetworkService {
+	if t == "skewer-tcp" {
+		return NewTcpService(stasher, gen, b, m, l)
+	} else if t == "skewer-udp" {
+		return NewUdpService(stasher, gen, b, m, l)
+	} else if t == "skewer-relp" {
+		return NewRelpService(b, m, l)
+	} else {
+		return nil
+	}
+}
 
 type Parser interface {
 	Parse(m string, dont_parse_sd bool) (*model.SyslogMessage, error)
@@ -29,8 +49,9 @@ type Connection interface {
 	Close() error
 }
 
-type Server struct {
-	Conf            conf.GConfig
+type GenericService struct {
+	SyslogConfigs   []*conf.SyslogConfig
+	ParserConfigs   []conf.ParserConfig
 	logger          log15.Logger
 	binder          *sys.BinderClient
 	unixSocketPaths []string
@@ -41,12 +62,17 @@ type Server struct {
 	statusMutex     *sync.Mutex
 }
 
-func (s *Server) init() {
+func (s *GenericService) init() {
 	s.wg = &sync.WaitGroup{}
 	s.unixSocketPaths = []string{}
 	s.connMutex = &sync.Mutex{}
 	s.connections = map[Connection]bool{}
 	s.statusMutex = &sync.Mutex{}
+}
+
+func (s *GenericService) SetConf(sc []*conf.SyslogConfig, pc []conf.ParserConfig) {
+	s.SyslogConfigs = sc
+	s.ParserConfigs = pc
 }
 
 type TCPListenerConf struct {
@@ -59,16 +85,16 @@ type UnixListenerConf struct {
 	Conf     *conf.SyslogConfig
 }
 
-type StreamServer struct {
-	Server
+type StreamingService struct {
+	GenericService
 	tcpListeners  []*TCPListenerConf
 	unixListeners []*UnixListenerConf
 	acceptsWg     *sync.WaitGroup
 	handler       StreamHandler
 }
 
-func (s *StreamServer) init() {
-	s.Server.init()
+func (s *StreamingService) init() {
+	s.GenericService.init()
 	s.tcpListeners = []*TCPListenerConf{}
 	s.unixListeners = []*UnixListenerConf{}
 	s.acceptsWg = &sync.WaitGroup{}
@@ -98,42 +124,13 @@ func (e *ParsersEnv) GetParser(parserName string) Parser {
 	}
 }
 
-func (s *StreamServer) Register(r *consul.Registry) {
-	if r == nil {
-		return
-	}
-	for _, lc := range s.tcpListeners {
-		svc, err := consul.NewService(lc.Conf.BindAddr, lc.Conf.Port, fmt.Sprintf("%s:%d", lc.Conf.BindAddr, lc.Conf.Port), []string{lc.Conf.Protocol})
-		if err != nil {
-			s.logger.Error("Error building the service object. Check skewer rights on the OS.", "error", err)
-		} else {
-			action := consul.ServiceAction{Action: consul.REGISTER, Service: svc}
-			r.RegisterChan <- action
-		}
-	}
-}
-
-func (s *StreamServer) Unregister(r *consul.Registry) {
-	if r == nil {
-		return
-	}
-	for _, lc := range s.tcpListeners {
-		svc, err := consul.NewService(lc.Conf.BindAddr, lc.Conf.Port, fmt.Sprintf("%s:%d", lc.Conf.BindAddr, lc.Conf.Port), []string{lc.Conf.Protocol})
-		if err != nil {
-			s.logger.Error("Error building the service object. Check skewer rights on the OS.", "error", err)
-		} else {
-			action := consul.ServiceAction{Action: consul.UNREGISTER, Service: svc}
-			r.RegisterChan <- action
-		}
-	}
-}
-
-func (s *StreamServer) initTCPListeners() int {
+func (s *StreamingService) initTCPListeners() []*model.ListenerInfo {
 	nb := 0
 	s.connections = map[Connection]bool{}
 	s.tcpListeners = []*TCPListenerConf{}
 	s.unixListeners = []*UnixListenerConf{}
-	for _, syslogConf := range s.Conf.Syslog {
+	//fmt.Println(s.SyslogConfigs)
+	for _, syslogConf := range s.SyslogConfigs {
 		if syslogConf.Protocol != s.protocol {
 			continue
 		}
@@ -189,10 +186,26 @@ func (s *StreamServer) initTCPListeners() int {
 			}
 		}
 	}
-	return nb
+
+	infos := []*model.ListenerInfo{}
+	for _, unixc := range s.unixListeners {
+		infos = append(infos, &model.ListenerInfo{
+			Protocol:       unixc.Conf.Protocol,
+			UnixSocketPath: unixc.Conf.UnixSocketPath,
+		})
+	}
+	for _, tcpc := range s.tcpListeners {
+		infos = append(infos, &model.ListenerInfo{
+			BindAddr: tcpc.Conf.BindAddr,
+			Port:     tcpc.Conf.Port,
+			Protocol: tcpc.Conf.Protocol,
+		})
+	}
+
+	return infos
 }
 
-func (s *StreamServer) resetTCPListeners() {
+func (s *StreamingService) resetTCPListeners() {
 	for _, l := range s.tcpListeners {
 		l.Listener.Close()
 	}
@@ -203,13 +216,13 @@ func (s *StreamServer) resetTCPListeners() {
 	s.unixListeners = []*UnixListenerConf{}
 }
 
-func (s *Server) AddConnection(conn Connection) {
+func (s *GenericService) AddConnection(conn Connection) {
 	s.connMutex.Lock()
 	defer s.connMutex.Unlock()
 	s.connections[conn] = true
 }
 
-func (s *Server) RemoveConnection(conn Connection) {
+func (s *GenericService) RemoveConnection(conn Connection) {
 	s.connMutex.Lock()
 	defer s.connMutex.Unlock()
 	if _, ok := s.connections[conn]; ok {
@@ -218,7 +231,7 @@ func (s *Server) RemoveConnection(conn Connection) {
 	}
 }
 
-func (s *Server) CloseConnections() {
+func (s *GenericService) CloseConnections() {
 	s.connMutex.Lock()
 	defer s.connMutex.Unlock()
 	for conn, _ := range s.connections {
@@ -233,11 +246,11 @@ func (s *Server) CloseConnections() {
 	s.unixSocketPaths = []string{}
 }
 
-func (s *StreamServer) handleConnection(conn net.Conn, config *conf.SyslogConfig) {
+func (s *StreamingService) handleConnection(conn net.Conn, config *conf.SyslogConfig) {
 	s.handler.HandleConnection(conn, config)
 }
 
-func (s *StreamServer) AcceptUnix(lc *UnixListenerConf) {
+func (s *StreamingService) AcceptUnix(lc *UnixListenerConf) {
 	defer s.wg.Done()
 	defer s.acceptsWg.Done()
 	for {
@@ -258,7 +271,7 @@ func (s *StreamServer) AcceptUnix(lc *UnixListenerConf) {
 
 }
 
-func (s *StreamServer) AcceptTCP(lc *TCPListenerConf) {
+func (s *StreamingService) AcceptTCP(lc *TCPListenerConf) {
 	defer s.wg.Done()
 	defer s.acceptsWg.Done()
 	for {
@@ -317,7 +330,7 @@ func (s *StreamServer) AcceptTCP(lc *TCPListenerConf) {
 	}
 }
 
-func (s *StreamServer) Listen() {
+func (s *StreamingService) Listen() {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()

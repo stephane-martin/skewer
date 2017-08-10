@@ -1,4 +1,4 @@
-package server
+package services
 
 import (
 	"bufio"
@@ -18,6 +18,7 @@ import (
 	"github.com/stephane-martin/skewer/javascript"
 	"github.com/stephane-martin/skewer/metrics"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/sys"
 )
 
 type RelpServerStatus int
@@ -29,8 +30,94 @@ const (
 	Waiting
 )
 
-type RelpServer struct {
-	StreamServer
+func NewRelpService(b *sys.BinderClient, m *metrics.Metrics, l log15.Logger) NetworkService {
+	s := &RelpService{b: b, m: m, logger: l}
+	s.impl = NewRelpServiceImpl(s.b, s.m, s.logger)
+	return s
+}
+
+type RelpService struct {
+	impl   *RelpServiceImpl
+	logger log15.Logger
+	b      *sys.BinderClient
+	m      *metrics.Metrics
+	sc     []*conf.SyslogConfig
+	pc     []conf.ParserConfig
+	kc     *conf.KafkaConfig
+}
+
+func (s *RelpService) Start(test bool) (infos []*model.ListenerInfo, err error) {
+	// the Relp service manages registration in Consul by itself and
+	// therefore does not report infos
+
+	infos = []*model.ListenerInfo{}
+	s.impl = NewRelpServiceImpl(s.b, s.m, s.logger)
+
+	go func() {
+		for {
+			state := <-s.impl.StatusChan
+			switch state {
+			case FinalStopped:
+				s.impl.logger.Debug("The RELP service has been definitely halted")
+				// TODO: unregister from Consul if necessary
+				return
+
+			case Stopped:
+				s.impl.logger.Debug("The RELP service is stopped")
+				s.impl.SetConf(s.sc, s.pc)
+				s.impl.SetKafkaConf(*s.kc)
+				infos, err := s.impl.Start(test)
+				if err == nil {
+					fmt.Println(infos)
+					// TODO: the first time it happens, register in Consul
+				} else {
+					s.impl.logger.Warn("The RELP service has failed to start", "error", err)
+					s.impl.StopAndWait()
+				}
+
+			case Waiting:
+				s.impl.logger.Debug("RELP waiting")
+				go func() {
+					time.Sleep(time.Duration(30) * time.Second)
+					s.impl.EndWait()
+				}()
+
+			case Started:
+				s.impl.logger.Debug("The RELP service has been started")
+			}
+		}
+	}()
+
+	s.impl.StatusChan <- Stopped // trigger the RELP service to start
+	return
+}
+
+func (s *RelpService) Stop() {
+	s.impl.FinalStop()
+}
+
+func (s *RelpService) WaitClosed() {
+	var more bool
+	for {
+		_, more = <-s.impl.StatusChan
+		if !more {
+			return
+		}
+	}
+}
+
+func (s *RelpService) SetConf(sc []*conf.SyslogConfig, pc []conf.ParserConfig) {
+	s.sc = sc
+	s.pc = pc
+}
+
+func (s *RelpService) SetKafkaConf(kc *conf.KafkaConfig) {
+	s.kc = kc
+}
+
+type RelpServiceImpl struct {
+	StreamingService
+	kafkaConf   conf.KafkaConfig
 	status      RelpServerStatus
 	StatusChan  chan RelpServerStatus
 	kafkaClient sarama.Client
@@ -38,45 +125,50 @@ type RelpServer struct {
 	test        bool
 }
 
-func (s *RelpServer) init() {
-	s.StreamServer.init()
+func (s *RelpServiceImpl) init() {
+	s.StreamingService.init()
 }
 
-func NewRelpServer(c *conf.GConfig, test bool, metrics *metrics.Metrics, logger log15.Logger) *RelpServer {
-	s := RelpServer{status: Stopped, metrics: metrics, test: test}
+func NewRelpServiceImpl(b *sys.BinderClient, metrics *metrics.Metrics, logger log15.Logger) *RelpServiceImpl {
+	s := RelpServiceImpl{status: Stopped, metrics: metrics}
 	s.logger = logger.New("class", "RelpServer")
+	s.binder = b
 	s.init()
 	s.protocol = "relp"
-	s.Conf = *c
 	s.handler = RelpHandler{Server: &s}
 	s.StatusChan = make(chan RelpServerStatus, 10)
 	return &s
 }
 
-func (s *RelpServer) Start() error {
+func (s *RelpServiceImpl) SetKafkaConf(c conf.KafkaConfig) {
+	s.kafkaConf = c
+}
+
+func (s *RelpServiceImpl) Start(test bool) ([]*model.ListenerInfo, error) {
 	s.statusMutex.Lock()
 	defer s.statusMutex.Unlock()
 	if s.status == FinalStopped {
-		return ServerDefinitelyStopped
+		return nil, ServerDefinitelyStopped
 	}
 	if s.status != Stopped && s.status != Waiting {
-		return ServerNotStopped
+		return nil, ServerNotStopped
 	}
 
-	nb := s.initTCPListeners()
-	if nb == 0 {
-		s.logger.Debug("RELP service not started: no listening port")
-		return nil
+	infos := s.initTCPListeners()
+	if len(infos) == 0 {
+		s.logger.Debug("RELP service not started: no listener")
+		return infos, nil
 	} else {
-		s.logger.Info("Listening on RELP", "nb_services", nb)
+		s.logger.Info("Listening on RELP", "nb_services", len(infos))
 	}
+	s.test = test
 	if !s.test {
 		var err error
-		s.kafkaClient, err = s.Conf.Kafka.GetClient()
+		s.kafkaClient, err = s.kafkaConf.GetClient()
 		if err != nil {
 			// sarama/kafka error
 			s.resetTCPListeners()
-			return err
+			return nil, err
 		}
 	}
 
@@ -84,22 +176,22 @@ func (s *RelpServer) Start() error {
 	s.StatusChan <- Started
 
 	s.Listen()
-	return nil
+	return infos, nil
 }
 
-func (s *RelpServer) Stop() {
+func (s *RelpServiceImpl) Stop() {
 	s.doStop(false, false, s.statusMutex)
 }
 
-func (s *RelpServer) FinalStop() {
+func (s *RelpServiceImpl) FinalStop() {
 	s.doStop(true, false, s.statusMutex)
 }
 
-func (s *RelpServer) StopAndWait() {
+func (s *RelpServiceImpl) StopAndWait() {
 	s.doStop(false, true, s.statusMutex)
 }
 
-func (s *RelpServer) EndWait() {
+func (s *RelpServiceImpl) EndWait() {
 	s.statusMutex.Lock()
 	defer s.statusMutex.Unlock()
 	if s.status != Waiting {
@@ -109,7 +201,7 @@ func (s *RelpServer) EndWait() {
 	s.StatusChan <- Stopped
 }
 
-func (s *RelpServer) doStop(final bool, wait bool, mu *sync.Mutex) {
+func (s *RelpServiceImpl) doStop(final bool, wait bool, mu *sync.Mutex) {
 	if mu != nil {
 		mu.Lock()
 		defer mu.Unlock()
@@ -154,7 +246,7 @@ func (s *RelpServer) doStop(final bool, wait bool, mu *sync.Mutex) {
 }
 
 type RelpHandler struct {
-	Server *RelpServer
+	Server *RelpServiceImpl
 }
 
 func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) {
@@ -201,7 +293,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		e := NewParsersEnv(s.Conf.Parsers, s.logger)
+		e := NewParsersEnv(s.ParserConfigs, s.logger)
 		for m := range raw_messages_chan {
 
 			parser := e.GetParser(config.Format)
@@ -269,7 +361,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 
 		}()
 	} else {
-		producer, err = s.Conf.Kafka.GetAsyncProducer()
+		producer, err = s.kafkaConf.GetAsyncProducer()
 		if err != nil {
 			s.metrics.KafkaConnectionErrorCounter.Inc()
 			logger.Warn("Can't get a kafka producer. Aborting handleConn.")

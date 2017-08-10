@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/consul/api"
 	"github.com/hashicorp/errwrap"
 	"github.com/inconshreveable/log15"
+	"github.com/stephane-martin/skewer/model"
 )
 
 type ServiceActionType bool
@@ -88,6 +89,34 @@ type Registry struct {
 
 func (r *Registry) WaitFinished() {
 	r.wgroup.Wait()
+}
+
+func (r *Registry) RegisterTcpListener(infos *model.ListenerInfo) {
+	if infos == nil {
+		return
+	}
+	if infos.BindAddr == "" || infos.Port == 0 || infos.Protocol == "" {
+		return
+	}
+	svc, err := NewService(infos.BindAddr, infos.Port, fmt.Sprintf("%s:%d", infos.BindAddr, infos.Port), []string{infos.Protocol})
+	if err == nil {
+		action := ServiceAction{Action: REGISTER, Service: svc}
+		r.RegisterChan <- action
+	}
+}
+
+func (r *Registry) UnregisterTcpListener(infos *model.ListenerInfo) {
+	if infos == nil {
+		return
+	}
+	if infos.BindAddr == "" || infos.Port == 0 || infos.Protocol == "" {
+		return
+	}
+	svc, err := NewService(infos.BindAddr, infos.Port, fmt.Sprintf("%s:%d", infos.BindAddr, infos.Port), []string{infos.Protocol})
+	if err == nil {
+		action := ServiceAction{Action: UNREGISTER, Service: svc}
+		r.RegisterChan <- action
+	}
 }
 
 func NewRegistry(ctx context.Context, params ConnParams, svcName string, logger log15.Logger) (*Registry, error) {

@@ -19,6 +19,13 @@ type Stasher interface {
 	Stash(m *TcpUdpParsedMessage)
 }
 
+type ListenerInfo struct {
+	Port           int    `json:"port"`
+	BindAddr       string `json:"bind_addr"`
+	UnixSocketPath string `json:"unix_socket_path"`
+	Protocol       string `json:"protocol"`
+}
+
 type AuditSubMessage struct {
 	Type uint16 `json:"type"`
 	Data string `json:"data"`

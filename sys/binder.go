@@ -60,14 +60,13 @@ type BinderClient struct {
 	ipacketMu          *sync.Mutex
 }
 
-func NewBinderClient(logger log15.Logger) (*BinderClient, error) {
-	f := os.NewFile(3, "toparent")
-	genconn, err := net.FileConn(f)
+func NewBinderClient(binderFile *os.File, logger log15.Logger) (*BinderClient, error) {
+	genconn, err := net.FileConn(binderFile)
 	if err != nil {
 		return nil, err
 	}
 	conn := genconn.(*net.UnixConn)
-	c := BinderClient{childFile: f, parentConn: conn}
+	c := BinderClient{childFile: binderFile, parentConn: conn}
 	c.IncomingConn = map[string]chan *FileConn{}
 	c.IncomingPacketConn = map[string]chan *FilePacketConn{}
 	c.iconnMu = &sync.Mutex{}

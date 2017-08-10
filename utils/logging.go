@@ -32,8 +32,9 @@ func receive(ctx context.Context, l log15.Logger, c net.Conn) {
 			break
 		default:
 			r := Record{}
-			c.SetReadDeadline(time.Now().Add(time.Second))
-			if decoder.Decode(&r) == nil {
+			c.SetReadDeadline(time.Now().Add(2 * time.Second))
+			e := decoder.Decode(&r)
+			if e == nil {
 				logr := log15.Record{Lvl: log15.Lvl(r.Lvl), Msg: r.Msg, Time: r.Time, KeyNames: keyNames}
 				logr.Ctx = make([]interface{}, 0, 2*len(r.Ctx))
 				for k, v := range r.Ctx {
@@ -42,6 +43,7 @@ func receive(ctx context.Context, l log15.Logger, c net.Conn) {
 				}
 				h.Log(&logr)
 			}
+
 		}
 	}
 }

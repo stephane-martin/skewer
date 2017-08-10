@@ -1,8 +1,9 @@
-package server
+package services
 
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"net"
 	"strconv"
 	"strings"
@@ -11,7 +12,6 @@ import (
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
 	"github.com/stephane-martin/skewer/conf"
-	"github.com/stephane-martin/skewer/consul"
 	"github.com/stephane-martin/skewer/metrics"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/sys"
@@ -24,24 +24,8 @@ const (
 	TcpStarted
 )
 
-type TcpServer interface {
-	Start() error
-	Stop()
-	Register(r *consul.Registry)
-	Unregister(r *consul.Registry)
-	WaitClosed()
-	SetConf(c conf.GConfig)
-}
-
-type TcpServerPlugin struct {
-}
-
-func (s *TcpServerPlugin) Start() error {
-	return nil
-}
-
 type tcpServerImpl struct {
-	StreamServer
+	StreamingService
 	status     TcpServerStatus
 	statusChan chan TcpServerStatus
 	stasher    model.Stasher
@@ -50,10 +34,10 @@ type tcpServerImpl struct {
 }
 
 func (s *tcpServerImpl) init() {
-	s.StreamServer.init()
+	s.StreamingService.init()
 }
 
-func NewTcpServer(c *conf.GConfig, stasher model.Stasher, gen chan ulid.ULID, b *sys.BinderClient, m *metrics.Metrics, l log15.Logger) TcpServer {
+func NewTcpService(stasher model.Stasher, gen chan ulid.ULID, b *sys.BinderClient, m *metrics.Metrics, l log15.Logger) NetworkService {
 	s := tcpServerImpl{
 		status:    TcpStopped,
 		stasher:   stasher,
@@ -63,39 +47,42 @@ func NewTcpServer(c *conf.GConfig, stasher model.Stasher, gen chan ulid.ULID, b 
 	s.logger = l.New("class", "TcpServer")
 	s.binder = b
 	s.protocol = "tcp"
-	s.Conf = *c
 	s.init()
 	s.handler = tcpHandler{Server: &s}
 	return &s
 }
 
+func (s *tcpServerImpl) SetKafkaConf(kc *conf.KafkaConfig) {}
+
 func (s *tcpServerImpl) WaitClosed() {
-	<-s.statusChan
+	var more bool
+	for {
+		_, more = <-s.statusChan
+		if !more {
+			return
+		}
+	}
 }
 
-func (s *tcpServerImpl) SetConf(c conf.GConfig) {
-	s.Conf = c
-}
-
-func (s *tcpServerImpl) Start() error {
+func (s *tcpServerImpl) Start(test bool) ([]*model.ListenerInfo, error) {
 	s.statusMutex.Lock()
 	defer s.statusMutex.Unlock()
 	if s.status != TcpStopped {
-		return ServerNotStopped
+		return nil, ServerNotStopped
 	}
 	s.statusChan = make(chan TcpServerStatus, 1)
 
 	// start listening on the required ports
-	nb := s.initTCPListeners()
-	if nb > 0 {
+	infos := s.initTCPListeners()
+	if len(infos) > 0 {
 		s.status = TcpStarted
 		s.Listen()
-		s.logger.Info("Listening on TCP", "nb_services", nb)
+		s.logger.Info("Listening on TCP", "nb_services", len(infos))
 	} else {
-		s.logger.Debug("TCP Server not started: no listening port")
+		s.logger.Debug("TCP Server not started: no listener")
 		close(s.statusChan)
 	}
-	return nil
+	return infos, nil
 }
 
 func (s *tcpServerImpl) Stop() {
@@ -155,13 +142,15 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) {
 
 	logger := s.logger.New("protocol", s.protocol, "client", client, "local_port", local_port, "unix_socket_path", path, "format", config.Format)
 	logger.Info("New client")
-	s.metrics.ClientConnectionCounter.WithLabelValues(s.protocol, client, local_port_s, path).Inc()
+	if s.metrics != nil {
+		s.metrics.ClientConnectionCounter.WithLabelValues(s.protocol, client, local_port_s, path).Inc()
+	}
 
 	// pull messages from raw_messages_chan, parse them and push them to the Store
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		e := NewParsersEnv(s.Conf.Parsers, s.logger)
+		e := NewParsersEnv(s.ParserConfigs, s.logger)
 		for m := range raw_messages_chan {
 			parser := e.GetParser(config.Format)
 			if parser == nil {
@@ -184,7 +173,9 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) {
 				}
 				s.stasher.Stash(&parsed_msg)
 			} else {
-				s.metrics.ParsingErrorCounter.WithLabelValues(config.Format, client).Inc()
+				if s.metrics != nil {
+					s.metrics.ParsingErrorCounter.WithLabelValues(config.Format, client).Inc()
+				}
 				logger.Info("Parsing error", "Message", m.Message, "error", err)
 			}
 		}
@@ -212,7 +203,9 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) {
 				LocalPort: local_port,
 				Message:   scanner.Text(),
 			}
-			s.metrics.IncomingMsgsCounter.WithLabelValues(s.protocol, client, local_port_s, path).Inc()
+			if s.metrics != nil {
+				s.metrics.IncomingMsgsCounter.WithLabelValues(s.protocol, client, local_port_s, path).Inc()
+			}
 			raw_messages_chan <- &raw
 		} else {
 			logger.Info("End of TCP client connection", "error", scanner.Err())
@@ -236,6 +229,33 @@ func LFTcpSplit(data []byte, atEOF bool) (int, []byte, error) {
 		// data does not contain a full syslog line
 		return 0, nil, nil
 	}
+}
+
+func PluginSplit(data []byte, atEOF bool) (int, []byte, error) {
+	trimmed_data := bytes.TrimLeft(data, " \r\n")
+	if len(trimmed_data) < 11 {
+		return 0, nil, nil
+	}
+	trimmed := len(data) - len(trimmed_data)
+	if trimmed_data[10] != byte(' ') {
+		return 0, nil, fmt.Errorf("Wrong plugin format")
+	}
+	var i int
+	for i = 0; i < 10; i++ {
+		if trimmed_data[i] < byte('0') || trimmed_data[i] > byte('9') {
+			return 0, nil, fmt.Errorf("Wring plugin format")
+		}
+	}
+	datalen, err := strconv.Atoi(string(trimmed_data[:10]))
+	if err != nil {
+		return 0, nil, err
+	}
+	advance := trimmed + 11 + datalen
+	if len(data) < advance {
+		return 0, nil, nil
+	}
+	token := bytes.Trim(trimmed_data[11:11+datalen], " \r\n")
+	return advance, token, nil
 }
 
 func TcpSplit(data []byte, atEOF bool) (int, []byte, error) {

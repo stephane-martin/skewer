@@ -1,4 +1,4 @@
-package server
+package services
 
 import (
 	"net"
@@ -20,10 +20,10 @@ const (
 	UdpStarted
 )
 
-type UdpServer struct {
-	Server
+type udpServiceImpl struct {
+	GenericService
 	status     UdpServerStatus
-	ClosedChan chan UdpServerStatus
+	statusChan chan UdpServerStatus
 	stasher    model.Stasher
 	handler    PacketHandler
 	metrics    *metrics.Metrics
@@ -35,51 +35,50 @@ type PacketHandler interface {
 }
 
 type UdpHandler struct {
-	Server *UdpServer
+	Server *udpServiceImpl
 }
 
-func (s *UdpServer) init() {
-	s.Server.init()
+func (s *udpServiceImpl) init() {
+	s.GenericService.init()
 }
 
-func NewUdpServer(c *conf.GConfig, stasher model.Stasher, gen chan ulid.ULID, b *sys.BinderClient, m *metrics.Metrics, l log15.Logger) *UdpServer {
-	s := UdpServer{status: UdpStopped, metrics: m, stasher: stasher, generator: gen}
+func NewUdpService(stasher model.Stasher, gen chan ulid.ULID, b *sys.BinderClient, m *metrics.Metrics, l log15.Logger) NetworkService {
+	s := udpServiceImpl{status: UdpStopped, metrics: m, stasher: stasher, generator: gen}
 	s.logger = l.New("class", "UdpServer")
 	s.binder = b
 	s.init()
 	s.protocol = "udp"
-	s.Conf = *c
 	s.handler = UdpHandler{Server: &s}
-
 	return &s
 }
 
-func (s *UdpServer) handleConnection(conn net.PacketConn, config *conf.SyslogConfig) {
+func (s *udpServiceImpl) handleConnection(conn net.PacketConn, config *conf.SyslogConfig) {
 	s.handler.HandleConnection(conn, config)
 }
 
-func (s *UdpServer) Start() (err error) {
+func (s *udpServiceImpl) SetKafkaConf(kc *conf.KafkaConfig) {}
+
+func (s *udpServiceImpl) Start(test bool) ([]*model.ListenerInfo, error) {
 	s.statusMutex.Lock()
 	defer s.statusMutex.Unlock()
 	if s.status != UdpStopped {
-		err = ServerNotStopped
-		return
+		return nil, ServerNotStopped
 	}
-	s.ClosedChan = make(chan UdpServerStatus, 1)
+	s.statusChan = make(chan UdpServerStatus, 1)
 
 	s.connections = map[Connection]bool{}
-	nb := s.ListenPacket()
-	if nb > 0 {
+	infos := s.ListenPacket()
+	if len(infos) > 0 {
 		s.status = UdpStarted
-		s.logger.Info("Listening on UDP", "nb_services", nb)
+		s.logger.Info("Listening on UDP", "nb_services", len(infos))
 	} else {
 		s.logger.Debug("The UDP service has not been started: no listening port")
-		close(s.ClosedChan)
+		close(s.statusChan)
 	}
-	return
+	return infos, nil
 }
 
-func (s *UdpServer) Stop() {
+func (s *udpServiceImpl) Stop() {
 	s.statusMutex.Lock()
 	defer s.statusMutex.Unlock()
 	if s.status != UdpStarted {
@@ -92,15 +91,25 @@ func (s *UdpServer) Stop() {
 	s.logger.Debug("UdpServer goroutines have ended")
 
 	s.status = UdpStopped
-	s.ClosedChan <- UdpStopped
-	close(s.ClosedChan)
+	s.statusChan <- UdpStopped
+	close(s.statusChan)
 	s.logger.Debug("Udp server has stopped")
 }
 
-func (s *UdpServer) ListenPacket() int {
+func (s *udpServiceImpl) WaitClosed() {
+	var more bool
+	for {
+		_, more = <-s.statusChan
+		if !more {
+			return
+		}
+	}
+}
+
+func (s *udpServiceImpl) ListenPacket() []*model.ListenerInfo {
+	udpinfos := []*model.ListenerInfo{}
 	s.unixSocketPaths = []string{}
-	nb := 0
-	for _, syslogConf := range s.Conf.Syslog {
+	for _, syslogConf := range s.SyslogConfigs {
 		if syslogConf.Protocol == "udp" {
 			if len(syslogConf.UnixSocketPath) > 0 {
 				conn, err := net.ListenPacket("unixgram", syslogConf.UnixSocketPath)
@@ -109,20 +118,26 @@ func (s *UdpServer) ListenPacket() int {
 					case *net.OpError:
 						if s.binder == nil {
 							s.logger.Warn("Listen unixgram OpError", "error", err)
+							conn = nil
 						} else {
 							s.logger.Info("Listen unixgram OpError. Retrying as root.", "error", err)
 							conn, err = s.binder.ListenPacket("unixgram", syslogConf.UnixSocketPath)
 							if err != nil {
 								s.logger.Warn("Listen unixgram OpError", "error", err)
+								conn = nil
 							}
 						}
 					default:
 						s.logger.Warn("Listen unixgram error", "error", err)
+						conn = nil
 					}
 				}
 				if conn != nil && err == nil {
 					s.logger.Debug("Listener", "protocol", s.protocol, "path", syslogConf.UnixSocketPath, "format", syslogConf.Format)
-					nb++
+					udpinfos = append(udpinfos, &model.ListenerInfo{
+						UnixSocketPath: syslogConf.UnixSocketPath,
+						Protocol:       s.protocol,
+					})
 					s.unixSocketPaths = append(s.unixSocketPaths, syslogConf.UnixSocketPath)
 					s.wg.Add(1)
 					go s.handleConnection(conn, syslogConf)
@@ -135,29 +150,35 @@ func (s *UdpServer) ListenPacket() int {
 					case *net.OpError:
 						if s.binder == nil || syslogConf.Port > 1024 {
 							s.logger.Warn("Listen UDP OpError", "error", err)
+							conn = nil
 						} else {
 							s.logger.Info("Listen unixgram OpError. Retrying as root.", "error", err)
 							conn, err = s.binder.ListenPacket("udp", listenAddr)
 							if err != nil {
 								s.logger.Warn("Listen UDP OpError", "error", err)
-
+								conn = nil
 							}
 						}
 					default:
 						s.logger.Warn("Listen UDP error", "error", err)
+						conn = nil
 					}
 
 				}
 				if conn != nil && err == nil {
 					s.logger.Debug("Listener", "protocol", s.protocol, "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
-					nb++
+					udpinfos = append(udpinfos, &model.ListenerInfo{
+						BindAddr: syslogConf.BindAddr,
+						Port:     syslogConf.Port,
+						Protocol: syslogConf.Protocol,
+					})
 					s.wg.Add(1)
 					go s.handleConnection(conn, syslogConf)
 				}
 			}
 		}
 	}
-	return nb
+	return udpinfos
 }
 
 func (h UdpHandler) HandleConnection(conn net.PacketConn, config *conf.SyslogConfig) {
@@ -194,7 +215,7 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config *conf.SyslogCon
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		e := NewParsersEnv(s.Conf.Parsers, s.logger)
+		e := NewParsersEnv(s.ParserConfigs, s.logger)
 		for m := range raw_messages_chan {
 			parser := e.GetParser(config.Format)
 			if parser == nil {

@@ -91,8 +91,8 @@ type WatcherConfig struct {
 }
 
 type ParserConfig struct {
-	Name string `mapstructure:"name" toml:"name"`
-	Func string `mapstructure:"func" toml:"func"`
+	Name string `mapstructure:"name" toml:"name" json:"name"`
+	Func string `mapstructure:"func" toml:"func" json:"func"`
 }
 
 type StoreConfig struct {
@@ -257,13 +257,13 @@ type SyslogConfig struct {
 	KeepAlive       bool          `mapstructure:"keepalive" toml:"keepalive" json:"keepalive"`
 	KeepAlivePeriod time.Duration `mapstructure:"keepalive_period" toml:"keepalive_period" json:"keepalive_period"`
 	Timeout         time.Duration `mapstructure:"timeout" toml:"timeout" json:"timeout"`
-	TLSEnabled      bool          `mapstructure:"tls_enabled" toml:"tls_enabled"`
-	CAFile          string        `mapstructure:"ca_file" toml:"ca_file"`
-	CAPath          string        `mapstructure:"ca_path" toml:"ca_path"`
-	KeyFile         string        `mapstructure:"key_file" toml:"key_file"`
-	CertFile        string        `mapstructure:"cert_file" toml:"cert_file"`
-	ClientAuthType  string        `mapstructure:"client_auth_type" toml:"client_auth_type"`
-	ConfID          string        `mapstructure:"-" toml:"-"`
+	TLSEnabled      bool          `mapstructure:"tls_enabled" toml:"tls_enabled" json:"tls_enabled"`
+	CAFile          string        `mapstructure:"ca_file" toml:"ca_file" json:"ca_file"`
+	CAPath          string        `mapstructure:"ca_path" toml:"ca_path" json:"ca_path"`
+	KeyFile         string        `mapstructure:"key_file" toml:"key_file" json:"key_file"`
+	CertFile        string        `mapstructure:"cert_file" toml:"cert_file" json:"cert_file"`
+	ClientAuthType  string        `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
+	ConfID          string        `mapstructure:"-" toml:"-" json:"conf_id"`
 	// todo: Partitioner ?
 }
 

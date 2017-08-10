@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime"
 	"sync"
 	"syscall"
 	"time"
@@ -18,7 +19,8 @@ import (
 	"github.com/stephane-martin/skewer/consul"
 	"github.com/stephane-martin/skewer/journald"
 	"github.com/stephane-martin/skewer/metrics"
-	"github.com/stephane-martin/skewer/server"
+	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/services"
 	"github.com/stephane-martin/skewer/store"
 	"github.com/stephane-martin/skewer/sys"
 	"github.com/stephane-martin/skewer/utils"
@@ -60,6 +62,7 @@ connects to Kafka, and forwards messages to Kafka.`,
 				// another execve is necessary on Linux to ensure that
 				// the following capability drop will be effective on
 				// all go threads
+				runtime.LockOSThread()
 				sys.DropNetBind()
 				exe, err := os.Executable()
 				if err != nil {
@@ -82,7 +85,7 @@ connects to Kafka, and forwards messages to Kafka.`,
 
 		if sys.CapabilitiesSupported {
 			// under Linux, re-exec ourself immediately with fewer privileges
-
+			runtime.LockOSThread()
 			need_fix, err := sys.NeedFixLinuxPrivileges(uidFlag, gidFlag)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
@@ -115,6 +118,21 @@ connects to Kafka, and forwards messages to Kafka.`,
 		rootlogger := utils.SetLogging(loglevelFlag, logjsonFlag, syslogFlag, logfilenameFlag)
 		logger := rootlogger.New("proc", "parent")
 
+		mustSocketPair := func(typ int) (int, int) {
+			a, b, err := sys.SocketPair(typ)
+			if err != nil {
+				logger.Crit("SocketPair() error", "error", err)
+				os.Exit(-1)
+			}
+			return a, b
+		}
+		getLoggerConn := func(handle int) net.Conn {
+			loggerConn, _ := net.FileConn(os.NewFile(uintptr(handle), "logger"))
+			loggerConn.(*net.UnixConn).SetReadBuffer(65536)
+			loggerConn.(*net.UnixConn).SetWriteBuffer(65536)
+			return loggerConn
+		}
+
 		numuid, numgid, err := sys.LookupUid(uidFlag, gidFlag)
 		if err != nil {
 			logger.Crit("Error looking up uid", "error", err, "uid", uidFlag, "gid", gidFlag)
@@ -125,28 +143,30 @@ connects to Kafka, and forwards messages to Kafka.`,
 			os.Exit(-1)
 		}
 
-		binderChildFD, binderParentFD, err := sys.SocketPair(syscall.SOCK_STREAM)
-		if err != nil {
-			logger.Crit("SocketPair() error", "error", err)
-			os.Exit(-1)
-		}
+		binderChildHandle, binderParentHandle := mustSocketPair(syscall.SOCK_STREAM)
+		binderTcpHandle, binderParentTcpHandle := mustSocketPair(syscall.SOCK_STREAM)
+		binderUdpHandle, binderParentUdpHandle := mustSocketPair(syscall.SOCK_STREAM)
+		binderRelpHandle, binderParentRelpHandle := mustSocketPair(syscall.SOCK_STREAM)
 
-		err = sys.Binder(binderParentFD, logger) // returns immediately
-
+		err = sys.Binder([]int{binderParentHandle, binderParentTcpHandle, binderParentUdpHandle, binderParentRelpHandle}, logger) // returns immediately
 		if err != nil {
 			logger.Crit("Error setting the root binder", "error", err)
 			os.Exit(-1)
 		}
 
-		loggerChildFD, loggerParentFD, err := sys.SocketPair(syscall.SOCK_DGRAM)
-		if err != nil {
-			logger.Crit("SocketPair() error", "error", err)
-			os.Exit(-1)
-		}
+		loggerChildHandle, loggerParentHandle := mustSocketPair(syscall.SOCK_DGRAM)
+		loggerChildConn := getLoggerConn(loggerParentHandle)
 
-		loggerF := os.NewFile(uintptr(loggerParentFD), "logger")
-		loggerConn, _ := net.FileConn(loggerF)
-		utils.LogReceiver(context.Background(), rootlogger, []net.Conn{loggerConn})
+		loggerTcpHandle, loggerParentTcpHandle := mustSocketPair(syscall.SOCK_DGRAM)
+		loggerTcpConn := getLoggerConn(loggerParentTcpHandle)
+
+		loggerUdpHandle, loggerParentUdpHandle := mustSocketPair(syscall.SOCK_DGRAM)
+		loggerUdpConn := getLoggerConn(loggerParentUdpHandle)
+
+		loggerRelpHandle, loggerParentRelpHandle := mustSocketPair(syscall.SOCK_DGRAM)
+		loggerRelpConn := getLoggerConn(loggerParentRelpHandle)
+
+		utils.LogReceiver(context.Background(), rootlogger, []net.Conn{loggerChildConn, loggerTcpConn, loggerUdpConn, loggerRelpConn})
 
 		logger.Debug("Target user", "uid", numuid, "gid", numgid)
 
@@ -164,8 +184,14 @@ connects to Kafka, and forwards messages to Kafka.`,
 			Stdout: os.Stdout,
 			Stderr: os.Stderr,
 			ExtraFiles: []*os.File{
-				os.NewFile(uintptr(binderChildFD), "child_binder_file"),
-				os.NewFile(uintptr(loggerChildFD), "child_logger_file"),
+				os.NewFile(uintptr(binderChildHandle), "child_binder_file"),
+				os.NewFile(uintptr(binderTcpHandle), "tcp_binder_file"),
+				os.NewFile(uintptr(binderUdpHandle), "udp_binder_file"),
+				os.NewFile(uintptr(binderRelpHandle), "relp_binder_file"),
+				os.NewFile(uintptr(loggerChildHandle), "child_logger_file"),
+				os.NewFile(uintptr(loggerTcpHandle), "tcp_logger_file"),
+				os.NewFile(uintptr(loggerUdpHandle), "udp_logger_file"),
+				os.NewFile(uintptr(loggerRelpHandle), "relp_logger_file"),
 			},
 			Env: []string{"SKEWER_CHILD=TRUE", "PATH=/bin:/usr/bin"},
 		}
@@ -177,13 +203,25 @@ connects to Kafka, and forwards messages to Kafka.`,
 			logger.Crit("Error starting child", "error", err)
 			os.Exit(-1)
 		}
-		syscall.Close(binderChildFD)
-		syscall.Close(loggerChildFD)
+		syscall.Close(binderChildHandle)
+		syscall.Close(binderTcpHandle)
+		syscall.Close(binderUdpHandle)
+		syscall.Close(binderRelpHandle)
+		syscall.Close(loggerChildHandle)
+		syscall.Close(loggerTcpHandle)
+		syscall.Close(loggerUdpHandle)
+		syscall.Close(loggerRelpHandle)
 
 		sig_chan := make(chan os.Signal, 1)
+		once := sync.Once{}
 		go func() {
 			for sig := range sig_chan {
-				logger.Debug("parent received signal (ignored)", "signal", sig)
+				logger.Debug("parent received signal", "signal", sig)
+				if sig == syscall.SIGTERM {
+					once.Do(func() { childProcess.Process.Signal(sig) })
+				} else if sig == syscall.SIGHUP {
+					childProcess.Process.Signal(sig)
+				}
 			}
 		}()
 		signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT)
@@ -230,16 +268,20 @@ func Serve() error {
 	watchCtx, stopWatch := context.WithCancel(shutdownCtx)
 	var logger log15.Logger
 
-	loggerF := os.NewFile(4, "logger")
-	loggerConn, _ := net.FileConn(loggerF)
-	logger = utils.NewRemoteLogger(gctx, loggerConn).New("proc", "child")
+	binderFile := os.NewFile(3, "binder")
+
+	loggerConn, _ := net.FileConn(os.NewFile(7, "logger"))
+	loggerConn.(*net.UnixConn).SetReadBuffer(65536)
+	loggerConn.(*net.UnixConn).SetWriteBuffer(65536)
+	loggerCtx, cancelLogger := context.WithCancel(context.Background())
+	logger = utils.NewRemoteLogger(loggerCtx, loggerConn).New("proc", "child")
 
 	logger.Debug("Serve() runs under user", "uid", os.Getuid(), "gid", os.Getgid())
 	if sys.CapabilitiesSupported {
 		logger.Debug("Capabilities", "caps", sys.GetCaps())
 	}
 
-	binderClient, err := sys.NewBinderClient(logger)
+	binderClient, err := sys.NewBinderClient(binderFile, logger)
 	if err != nil {
 		logger.Error("Error binding to the root parent socket", "error", err)
 		binderClient = nil
@@ -328,12 +370,13 @@ func Serve() error {
 		if registry != nil {
 			registry.WaitFinished() // wait that the services have been unregistered from Consul
 		}
+		cancelLogger()
 		time.Sleep(time.Second)
 	}()
 
 	// retrieve linux audit logs
 
-	var auditService *server.AuditService
+	var auditService *services.AuditService
 	var auditCtx context.Context
 	var cancelAudit context.CancelFunc
 	if auditlogs.Supported {
@@ -346,7 +389,7 @@ func Serve() error {
 			} else {
 				logger.Info("Linux audit logs are enabled")
 				auditCtx, cancelAudit = context.WithCancel(shutdownCtx)
-				auditService = server.NewAuditService(st, generator, metricStore, logger)
+				auditService = services.NewAuditService(st, generator, metricStore, logger)
 				err := auditService.Start(auditCtx, c.Audit)
 				if err != nil {
 					logger.Warn("Error starting the linux audit service", "error", err)
@@ -365,14 +408,14 @@ func Serve() error {
 	}
 
 	// retrieve messages from journald
-	var journaldServer *server.JournaldServer
+	var journaldServer *services.JournaldServer
 	if journald.Supported {
 		logger.Info("Journald is supported")
 		if c.Journald.Enabled {
 			logger.Info("Journald service is enabled")
 
 			journalCtx, cancelJournal := context.WithCancel(gctx)
-			journaldServer, err = server.NewJournaldServer(journalCtx, c.Journald, st, generator, metricStore, logger)
+			journaldServer, err = services.NewJournaldServer(journalCtx, c.Journald, st, generator, metricStore, logger)
 			if err == nil {
 				err = journaldServer.Start()
 				if err != nil {
@@ -393,26 +436,84 @@ func Serve() error {
 		logger.Info("Journald not supported")
 	}
 
-	// prepare the RELP service
-	relpServer := server.NewRelpServer(c, testFlag, metricStore, logger)
 	sig_chan := make(chan os.Signal)
 	signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
-	relpServer.StatusChan <- server.Stopped // trigger the RELP service to start
 
-	// start the TCP service
-	tcpServer := server.NewTcpServer(c, st, generator, binderClient, metricStore, logger)
-	err = tcpServer.Start()
-	if err == nil {
-		tcpServer.Register(registry)
-	} else {
-		logger.Error("Error starting the TCP server", "error", err)
+	relpServicePlugin := services.NewNetworkPlugin("relp", st, 6, 10, metricStore, logger)
+
+	startRELP := func(curconf *conf.GConfig) {
+		var err error
+		relpServicePlugin.SetConf(curconf.Syslog, curconf.Parsers)
+		relpServicePlugin.SetKafkaConf(&curconf.Kafka)
+		_, err = relpServicePlugin.Start(testFlag)
+		if err != nil {
+			logger.Crit("Error starting RELP plugin", "error", err)
+		} else {
+			logger.Info("RELP plugin has been started")
+		}
 	}
 
-	// start the UDP service
-	udpServer := server.NewUdpServer(c, st, generator, binderClient, metricStore, logger)
-	err = udpServer.Start()
-	if err != nil {
-		logger.Error("Error starting the UDP server", "error", err)
+	tcpServicePlugin := services.NewNetworkPlugin("tcp", st, 4, 8, metricStore, logger)
+	var tcpinfos []*model.ListenerInfo
+
+	startTCP := func(curconf *conf.GConfig) {
+		var err error
+		tcpServicePlugin.SetConf(curconf.Syslog, curconf.Parsers)
+		tcpServicePlugin.SetKafkaConf(&curconf.Kafka)
+		tcpinfos, err = tcpServicePlugin.Start(testFlag)
+		if err != nil {
+			logger.Crit("Error starting TCP plugin", "error", err)
+		} else if len(tcpinfos) == 0 {
+			logger.Info("TCP plugin not started")
+		} else {
+			logger.Info("TCP plugin has been started", "listeners", len(tcpinfos))
+			if registry != nil {
+				for _, infos := range tcpinfos {
+					registry.RegisterTcpListener(infos)
+				}
+			}
+		}
+	}
+
+	udpServicePlugin := services.NewNetworkPlugin("udp", st, 5, 9, metricStore, logger)
+
+	startUDP := func(curconf *conf.GConfig) {
+		var err error
+		udpServicePlugin.SetConf(curconf.Syslog, curconf.Parsers)
+		udpServicePlugin.SetKafkaConf(&curconf.Kafka)
+		udpinfos, err := udpServicePlugin.Start(testFlag)
+		if err != nil {
+			logger.Crit("Error starting UDP plugin", "error", err)
+		} else if len(udpinfos) == 0 {
+			logger.Info("UDP plugin not started")
+		} else {
+			logger.Info("UDP plugin started", "listeners", len(udpinfos))
+		}
+	}
+
+	startRELP(c)
+	startTCP(c)
+	startUDP(c)
+
+	stopTCP := func() {
+		tcpServicePlugin.Stop()
+		tcpServicePlugin.WaitClosed()
+		if len(tcpinfos) > 0 && registry != nil {
+			for _, infos := range tcpinfos {
+				registry.UnregisterTcpListener(infos)
+			}
+			tcpinfos = nil
+		}
+	}
+
+	stopUDP := func() {
+		udpServicePlugin.Stop()
+		udpServicePlugin.WaitClosed()
+	}
+
+	stopRELP := func() {
+		relpServicePlugin.Stop()
+		relpServicePlugin.WaitClosed()
 	}
 
 	Reload := func(newConf *conf.GConfig) {
@@ -459,37 +560,24 @@ func Serve() error {
 		// reset the RELP service
 		wg.Add(1)
 		go func() {
-			relpServer.Unregister(registry)
-			relpServer.Stop()
+			stopRELP()
+			startRELP(newConf)
 			wg.Done()
 		}()
 
 		// reset the TCP service
 		wg.Add(1)
 		go func() {
-			tcpServer.Unregister(registry)
-			tcpServer.Stop()
-			tcpServer.WaitClosed()
-			tcpServer.SetConf(*newConf)
-			err := tcpServer.Start()
-			if err == nil {
-				tcpServer.Register(registry)
-			} else {
-				logger.Error("Error starting the TCP server", "error", err)
-			}
+			stopTCP()
+			startTCP(newConf)
 			wg.Done()
 		}()
 
 		// reset the UDP service
 		wg.Add(1)
 		go func() {
-			udpServer.Stop()
-			<-udpServer.ClosedChan
-			udpServer.Conf = *newConf
-			err := udpServer.Start()
-			if err != nil {
-				logger.Error("Error starting the UDP server", "error", err)
-			}
+			stopUDP()
+			startUDP(newConf)
 			wg.Done()
 		}()
 		wg.Wait()
@@ -500,12 +588,14 @@ func Serve() error {
 		select {
 		case <-shutdownCtx.Done():
 			logger.Info("Shutting down")
-			relpServer.Unregister(registry)
-			relpServer.FinalStop()
-			_, more := <-relpServer.StatusChan
-			for more {
-				_, more = <-relpServer.StatusChan
-			}
+
+			//relpServer.Unregister(registry)
+			//relpServer.FinalStop()
+			//_, more := <-relpServer.StatusChan
+			//for more {
+			//	_, more = <-relpServer.StatusChan
+			//}
+			stopRELP()
 			logger.Debug("The RELP service has been stopped")
 
 			if journaldServer != nil {
@@ -513,6 +603,7 @@ func Serve() error {
 				journaldServer.Stop()
 				logger.Debug("Stopped journald service")
 			}
+
 			if auditService != nil {
 				logger.Debug("Stopping audit service")
 				cancelAudit()
@@ -520,14 +611,12 @@ func Serve() error {
 				logger.Debug("Stopped audit service")
 			}
 
-			tcpServer.Unregister(registry)
-			logger.Debug("Stopping tcp and udp services")
-			tcpServer.Stop()
-			udpServer.Stop()
-			tcpServer.WaitClosed()
+			logger.Debug("Stopping TCP and UDP services")
+			stopTCP()
 			logger.Debug("The TCP service has been stopped")
-			<-udpServer.ClosedChan
+			stopUDP()
 			logger.Debug("The UDP service has been stopped")
+
 			return nil
 
 		case _, more := <-updated:
@@ -586,32 +675,6 @@ func Serve() error {
 				time.Sleep(time.Second)
 				startForwarder(kafkaConf)
 			}()
-
-		case state := <-relpServer.StatusChan:
-			switch state {
-			case server.FinalStopped:
-				logger.Debug("The RELP service has been definitely halted")
-
-			case server.Stopped:
-				logger.Debug("The RELP service is stopped")
-				relpServer.Conf = *c
-				err := relpServer.Start()
-				if err != nil {
-					logger.Warn("The RELP service has failed to start", "error", err)
-					relpServer.StopAndWait()
-				}
-
-			case server.Waiting:
-				logger.Debug("RELP waiting")
-				go func() {
-					time.Sleep(time.Duration(30) * time.Second)
-					relpServer.EndWait()
-				}()
-
-			case server.Started:
-				logger.Debug("The RELP service has been started")
-				relpServer.Register(registry)
-			}
 
 		}
 

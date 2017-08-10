@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"os"
 	"os/user"
-	"runtime"
 	"strconv"
 	"strings"
 
@@ -226,8 +225,6 @@ func Drop(uid int, gid int) error {
 		if kernelVer.Compare(minVer) < 0 {
 			return fmt.Errorf("We need Linux kernel >= 4.3 to support ambient capabilities")
 		}
-		// ensure the current goroutine stays on the same OS thread
-		runtime.LockOSThread()
 		// keep the current capabilities when we will change UID
 		// (to set the securebits, SETPCAP capability is needed)
 		err = KeepCaps()

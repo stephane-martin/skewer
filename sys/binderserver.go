@@ -86,7 +86,17 @@ func BinderPacket(addr string) (net.PacketConn, error) {
 	return conn, nil
 }
 
-func Binder(parentFD int, logger log15.Logger) error {
+func Binder(parentsHandles []int, logger log15.Logger) (err error) {
+	for _, handle := range parentsHandles {
+		err = binderOne(handle, logger)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func binderOne(parentFD int, logger log15.Logger) error {
 	logger = logger.New("class", "binder")
 	parentFile := os.NewFile(uintptr(parentFD), "parent_file")
 
@@ -224,8 +234,6 @@ func Binder(parentFD int, logger log15.Logger) error {
 
 	go func() {
 		defer func() {
-			//c.Close()
-			//parentFile.Close()
 			cancel()
 		}()
 		scanner := bufio.NewScanner(childConn)
