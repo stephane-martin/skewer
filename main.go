@@ -19,8 +19,8 @@ func main() {
 		ssys.Predrop()
 	}
 
-	getLogger := func(name string) log15.Logger {
-		loggerConn, _ := net.FileConn(os.NewFile(4, "logger"))
+	getLogger := func(name string, handle int) log15.Logger {
+		loggerConn, _ := net.FileConn(os.NewFile(uintptr(handle), "logger"))
 		loggerConn.(*net.UnixConn).SetReadBuffer(65536)
 		loggerConn.(*net.UnixConn).SetWriteBuffer(65536)
 		return utils.NewRemoteLogger(context.Background(), loggerConn).New("proc", name)
@@ -28,8 +28,16 @@ func main() {
 
 	switch name := os.Args[0]; name {
 	case "skewer-tcp", "skewer-udp", "skewer-relp", "skewer-journal":
-		logger := getLogger(name)
-		binderClient, _ := ssys.NewBinderClient(os.NewFile(3, "binder"), logger)
+		var binderClient *ssys.BinderClient
+		logger := log15.New()
+		if os.Getenv("HAS_BINDER") == "TRUE" {
+			if os.Getenv("HAS_LOGGER") == "TRUE" {
+				logger = getLogger(name, 4)
+			}
+			binderClient, _ = ssys.NewBinderClient(os.NewFile(3, "binder"), logger)
+		} else if os.Getenv("HAS_LOGGER") == "TRUE" {
+			logger = getLogger(name, 3)
+		}
 		signal.Ignore(syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
 		svc := services.NetworkPluginProvider{}
 		if len(os.Args) >= 2 {

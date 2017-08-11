@@ -136,6 +136,7 @@ func (s *JournalService) Start(test bool) ([]*model.ListenerInfo, error) {
 			}
 		}
 	}()
+	s.logger.Debug("Journald service is started")
 	return []*model.ListenerInfo{}, nil
 }
 

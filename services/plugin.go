@@ -28,18 +28,21 @@ func NewNetworkPlugin(t string, stasher model.Stasher, binderHandle int, loggerH
 	if err != nil {
 		// TODO
 	}
+	envs := []string{"PATH=/bin:/usr/bin"}
 	files := []*os.File{}
 	if s.binderHandle != 0 {
 		files = append(files, os.NewFile(uintptr(s.binderHandle), "binder"))
+		envs = append(envs, "HAS_BINDER=TRUE")
 	}
 	if s.loggerHandle != 0 {
 		files = append(files, os.NewFile(uintptr(s.loggerHandle), "logger"))
+		envs = append(envs, "HAS_LOGGER=TRUE")
 	}
 	s.cmd = &exec.Cmd{
 		Path:       exe,
 		Stderr:     os.Stderr,
 		ExtraFiles: files,
-		Env:        []string{"PATH=/bin:/usr/bin"},
+		Env:        envs,
 	}
 
 	s.stdin, err = s.cmd.StdinPipe()
