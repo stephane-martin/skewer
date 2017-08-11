@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -66,9 +67,10 @@ func (s *RelpService) Start(test bool) (infos []*model.ListenerInfo, err error) 
 				s.impl.logger.Debug("The RELP service is stopped")
 				s.impl.SetConf(s.sc, s.pc)
 				s.impl.SetKafkaConf(*s.kc)
-				infos, err := s.impl.Start(test)
+				//infos, err := s.impl.Start(test)
+				_, err := s.impl.Start(test)
 				if err == nil {
-					fmt.Println(infos)
+					//fmt.Println(infos)
 					// TODO: the first time it happens, register in Consul
 				} else {
 					s.impl.logger.Warn("The RELP service has failed to start", "error", err)
@@ -518,9 +520,9 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 			if s.test {
 				v, _ := kafkaMsg.Value.Encode()
 				pkey, _ := kafkaMsg.Key.Encode()
-				fmt.Printf("pkey: '%s' topic:'%s' txnr:'%d'\n", pkey, kafkaMsg.Topic, m.Txnr)
-				fmt.Println(string(v))
-				fmt.Println()
+				fmt.Fprintf(os.Stderr, "pkey: '%s' topic:'%s' txnr:'%d'\n", pkey, kafkaMsg.Topic, m.Txnr)
+				fmt.Fprintln(os.Stderr, string(v))
+				fmt.Fprintln(os.Stderr)
 				other_successes_chan <- m.Txnr
 			} else {
 				producer.Input() <- kafkaMsg

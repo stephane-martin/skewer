@@ -238,12 +238,12 @@ func PluginSplit(data []byte, atEOF bool) (int, []byte, error) {
 	}
 	trimmed := len(data) - len(trimmed_data)
 	if trimmed_data[10] != byte(' ') {
-		return 0, nil, fmt.Errorf("Wrong plugin format")
+		return 0, nil, fmt.Errorf("Wrong plugin format, 11th char is not space: '%s'", string(data))
 	}
 	var i int
 	for i = 0; i < 10; i++ {
 		if trimmed_data[i] < byte('0') || trimmed_data[i] > byte('9') {
-			return 0, nil, fmt.Errorf("Wring plugin format")
+			return 0, nil, fmt.Errorf("Wrong plugin format")
 		}
 	}
 	datalen, err := strconv.Atoi(string(trimmed_data[:10]))

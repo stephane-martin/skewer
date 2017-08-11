@@ -21,6 +21,7 @@ func main() {
 		loggerConn, err := net.FileConn(os.NewFile(uintptr(handle), "logger"))
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
+			return nil
 		}
 		err = loggerConn.(*net.UnixConn).SetReadBuffer(65536)
 		if err != nil {
@@ -44,6 +45,10 @@ func main() {
 			binderClient, _ = sys.NewBinderClient(os.NewFile(3, "binder"), logger)
 		} else if os.Getenv("HAS_LOGGER") == "TRUE" {
 			logger = getLogger(name, 3)
+		}
+		if logger == nil {
+			fmt.Fprintln(os.Stderr, "Could not create a logger for the plugin")
+			os.Exit(-1)
 		}
 		signal.Ignore(syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
 		svc := services.NetworkPluginProvider{}
