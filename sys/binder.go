@@ -191,7 +191,9 @@ func (l *BinderListener) Close() error {
 }
 
 func (l *BinderListener) Accept() (net.Conn, error) {
+	l.client.iconnMu.Lock()
 	ichan, ok := l.client.IncomingConn[l.addr]
+	l.client.iconnMu.Unlock()
 	notListenErr := &net.OpError{Err: fmt.Errorf("Not listening on that address"), Addr: l.Addr(), Op: "Accept"}
 	if !ok {
 		return nil, notListenErr

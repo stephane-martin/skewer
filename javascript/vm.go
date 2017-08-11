@@ -121,7 +121,7 @@ type ConcreteParser struct {
 func (p *ConcreteParser) Parse(rawMessage string, dont_parse_sd bool) (*model.SyslogMessage, error) {
 	jsParser, ok := p.env.jsParsers[p.name]
 	if !ok {
-		return nil, &model.UnknownFormatError{p.name}
+		return nil, &model.UnknownFormatError{Format: p.name}
 	}
 	rawMessage = strings.Trim(rawMessage, "\r\n ")
 	if len(rawMessage) == 0 {
@@ -314,7 +314,7 @@ func (e *Environment) Topic(m *model.SyslogMessage) (topic string, errs []error)
 	}
 	if len(topic) > 0 {
 		if !model.TopicNameIsValid(topic) {
-			errs = append(errs, &model.InvalidTopic{topic})
+			errs = append(errs, &model.InvalidTopic{Topic: topic})
 			return "", errs
 		}
 	}

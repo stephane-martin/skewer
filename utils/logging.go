@@ -73,38 +73,42 @@ func NewRemoteLogger(ctx context.Context, remote net.Conn) log15.Logger {
 	h := RemoteLoggerHandler{remote: remote, encoder: gob.NewEncoder(remote), ctx: ctx}
 	h.msgChan = make(chan *log15.Record, 1000)
 	logger.SetHandler(&h)
+
 	go func() {
-		<-ctx.Done()
-		c := h.msgChan
-		h.msgChan = nil
-		close(c)
-		h.Close()
-	}()
-	go func() {
+		defer h.Close()
 		var rbis Record
-		for r := range h.msgChan {
-			rbis = Record{Time: r.Time, Lvl: int(r.Lvl), Msg: r.Msg}
-			rbis.Ctx = map[string]string{}
+		var r *log15.Record
+		var more bool
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case r, more = <-h.msgChan:
+				if more {
+					rbis = Record{Time: r.Time, Lvl: int(r.Lvl), Msg: r.Msg}
+					rbis.Ctx = map[string]string{}
 
-			l := len(r.Ctx)
-			var i int
-			var ok bool
-			label := ""
-			val := ""
+					l := len(r.Ctx)
+					var i int
+					var ok bool
+					label := ""
+					val := ""
 
-			for i < l {
-				label, ok = r.Ctx[i].(string)
-				if ok {
-					i++
-					if i < l {
-						val = formatValue(r.Ctx[i])
-						rbis.Ctx[label] = val
-						i++
+					for i < l {
+						label, ok = r.Ctx[i].(string)
+						if ok {
+							i++
+							if i < l {
+								val = formatValue(r.Ctx[i])
+								rbis.Ctx[label] = val
+								i++
+							}
+						}
+
 					}
+					h.encoder.Encode(rbis)
 				}
-
 			}
-			h.encoder.Encode(rbis)
 		}
 	}()
 

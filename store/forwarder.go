@@ -53,6 +53,7 @@ func (fwder *kafkaForwarder) Forward(ctx context.Context, from Store, to conf.Ka
 	if !atomic.CompareAndSwapInt32(&fwder.forwarding, 0, 1) {
 		return false
 	}
+	fwder.errorChan = make(chan struct{})
 	fwder.wg.Add(1)
 	go fwder.doForward(ctx, from, to)
 	go func() {
@@ -67,8 +68,6 @@ func (fwder *kafkaForwarder) doForward(ctx context.Context, from Store, to conf.
 	var succChan <-chan *sarama.ProducerMessage
 	var failChan <-chan *sarama.ProducerError
 	var producer sarama.AsyncProducer
-
-	fwder.errorChan = make(chan struct{})
 
 	if !fwder.test {
 		producer = fwder.getProducer(ctx, &to)

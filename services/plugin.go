@@ -21,7 +21,34 @@ import (
 )
 
 func NewNetworkPlugin(t string, stasher model.Stasher, binderHandle int, loggerHandle int, m *metrics.Metrics, l log15.Logger) NetworkService {
-	return &NetworkPlugin{t: t, stasher: stasher, binderHandle: binderHandle, loggerHandle: loggerHandle, metrics: m, logger: l}
+	s := &NetworkPlugin{t: t, stasher: stasher, binderHandle: binderHandle, loggerHandle: loggerHandle, metrics: m, logger: l}
+	s.closed = make(chan struct{})
+	exe, err := sys.Executable()
+	if err != nil {
+		// TODO
+	}
+
+	s.cmd = &exec.Cmd{
+		Path:   exe,
+		Stderr: os.Stderr,
+		ExtraFiles: []*os.File{
+			os.NewFile(uintptr(s.binderHandle), "binder"),
+			os.NewFile(uintptr(s.loggerHandle), "logger"),
+		},
+		Env: []string{"PATH=/bin:/usr/bin"},
+	}
+
+	s.stdin, err = s.cmd.StdinPipe()
+	if err != nil {
+		// TODO
+	}
+
+	s.stdout, err = s.cmd.StdoutPipe()
+	if err != nil {
+		// TODO
+	}
+
+	return s
 }
 
 // NetworkPlugin launches and controls the TCP service
@@ -38,21 +65,17 @@ type NetworkPlugin struct {
 	metrics      *metrics.Metrics
 	logger       log15.Logger
 	stasher      model.Stasher
+	closed       chan struct{}
 }
 
 func (s *NetworkPlugin) Stop() {
-	if s.stdin != nil {
-		s.stdin.Write([]byte("stop\n"))
-	}
+	s.stdin.Write([]byte("stop\n"))
 }
 
 func (s *NetworkPlugin) WaitClosed() {
 	// TODO: kill the plugin if it has not stopped after a few seconds
-	if s.cmd != nil {
-		s.cmd.Wait()
-		s.cmd = nil
-		s.stdin = nil
-	}
+	<-s.closed
+	s.cmd.Wait()
 }
 
 func (s *NetworkPlugin) SetConf(sc []*conf.SyslogConfig, pc []conf.ParserConfig) {
@@ -65,40 +88,14 @@ func (s *NetworkPlugin) SetKafkaConf(kc *conf.KafkaConfig) {
 }
 
 func (s *NetworkPlugin) Start(test bool) (infos []*model.ListenerInfo, rerr error) {
-	if s.cmd != nil {
-		return nil, fmt.Errorf("Plugin already started")
-	}
-	exe, err := sys.Executable()
-	if err != nil {
-		return nil, err
-	}
 
 	args := []string{fmt.Sprintf("skewer-%s", s.t)}
 	if test {
 		args = append(args, "--test")
 	}
-	s.cmd = &exec.Cmd{
-		Args:   args,
-		Path:   exe,
-		Stderr: os.Stderr,
-		ExtraFiles: []*os.File{
-			os.NewFile(uintptr(s.binderHandle), "binder"),
-			os.NewFile(uintptr(s.loggerHandle), "logger"),
-		},
-		Env: []string{"PATH=/bin:/usr/bin"},
-	}
+	s.cmd.Args = args
 
-	s.stdin, err = s.cmd.StdinPipe()
-	if err != nil {
-		return nil, err
-	}
-
-	s.stdout, err = s.cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
-
-	err = s.cmd.Start()
+	err := s.cmd.Start()
 	if err != nil {
 		return nil, err
 	}
@@ -109,6 +106,7 @@ func (s *NetworkPlugin) Start(test bool) (infos []*model.ListenerInfo, rerr erro
 	var once sync.Once
 
 	go func() {
+		defer close(s.closed)
 		// read JSON encoded messages that the plugin is going to
 		// write on stdout
 		var err error
@@ -144,11 +142,8 @@ func (s *NetworkPlugin) Start(test bool) (infos []*model.ListenerInfo, rerr erro
 				rerr = fmt.Errorf(string(b[15:]))
 				once.Do(func() { close(startedChan) })
 			} else if bytes.HasPrefix(b, []byte("nolistenererror")) {
-				rerr = nil
-				infos = nil
+				rerr = fmt.Errorf("No listener")
 				once.Do(func() { close(startedChan) })
-				s.Stop()
-				s.WaitClosed()
 			} else {
 				s.logger.Warn("Unexpected message from plugin", "message", string(b))
 			}
@@ -177,6 +172,7 @@ func (s *NetworkPlugin) Start(test bool) (infos []*model.ListenerInfo, rerr erro
 	if rerr != nil {
 		infos = nil
 		s.Stop()
+		s.WaitClosed()
 	}
 
 	return infos, rerr

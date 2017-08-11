@@ -212,8 +212,6 @@ func (s *StreamingService) resetTCPListeners() {
 	for _, l := range s.unixListeners {
 		l.Listener.Close()
 	}
-	s.tcpListeners = []*TCPListenerConf{}
-	s.unixListeners = []*UnixListenerConf{}
 }
 
 func (s *GenericService) AddConnection(conn Connection) {

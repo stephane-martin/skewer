@@ -56,7 +56,7 @@ type ExecutingJSError struct {
 }
 
 func (e *ExecutingJSError) Error() string {
-	return fmt.Sprintf("An unexpected error happened when executing the JS function '%s': %s", e.Err.Error())
+	return fmt.Sprintf("An unexpected error happened when executing the JS function '%s': %s", e.FuncName, e.Err.Error())
 }
 
 func (e *ExecutingJSError) Javascript() {}

@@ -31,7 +31,7 @@ type ConfigurationSyntaxError struct {
 }
 
 func (e ConfigurationSyntaxError) Error() string {
-	return fmt.Sprintf("Syntax error in configuration file '%s': %s", e.Filename, e.Err.Error)
+	return fmt.Sprintf("Syntax error in configuration file '%s': %s", e.Filename, e.Err.Error())
 }
 
 func (e ConfigurationSyntaxError) WrappedErrors() []error {

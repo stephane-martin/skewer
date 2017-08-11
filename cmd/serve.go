@@ -332,11 +332,15 @@ func Serve() error {
 	st, err = store.NewStore(gctx, c.Store, metricStore, logger)
 	if err != nil {
 		logger.Crit("Can't create the message Store", "error", err)
+		gCancel()
+		cancelLogger()
 		return err
 	}
 	err = st.StoreAllSyslogConfigs(c)
 	if err != nil {
 		logger.Crit("Can't store the syslog configurations", "error", err)
+		gCancel()
+		cancelLogger()
 		return err
 	}
 
@@ -439,34 +443,37 @@ func Serve() error {
 	sig_chan := make(chan os.Signal)
 	signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 
-	relpServicePlugin := services.NewNetworkPlugin("relp", st, 6, 10, metricStore, logger)
+	var relpServicePlugin services.NetworkService
+	var tcpServicePlugin services.NetworkService
+	var udpServicePlugin services.NetworkService
 
 	startRELP := func(curconf *conf.GConfig) {
 		var err error
+		relpServicePlugin = services.NewNetworkPlugin("relp", st, 6, 10, metricStore, logger)
 		relpServicePlugin.SetConf(curconf.Syslog, curconf.Parsers)
 		relpServicePlugin.SetKafkaConf(&curconf.Kafka)
 		_, err = relpServicePlugin.Start(testFlag)
 		if err != nil {
-			logger.Crit("Error starting RELP plugin", "error", err)
+			logger.Error("Error starting RELP plugin", "error", err)
 		} else {
-			logger.Info("RELP plugin has been started")
+			logger.Debug("RELP plugin has been started")
 		}
 	}
 
-	tcpServicePlugin := services.NewNetworkPlugin("tcp", st, 4, 8, metricStore, logger)
 	var tcpinfos []*model.ListenerInfo
 
 	startTCP := func(curconf *conf.GConfig) {
 		var err error
+		tcpServicePlugin = services.NewNetworkPlugin("tcp", st, 4, 8, metricStore, logger)
 		tcpServicePlugin.SetConf(curconf.Syslog, curconf.Parsers)
 		tcpServicePlugin.SetKafkaConf(&curconf.Kafka)
 		tcpinfos, err = tcpServicePlugin.Start(testFlag)
 		if err != nil {
-			logger.Crit("Error starting TCP plugin", "error", err)
+			logger.Error("Error starting TCP plugin", "error", err)
 		} else if len(tcpinfos) == 0 {
 			logger.Info("TCP plugin not started")
 		} else {
-			logger.Info("TCP plugin has been started", "listeners", len(tcpinfos))
+			logger.Debug("TCP plugin has been started", "listeners", len(tcpinfos))
 			if registry != nil {
 				for _, infos := range tcpinfos {
 					registry.RegisterTcpListener(infos)
@@ -475,19 +482,18 @@ func Serve() error {
 		}
 	}
 
-	udpServicePlugin := services.NewNetworkPlugin("udp", st, 5, 9, metricStore, logger)
-
 	startUDP := func(curconf *conf.GConfig) {
 		var err error
+		udpServicePlugin = services.NewNetworkPlugin("udp", st, 5, 9, metricStore, logger)
 		udpServicePlugin.SetConf(curconf.Syslog, curconf.Parsers)
 		udpServicePlugin.SetKafkaConf(&curconf.Kafka)
 		udpinfos, err := udpServicePlugin.Start(testFlag)
 		if err != nil {
-			logger.Crit("Error starting UDP plugin", "error", err)
+			logger.Error("Error starting UDP plugin", "error", err)
 		} else if len(udpinfos) == 0 {
 			logger.Info("UDP plugin not started")
 		} else {
-			logger.Info("UDP plugin started", "listeners", len(udpinfos))
+			logger.Debug("UDP plugin started", "listeners", len(udpinfos))
 		}
 	}
 

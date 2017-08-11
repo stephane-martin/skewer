@@ -23,6 +23,7 @@ var printStoreCmd = &cobra.Command{
 		var c *conf.GConfig
 		var st store.Store
 		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
 		logger := log15.New()
 
 		params := consul.ConnParams{
@@ -38,7 +39,7 @@ var printStoreCmd = &cobra.Command{
 
 		c, _, err = conf.InitLoad(ctx, configDirName, storeDirname, consulPrefix, params, logger)
 		if err != nil {
-			fmt.Println("bleh")
+			fmt.Println("bleh", err)
 			return
 		}
 
@@ -49,10 +50,7 @@ var printStoreCmd = &cobra.Command{
 			fmt.Println("Can't create the message Store", "error", err)
 			return
 		}
-		defer func() {
-			cancel()
-			st.WaitFinished()
-		}()
+		defer st.WaitFinished()
 
 		readyMap, failedMap, sentMap := st.ReadAllBadgers()
 
