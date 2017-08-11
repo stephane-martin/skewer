@@ -27,7 +27,7 @@ func main() {
 	}
 
 	switch name := os.Args[0]; name {
-	case "skewer-tcp", "skewer-udp", "skewer-relp":
+	case "skewer-tcp", "skewer-udp", "skewer-relp", "skewer-journal":
 		logger := getLogger(name)
 		binderClient, _ := ssys.NewBinderClient(os.NewFile(3, "binder"), logger)
 		signal.Ignore(syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
@@ -41,7 +41,6 @@ func main() {
 		svc.Launch(name, false, binderClient, logger)
 
 	case "skewer-audit":
-	case "skewer-journald":
 	default:
 		cmd.Execute()
 	}

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/conf"
@@ -20,22 +21,25 @@ import (
 	"github.com/stephane-martin/skewer/utils"
 )
 
-func NewNetworkPlugin(t string, stasher model.Stasher, binderHandle int, loggerHandle int, m *metrics.Metrics, l log15.Logger) NetworkService {
+func NewNetworkPlugin(t string, stasher model.Stasher, binderHandle int, loggerHandle int, m *metrics.Metrics, l log15.Logger) *NetworkPlugin {
 	s := &NetworkPlugin{t: t, stasher: stasher, binderHandle: binderHandle, loggerHandle: loggerHandle, metrics: m, logger: l}
 	s.closed = make(chan struct{})
 	exe, err := sys.Executable()
 	if err != nil {
 		// TODO
 	}
-
+	files := []*os.File{}
+	if s.binderHandle != 0 {
+		files = append(files, os.NewFile(uintptr(s.binderHandle), "binder"))
+	}
+	if s.loggerHandle != 0 {
+		files = append(files, os.NewFile(uintptr(s.loggerHandle), "logger"))
+	}
 	s.cmd = &exec.Cmd{
-		Path:   exe,
-		Stderr: os.Stderr,
-		ExtraFiles: []*os.File{
-			os.NewFile(uintptr(s.binderHandle), "binder"),
-			os.NewFile(uintptr(s.loggerHandle), "logger"),
-		},
-		Env: []string{"PATH=/bin:/usr/bin"},
+		Path:       exe,
+		Stderr:     os.Stderr,
+		ExtraFiles: files,
+		Env:        []string{"PATH=/bin:/usr/bin"},
 	}
 
 	s.stdin, err = s.cmd.StdinPipe()
@@ -70,6 +74,10 @@ type NetworkPlugin struct {
 
 func (s *NetworkPlugin) Stop() {
 	s.stdin.Write([]byte("stop\n"))
+}
+
+func (s *NetworkPlugin) Shutdown() {
+	s.stdin.Write([]byte("shutdown\n"))
 }
 
 func (s *NetworkPlugin) WaitClosed() {
@@ -171,7 +179,7 @@ func (s *NetworkPlugin) Start(test bool) (infos []*model.ListenerInfo, rerr erro
 
 	if rerr != nil {
 		infos = nil
-		s.Stop()
+		s.Shutdown()
 		s.WaitClosed()
 	}
 
@@ -205,6 +213,7 @@ func (p *NetworkPluginProvider) Launch(typ string, test bool, binderClient *sys.
 	var scanner *bufio.Scanner
 	var command string
 	var args string
+	var cancel context.CancelFunc
 	scanner = bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
 		parts := strings.SplitN(strings.Trim(scanner.Text(), "\r\n "), " ", 2)
@@ -216,32 +225,45 @@ func (p *NetworkPluginProvider) Launch(typ string, test bool, binderClient *sys.
 				fmt.Fprintf(os.Stdout, "%010d %s\n", len(errs), errs)
 				p.svc = nil
 			} else {
-				p.svc = NewNetworkService(typ, p, generator, binderClient, nil, logger)
-				p.svc.SetConf(p.syslogConfs, p.parserConfs)
-				p.svc.SetKafkaConf(p.kafkaConf)
-				infos, err := p.svc.Start(test)
-				if err != nil {
-					errs := fmt.Sprintf("starterror %s", err.Error())
-					fmt.Fprintf(os.Stdout, "%010d %s\n", len(errs), errs)
-					p.svc = nil
-				} else if len(infos) == 0 && typ != "skewer-relp" { // RELP never reports infos
-					p.svc.Stop()
-					p.svc = nil
-					errs := "nolistenererror"
+				p.svc, cancel = NewNetworkService(typ, p, generator, binderClient, nil, logger)
+				if p.svc == nil {
+					errs := "starterror NewNetworkService returned nil"
 					fmt.Fprintf(os.Stdout, "%010d %s\n", len(errs), errs)
 				} else {
-					infosb, _ := json.Marshal(infos)
-					answer := fmt.Sprintf("started %s", infosb)
-					fmt.Fprintf(os.Stdout, "%010d %s\n", len(answer), answer)
+					p.svc.SetConf(p.syslogConfs, p.parserConfs)
+					p.svc.SetKafkaConf(p.kafkaConf)
+					infos, err := p.svc.Start(test)
+					if err != nil {
+						errs := fmt.Sprintf("starterror %s", err.Error())
+						fmt.Fprintf(os.Stdout, "%010d %s\n", len(errs), errs)
+						p.svc = nil
+					} else if len(infos) == 0 && typ != "skewer-relp" && typ != "skewer-journal" { // RELP and Journal never report infos
+						p.svc.Stop()
+						p.svc = nil
+						errs := "nolistenererror"
+						fmt.Fprintf(os.Stdout, "%010d %s\n", len(errs), errs)
+					} else {
+						infosb, _ := json.Marshal(infos)
+						answer := fmt.Sprintf("started %s", infosb)
+						fmt.Fprintf(os.Stdout, "%010d %s\n", len(answer), answer)
+					}
 				}
 			}
 		case "stop":
 			if p.svc != nil {
 				p.svc.Stop()
 				p.svc.WaitClosed()
-				p.svc = nil
 			}
-			os.Exit(0)
+		case "shutdown":
+			if p.svc != nil {
+				p.svc.Stop()
+				p.svc.WaitClosed()
+			}
+			if cancel != nil {
+				cancel()
+				time.Sleep(time.Second) // give a chance for cleaning to be executed before plugin process ends
+			}
+			return
 		case "syslogconf":
 			args = parts[1]
 			sc := []*conf.SyslogConfig{}
@@ -280,7 +302,5 @@ func (p *NetworkPluginProvider) Launch(typ string, test bool, binderClient *sys.
 	e := scanner.Err()
 	if e != nil {
 		logger.Error("Scanning stdin error", "error", e)
-		os.Exit(-1)
 	}
-	os.Exit(0)
 }

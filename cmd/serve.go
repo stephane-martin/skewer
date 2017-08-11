@@ -166,7 +166,12 @@ connects to Kafka, and forwards messages to Kafka.`,
 		loggerRelpHandle, loggerParentRelpHandle := mustSocketPair(syscall.SOCK_DGRAM)
 		loggerRelpConn := getLoggerConn(loggerParentRelpHandle)
 
-		utils.LogReceiver(context.Background(), rootlogger, []net.Conn{loggerChildConn, loggerTcpConn, loggerUdpConn, loggerRelpConn})
+		loggerJournalHandle, loggerParentRelpHandle := mustSocketPair(syscall.SOCK_DGRAM)
+		loggerJournalConn := getLoggerConn(loggerParentRelpHandle)
+
+		utils.LogReceiver(context.Background(), rootlogger, []net.Conn{
+			loggerChildConn, loggerTcpConn, loggerUdpConn, loggerRelpConn, loggerJournalConn,
+		})
 
 		logger.Debug("Target user", "uid", numuid, "gid", numgid)
 
@@ -192,6 +197,7 @@ connects to Kafka, and forwards messages to Kafka.`,
 				os.NewFile(uintptr(loggerTcpHandle), "tcp_logger_file"),
 				os.NewFile(uintptr(loggerUdpHandle), "udp_logger_file"),
 				os.NewFile(uintptr(loggerRelpHandle), "relp_logger_file"),
+				os.NewFile(uintptr(loggerJournalHandle), "journal_logger_file"),
 			},
 			Env: []string{"SKEWER_CHILD=TRUE", "PATH=/bin:/usr/bin"},
 		}
@@ -211,6 +217,7 @@ connects to Kafka, and forwards messages to Kafka.`,
 		syscall.Close(loggerTcpHandle)
 		syscall.Close(loggerUdpHandle)
 		syscall.Close(loggerRelpHandle)
+		syscall.Close(loggerJournalHandle)
 
 		sig_chan := make(chan os.Signal, 1)
 		once := sync.Once{}
@@ -411,41 +418,45 @@ func Serve() error {
 		logger.Info("Linux audit logs are not supported")
 	}
 
-	// retrieve messages from journald
-	var journaldServer *services.JournaldServer
-	if journald.Supported {
-		logger.Info("Journald is supported")
-		if c.Journald.Enabled {
-			logger.Info("Journald service is enabled")
+	var journalServicePlugin *services.NetworkPlugin
 
-			journalCtx, cancelJournal := context.WithCancel(gctx)
-			journaldServer, err = services.NewJournaldServer(journalCtx, c.Journald, st, generator, metricStore, logger)
-			if err == nil {
-				err = journaldServer.Start()
+	startJournal := func(curconf *conf.GConfig) {
+		// retrieve messages from journald
+		if journald.Supported {
+			logger.Info("Journald is supported")
+			if c.Journald.Enabled {
+				logger.Info("Journald service is enabled")
+				journalServicePlugin = services.NewNetworkPlugin("journal", st, 0, 11, metricStore, logger)
+				curjconf := &conf.SyslogConfig{
+					ConfID:        curconf.Journald.ConfID,
+					FilterFunc:    curconf.Journald.FilterFunc,
+					PartitionFunc: curconf.Journald.PartitionFunc,
+					PartitionTmpl: curconf.Journald.PartitionTmpl,
+					TopicFunc:     curconf.Journald.TopicFunc,
+					TopicTmpl:     curconf.Journald.TopicTmpl,
+				}
+				journalServicePlugin.SetConf([]*conf.SyslogConfig{curjconf}, curconf.Parsers)
+				journalServicePlugin.SetKafkaConf(&curconf.Kafka)
+				_, err = journalServicePlugin.Start(testFlag)
 				if err != nil {
-					logger.Warn("Error starting the journald service", "error", err)
-					cancelJournal()
-					journaldServer = nil
+					logger.Error("Error starting Journald plugin", "error", err)
 				} else {
-					logger.Debug("Journald service is started")
+					logger.Debug("Journald plugin has been started")
 				}
 			} else {
-				logger.Warn("Error initializing the journald service", "error", err)
-				journaldServer = nil
+				logger.Info("Journald service is disabled")
 			}
 		} else {
-			logger.Info("Journald service is disabled")
+			logger.Info("Journald service is not supported (only Linux)")
 		}
-	} else {
-		logger.Info("Journald not supported")
 	}
 
 	sig_chan := make(chan os.Signal)
 	signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 
-	var relpServicePlugin services.NetworkService
-	var tcpServicePlugin services.NetworkService
-	var udpServicePlugin services.NetworkService
+	var relpServicePlugin *services.NetworkPlugin
+	var tcpServicePlugin *services.NetworkPlugin
+	var udpServicePlugin *services.NetworkPlugin
 
 	startRELP := func(curconf *conf.GConfig) {
 		var err error
@@ -502,7 +513,7 @@ func Serve() error {
 	startUDP(c)
 
 	stopTCP := func() {
-		tcpServicePlugin.Stop()
+		tcpServicePlugin.Shutdown()
 		tcpServicePlugin.WaitClosed()
 		if len(tcpinfos) > 0 && registry != nil {
 			for _, infos := range tcpinfos {
@@ -513,13 +524,27 @@ func Serve() error {
 	}
 
 	stopUDP := func() {
-		udpServicePlugin.Stop()
+		udpServicePlugin.Shutdown()
 		udpServicePlugin.WaitClosed()
 	}
 
 	stopRELP := func() {
-		relpServicePlugin.Stop()
+		relpServicePlugin.Shutdown()
 		relpServicePlugin.WaitClosed()
+	}
+
+	stopJournal := func(shutdown bool) {
+		if journald.Supported {
+			if journalServicePlugin != nil {
+				if shutdown {
+					journalServicePlugin.Shutdown()
+					journalServicePlugin.WaitClosed()
+				} else {
+					journalServicePlugin.Stop()
+					journalServicePlugin.WaitClosed()
+				}
+			}
+		}
 	}
 
 	Reload := func(newConf *conf.GConfig) {
@@ -535,13 +560,12 @@ func Serve() error {
 
 		wg := &sync.WaitGroup{}
 
-		// reset the journald service
-		if journaldServer != nil {
+		if journald.Supported {
+			// reset the journald service
 			wg.Add(1)
 			go func() {
-				journaldServer.Stop()
-				journaldServer.Conf = newConf.Journald
-				journaldServer.Start()
+				stopJournal(false)
+				startJournal(newConf)
 				wg.Done()
 			}()
 		}
@@ -604,11 +628,8 @@ func Serve() error {
 			stopRELP()
 			logger.Debug("The RELP service has been stopped")
 
-			if journaldServer != nil {
-				logger.Debug("Stopping journald service")
-				journaldServer.Stop()
-				logger.Debug("Stopped journald service")
-			}
+			stopJournal(true)
+			logger.Debug("Stopped journald service")
 
 			if auditService != nil {
 				logger.Debug("Stopping audit service")

@@ -69,27 +69,26 @@ func EntryToSyslog(entry map[string]string) *model.SyslogMessage {
 	return &m
 }
 
-type JournaldServer struct {
+type JournalService struct {
 	stasher   model.Stasher
 	reader    journald.JournaldReader
 	metrics   *metrics.Metrics
 	logger    log15.Logger
-	stopchan  chan bool
+	stopchan  chan struct{}
 	Conf      *conf.JournaldConfig
 	wgroup    *sync.WaitGroup
 	generator chan ulid.ULID
 }
 
-func NewJournaldServer(
+func NewJournalService(
 	ctx context.Context,
-	c *conf.JournaldConfig,
 	stasher model.Stasher,
 	generator chan ulid.ULID,
 	metric *metrics.Metrics,
-	logger log15.Logger) (*JournaldServer, error) {
+	logger log15.Logger) (*JournalService, error) {
 
 	var err error
-	s := JournaldServer{Conf: c, stasher: stasher, metrics: metric, generator: generator}
+	s := JournalService{stasher: stasher, metrics: metric, generator: generator}
 	s.logger = logger.New("class", "journald")
 	s.reader, err = journald.NewReader(ctx, s.logger)
 	if err != nil {
@@ -100,9 +99,9 @@ func NewJournaldServer(
 	return &s, nil
 }
 
-func (s *JournaldServer) Start() error {
-	s.stopchan = make(chan bool)
+func (s *JournalService) Start(test bool) ([]*model.ListenerInfo, error) {
 	s.wgroup.Add(1)
+	s.stopchan = make(chan struct{})
 	go func() {
 		defer s.wgroup.Done()
 
@@ -135,12 +134,27 @@ func (s *JournaldServer) Start() error {
 			}
 		}
 	}()
-	return nil
+	return []*model.ListenerInfo{}, nil
 }
 
-func (s *JournaldServer) Stop() {
-	if s.stopchan != nil {
-		close(s.stopchan)
-	}
+func (s *JournalService) Stop() {
+	close(s.stopchan)
 	s.wgroup.Wait()
 }
+
+func (s *JournalService) WaitClosed() {
+	s.wgroup.Wait()
+}
+
+func (s *JournalService) SetConf(sc []*conf.SyslogConfig, pc []conf.ParserConfig) {
+	s.Conf = &conf.JournaldConfig{
+		ConfID:        sc[0].ConfID,
+		FilterFunc:    sc[0].FilterFunc,
+		PartitionFunc: sc[0].PartitionFunc,
+		PartitionTmpl: sc[0].PartitionTmpl,
+		TopicFunc:     sc[0].TopicFunc,
+		TopicTmpl:     sc[0].TopicTmpl,
+	}
+}
+
+func (s *JournalService) SetKafkaConf(kc *conf.KafkaConfig) {}

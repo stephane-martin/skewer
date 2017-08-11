@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"crypto/tls"
 	"net"
 	"os"
@@ -25,15 +26,27 @@ type NetworkService interface {
 	SetKafkaConf(kc *conf.KafkaConfig)
 }
 
-func NewNetworkService(t string, stasher model.Stasher, gen chan ulid.ULID, b *sys.BinderClient, m *metrics.Metrics, l log15.Logger) NetworkService {
-	if t == "skewer-tcp" {
-		return NewTcpService(stasher, gen, b, m, l)
-	} else if t == "skewer-udp" {
-		return NewUdpService(stasher, gen, b, m, l)
-	} else if t == "skewer-relp" {
-		return NewRelpService(b, m, l)
-	} else {
-		return nil
+func NewNetworkService(t string, stasher model.Stasher, gen chan ulid.ULID,
+	b *sys.BinderClient, m *metrics.Metrics, l log15.Logger) (NetworkService, context.CancelFunc) {
+	switch t {
+	case "skewer-tcp":
+		return NewTcpService(stasher, gen, b, m, l), nil
+	case "skewer-udp":
+		return NewUdpService(stasher, gen, b, m, l), nil
+	case "skewer-relp":
+		return NewRelpService(b, m, l), nil
+	case "skewer-journal":
+		ctx, cancel := context.WithCancel(context.Background())
+		s, err := NewJournalService(ctx, stasher, gen, m, l)
+		if err == nil {
+			return s, cancel
+		} else {
+			l.Error("Error initializing journal service", "error", err)
+			cancel()
+			return nil, nil
+		}
+	default:
+		return nil, nil
 	}
 }
 
