@@ -508,6 +508,7 @@ func Serve() error {
 		}
 	}
 
+	startJournal(c)
 	startRELP(c)
 	startTCP(c)
 	startUDP(c)

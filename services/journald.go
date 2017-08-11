@@ -125,7 +125,9 @@ func (s *JournalService) Start(test bool) ([]*model.ListenerInfo, error) {
 					if s.stasher != nil {
 						s.stasher.Stash(&fullParsedMessage)
 					}
-					s.metrics.IncomingMsgsCounter.WithLabelValues("journald", "journald", "", "").Inc()
+					if s.metrics != nil {
+						s.metrics.IncomingMsgsCounter.WithLabelValues("journald", "journald", "", "").Inc()
+					}
 				} else {
 					return
 				}
