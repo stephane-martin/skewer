@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"os"
 	"os/signal"
@@ -10,31 +11,37 @@ import (
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/cmd"
 	"github.com/stephane-martin/skewer/services"
-	ssys "github.com/stephane-martin/skewer/sys"
+	"github.com/stephane-martin/skewer/sys"
 	"github.com/stephane-martin/skewer/utils"
 )
 
 func main() {
-	if ssys.CapabilitiesSupported {
-		ssys.Predrop()
-	}
 
 	getLogger := func(name string, handle int) log15.Logger {
-		loggerConn, _ := net.FileConn(os.NewFile(uintptr(handle), "logger"))
-		loggerConn.(*net.UnixConn).SetReadBuffer(65536)
-		loggerConn.(*net.UnixConn).SetWriteBuffer(65536)
+		loggerConn, err := net.FileConn(os.NewFile(uintptr(handle), "logger"))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
+		err = loggerConn.(*net.UnixConn).SetReadBuffer(65536)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
+		err = loggerConn.(*net.UnixConn).SetWriteBuffer(65536)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
 		return utils.NewRemoteLogger(context.Background(), loggerConn).New("proc", name)
 	}
 
 	switch name := os.Args[0]; name {
 	case "skewer-tcp", "skewer-udp", "skewer-relp", "skewer-journal":
-		var binderClient *ssys.BinderClient
+		var binderClient *sys.BinderClient
 		logger := log15.New()
 		if os.Getenv("HAS_BINDER") == "TRUE" {
 			if os.Getenv("HAS_LOGGER") == "TRUE" {
 				logger = getLogger(name, 4)
 			}
-			binderClient, _ = ssys.NewBinderClient(os.NewFile(3, "binder"), logger)
+			binderClient, _ = sys.NewBinderClient(os.NewFile(3, "binder"), logger)
 		} else if os.Getenv("HAS_LOGGER") == "TRUE" {
 			logger = getLogger(name, 3)
 		}
@@ -50,6 +57,13 @@ func main() {
 
 	case "skewer-audit":
 	default:
+		if sys.CapabilitiesSupported {
+			err := sys.Predrop()
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+		}
 		cmd.Execute()
 	}
 }

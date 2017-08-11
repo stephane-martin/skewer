@@ -252,7 +252,7 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, m *metrics.Metrics, l l
 			close(store.OutputsChan)
 			store.wg.Done()
 		}()
-		messages := map[string]*model.TcpUdpParsedMessage{}
+		var messages map[string]*model.TcpUdpParsedMessage
 		for {
 		wait_messages:
 			for {

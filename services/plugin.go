@@ -26,7 +26,8 @@ func NewNetworkPlugin(t string, stasher model.Stasher, binderHandle int, loggerH
 	s.closed = make(chan struct{})
 	exe, err := sys.Executable()
 	if err != nil {
-		// TODO
+		l.Error("Error getting executable name", "error", err)
+		return nil
 	}
 	envs := []string{"PATH=/bin:/usr/bin"}
 	files := []*os.File{}
@@ -47,12 +48,14 @@ func NewNetworkPlugin(t string, stasher model.Stasher, binderHandle int, loggerH
 
 	s.stdin, err = s.cmd.StdinPipe()
 	if err != nil {
-		// TODO
+		l.Error("Error getting plugin stdin", "error", err)
+		return nil
 	}
 
 	s.stdout, err = s.cmd.StdoutPipe()
 	if err != nil {
-		// TODO
+		l.Error("Error getting plugin stdout", "error", err)
+		return nil
 	}
 
 	return s

@@ -51,7 +51,11 @@ connects to Kafka, and forwards messages to Kafka.`,
 
 		if os.Getenv("SKEWER_LINUX_CHILD") == "TRUE" {
 			// we are in the final child on linux
-			sys.NoNewPriv()
+			err := sys.NoNewPriv()
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(-1)
+			}
 			Serve()
 			os.Exit(0)
 		}
@@ -63,7 +67,10 @@ connects to Kafka, and forwards messages to Kafka.`,
 				// the following capability drop will be effective on
 				// all go threads
 				runtime.LockOSThread()
-				sys.DropNetBind()
+				err := sys.DropNetBind()
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+				}
 				exe, err := os.Executable()
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
@@ -75,7 +82,11 @@ connects to Kafka, and forwards messages to Kafka.`,
 					os.Exit(-1)
 				}
 			} else {
-				sys.NoNewPriv()
+				err := sys.NoNewPriv()
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(-1)
+				}
 				Serve()
 				os.Exit(0)
 			}
@@ -101,7 +112,11 @@ connects to Kafka, and forwards messages to Kafka.`,
 					fmt.Fprintln(os.Stderr, err)
 					os.Exit(-1)
 				}
-				sys.NoNewPriv()
+				err = sys.NoNewPriv()
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(-1)
+				}
 				exe, err := os.Executable()
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
@@ -219,7 +234,7 @@ connects to Kafka, and forwards messages to Kafka.`,
 		syscall.Close(loggerRelpHandle)
 		syscall.Close(loggerJournalHandle)
 
-		sig_chan := make(chan os.Signal, 1)
+		sig_chan := make(chan os.Signal, 10)
 		once := sync.Once{}
 		go func() {
 			for sig := range sig_chan {
@@ -427,21 +442,25 @@ func Serve() error {
 			if c.Journald.Enabled {
 				logger.Info("Journald service is enabled")
 				journalServicePlugin = services.NewNetworkPlugin("journal", st, 0, 11, metricStore, logger)
-				curjconf := &conf.SyslogConfig{
-					ConfID:        curconf.Journald.ConfID,
-					FilterFunc:    curconf.Journald.FilterFunc,
-					PartitionFunc: curconf.Journald.PartitionFunc,
-					PartitionTmpl: curconf.Journald.PartitionTmpl,
-					TopicFunc:     curconf.Journald.TopicFunc,
-					TopicTmpl:     curconf.Journald.TopicTmpl,
-				}
-				journalServicePlugin.SetConf([]*conf.SyslogConfig{curjconf}, curconf.Parsers)
-				journalServicePlugin.SetKafkaConf(&curconf.Kafka)
-				_, err = journalServicePlugin.Start(testFlag)
-				if err != nil {
-					logger.Error("Error starting Journald plugin", "error", err)
+				if journalServicePlugin == nil {
+					logger.Error("Error starting Journald plugin")
 				} else {
-					logger.Debug("Journald plugin has been started")
+					curjconf := &conf.SyslogConfig{
+						ConfID:        curconf.Journald.ConfID,
+						FilterFunc:    curconf.Journald.FilterFunc,
+						PartitionFunc: curconf.Journald.PartitionFunc,
+						PartitionTmpl: curconf.Journald.PartitionTmpl,
+						TopicFunc:     curconf.Journald.TopicFunc,
+						TopicTmpl:     curconf.Journald.TopicTmpl,
+					}
+					journalServicePlugin.SetConf([]*conf.SyslogConfig{curjconf}, curconf.Parsers)
+					journalServicePlugin.SetKafkaConf(&curconf.Kafka)
+					_, err = journalServicePlugin.Start(testFlag)
+					if err != nil {
+						logger.Error("Error starting Journald plugin", "error", err)
+					} else {
+						logger.Debug("Journald plugin has been started")
+					}
 				}
 			} else {
 				logger.Info("Journald service is disabled")
@@ -451,7 +470,7 @@ func Serve() error {
 		}
 	}
 
-	sig_chan := make(chan os.Signal)
+	sig_chan := make(chan os.Signal, 10)
 	signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 
 	var relpServicePlugin *services.NetworkPlugin
@@ -459,52 +478,61 @@ func Serve() error {
 	var udpServicePlugin *services.NetworkPlugin
 
 	startRELP := func(curconf *conf.GConfig) {
-		var err error
 		relpServicePlugin = services.NewNetworkPlugin("relp", st, 6, 10, metricStore, logger)
-		relpServicePlugin.SetConf(curconf.Syslog, curconf.Parsers)
-		relpServicePlugin.SetKafkaConf(&curconf.Kafka)
-		_, err = relpServicePlugin.Start(testFlag)
-		if err != nil {
-			logger.Error("Error starting RELP plugin", "error", err)
+		if relpServicePlugin == nil {
+			logger.Error("Error starting RELP plugin")
 		} else {
-			logger.Debug("RELP plugin has been started")
+			relpServicePlugin.SetConf(curconf.Syslog, curconf.Parsers)
+			relpServicePlugin.SetKafkaConf(&curconf.Kafka)
+			_, err := relpServicePlugin.Start(testFlag)
+			if err != nil {
+				logger.Error("Error starting RELP plugin", "error", err)
+			} else {
+				logger.Debug("RELP plugin has been started")
+			}
 		}
 	}
 
 	var tcpinfos []*model.ListenerInfo
 
 	startTCP := func(curconf *conf.GConfig) {
-		var err error
 		tcpServicePlugin = services.NewNetworkPlugin("tcp", st, 4, 8, metricStore, logger)
-		tcpServicePlugin.SetConf(curconf.Syslog, curconf.Parsers)
-		tcpServicePlugin.SetKafkaConf(&curconf.Kafka)
-		tcpinfos, err = tcpServicePlugin.Start(testFlag)
-		if err != nil {
-			logger.Error("Error starting TCP plugin", "error", err)
-		} else if len(tcpinfos) == 0 {
-			logger.Info("TCP plugin not started")
+		if tcpServicePlugin == nil {
+			logger.Error("Error starting TCP plugin")
 		} else {
-			logger.Debug("TCP plugin has been started", "listeners", len(tcpinfos))
-			if registry != nil {
-				for _, infos := range tcpinfos {
-					registry.RegisterTcpListener(infos)
+			tcpServicePlugin.SetConf(curconf.Syslog, curconf.Parsers)
+			tcpServicePlugin.SetKafkaConf(&curconf.Kafka)
+			tcpinfos, err = tcpServicePlugin.Start(testFlag)
+			if err != nil {
+				logger.Error("Error starting TCP plugin", "error", err)
+			} else if len(tcpinfos) == 0 {
+				logger.Info("TCP plugin not started")
+			} else {
+				logger.Debug("TCP plugin has been started", "listeners", len(tcpinfos))
+				if registry != nil {
+					for _, infos := range tcpinfos {
+						registry.RegisterTcpListener(infos)
+					}
 				}
 			}
 		}
 	}
 
 	startUDP := func(curconf *conf.GConfig) {
-		var err error
 		udpServicePlugin = services.NewNetworkPlugin("udp", st, 5, 9, metricStore, logger)
-		udpServicePlugin.SetConf(curconf.Syslog, curconf.Parsers)
-		udpServicePlugin.SetKafkaConf(&curconf.Kafka)
-		udpinfos, err := udpServicePlugin.Start(testFlag)
-		if err != nil {
-			logger.Error("Error starting UDP plugin", "error", err)
-		} else if len(udpinfos) == 0 {
-			logger.Info("UDP plugin not started")
+		if udpServicePlugin == nil {
+			logger.Error("Error starting UDP plugin")
 		} else {
-			logger.Debug("UDP plugin started", "listeners", len(udpinfos))
+			udpServicePlugin.SetConf(curconf.Syslog, curconf.Parsers)
+			udpServicePlugin.SetKafkaConf(&curconf.Kafka)
+			udpinfos, err := udpServicePlugin.Start(testFlag)
+			if err != nil {
+				logger.Error("Error starting UDP plugin", "error", err)
+			} else if len(udpinfos) == 0 {
+				logger.Info("UDP plugin not started")
+			} else {
+				logger.Debug("UDP plugin started", "listeners", len(udpinfos))
+			}
 		}
 	}
 
@@ -514,6 +542,9 @@ func Serve() error {
 	startUDP(c)
 
 	stopTCP := func() {
+		if tcpServicePlugin == nil {
+			return
+		}
 		tcpServicePlugin.Shutdown()
 		tcpServicePlugin.WaitClosed()
 		if len(tcpinfos) > 0 && registry != nil {
@@ -525,11 +556,17 @@ func Serve() error {
 	}
 
 	stopUDP := func() {
+		if udpServicePlugin == nil {
+			return
+		}
 		udpServicePlugin.Shutdown()
 		udpServicePlugin.WaitClosed()
 	}
 
 	stopRELP := func() {
+		if relpServicePlugin == nil {
+			return
+		}
 		relpServicePlugin.Shutdown()
 		relpServicePlugin.WaitClosed()
 	}
@@ -677,7 +714,7 @@ func Serve() error {
 						newStopWatch()
 						logger.Error("Error reloading configuration. Configuration was left untouched.", "error", err)
 					}
-					sig_chan = make(chan os.Signal)
+					sig_chan = make(chan os.Signal, 10)
 					signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 				}
 
