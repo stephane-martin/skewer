@@ -20,7 +20,7 @@ func WatchTree(ctx context.Context, client *api.Client, prefix string, resultsCh
 	logger.Debug("Getting configuration from Consul", "prefix", prefix)
 
 	var first_index uint64
-	results, first_index, err = getTree(client, prefix, 0)
+	results, first_index, err = getTree(ctx, client, prefix, 0)
 
 	if err != nil {
 		sclose(resultsChan)
@@ -35,7 +35,14 @@ func WatchTree(ctx context.Context, client *api.Client, prefix string, resultsCh
 	previous_keyvalues := copy_map(results)
 
 	watch := func() {
-		results, index, err := getTree(client, prefix, previous_index)
+		results, index, err := getTree(ctx, client, prefix, previous_index)
+
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
 		if err != nil {
 			logger.Warn("Error reading configuration in Consul", "error", err)
 			time.Sleep(time.Second)
@@ -89,8 +96,9 @@ func WatchTree(ctx context.Context, client *api.Client, prefix string, resultsCh
 
 }
 
-func getTree(client *api.Client, prefix string, waitIndex uint64) (map[string]string, uint64, error) {
+func getTree(ctx context.Context, client *api.Client, prefix string, waitIndex uint64) (map[string]string, uint64, error) {
 	q := &api.QueryOptions{RequireConsistent: true, WaitIndex: waitIndex, WaitTime: 2 * time.Second}
+	q = q.WithContext(ctx)
 	kvpairs, meta, err := client.KV().List(prefix, q)
 	if err != nil {
 		return nil, 0, errwrap.Wrapf("Error reading configuration in Consul: {{err}}", err)
