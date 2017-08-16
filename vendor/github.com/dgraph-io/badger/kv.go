@@ -17,11 +17,12 @@
 package badger
 
 import (
+	"expvar"
 	"log"
-	"math"
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/net/trace"
@@ -69,11 +70,6 @@ type Options struct {
 	// Size of single value log file.
 	ValueLogFileSize int64
 
-	// The following affect value compression in value log. Note that compression
-	// can significantly slow down the loading and lookup time.
-	ValueCompressionMinSize  int32   // Minimal size in bytes of KV pair to be compressed.
-	ValueCompressionMinRatio float64 // Minimal compression ratio of KV pair to be compressed.
-
 	// Sync all writes to disk. Setting this to true would slow down data loading significantly.
 	SyncWrites bool
 
@@ -95,19 +91,24 @@ var DefaultOptions = Options{
 	MapTablesTo:         table.LoadToRAM,
 	// table.MemoryMap to mmap() the tables.
 	// table.Nothing to not preload the tables.
-	MaxLevels:                7,
-	MaxTableSize:             64 << 20,
-	NumCompactors:            3,
-	NumLevelZeroTables:       5,
-	NumLevelZeroTablesStall:  10,
-	NumMemtables:             5,
-	SyncWrites:               false,
-	ValueCompressionMinRatio: 2.0,
-	ValueCompressionMinSize:  math.MaxInt32, // Turn off by default.
-	ValueGCRunInterval:       10 * time.Minute,
-	ValueGCThreshold:         0.5, // Set to zero to not run GC.
-	ValueLogFileSize:         1 << 30,
-	ValueThreshold:           20,
+	MaxLevels:               7,
+	MaxTableSize:            64 << 20,
+	NumCompactors:           3,
+	NumLevelZeroTables:      5,
+	NumLevelZeroTablesStall: 10,
+	NumMemtables:            5,
+	SyncWrites:              false,
+	ValueGCRunInterval:      10 * time.Minute,
+	ValueGCThreshold:        0.5, // Set to zero to not run GC.
+	ValueLogFileSize:        1 << 30,
+	ValueThreshold:          20,
+}
+
+func (opt *Options) estimateSize(entry *Entry) int {
+	if len(entry.Value) < opt.ValueThreshold {
+		return len(entry.Key) + len(entry.Value) + y.MetaSize + y.UserMetaSize + y.CasSize
+	}
+	return len(entry.Key) + 16 + y.MetaSize + y.UserMetaSize + y.CasSize
 }
 
 // KV provides the various functions required to interact with Badger.
@@ -115,31 +116,42 @@ var DefaultOptions = Options{
 type KV struct {
 	sync.RWMutex // Guards list of inmemory tables, not individual reads and writes.
 
-	dirLockGuard *y.DirectoryLockGuard
+	dirLockGuard *DirectoryLockGuard
 	// nil if Dir and ValueDir are the same
-	valueDirGuard *y.DirectoryLockGuard
+	valueDirGuard *DirectoryLockGuard
 
 	closer    *y.Closer
 	elog      trace.EventLog
-	mt        *skl.Skiplist
+	mt        *skl.Skiplist   // Our latest (actively written) in-memory table
 	imm       []*skl.Skiplist // Add here only AFTER pushing to flushChan.
 	opt       Options
+	manifest  *manifestFile
 	lc        *levelsController
 	vlog      valueLog
-	vptr      valuePointer
+	vptr      valuePointer // less than or equal to a pointer to the last vlog value put into mt
 	writeCh   chan *request
 	flushChan chan flushTask // For flushing memtables.
+
+	// Incremented in the non-concurrently accessed write loop.  But also accessed outside. So
+	// we use an atomic op.
+	lastUsedCasCounter uint64
+	metricsTicker      *time.Ticker
 }
 
 var ErrInvalidDir error = errors.New("Invalid Dir, directory does not exist")
 var ErrValueLogSize error = errors.New("Invalid ValueLogFileSize, must be between 1MB and 1GB")
+var ErrExceedsMaxKeyValueSize error = errors.New("Key (value) size exceeded 1MB (1GB) limit")
 
 const (
 	kvWriteChCapacity = 1000
 )
 
 // NewKV returns a new KV object.
-func NewKV(opt *Options) (out *KV, err error) {
+func NewKV(optParam *Options) (out *KV, err error) {
+	// Make a copy early and fill in maxBatchSize
+	opt := *optParam
+	opt.maxBatchSize = (15 * opt.MaxTableSize) / 100
+
 	for _, path := range []string{opt.Dir, opt.ValueDir} {
 		dirExists, err := exists(path)
 		if err != nil {
@@ -158,7 +170,7 @@ func NewKV(opt *Options) (out *KV, err error) {
 		return nil, err
 	}
 
-	dirLockGuard, err := y.AcquireDirectoryLock(opt.Dir, lockFile)
+	dirLockGuard, err := AcquireDirectoryLock(opt.Dir, lockFile)
 	if err != nil {
 		return nil, err
 	}
@@ -167,9 +179,9 @@ func NewKV(opt *Options) (out *KV, err error) {
 			_ = dirLockGuard.Release()
 		}
 	}()
-	var valueDirLockGuard *y.DirectoryLockGuard
+	var valueDirLockGuard *DirectoryLockGuard
 	if absValueDir != absDir {
-		valueDirLockGuard, err = y.AcquireDirectoryLock(opt.ValueDir, lockFile)
+		valueDirLockGuard, err = AcquireDirectoryLock(opt.ValueDir, lockFile)
 		if err != nil {
 			return nil, err
 		}
@@ -182,21 +194,33 @@ func NewKV(opt *Options) (out *KV, err error) {
 	if !(opt.ValueLogFileSize <= 2<<30 && opt.ValueLogFileSize >= 1<<20) {
 		return nil, ErrValueLogSize
 	}
-	opt.maxBatchSize = (15 * opt.MaxTableSize) / 100
+	manifestFile, manifest, err := OpenOrCreateManifestFile(opt.Dir)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if manifestFile != nil {
+			_ = manifestFile.close()
+		}
+	}()
+
 	out = &KV{
 		imm:           make([]*skl.Skiplist, 0, opt.NumMemtables),
 		flushChan:     make(chan flushTask, opt.NumMemtables),
 		writeCh:       make(chan *request, kvWriteChCapacity),
-		opt:           *opt, // Make a copy.
+		opt:           opt,
 		closer:        y.NewCloser(),
+		manifest:      manifestFile,
 		elog:          trace.NewEventLog("Badger", "KV"),
 		dirLockGuard:  dirLockGuard,
 		valueDirGuard: valueDirLockGuard,
+		metricsTicker: time.NewTicker(5 * time.Minute),
 	}
-	out.mt = skl.NewSkiplist(arenaSize(opt))
+	go out.updateSize()
+	out.mt = skl.NewSkiplist(arenaSize(&opt))
 
 	// newLevelsController potentially loads files in directory.
-	if out.lc, err = newLevelsController(out); err != nil {
+	if out.lc, err = newLevelsController(out, &manifest); err != nil {
 		return nil, err
 	}
 
@@ -206,7 +230,7 @@ func NewKV(opt *Options) (out *KV, err error) {
 	lc = out.closer.Register("memtable")
 	go out.flushMemtable(lc) // Need levels controller to be up.
 
-	if err = out.vlog.Open(out, opt); err != nil {
+	if err = out.vlog.Open(out, &opt); err != nil {
 		return out, err
 	}
 
@@ -215,6 +239,11 @@ func NewKV(opt *Options) (out *KV, err error) {
 		return nil, errors.Wrap(err, "Retrieving head")
 	}
 	val := item.Value()
+	// lastUsedCasCounter will either be the value stored in !badger!head, or some subsequently
+	// written value log entry that we replay.  (Subsequent value log entries might be _less_
+	// than lastUsedCasCounter, if there was value log gc so we have to max() values while
+	// replaying.)
+	out.lastUsedCasCounter = item.casCounter
 
 	var vptr valuePointer
 	if len(val) > 0 {
@@ -230,6 +259,9 @@ func NewKV(opt *Options) (out *KV, err error) {
 			out.elog.Printf("First key=%s\n", e.Key)
 		}
 		first = false
+		if out.lastUsedCasCounter < e.casCounter {
+			out.lastUsedCasCounter = e.casCounter
+		}
 
 		if e.CASCounterCheck != 0 {
 			oldValue, err := out.get(e.Key)
@@ -256,6 +288,7 @@ func NewKV(opt *Options) (out *KV, err error) {
 		v := y.ValueStruct{
 			Value:      nv,
 			Meta:       meta,
+			UserMeta:   e.UserMeta,
 			CASCounter: e.casCounter,
 		}
 		for err := out.ensureRoomForWrite(); err != nil; err = out.ensureRoomForWrite() {
@@ -279,6 +312,7 @@ func NewKV(opt *Options) (out *KV, err error) {
 
 	valueDirLockGuard = nil
 	dirLockGuard = nil
+	manifestFile = nil
 	return out, nil
 }
 
@@ -294,6 +328,10 @@ func (s *KV) Close() (err error) {
 				err = errors.Wrap(guardErr, "KV.Close")
 			}
 		}
+		if manifestErr := s.manifest.close(); err == nil {
+			err = errors.Wrap(manifestErr, "KV.Close")
+		}
+
 		// Fsync directories to ensure that lock file, and any other removed files whose directory
 		// we haven't specifically fsynced, are guaranteed to have their directory entry removal
 		// persisted to disk.
@@ -324,7 +362,7 @@ func (s *KV) Close() (err error) {
 	// and remove them completely, while the block / memtable writer is still
 	// trying to push stuff into the memtable. This will also resolve the value
 	// offset problem: as we push into memtable, we update value offsets there.
-	if s.mt.Size() > 0 {
+	if !s.mt.Empty() {
 		s.elog.Printf("Flushing memtable")
 		for {
 			pushedFlushTask := func() bool {
@@ -363,6 +401,7 @@ func (s *KV) Close() (err error) {
 	if err := s.lc.close(); err != nil {
 		return errors.Wrap(err, "KV.Close")
 	}
+	s.metricsTicker.Stop()
 	s.elog.Printf("Waiting for closer")
 	s.closer.SignalAll()
 	s.closer.WaitForAll()
@@ -379,7 +418,7 @@ const (
 // in order to guarantee the file is visible (if the system crashes).  (See the man page for fsync,
 // or see https://github.com/coreos/etcd/issues/6368 for an example.)
 func syncDir(dir string) error {
-	f, err := os.Open(dir)
+	f, err := OpenDir(dir)
 	if err != nil {
 		return err
 	}
@@ -416,13 +455,22 @@ func (s *KV) getMemTables() ([]*skl.Skiplist, func()) {
 }
 
 func (s *KV) fillItem(item *KVItem) error {
+	if item.meta == 0 && item.vptr == nil {
+		item.val = nil // key not found
+		return nil
+	}
 	if (item.meta & BitDelete) != 0 {
 		// Tombstone encountered.
 		item.val = nil
 		return nil
 	}
+
+	if item.slice == nil {
+		item.slice = new(y.Slice)
+	}
 	if (item.meta & BitValuePointer) == 0 {
-		item.val = item.vptr
+		item.val = item.slice.Resize(len(item.vptr))
+		copy(item.val, item.vptr)
 		return nil
 	}
 
@@ -432,7 +480,7 @@ func (s *KV) fillItem(item *KVItem) error {
 	if err != nil {
 		return errors.Wrapf(err, "Unable to read from value log: %+v", vp)
 	}
-	if (entry.Meta & BitDelete) != 0 { // Not tombstone.
+	if (entry.Meta & BitDelete) != 0 { // Is a tombstone.
 		item.val = nil
 		return nil
 	}
@@ -446,8 +494,10 @@ func (s *KV) get(key []byte) (y.ValueStruct, error) {
 	tables, decr := s.getMemTables() // Lock should be released.
 	defer decr()
 
+	y.NumGets.Add(1)
 	for i := 0; i < len(tables); i++ {
 		vs := tables[i].Get(key)
+		y.NumMemtableGets.Add(1)
 		if vs.Meta != 0 || vs.Value != nil {
 			return vs, nil
 		}
@@ -466,6 +516,7 @@ func (s *KV) Get(key []byte, item *KVItem) error {
 		item.slice = new(y.Slice)
 	}
 	item.meta = vs.Meta
+	item.userMeta = vs.UserMeta
 	item.casCounter = vs.CASCounter
 	item.key = key
 	item.vptr = vs.Value
@@ -474,25 +525,6 @@ func (s *KV) Get(key []byte, item *KVItem) error {
 		return errors.Wrapf(err, "KV::Get key: %q", key)
 	}
 	return nil
-}
-
-// Touch looks for key, if it finds it then it returns
-// else it puts the key and the value of an empty byte slice in the LSM tree.
-func (s *KV) Touch(key []byte) error {
-	exists, err := s.Exists(key)
-	if err != nil {
-		return err
-	}
-	// Found the key, return.
-	if exists {
-		return nil
-	}
-
-	e := &Entry{
-		Key:  key,
-		Meta: BitTouch,
-	}
-	return s.BatchSet([]*Entry{e})
 }
 
 // Exists looks if a key exists. Returns true if the
@@ -517,16 +549,22 @@ func (s *KV) Exists(key []byte) (bool, error) {
 }
 
 func (s *KV) updateOffset(ptrs []valuePointer) {
-	ptr := ptrs[len(ptrs)-1]
+	var ptr valuePointer
+	for i := len(ptrs) - 1; i >= 0; i-- {
+		p := ptrs[i]
+		if !p.IsZero() {
+			ptr = p
+			break
+		}
+	}
+	if ptr.IsZero() {
+		return
+	}
+
 	s.Lock()
 	defer s.Unlock()
-	if s.vptr.Fid < ptr.Fid {
-		s.vptr = ptr
-	} else if s.vptr.Offset < ptr.Offset {
-		s.vptr = ptr
-	} else if s.vptr.Fid == ptr.Fid && s.vptr.Offset == ptr.Offset && s.vptr.Len < ptr.Len {
-		s.vptr = ptr
-	}
+	y.AssertTrue(!ptr.Less(s.vptr))
+	s.vptr = ptr
 }
 
 var requestPool = sync.Pool{
@@ -559,7 +597,7 @@ func (s *KV) writeToLSM(b *request) error {
 			}
 		}
 
-		if entry.Meta == BitTouch {
+		if entry.Meta == BitSetIfAbsent {
 			// Someone else might have written a value, so lets check again if key exists.
 			exists, err := s.Exists(entry.Key)
 			if err != nil {
@@ -567,6 +605,7 @@ func (s *KV) writeToLSM(b *request) error {
 			}
 			// Value already exists, don't write.
 			if exists {
+				entry.Error = KeyExists
 				continue
 			}
 		}
@@ -576,16 +615,30 @@ func (s *KV) writeToLSM(b *request) error {
 				y.ValueStruct{
 					Value:      entry.Value,
 					Meta:       entry.Meta,
+					UserMeta:   entry.UserMeta,
 					CASCounter: entry.casCounter})
 		} else {
 			s.mt.Put(entry.Key,
 				y.ValueStruct{
 					Value:      b.Ptrs[i].Encode(offsetBuf[:]),
 					Meta:       entry.Meta | BitValuePointer,
+					UserMeta:   entry.UserMeta,
 					CASCounter: entry.casCounter})
 		}
 	}
 	return nil
+}
+
+// lastCASCounter returns the last-used cas counter.
+func (s *KV) lastCASCounter() uint64 {
+	return atomic.LoadUint64(&s.lastUsedCasCounter)
+}
+
+// newCASCounters generates a set of unique CAS counters -- the interval [x, x + howMany) where x
+// is the return value.
+func (s *KV) newCASCounters(howMany uint64) uint64 {
+	last := atomic.AddUint64(&s.lastUsedCasCounter, howMany)
+	return last - howMany + 1
 }
 
 // writeRequests is called serially by only one goroutine.
@@ -603,12 +656,17 @@ func (s *KV) writeRequests(reqs []*request) error {
 
 	s.elog.Printf("writeRequests called. Writing to value log")
 
-	// CAS counter for all operations has to go onto value log. Otherwise, if it is just in memtable for
-	// a long time, and following CAS operations use that as a check, when replaying, we will think that
-	// these CAS operations should fail, when they are actually valid.
+	// CAS counter for all operations has to go onto value log. Otherwise, if it is just in
+	// memtable for a long time, and following CAS operations use that as a check, when
+	// replaying, we will think that these CAS operations should fail, when they are actually
+	// valid.
+
+	// There is code (in flushMemtable) whose correctness depends on us generating CAS Counter
+	// values _before_ we modify s.vptr here.
 	for _, req := range reqs {
-		for _, e := range req.Entries {
-			e.casCounter = newCASCounter()
+		counterBase := s.newCASCounters(uint64(len(req.Entries)))
+		for i, e := range req.Entries {
+			e.casCounter = counterBase + uint64(i)
 		}
 	}
 	err := s.vlog.write(reqs)
@@ -693,29 +751,28 @@ func (s *KV) doWrites(lc *y.LevelCloser) {
 	}
 }
 
-func (s *KV) estimateSize(entry *Entry) int {
-	if len(entry.Value) < s.opt.ValueThreshold {
-		// 3 is for cas + meta
-		return len(entry.Key) + len(entry.Value) + 3
-	}
-	return len(entry.Key) + 16 + 3
-}
-
 func (s *KV) sendToWriteCh(entries []*Entry) []*request {
 	var reqs []*request
 	var size int64
 	var b *request
+	var bad []*Entry
 	for _, entry := range entries {
+		if len(entry.Key) > maxKeySize || len(entry.Value) > maxValueSize {
+			entry.Error = ErrExceedsMaxKeyValueSize
+			bad = append(bad, entry)
+			continue
+		}
 		if b == nil {
 			b = requestPool.Get().(*request)
 			b.Entries = b.Entries[:0]
 			b.Wg = sync.WaitGroup{}
 			b.Wg.Add(1)
 		}
-		size += int64(s.estimateSize(entry))
+		size += int64(s.opt.estimateSize(entry))
 		b.Entries = append(b.Entries, entry)
 		if size >= s.opt.maxBatchSize {
 			s.writeCh <- b
+			y.NumPuts.Add(int64(len(b.Entries)))
 			reqs = append(reqs, b)
 			size = 0
 			b = nil
@@ -724,12 +781,27 @@ func (s *KV) sendToWriteCh(entries []*Entry) []*request {
 
 	if size > 0 {
 		s.writeCh <- b
+		y.NumPuts.Add(int64(len(b.Entries)))
 		reqs = append(reqs, b)
 	}
+
+	if len(bad) > 0 {
+		b := requestPool.Get().(*request)
+		b.Entries = bad
+		b.Wg = sync.WaitGroup{}
+		b.Err = nil
+		b.Ptrs = nil
+		reqs = append(reqs, b)
+		y.NumBlockedPuts.Add(int64(len(bad)))
+	}
+
 	return reqs
 }
 
-// BatchSet applies a list of badger.Entry. Errors are set on each Entry individually.
+// BatchSet applies a list of badger.Entry. If a request level error occurs it
+// will be returned. Errors are also set on each Entry and must be checked
+// individually.
+//   Check(kv.BatchSet(entries))
 //   for _, e := range entries {
 //      Check(e.Error)
 //   }
@@ -747,9 +819,16 @@ func (s *KV) BatchSet(entries []*Entry) error {
 	return err
 }
 
-// BatchSetAsync is the asynchronous version of BatchSet. It accepts a callback function
-// which is called when all the sets are complete. Any error during execution is passed as an
-// argument to the callback function.
+// BatchSetAsync is the asynchronous version of BatchSet. It accepts a callback
+// function which is called when all the sets are complete. If a request level
+// error occurs, it will be passed back via the callback. The caller should
+// still check for errors set on each Entry individually.
+//   kv.BatchSetAsync(entries, func(err error)) {
+//      Check(err)
+//      for _, e := range entries {
+//         Check(e.Error)
+//      }
+//   }
 func (s *KV) BatchSetAsync(entries []*Entry, f func(error)) {
 	reqs := s.sendToWriteCh(entries)
 
@@ -762,30 +841,69 @@ func (s *KV) BatchSetAsync(entries []*Entry, f func(error)) {
 			}
 			requestPool.Put(req)
 		}
-		// All writes complete, lets call the callback function now.
+		// All writes complete, let's call the callback function now.
 		f(err)
 	}()
 }
 
 // Set sets the provided value for a given key. If key is not present, it is created.
 // If it is present, the existing value is overwritten with the one provided.
-func (s *KV) Set(key, val []byte) error {
+func (s *KV) Set(key, val []byte, userMeta byte) error {
 	e := &Entry{
-		Key:   key,
-		Value: val,
+		Key:      key,
+		Value:    val,
+		UserMeta: userMeta,
 	}
-	return s.BatchSet([]*Entry{e})
+	if err := s.BatchSet([]*Entry{e}); err != nil {
+		return err
+	}
+	return e.Error
 }
 
 // SetAsync is the asynchronous version of Set. It accepts a callback function which is called
 // when the set is complete. Any error encountered during execution is passed as an argument
 // to the callback function.
-func (s *KV) SetAsync(key, val []byte, f func(error)) {
+func (s *KV) SetAsync(key, val []byte, userMeta byte, f func(error)) {
 	e := &Entry{
-		Key:   key,
-		Value: val,
+		Key:      key,
+		Value:    val,
+		UserMeta: userMeta,
 	}
-	s.BatchSetAsync([]*Entry{e}, f)
+	s.BatchSetAsync([]*Entry{e}, func(err error) {
+		if err != nil {
+			f(err)
+			return
+		}
+		if e.Error != nil {
+			f(e.Error)
+			return
+		}
+		f(nil)
+	})
+}
+
+// SetIfAbsent sets value of key if key is not present.
+// If it is present, it returns the KeyExists error.
+func (s *KV) SetIfAbsent(key, val []byte, userMeta byte) error {
+	exists, err := s.Exists(key)
+	if err != nil {
+		return err
+	}
+	// Found the key, return KeyExists
+	if exists {
+		return KeyExists
+	}
+
+	e := &Entry{
+		Key:      key,
+		Meta:     BitSetIfAbsent,
+		Value:    val,
+		UserMeta: userMeta,
+	}
+	if err := s.BatchSet([]*Entry{e}); err != nil {
+		return err
+	}
+	return e.Error
 }
 
 // EntriesSet adds a Set to the list of entries.
@@ -800,7 +918,7 @@ func EntriesSet(s []*Entry, key, val []byte) []*Entry {
 // CompareAndSet sets the given value, ensuring that the no other Set operation has happened,
 // since last read. If the key has a different casCounter, this would not update the key
 // and return an error.
-func (s *KV) CompareAndSet(key []byte, val []byte, casCounter uint16) error {
+func (s *KV) CompareAndSet(key []byte, val []byte, casCounter uint64) error {
 	e := &Entry{
 		Key:             key,
 		Value:           val,
@@ -831,7 +949,7 @@ func (s *KV) compareAsync(e *Entry, f func(error)) {
 // CompareAndSetAsync is the asynchronous version of CompareAndSet. It accepts a callback function
 // which is called when the CompareAndSet completes. Any error encountered during execution is
 // passed as an argument to the callback function.
-func (s *KV) CompareAndSetAsync(key []byte, val []byte, casCounter uint16, f func(error)) {
+func (s *KV) CompareAndSetAsync(key []byte, val []byte, casCounter uint64, f func(error)) {
 	e := &Entry{
 		Key:             key,
 		Value:           val,
@@ -873,7 +991,7 @@ func EntriesDelete(s []*Entry, key []byte) []*Entry {
 
 // CompareAndDelete deletes a key ensuring that it has not been changed since last read.
 // If existing key has different casCounter, this would not delete the key and return an error.
-func (s *KV) CompareAndDelete(key []byte, casCounter uint16) error {
+func (s *KV) CompareAndDelete(key []byte, casCounter uint64) error {
 	e := &Entry{
 		Key:             key,
 		Meta:            BitDelete,
@@ -888,7 +1006,7 @@ func (s *KV) CompareAndDelete(key []byte, casCounter uint16) error {
 // CompareAndDeleteAsync is the asynchronous version of CompareAndDelete. It accepts a callback
 // function which is called when the CompareAndDelete completes. Any error encountered during
 // execution is passed as an argument to the callback function.
-func (s *KV) CompareAndDeleteAsync(key []byte, casCounter uint16, f func(error)) {
+func (s *KV) CompareAndDeleteAsync(key []byte, casCounter uint64, f func(error)) {
 	e := &Entry{
 		Key:             key,
 		Meta:            BitDelete,
@@ -904,7 +1022,7 @@ func (s *KV) ensureRoomForWrite() error {
 	var err error
 	s.Lock()
 	defer s.Unlock()
-	if s.mt.Size() < s.opt.MaxTableSize {
+	if s.mt.MemSize() < s.opt.MaxTableSize {
 		return nil
 	}
 
@@ -919,7 +1037,7 @@ func (s *KV) ensureRoomForWrite() error {
 		}
 
 		s.elog.Printf("Flushing memtable, mt.size=%d size of flushChan: %d\n",
-			s.mt.Size(), len(s.flushChan))
+			s.mt.MemSize(), len(s.flushChan))
 		// We manage to push this task. Let's modify imm.
 		s.imm = append(s.imm, s.mt)
 		s.mt = skl.NewSkiplist(arenaSize(&s.opt))
@@ -946,8 +1064,7 @@ func writeLevel0Table(s *skl.Skiplist, f *os.File) error {
 			return err
 		}
 	}
-	var buf [2]byte // Level 0. Leave it initialized as 0.
-	_, err := f.Write(b.Finish(buf[:]))
+	_, err := f.Write(b.Finish())
 	return err
 }
 
@@ -964,16 +1081,22 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) error {
 			return nil
 		}
 
-		if ft.vptr.Fid > 0 || ft.vptr.Offset > 0 || ft.vptr.Len > 0 {
+		if !ft.vptr.IsZero() {
 			s.elog.Printf("Storing offset: %+v\n", ft.vptr)
 			offset := make([]byte, 10)
-			s.Lock() // For vptr.
-			s.vptr.Encode(offset)
-			s.Unlock()
-			ft.mt.Put(head, y.ValueStruct{Value: offset}) // casCounter not needed.
+			ft.vptr.Encode(offset)
+			// CAS counter is needed and is desirable -- it's the first value log entry
+			// we replay, so to speak, perhaps the only, and we use it to re-initialize
+			// the CAS counter.
+			//
+			// The write loop generates CAS counter values _before_ it sets vptr.  It
+			// is crucial that we read the cas counter here _after_ reading vptr.  That
+			// way, our value here is guaranteed to be >= the CASCounter values written
+			// before vptr (because they don't get replayed).
+			ft.mt.Put(head, y.ValueStruct{Value: offset, CASCounter: s.lastCASCounter()})
 		}
-		fileID, _ := s.lc.reserveFileIDs(1)
-		fd, err := y.OpenSyncedFile(table.NewFilename(fileID, s.opt.Dir), true)
+		fileID := s.lc.reserveFileID()
+		fd, err := y.CreateSyncedFile(table.NewFilename(fileID, s.opt.Dir), true)
 		if err != nil {
 			return y.Wrap(err)
 		}
@@ -999,8 +1122,12 @@ func (s *KV) flushMemtable(lc *y.LevelCloser) error {
 			s.elog.Printf("ERROR while opening table: %v", err)
 			return err
 		}
-		defer tbl.DecrRef()
-		s.lc.addLevel0Table(tbl) // This will incrRef again.
+		// We own a ref on tbl.
+		err = s.lc.addLevel0Table(tbl) // This will incrRef (if we don't error, sure)
+		tbl.DecrRef()                  // Releases our ref.
+		if err != nil {
+			return err
+		}
 
 		// Update s.imm. Need a lock.
 		s.Lock()
@@ -1021,4 +1148,43 @@ func exists(path string) (bool, error) {
 		return false, nil
 	}
 	return true, err
+}
+
+func (s *KV) updateSize() {
+	getNewInt := func(val int64) *expvar.Int {
+		v := new(expvar.Int)
+		v.Add(val)
+		return v
+	}
+
+	totalSize := func(dir string) (int64, int64) {
+		var lsmSize, vlogSize int64
+		err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			ext := filepath.Ext(path)
+			if ext == ".sst" {
+				lsmSize += info.Size()
+			} else if ext == ".vlog" {
+				vlogSize += info.Size()
+			}
+			return nil
+		})
+		if err != nil {
+			s.elog.Printf("Got error while calculating total size of directory: %s", dir)
+		}
+		return lsmSize, vlogSize
+	}
+
+	for range s.metricsTicker.C {
+		lsmSize, vlogSize := totalSize(s.opt.Dir)
+		y.LSMSize.Set(s.opt.Dir, getNewInt(lsmSize))
+		// If valueDir is different from dir, we'd have to do another walk.
+		if s.opt.ValueDir != s.opt.Dir {
+			_, vlogSize = totalSize(s.opt.ValueDir)
+		}
+		y.VlogSize.Set(s.opt.Dir, getNewInt(vlogSize))
+	}
+
 }

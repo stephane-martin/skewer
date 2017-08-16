@@ -50,7 +50,7 @@ func (p *partitionImpl) Get(key string) ([]byte, error) {
 }
 
 func (p *partitionImpl) Set(key string, value []byte) error {
-	return p.parent.Set([]byte(p.prefix+key), value)
+	return p.parent.Set([]byte(p.prefix+key), value, byte(0))
 }
 
 func (p *partitionImpl) AddMany(m map[string][]byte) (errors []string, err error) {

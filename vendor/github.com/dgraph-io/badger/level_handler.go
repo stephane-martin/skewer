@@ -18,6 +18,7 @@ package badger
 
 import (
 	"bytes"
+	"fmt"
 	"sort"
 
 	"github.com/dgraph-io/badger/table"
@@ -37,6 +38,7 @@ type levelHandler struct {
 
 	// The following are initialized once and const.
 	level        int
+	strLevel     string
 	maxTotalSize int64
 	kv           *KV
 }
@@ -73,14 +75,14 @@ func (s *levelHandler) initTables(tables []*table.Table) {
 }
 
 // deleteTables remove tables idx0, ..., idx1-1.
-func (s *levelHandler) deleteTables(toDel []*table.Table) {
-	s.Lock()
-	defer s.Unlock()
+func (s *levelHandler) deleteTables(toDel []*table.Table) error {
+	s.Lock() // s.Unlock() below
 
 	toDelMap := make(map[uint64]struct{})
 	for _, t := range toDel {
 		toDelMap[t.ID()] = struct{}{}
 	}
+
 	// Make a copy as iterators might be keeping a slice of tables.
 	var newTables []*table.Table
 	for _, t := range s.tables {
@@ -90,21 +92,25 @@ func (s *levelHandler) deleteTables(toDel []*table.Table) {
 			continue
 		}
 		s.totalSize -= t.Size()
-		t.DecrRef()
 	}
 	s.tables = newTables
+
+	s.Unlock() // Unlock s _before_ we DecrRef our tables, which can be slow.
+
+	return decrRefs(toDel)
 }
 
 // replaceTables will replace tables[left:right] with newTables. Note this EXCLUDES tables[right].
-func (s *levelHandler) replaceTables(newTables []*table.Table) {
-	s.Lock()
-	defer s.Unlock()
-
-	// Need to re-search the range of tables in this level to be replaced as
-	// other goroutines might be changing it as well.
+// You must call decr() to delete the old tables _after_ writing the update to the manifest.
+func (s *levelHandler) replaceTables(newTables []*table.Table) error {
+	// Need to re-search the range of tables in this level to be replaced as other goroutines might
+	// be changing it as well.  (They can't touch our tables, but if they add/remove other tables,
+	// the indices get shifted around.)
 	if len(newTables) == 0 {
-		return
+		return nil
 	}
+
+	s.Lock() // We s.Unlock() below.
 
 	// Increase totalSize first.
 	for _, tbl := range newTables {
@@ -118,10 +124,12 @@ func (s *levelHandler) replaceTables(newTables []*table.Table) {
 	}
 	left, right := s.overlappingTables(kr)
 
+	toDecr := make([]*table.Table, right-left)
 	// Update totalSize and reference counts.
 	for i := left; i < right; i++ {
-		s.totalSize -= s.tables[i].Size()
-		s.tables[i].DecrRef()
+		tbl := s.tables[i]
+		s.totalSize -= tbl.Size()
+		toDecr[i-left] = tbl
 	}
 
 	// To be safe, just make a copy. TODO: Be more careful and avoid copying.
@@ -134,12 +142,24 @@ func (s *levelHandler) replaceTables(newTables []*table.Table) {
 	t = t[numAdded:]
 	y.AssertTrue(len(s.tables[right:]) == copy(t, s.tables[right:]))
 	s.tables = tables
+	s.Unlock() // s.Unlock before we DecrRef tables -- that can be slow.
+	return decrRefs(toDecr)
+}
+
+func decrRefs(tables []*table.Table) error {
+	for _, table := range tables {
+		if err := table.DecrRef(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func newLevelHandler(kv *KV, level int) *levelHandler {
 	return &levelHandler{
-		level: level,
-		kv:    kv,
+		level:    level,
+		strLevel: fmt.Sprintf("l%d", level),
+		kv:       kv,
 	}
 }
 
@@ -149,7 +169,7 @@ func (s *levelHandler) tryAddLevel0Table(t *table.Table) bool {
 	// Need lock as we may be deleting the first table during a level 0 compaction.
 	s.Lock()
 	defer s.Unlock()
-	if len(s.tables) > s.kv.opt.NumLevelZeroTablesStall {
+	if len(s.tables) >= s.kv.opt.NumLevelZeroTablesStall {
 		return false
 	}
 
@@ -219,12 +239,14 @@ func (s *levelHandler) get(key []byte) (y.ValueStruct, error) {
 
 	for _, th := range tables {
 		if th.DoesNotHave(key) {
+			y.NumLSMBloomHits.Add(s.strLevel, 1)
 			continue
 		}
 
 		it := th.NewIterator(false)
 		defer it.Close()
 
+		y.NumLSMGets.Add(s.strLevel, 1)
 		it.Seek(key)
 		if !it.Valid() {
 			continue

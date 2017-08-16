@@ -29,36 +29,12 @@ import (
 //var tableSize int64 = 50 << 20
 var (
 	restartInterval int = 100 // Might want to change this to be based on total size instead of numKeys.
-	bufPool             = new(bufferPool)
 )
 
-func init() {
-	bufPool.Ch = make(chan *bytes.Buffer, 10)
-}
-
-type bufferPool struct {
-	Ch chan *bytes.Buffer
-}
-
-func (p *bufferPool) Put(b *bytes.Buffer) {
-	b.Reset()
-
-	select {
-	case p.Ch <- b:
-	default:
-		// ignore
-	}
-}
-
-func (p *bufferPool) Get() *bytes.Buffer {
-	select {
-	case b := <-p.Ch:
-		return b
-	default:
-		b := new(bytes.Buffer)
-		b.Grow(64 << 20)
-		return b
-	}
+func newBuffer(sz int) *bytes.Buffer {
+	b := new(bytes.Buffer)
+	b.Grow(sz)
+	return b
 }
 
 type header struct {
@@ -108,17 +84,14 @@ type TableBuilder struct {
 
 func NewTableBuilder() *TableBuilder {
 	return &TableBuilder{
-		keyBuf:     bufPool.Get(),
-		buf:        bufPool.Get(),
+		keyBuf:     newBuffer(32 << 20),
+		buf:        newBuffer(64 << 20),
 		prevOffset: math.MaxUint32, // Used for the first element!
 	}
 }
 
-// Close closes the TableBuilder. Do not use buf field anymore.
-func (b *TableBuilder) Close() {
-	bufPool.Put(b.buf)
-	bufPool.Put(b.keyBuf)
-}
+// Close closes the TableBuilder.
+func (b *TableBuilder) Close() {}
 
 func (b *TableBuilder) Empty() bool { return b.buf.Len() == 0 }
 
@@ -155,8 +128,8 @@ func (b *TableBuilder) addHelper(key []byte, v y.ValueStruct) {
 	h := header{
 		plen: uint16(len(key) - len(diffKey)),
 		klen: uint16(len(diffKey)),
-		vlen: uint16(len(v.Value) + 1 + 2), // Include meta byte and casCounter.
-		prev: b.prevOffset,                 // prevOffset is the location of the last key-value added.
+		vlen: uint16(len(v.Value) + y.MetaSize + y.UserMetaSize + y.CasSize),
+		prev: b.prevOffset, // prevOffset is the location of the last key-value added.
 	}
 	b.prevOffset = uint32(b.buf.Len()) - b.baseOffset // Remember current offset for the next Add call.
 
@@ -166,8 +139,9 @@ func (b *TableBuilder) addHelper(key []byte, v y.ValueStruct) {
 	b.buf.Write(hbuf[:])
 	b.buf.Write(diffKey)    // We only need to store the key difference.
 	b.buf.WriteByte(v.Meta) // Meta byte precedes actual value.
-	var casBytes [2]byte
-	binary.BigEndian.PutUint16(casBytes[:], v.CASCounter)
+	b.buf.WriteByte(v.UserMeta)
+	var casBytes [y.CasSize]byte
+	binary.BigEndian.PutUint64(casBytes[:], v.CASCounter)
 	b.buf.Write(casBytes[:])
 	b.buf.Write(v.Value)
 	b.counter++ // Increment number of keys added for this current block.
@@ -222,7 +196,7 @@ func (b *TableBuilder) blockIndex() []byte {
 }
 
 // Finish finishes the table by appending the index.
-func (b *TableBuilder) Finish(metadata []byte) []byte {
+func (b *TableBuilder) Finish() []byte {
 	bf := bbloom.New(float64(b.keyCount), 0.01)
 	var klen [2]byte
 	key := make([]byte, 1024)
@@ -251,10 +225,6 @@ func (b *TableBuilder) Finish(metadata []byte) []byte {
 	y.Check(err)
 	var buf [4]byte
 	binary.BigEndian.PutUint32(buf[:], uint32(n))
-	b.buf.Write(buf[:])
-
-	b.buf.Write(metadata)
-	binary.BigEndian.PutUint32(buf[:], uint32(len(metadata)))
 	b.buf.Write(buf[:])
 
 	return b.buf.Bytes()

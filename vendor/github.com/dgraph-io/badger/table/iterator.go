@@ -18,7 +18,6 @@ package table
 
 import (
 	"bytes"
-	"encoding/binary"
 	"io"
 	"math"
 	"sort"
@@ -219,7 +218,7 @@ func (itr *TableIterator) reset() {
 }
 
 func (itr *TableIterator) Valid() bool {
-	return itr != nil && itr.err == nil
+	return itr.err == nil
 }
 
 func (itr *TableIterator) Error() error {
@@ -391,13 +390,9 @@ func (itr *TableIterator) Key() []byte {
 	return itr.bi.Key()
 }
 
-func (itr *TableIterator) Value() y.ValueStruct {
-	v := itr.bi.Value()
-	return y.ValueStruct{
-		Value:      v[3:],
-		Meta:       v[0],
-		CASCounter: binary.BigEndian.Uint16(v[1:3]),
-	}
+func (itr *TableIterator) Value() (ret y.ValueStruct) {
+	ret.DecodeEntireSlice(itr.bi.Value())
+	return
 }
 
 func (s *TableIterator) Next() {
@@ -469,7 +464,7 @@ func (s *ConcatIterator) Rewind() {
 }
 
 func (s *ConcatIterator) Valid() bool {
-	return s.cur.Valid()
+	return s.cur != nil && s.cur.Valid()
 }
 
 func (s *ConcatIterator) Name() string { return "ConcatIterator" }
