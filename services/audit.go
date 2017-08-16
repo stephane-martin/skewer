@@ -23,6 +23,8 @@ type AuditService struct {
 	logger    log15.Logger
 	wgroup    *sync.WaitGroup
 	generator chan ulid.ULID
+	cancel    context.CancelFunc
+	aconf     *conf.AuditConfig
 }
 
 func NewAuditService(stasher model.Stasher, generator chan ulid.ULID, metric *metrics.Metrics, logger log15.Logger) *AuditService {
@@ -31,15 +33,19 @@ func NewAuditService(stasher model.Stasher, generator chan ulid.ULID, metric *me
 	return &s
 }
 
-func (s *AuditService) Start(ctx context.Context, c *conf.AuditConfig) error {
+func (s *AuditService) Start(test bool) ([]*model.ListenerInfo, error) {
+	infos := []*model.ListenerInfo{}
 	hostname, err := os.Hostname()
 	if err != nil {
-		return err
+		return infos, err
 	}
 
-	msgChan, err := auditlogs.WriteAuditLogs(ctx, c, s.logger)
+	var ctx context.Context
+	ctx, s.cancel = context.WithCancel(context.Background())
+
+	msgChan, err := auditlogs.WriteAuditLogs(ctx, s.aconf, s.logger)
 	if err != nil {
-		return err
+		return infos, err
 	}
 
 	auditToSyslog := func(auditMsg *model.AuditMessageGroup) *model.SyslogMessage {
@@ -52,10 +58,10 @@ func (s *AuditService) Start(ctx context.Context, c *conf.AuditConfig) error {
 		}
 
 		m := model.SyslogMessage{
-			Appname:          c.Appname,
-			Facility:         model.Facility(c.Facility),
-			Severity:         model.Severity(c.Severity),
-			Priority:         model.Priority(8*c.Facility + c.Severity),
+			Appname:          s.aconf.Appname,
+			Facility:         model.Facility(s.aconf.Facility),
+			Severity:         model.Severity(s.aconf.Severity),
+			Priority:         model.Priority(8*s.aconf.Facility + s.aconf.Severity),
 			Hostname:         hostname,
 			TimeReported:     treported,
 			TimeGenerated:    tgenerated,
@@ -87,7 +93,7 @@ func (s *AuditService) Start(ctx context.Context, c *conf.AuditConfig) error {
 				UnixSocketPath: "",
 			}
 			full := &model.TcpUdpParsedMessage{
-				ConfId: c.ConfID,
+				ConfId: s.aconf.ConfID,
 				Uid:    uid.String(),
 				Parsed: parsed,
 			}
@@ -100,9 +106,23 @@ func (s *AuditService) Start(ctx context.Context, c *conf.AuditConfig) error {
 		}
 		s.wgroup.Done()
 	}()
-	return nil
+	return infos, nil
 }
 
-func (s *AuditService) WaitFinished() {
+func (s *AuditService) SetConf(sc []*conf.SyslogConfig, pc []conf.ParserConfig) {}
+
+func (s *AuditService) SetKafkaConf(kc *conf.KafkaConfig) {}
+
+func (s *AuditService) SetAuditConf(ac *conf.AuditConfig) {
+	s.aconf = ac
+}
+
+func (s *AuditService) Stop() {
+	if s.cancel != nil {
+		s.cancel()
+	}
+}
+
+func (s *AuditService) WaitClosed() {
 	s.wgroup.Wait()
 }

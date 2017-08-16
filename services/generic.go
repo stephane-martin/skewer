@@ -24,6 +24,7 @@ type NetworkService interface {
 	WaitClosed()
 	SetConf(sc []*conf.SyslogConfig, pc []conf.ParserConfig)
 	SetKafkaConf(kc *conf.KafkaConfig)
+	SetAuditConf(ac *conf.AuditConfig)
 }
 
 func NewNetworkService(t string, stasher model.Stasher, gen chan ulid.ULID,
@@ -45,6 +46,8 @@ func NewNetworkService(t string, stasher model.Stasher, gen chan ulid.ULID,
 			cancel()
 			return nil, nil
 		}
+	case "skewer-audit":
+		return NewAuditService(stasher, gen, m, l), nil
 	default:
 		return nil, nil
 	}

@@ -54,6 +54,8 @@ func NewTcpService(stasher model.Stasher, gen chan ulid.ULID, b *sys.BinderClien
 
 func (s *tcpServerImpl) SetKafkaConf(kc *conf.KafkaConfig) {}
 
+func (s *tcpServerImpl) SetAuditConf(ac *conf.AuditConfig) {}
+
 func (s *tcpServerImpl) WaitClosed() {
 	var more bool
 	for {

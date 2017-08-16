@@ -58,6 +58,8 @@ func (s *udpServiceImpl) handleConnection(conn net.PacketConn, config *conf.Sysl
 
 func (s *udpServiceImpl) SetKafkaConf(kc *conf.KafkaConfig) {}
 
+func (s *udpServiceImpl) SetAuditConf(ac *conf.AuditConfig) {}
+
 func (s *udpServiceImpl) Start(test bool) ([]*model.ListenerInfo, error) {
 	s.statusMutex.Lock()
 	defer s.statusMutex.Unlock()

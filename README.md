@@ -42,7 +42,8 @@ to post bugs and ask questions.
     different machines.)
 
 -   Locally, as the unique system syslog server. Well. Don't do it right now.
-    Skewer is not enough tested for that, and does not *yet* have a local export function to write logs to /var/log. But that's definitely on the
+    Skewer is not enough tested for that, and does not *yet* have a local export
+	function to write logs to /var/log. But that's definitely on the
     roadmap.
 
 
@@ -85,9 +86,12 @@ to post bugs and ask questions.
 ## Building
 
 
-Nothing special. Dependencies are vendored. Uses `cgo` at least on Linux.
-
-You can `go get github.com/stephane-martin/skewer` or `git clone ...` and `go build`.
+-	Go Dependencies are vendored.
+-	Uses `cgo` at least on Linux.
+-	On linux you will need to install libsystemd header files (needed to
+	query journald)
+-	You can `go get github.com/stephane-martin/skewer` or `git clone ...` and
+	`go build`.
 
 
 ## Configuration

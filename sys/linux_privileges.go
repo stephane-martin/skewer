@@ -48,10 +48,11 @@ func KeepCaps() error {
 	return unix.Prctl(unix.PR_SET_SECUREBITS, uintptr(5)|uintptr(3), 0, 0, 0)
 }
 
-func Predrop() error {
+func Predrop() (bool, error) {
+	KeepCaps() // when executing skewer as root, ensure the dropped capabilities won't be acquired again at next Exec
 	c, err := NewCapabilitiesQuery()
 	if err != nil {
-		return err
+		return false, err
 	}
 	toKeepMap := map[capability.Cap]bool{}
 	for _, cap := range CAPS_TO_KEEP {
@@ -61,27 +62,50 @@ func Predrop() error {
 	toKeepMap[capability.CAP_SETGID] = true
 	toKeepMap[capability.CAP_SETPCAP] = true
 
+	applied := false
+
 	for i := 0; i <= int(capability.CAP_LAST_CAP); i++ {
 		if toKeepMap[capability.Cap(i)] {
 			continue
 		}
 		if c.caps.Get(capability.EFFECTIVE, capability.Cap(i)) {
 			c.caps.Unset(capability.EFFECTIVE, capability.Cap(i))
+			applied = true
 		}
 		if c.caps.Get(capability.PERMITTED, capability.Cap(i)) {
 			c.caps.Unset(capability.PERMITTED, capability.Cap(i))
+			applied = true
 		}
-		if c.caps.Get(capability.BOUNDING, capability.Cap(i)) {
-			c.caps.Unset(capability.BOUNDING, capability.Cap(i))
+		if c.caps.Get(capability.INHERITABLE, capability.Cap(i)) {
+			c.caps.Unset(capability.INHERITABLE, capability.Cap(i))
+			applied = true
 		}
 	}
 
-	err = c.caps.Apply(capability.BOUNDING)
-	if err != nil {
-		return err
-	}
+	if applied {
 
-	return c.caps.Apply(capability.CAPS)
+		// make the current capabilities "ambient" (needs linux kernel 4.3), so
+		// that we can execve ourself and keep the caps
+		c.caps.Clear(capability.AMBIENT)
+		c.caps.Clear(capability.INHERITABLE)
+
+		for i := 0; i <= int(capability.CAP_LAST_CAP); i++ {
+			if c.caps.Get(capability.PERMITTED, capability.Cap(i)) {
+				c.caps.Set(capability.CAPS, capability.Cap(i))
+				c.caps.Set(capability.AMBIENT, capability.Cap(i))
+			}
+		}
+
+		err = c.caps.Apply(capability.CAPS)
+		if err != nil {
+			return true, err
+		}
+
+		return true, c.caps.Apply(capability.AMBIENT)
+
+	} else {
+		return false, nil
+	}
 }
 
 func NeedFixLinuxPrivileges(uid, gid string) (bool, error) {
@@ -181,7 +205,7 @@ func Drop(uid int, gid int) error {
 	}
 
 	if curUid == uid && curGid == gid {
-		// just have to drop the superfluous caps
+		// just have to drop the potential superfluous caps, no setuid dance needed
 		toKeepMap := map[capability.Cap]bool{}
 		for _, cap := range CAPS_TO_KEEP {
 			toKeepMap[cap] = true
@@ -202,16 +226,27 @@ func Drop(uid int, gid int) error {
 			}
 		}
 
+		// make the current capabilities "ambient" (needs linux kernel 4.3), so
+		// that we can execve ourself and keep the caps
 		c.caps.Clear(capability.AMBIENT)
+		c.caps.Clear(capability.INHERITABLE)
 
-		err := c.caps.Apply(capability.AMBIENT)
+		for i := 0; i <= int(capability.CAP_LAST_CAP); i++ {
+			if c.caps.Get(capability.PERMITTED, capability.Cap(i)) {
+				c.caps.Set(capability.CAPS, capability.Cap(i))
+				c.caps.Set(capability.AMBIENT, capability.Cap(i))
+			}
+		}
+
+		err = c.caps.Apply(capability.CAPS)
 		if err != nil {
 			return err
 		}
-		return c.caps.Apply(capability.CAPS)
+
+		return c.caps.Apply(capability.AMBIENT)
 
 	} else if !c.CanModifySecurebits() {
-		return fmt.Errorf("Asked to change UID/GID, but no way to set the correct capabilities (need SETPCAP)")
+		return fmt.Errorf("Asked to change UID/GID, but no way to set the correct capabilities and securebits (need SETPCAP)")
 	} else {
 		kernelVerStr, err := host.KernelVersion()
 		if err != nil {
@@ -237,7 +272,7 @@ func Drop(uid int, gid int) error {
 		os.Stdin.Chown(uid, gid)
 		os.Stderr.Chown(uid, gid)
 
-		err = Predrop()
+		_, err = Predrop()
 		if err != nil {
 			return err
 		}
@@ -266,11 +301,7 @@ func Drop(uid int, gid int) error {
 		}
 
 		// drop caps SETUID, SETGID, SETPCAP
-		c.caps.Unset(capability.CAPS|capability.BOUNDING, capability.CAP_SETUID, capability.CAP_SETGID, capability.CAP_SETPCAP)
-		err = c.caps.Apply(capability.BOUNDING)
-		if err != nil {
-			return err
-		}
+		c.caps.Unset(capability.CAPS, capability.CAP_SETUID, capability.CAP_SETGID, capability.CAP_SETPCAP)
 		err = c.caps.Apply(capability.CAPS)
 		if err != nil {
 			return err

@@ -117,6 +117,8 @@ func (s *RelpService) SetKafkaConf(kc *conf.KafkaConfig) {
 	s.kc = kc
 }
 
+func (s *RelpService) SetAuditConf(ac *conf.AuditConfig) {}
+
 type RelpServiceImpl struct {
 	StreamingService
 	kafkaConf   conf.KafkaConfig

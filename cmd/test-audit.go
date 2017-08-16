@@ -35,11 +35,12 @@ var testauditCmd = &cobra.Command{
 		ctx, _ := context.WithCancel(context.Background())
 		generator := utils.Generator(ctx, logger)
 		auditsvc := services.NewAuditService(nil, generator, nil, logger)
-		err := auditsvc.Start(ctx, &c)
+		auditsvc.SetAuditConf(&c)
+		_, err := auditsvc.Start(false)
 		if err != nil {
 			fmt.Println("doh", err)
 		} else {
-			auditsvc.WaitFinished()
+			auditsvc.WaitClosed()
 		}
 	},
 }

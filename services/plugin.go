@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/inconshreveable/log15"
@@ -33,20 +34,22 @@ type NetworkPlugin struct {
 	syslogConfs  []*conf.SyslogConfig
 	parserConfs  []conf.ParserConfig
 	kafkaConf    *conf.KafkaConfig
+	auditConf    *conf.AuditConfig
 	binderHandle int
 	loggerHandle int
 	metrics      *metrics.Metrics
 	logger       log15.Logger
 	stasher      model.Stasher
-	closed       chan struct{}
+	shutdown     chan struct{}
 	stdin        io.WriteCloser
 	mu           *sync.Mutex
+	ExitError    int32
 }
 
 func (s *NetworkPlugin) Stop() {
 	s.mu.Lock()
 	select {
-	case <-s.closed:
+	case <-s.shutdown:
 	default:
 		if s.stdin != nil {
 			s.stdin.Write([]byte("stop\n"))
@@ -58,7 +61,7 @@ func (s *NetworkPlugin) Stop() {
 func (s *NetworkPlugin) Shutdown() {
 	s.mu.Lock()
 	select {
-	case <-s.closed:
+	case <-s.shutdown:
 	default:
 		if s.stdin != nil {
 			s.stdin.Write([]byte("shutdown\n"))
@@ -67,8 +70,8 @@ func (s *NetworkPlugin) Shutdown() {
 	s.mu.Unlock()
 }
 
-func (s *NetworkPlugin) WaitClosed() {
-	<-s.closed
+func (s *NetworkPlugin) WaitPluginShutdown() {
+	<-s.shutdown
 }
 
 func (s *NetworkPlugin) SetConf(sc []*conf.SyslogConfig, pc []conf.ParserConfig) {
@@ -80,13 +83,17 @@ func (s *NetworkPlugin) SetKafkaConf(kc *conf.KafkaConfig) {
 	s.kafkaConf = kc
 }
 
+func (s *NetworkPlugin) SetAuditConf(ac *conf.AuditConfig) {
+	s.auditConf = ac
+}
+
 func (s *NetworkPlugin) Start(test bool) ([]*model.ListenerInfo, error) {
 	infos := []*model.ListenerInfo{}
-	s.closed = make(chan struct{})
+	s.shutdown = make(chan struct{})
 
 	exe, err := sys.Executable()
 	if err != nil {
-		close(s.closed)
+		close(s.shutdown)
 		return infos, err
 	}
 
@@ -112,13 +119,13 @@ func (s *NetworkPlugin) Start(test bool) ([]*model.ListenerInfo, error) {
 	s.mu.Unlock()
 
 	if err != nil {
-		close(s.closed)
+		close(s.shutdown)
 		return infos, err
 	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		close(s.closed)
+		close(s.shutdown)
 		return infos, err
 	}
 
@@ -130,7 +137,7 @@ func (s *NetworkPlugin) Start(test bool) ([]*model.ListenerInfo, error) {
 
 	err = cmd.Start()
 	if err != nil {
-		close(s.closed)
+		close(s.shutdown)
 		return infos, err
 	}
 
@@ -147,16 +154,22 @@ func (s *NetworkPlugin) Start(test bool) ([]*model.ListenerInfo, error) {
 			// 1/ when the plugin process has stopped (stdout is closed, so scanner returns)
 			// or 2/ if scanner faces a formatting error
 			// or 3/ if the plugin sent a badly JSON encoded message
-			// or 4/ the plugin sent an unexpected message
+			// or 4/ if the plugin sent an unexpected message
 			s.logger.Debug("End of plugin", "type", s.t)
-			close(s.closed)
 			if kill {
 				s.logger.Crit("KIIIIIIILLLLLL", "type", s.t)
 				s.mu.Lock()
 				cmd.Process.Kill()
 				s.mu.Unlock()
 			}
-			cmd.Wait() // reap the zombie
+			err := cmd.Wait() // reap the zombie
+			if err != nil {
+				s.logger.Error("Plugin exited with an error", "type", s.t, "error", err)
+			}
+			if !cmd.ProcessState.Success() {
+				atomic.StoreInt32(&s.ExitError, 1)
+			}
+			close(s.shutdown)
 		}()
 
 		// read JSON encoded messages that the plugin is going to write on stdout
@@ -203,6 +216,9 @@ func (s *NetworkPlugin) Start(test bool) ([]*model.ListenerInfo, error) {
 			} else if bytes.HasPrefix(b, []byte("kafkaconferror ")) {
 				err := fmt.Errorf(string(b[15:]))
 				once.Do(func() { startedChan <- err; close(startedChan) })
+			} else if bytes.HasPrefix(b, []byte("auditconferror ")) {
+				err := fmt.Errorf(string(b[15:]))
+				once.Do(func() { startedChan <- err; close(startedChan) })
 			} else if bytes.HasPrefix(b, []byte("nolistenererror")) {
 				err := fmt.Errorf("No listener")
 				once.Do(func() { startedChan <- err; close(startedChan) })
@@ -226,6 +242,7 @@ func (s *NetworkPlugin) Start(test bool) ([]*model.ListenerInfo, error) {
 	scb, _ := json.Marshal(s.syslogConfs)
 	pcb, _ := json.Marshal(s.parserConfs)
 	kcb, _ := json.Marshal(s.kafkaConf)
+	acb, _ := json.Marshal(s.auditConf)
 
 	s.mu.Lock()
 	s.stdin.Write([]byte("syslogconf "))
@@ -240,15 +257,19 @@ func (s *NetworkPlugin) Start(test bool) ([]*model.ListenerInfo, error) {
 	s.stdin.Write(kcb)
 	s.stdin.Write([]byte("\n"))
 
+	s.stdin.Write([]byte("auditconf "))
+	s.stdin.Write(acb)
+	s.stdin.Write([]byte("\n"))
+
 	s.stdin.Write([]byte("start\n"))
 	s.mu.Unlock()
 	rerr := <-startedChan
 
 	if rerr != nil {
 		infos = nil
-		s.logger.Debug("Ask the errer plugin to stop", "type", s.t)
+		s.logger.Debug("Ask the erred plugin to stop", "type", s.t)
 		s.Shutdown()
-		s.WaitClosed()
+		s.WaitPluginShutdown()
 	}
 
 	return infos, rerr
@@ -261,6 +282,7 @@ type NetworkPluginProvider struct {
 	syslogConfs []*conf.SyslogConfig
 	parserConfs []conf.ParserConfig
 	kafkaConf   *conf.KafkaConfig
+	auditConf   *conf.AuditConfig
 }
 
 func (p *NetworkPluginProvider) Stash(m *model.TcpUdpParsedMessage) {
@@ -274,7 +296,7 @@ func (p *NetworkPluginProvider) Stash(m *model.TcpUdpParsedMessage) {
 	}
 }
 
-func (p *NetworkPluginProvider) Launch(typ string, test bool, binderClient *sys.BinderClient, logger log15.Logger) {
+func (p *NetworkPluginProvider) Launch(typ string, test bool, binderClient *sys.BinderClient, logger log15.Logger) error {
 	generator := utils.Generator(context.Background(), logger)
 	p.logger = logger
 
@@ -288,7 +310,7 @@ func (p *NetworkPluginProvider) Launch(typ string, test bool, binderClient *sys.
 		command = parts[0]
 		switch command {
 		case "start":
-			if p.syslogConfs == nil || p.parserConfs == nil || p.kafkaConf == nil {
+			if p.syslogConfs == nil || p.parserConfs == nil || p.kafkaConf == nil || p.auditConf == nil {
 				errs := fmt.Sprintf("syslogconferror syslog conf or parser conf was not provided to plugin")
 				fmt.Fprintf(os.Stdout, "%010d %s\n", len(errs), errs)
 				p.svc = nil
@@ -300,12 +322,14 @@ func (p *NetworkPluginProvider) Launch(typ string, test bool, binderClient *sys.
 				} else {
 					p.svc.SetConf(p.syslogConfs, p.parserConfs)
 					p.svc.SetKafkaConf(p.kafkaConf)
+					p.svc.SetAuditConf(p.auditConf)
 					infos, err := p.svc.Start(test)
 					if err != nil {
 						errs := fmt.Sprintf("starterror %s", err.Error())
 						fmt.Fprintf(os.Stdout, "%010d %s\n", len(errs), errs)
 						p.svc = nil
-					} else if len(infos) == 0 && typ != "skewer-relp" && typ != "skewer-journal" { // RELP and Journal never report infos
+					} else if len(infos) == 0 && typ != "skewer-relp" && typ != "skewer-journal" && typ != "skewer-audit" {
+						// (RELP, Journal and audit never report infos)
 						p.svc.Stop()
 						p.svc = nil
 						errs := "nolistenererror"
@@ -329,9 +353,9 @@ func (p *NetworkPluginProvider) Launch(typ string, test bool, binderClient *sys.
 			}
 			if cancel != nil {
 				cancel()
-				time.Sleep(time.Second) // give a chance for cleaning to be executed before plugin process ends
+				time.Sleep(400 * time.Millisecond) // give a chance for cleaning to be executed before plugin process ends
 			}
-			return
+			return nil
 		case "syslogconf":
 			args = parts[1]
 			sc := []*conf.SyslogConfig{}
@@ -365,10 +389,26 @@ func (p *NetworkPluginProvider) Launch(typ string, test bool, binderClient *sys.
 				errs := fmt.Sprintf("kafkaconferror %s", err.Error())
 				fmt.Fprintf(os.Stdout, "%010d %s\n", len(errs), errs)
 			}
+		case "auditconf":
+			args = parts[1]
+			ac := conf.AuditConfig{}
+			err := json.Unmarshal([]byte(args), &ac)
+			if err == nil {
+				p.auditConf = &ac
+			} else {
+				p.auditConf = nil
+				errs := fmt.Sprintf("auditconferror %s", err.Error())
+				fmt.Fprintf(os.Stdout, "%010d %s\n", len(errs), errs)
+			}
+		default:
+			return fmt.Errorf("Unknown command")
 		}
+
 	}
 	e := scanner.Err()
 	if e != nil {
-		logger.Error("Scanning stdin error", "error", e)
+		logger.Error("In plugin, scanning stdin met error", "error", e)
+		return e
 	}
+	return nil
 }

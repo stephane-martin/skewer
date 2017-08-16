@@ -56,7 +56,11 @@ connects to Kafka, and forwards messages to Kafka.`,
 				fmt.Fprintln(os.Stderr, err)
 				os.Exit(-1)
 			}
-			Serve()
+			err = Serve()
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "Fatal error in Serve()", err)
+				os.Exit(-1)
+			}
 			os.Exit(0)
 		}
 
@@ -87,7 +91,11 @@ connects to Kafka, and forwards messages to Kafka.`,
 					fmt.Fprintln(os.Stderr, err)
 					os.Exit(-1)
 				}
-				Serve()
+				err = Serve()
+				if err != nil {
+					fmt.Fprintln(os.Stderr, "Fatal error in Serve()", err)
+					os.Exit(-1)
+				}
 				os.Exit(0)
 			}
 		}
@@ -181,11 +189,14 @@ connects to Kafka, and forwards messages to Kafka.`,
 		loggerRelpHandle, loggerParentRelpHandle := mustSocketPair(syscall.SOCK_DGRAM)
 		loggerRelpConn := getLoggerConn(loggerParentRelpHandle)
 
-		loggerJournalHandle, loggerParentRelpHandle := mustSocketPair(syscall.SOCK_DGRAM)
-		loggerJournalConn := getLoggerConn(loggerParentRelpHandle)
+		loggerJournalHandle, loggerParentJournalHandle := mustSocketPair(syscall.SOCK_DGRAM)
+		loggerJournalConn := getLoggerConn(loggerParentJournalHandle)
+
+		loggerAuditHandle, loggerParentAuditHandle := mustSocketPair(syscall.SOCK_DGRAM)
+		loggerAuditConn := getLoggerConn(loggerParentAuditHandle)
 
 		utils.LogReceiver(context.Background(), rootlogger, []net.Conn{
-			loggerChildConn, loggerTcpConn, loggerUdpConn, loggerRelpConn, loggerJournalConn,
+			loggerChildConn, loggerTcpConn, loggerUdpConn, loggerRelpConn, loggerJournalConn, loggerAuditConn,
 		})
 
 		logger.Debug("Target user", "uid", numuid, "gid", numgid)
@@ -213,6 +224,7 @@ connects to Kafka, and forwards messages to Kafka.`,
 				os.NewFile(uintptr(loggerUdpHandle), "udp_logger_file"),
 				os.NewFile(uintptr(loggerRelpHandle), "relp_logger_file"),
 				os.NewFile(uintptr(loggerJournalHandle), "journal_logger_file"),
+				os.NewFile(uintptr(loggerAuditHandle), "audit_logger_file"),
 			},
 			Env: []string{"SKEWER_CHILD=TRUE", "PATH=/bin:/usr/bin"},
 		}
@@ -233,6 +245,7 @@ connects to Kafka, and forwards messages to Kafka.`,
 		syscall.Close(loggerUdpHandle)
 		syscall.Close(loggerRelpHandle)
 		syscall.Close(loggerJournalHandle)
+		syscall.Close(loggerAuditHandle)
 
 		sig_chan := make(chan os.Signal, 10)
 		once := sync.Once{}
@@ -311,8 +324,6 @@ func Serve() error {
 		defer binderClient.Quit()
 	}
 
-	generator := utils.Generator(gctx, logger)
-
 	var c *conf.GConfig
 	var st store.Store
 	var updated chan bool
@@ -354,6 +365,7 @@ func Serve() error {
 	st, err = store.NewStore(gctx, c.Store, metricStore, logger)
 	if err != nil {
 		logger.Crit("Can't create the message Store", "error", err)
+		time.Sleep(100 * time.Millisecond)
 		gCancel()
 		cancelLogger()
 		return err
@@ -361,6 +373,7 @@ func Serve() error {
 	err = st.StoreAllSyslogConfigs(c)
 	if err != nil {
 		logger.Crit("Can't store the syslog configurations", "error", err)
+		time.Sleep(100 * time.Millisecond)
 		gCancel()
 		cancelLogger()
 		return err
@@ -400,40 +413,48 @@ func Serve() error {
 		time.Sleep(time.Second)
 	}()
 
+	sig_chan := make(chan os.Signal, 10)
+	signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+
 	// retrieve linux audit logs
+	var relpServicePlugin *services.NetworkPlugin
+	var tcpServicePlugin *services.NetworkPlugin
+	var udpServicePlugin *services.NetworkPlugin
+	var auditServicePlugin *services.NetworkPlugin
+	var journalServicePlugin *services.NetworkPlugin
 
-	var auditService *services.AuditService
-	var auditCtx context.Context
-	var cancelAudit context.CancelFunc
-	if auditlogs.Supported {
-		logger.Info("Linux audit logs are supported")
-		if c.Audit.Enabled {
-			if !sys.CanReadAuditLogs() {
-				logger.Info("Audit logs are requested, but the needed Linux Capability is not present. Disabling.")
-			} else if sys.HasAnyProcess([]string{"go-audit", "auditd"}) {
-				logger.Warn("Audit logs are requested, but go-audit or auditd process is already running, so we disable audit logs")
-			} else {
-				logger.Info("Linux audit logs are enabled")
-				auditCtx, cancelAudit = context.WithCancel(shutdownCtx)
-				auditService = services.NewAuditService(st, generator, metricStore, logger)
-				err := auditService.Start(auditCtx, c.Audit)
-				if err != nil {
-					logger.Warn("Error starting the linux audit service", "error", err)
-					cancelAudit()
-					auditService = nil
+	startAudit := func(curconf *conf.GConfig) {
+		if auditlogs.Supported {
+			logger.Info("Linux audit logs are supported")
+			if c.Audit.Enabled {
+				if !sys.CanReadAuditLogs() {
+					logger.Info("Audit logs are requested, but the needed Linux Capability is not present. Disabling.")
+				} else if sys.HasAnyProcess([]string{"go-audit", "auditd"}) {
+					logger.Warn("Audit logs are requested, but go-audit or auditd process is already running, so we disable audit logs in skewer")
 				} else {
-					logger.Debug("Linux audit logs service is started")
+					logger.Info("Linux audit logs are enabled")
+					auditServicePlugin = services.NewNetworkPlugin("audit", st, 0, 12, metricStore, logger)
+					if auditServicePlugin == nil {
+						logger.Error("Error starting Linux Audit plugin")
+					} else {
+						auditServicePlugin.SetConf(curconf.Syslog, curconf.Parsers)
+						auditServicePlugin.SetKafkaConf(&curconf.Kafka)
+						auditServicePlugin.SetAuditConf(curconf.Audit)
+						_, err := auditServicePlugin.Start(testFlag)
+						if err == nil {
+							logger.Debug("Linux audit plugin has been started")
+						} else {
+							logger.Error("Error starting Linux Audit plugin", "error", err)
+						}
+					}
 				}
-
+			} else {
+				logger.Info("Linux audit logs are disabled (not requested or not Linux)")
 			}
 		} else {
-			logger.Info("Linux audit logs are disabled (not requested or not Linux)")
+			logger.Info("Linux audit logs are not supported")
 		}
-	} else {
-		logger.Info("Linux audit logs are not supported")
 	}
-
-	var journalServicePlugin *services.NetworkPlugin
 
 	startJournal := func(curconf *conf.GConfig) {
 		// retrieve messages from journald
@@ -455,6 +476,7 @@ func Serve() error {
 					}
 					journalServicePlugin.SetConf([]*conf.SyslogConfig{curjconf}, curconf.Parsers)
 					journalServicePlugin.SetKafkaConf(&curconf.Kafka)
+					journalServicePlugin.SetAuditConf(curconf.Audit)
 					_, err = journalServicePlugin.Start(testFlag)
 					if err != nil {
 						logger.Error("Error starting Journald plugin", "error", err)
@@ -470,13 +492,6 @@ func Serve() error {
 		}
 	}
 
-	sig_chan := make(chan os.Signal, 10)
-	signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
-
-	var relpServicePlugin *services.NetworkPlugin
-	var tcpServicePlugin *services.NetworkPlugin
-	var udpServicePlugin *services.NetworkPlugin
-
 	startRELP := func(curconf *conf.GConfig) {
 		relpServicePlugin = services.NewNetworkPlugin("relp", st, 6, 10, metricStore, logger)
 		if relpServicePlugin == nil {
@@ -484,6 +499,7 @@ func Serve() error {
 		} else {
 			relpServicePlugin.SetConf(curconf.Syslog, curconf.Parsers)
 			relpServicePlugin.SetKafkaConf(&curconf.Kafka)
+			relpServicePlugin.SetAuditConf(curconf.Audit)
 			_, err := relpServicePlugin.Start(testFlag)
 			if err != nil {
 				logger.Error("Error starting RELP plugin", "error", err)
@@ -502,6 +518,7 @@ func Serve() error {
 		} else {
 			tcpServicePlugin.SetConf(curconf.Syslog, curconf.Parsers)
 			tcpServicePlugin.SetKafkaConf(&curconf.Kafka)
+			tcpServicePlugin.SetAuditConf(curconf.Audit)
 			tcpinfos, err = tcpServicePlugin.Start(testFlag)
 			if err != nil {
 				logger.Error("Error starting TCP plugin", "error", err)
@@ -525,6 +542,7 @@ func Serve() error {
 		} else {
 			udpServicePlugin.SetConf(curconf.Syslog, curconf.Parsers)
 			udpServicePlugin.SetKafkaConf(&curconf.Kafka)
+			udpServicePlugin.SetAuditConf(curconf.Audit)
 			udpinfos, err := udpServicePlugin.Start(testFlag)
 			if err != nil {
 				logger.Error("Error starting UDP plugin", "error", err)
@@ -537,6 +555,7 @@ func Serve() error {
 	}
 
 	startJournal(c)
+	startAudit(c)
 	startRELP(c)
 	startTCP(c)
 	startUDP(c)
@@ -546,7 +565,7 @@ func Serve() error {
 			return
 		}
 		tcpServicePlugin.Shutdown()
-		tcpServicePlugin.WaitClosed()
+		tcpServicePlugin.WaitPluginShutdown()
 		if len(tcpinfos) > 0 && registry != nil {
 			for _, infos := range tcpinfos {
 				registry.UnregisterTcpListener(infos)
@@ -560,7 +579,7 @@ func Serve() error {
 			return
 		}
 		udpServicePlugin.Shutdown()
-		udpServicePlugin.WaitClosed()
+		udpServicePlugin.WaitPluginShutdown()
 	}
 
 	stopRELP := func() {
@@ -568,20 +587,24 @@ func Serve() error {
 			return
 		}
 		relpServicePlugin.Shutdown()
-		relpServicePlugin.WaitClosed()
+		relpServicePlugin.WaitPluginShutdown()
 	}
 
 	stopJournal := func(shutdown bool) {
-		if journald.Supported {
-			if journalServicePlugin != nil {
-				if shutdown {
-					journalServicePlugin.Shutdown()
-					journalServicePlugin.WaitClosed()
-				} else {
-					journalServicePlugin.Stop()
-					journalServicePlugin.WaitClosed()
-				}
+		if journald.Supported && journalServicePlugin != nil {
+			if shutdown {
+				journalServicePlugin.Shutdown()
+				journalServicePlugin.WaitPluginShutdown()
+			} else {
+				journalServicePlugin.Stop()
 			}
+		}
+	}
+
+	stopAudit := func() {
+		if auditlogs.Supported && auditServicePlugin != nil {
+			auditServicePlugin.Shutdown()
+			auditServicePlugin.WaitPluginShutdown()
 		}
 	}
 
@@ -608,19 +631,11 @@ func Serve() error {
 			}()
 		}
 
-		// reset the audit service
-		if auditService != nil {
+		if auditlogs.Supported {
 			wg.Add(1)
 			go func() {
-				cancelAudit()
-				auditService.WaitFinished()
-				auditCtx, cancelAudit = context.WithCancel(shutdownCtx)
-				err := auditService.Start(auditCtx, newConf.Audit)
-				if err != nil {
-					cancelAudit()
-					auditService = nil
-					logger.Warn("Error starting the linux audit service", "error", err)
-				}
+				stopAudit()
+				startAudit(newConf)
 				wg.Done()
 			}()
 		}
@@ -657,28 +672,18 @@ func Serve() error {
 		case <-shutdownCtx.Done():
 			logger.Info("Shutting down")
 
-			//relpServer.Unregister(registry)
-			//relpServer.FinalStop()
-			//_, more := <-relpServer.StatusChan
-			//for more {
-			//	_, more = <-relpServer.StatusChan
-			//}
 			stopRELP()
 			logger.Debug("The RELP service has been stopped")
 
 			stopJournal(true)
 			logger.Debug("Stopped journald service")
 
-			if auditService != nil {
-				logger.Debug("Stopping audit service")
-				cancelAudit()
-				auditService.WaitFinished()
-				logger.Debug("Stopped audit service")
-			}
+			stopAudit()
+			logger.Debug("Stopped linux audit service")
 
-			logger.Debug("Stopping TCP and UDP services")
 			stopTCP()
 			logger.Debug("The TCP service has been stopped")
+
 			stopUDP()
 			logger.Debug("The UDP service has been stopped")
 

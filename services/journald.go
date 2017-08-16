@@ -161,3 +161,5 @@ func (s *JournalService) SetConf(sc []*conf.SyslogConfig, pc []conf.ParserConfig
 }
 
 func (s *JournalService) SetKafkaConf(kc *conf.KafkaConfig) {}
+
+func (s *JournalService) SetAuditConf(ac *conf.AuditConfig) {}
