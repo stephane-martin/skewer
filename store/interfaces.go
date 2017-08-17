@@ -17,7 +17,7 @@ type Store interface {
 	WaitFinished()
 	GetSyslogConfig(configID string) (*conf.SyslogConfig, error)
 	//StoreSyslogConfig(config *conf.SyslogConfig) error
-	StoreAllSyslogConfigs(c *conf.GConfig) error
+	StoreAllSyslogConfigs(c *conf.BaseConfig) error
 	ReadAllBadgers() (map[string]string, map[string]string, map[string]string)
 }
 

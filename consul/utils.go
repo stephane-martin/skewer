@@ -25,14 +25,15 @@ func LocalIP() (net.IP, error) {
 }
 
 type ConnParams struct {
-	Address    string
-	Datacenter string
-	Token      string
-	CAFile     string
-	CAPath     string
-	CertFile   string
-	KeyFile    string
-	Insecure   bool
+	Address    string `json:"address"`
+	Datacenter string `json:"datacenter"`
+	Token      string `json:"token"`
+	CAFile     string `json:"ca_file"`
+	CAPath     string `json:"ca_path"`
+	CertFile   string `json:"cert_file"`
+	KeyFile    string `json:"key_file"`
+	Insecure   bool   `json:"insecure"`
+	Prefix     string `json:"prefix"`
 }
 
 func NewClient(params ConnParams) (*api.Client, error) {

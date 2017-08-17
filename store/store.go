@@ -298,7 +298,7 @@ func (s *MessageStore) WaitFinished() {
 	<-s.closedChan
 }
 
-func (s *MessageStore) StoreAllSyslogConfigs(c *conf.GConfig) (err error) {
+func (s *MessageStore) StoreAllSyslogConfigs(c *conf.BaseConfig) (err error) {
 	for _, config := range c.Syslog {
 		err = s.StoreSyslogConfig(config)
 		if err != nil {

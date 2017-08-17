@@ -22,6 +22,11 @@ import (
 	"github.com/stephane-martin/skewer/utils"
 )
 
+func w(dest io.Writer, header string, message string) {
+	m := header + " " + message
+	fmt.Fprintf(dest, "%010d %s\n", len(m), m)
+}
+
 func NewNetworkPlugin(t string, stasher model.Stasher, binderHandle int, loggerHandle int, m *metrics.Metrics, l log15.Logger) *NetworkPlugin {
 	s := &NetworkPlugin{t: t, stasher: stasher, binderHandle: binderHandle, loggerHandle: loggerHandle, metrics: m, logger: l}
 	s.mu = &sync.Mutex{}
@@ -52,7 +57,7 @@ func (s *NetworkPlugin) Stop() {
 	case <-s.shutdown:
 	default:
 		if s.stdin != nil {
-			s.stdin.Write([]byte("stop\n"))
+			w(s.stdin, "stop", "now")
 		}
 	}
 	s.mu.Unlock()
@@ -64,7 +69,7 @@ func (s *NetworkPlugin) Shutdown() {
 	case <-s.shutdown:
 	default:
 		if s.stdin != nil {
-			s.stdin.Write([]byte("shutdown\n"))
+			w(s.stdin, "shutdown", "now")
 		}
 	}
 	s.mu.Unlock()
@@ -157,7 +162,7 @@ func (s *NetworkPlugin) Start(test bool) ([]*model.ListenerInfo, error) {
 			// or 4/ if the plugin sent an unexpected message
 			s.logger.Debug("End of plugin", "type", s.t)
 			if kill {
-				s.logger.Crit("KIIIIIIILLLLLL", "type", s.t)
+				s.logger.Crit("kill misbehaving plugin", "type", s.t)
 				s.mu.Lock()
 				cmd.Process.Kill()
 				s.mu.Unlock()
@@ -174,7 +179,7 @@ func (s *NetworkPlugin) Start(test bool) ([]*model.ListenerInfo, error) {
 
 		// read JSON encoded messages that the plugin is going to write on stdout
 		scanner := bufio.NewScanner(stdout)
-		scanner.Split(PluginSplit)
+		scanner.Split(utils.PluginSplit)
 		for scanner.Scan() {
 			b := scanner.Bytes()
 			if bytes.HasPrefix(b, []byte("syslog ")) {
@@ -245,29 +250,16 @@ func (s *NetworkPlugin) Start(test bool) ([]*model.ListenerInfo, error) {
 	acb, _ := json.Marshal(s.auditConf)
 
 	s.mu.Lock()
-	s.stdin.Write([]byte("syslogconf "))
-	s.stdin.Write(scb)
-	s.stdin.Write([]byte("\n"))
-
-	s.stdin.Write([]byte("parserconf "))
-	s.stdin.Write(pcb)
-	s.stdin.Write([]byte("\n"))
-
-	s.stdin.Write([]byte("kafkaconf "))
-	s.stdin.Write(kcb)
-	s.stdin.Write([]byte("\n"))
-
-	s.stdin.Write([]byte("auditconf "))
-	s.stdin.Write(acb)
-	s.stdin.Write([]byte("\n"))
-
-	s.stdin.Write([]byte("start\n"))
+	w(s.stdin, "syslogconf", string(scb))
+	w(s.stdin, "parserconf", string(pcb))
+	w(s.stdin, "kafkaconf", string(kcb))
+	w(s.stdin, "auditconf", string(acb))
+	w(s.stdin, "start", "now")
 	s.mu.Unlock()
 	rerr := <-startedChan
 
 	if rerr != nil {
 		infos = nil
-		s.logger.Debug("Ask the erred plugin to stop", "type", s.t)
 		s.Shutdown()
 		s.WaitPluginShutdown()
 	}
@@ -288,8 +280,7 @@ type NetworkPluginProvider struct {
 func (p *NetworkPluginProvider) Stash(m *model.TcpUdpParsedMessage) {
 	b, err := json.Marshal(m)
 	if err == nil {
-		s := fmt.Sprintf("syslog %s", string(b))
-		fmt.Fprintf(os.Stdout, "%010d %s\n", len(s), s)
+		w(os.Stdout, "syslog", string(b))
 	} else {
 		// should not happen
 		p.logger.Warn("In plugin, a syslog message could not be serialized to JSON ?!")
@@ -305,39 +296,36 @@ func (p *NetworkPluginProvider) Launch(typ string, test bool, binderClient *sys.
 	var args string
 	var cancel context.CancelFunc
 	scanner = bufio.NewScanner(os.Stdin)
+	scanner.Split(utils.PluginSplit)
 	for scanner.Scan() {
 		parts := strings.SplitN(strings.Trim(scanner.Text(), "\r\n "), " ", 2)
 		command = parts[0]
 		switch command {
 		case "start":
 			if p.syslogConfs == nil || p.parserConfs == nil || p.kafkaConf == nil || p.auditConf == nil {
-				errs := fmt.Sprintf("syslogconferror syslog conf or parser conf was not provided to plugin")
-				fmt.Fprintf(os.Stdout, "%010d %s\n", len(errs), errs)
+				w(os.Stdout, "syslogconferror", "syslog conf or parser conf was not provided to plugin")
 				p.svc = nil
+				// TODO: return
 			} else {
 				p.svc, cancel = NewNetworkService(typ, p, generator, binderClient, nil, logger)
 				if p.svc == nil {
-					errs := "starterror NewNetworkService returned nil"
-					fmt.Fprintf(os.Stdout, "%010d %s\n", len(errs), errs)
+					w(os.Stdout, "starterror", "NewNetworkService returned nil")
 				} else {
 					p.svc.SetConf(p.syslogConfs, p.parserConfs)
 					p.svc.SetKafkaConf(p.kafkaConf)
 					p.svc.SetAuditConf(p.auditConf)
 					infos, err := p.svc.Start(test)
 					if err != nil {
-						errs := fmt.Sprintf("starterror %s", err.Error())
-						fmt.Fprintf(os.Stdout, "%010d %s\n", len(errs), errs)
+						w(os.Stdout, "starterror", err.Error())
 						p.svc = nil
 					} else if len(infos) == 0 && typ != "skewer-relp" && typ != "skewer-journal" && typ != "skewer-audit" {
 						// (RELP, Journal and audit never report infos)
 						p.svc.Stop()
 						p.svc = nil
-						errs := "nolistenererror"
-						fmt.Fprintf(os.Stdout, "%010d %s\n", len(errs), errs)
+						w(os.Stdout, "nolistenererror", "plugin is inactive")
 					} else {
 						infosb, _ := json.Marshal(infos)
-						answer := fmt.Sprintf("started %s", infosb)
-						fmt.Fprintf(os.Stdout, "%010d %s\n", len(answer), answer)
+						w(os.Stdout, "started", string(infosb))
 					}
 				}
 			}
@@ -364,8 +352,7 @@ func (p *NetworkPluginProvider) Launch(typ string, test bool, binderClient *sys.
 				p.syslogConfs = sc
 			} else {
 				p.syslogConfs = nil
-				errs := fmt.Sprintf("syslogconferror %s", err.Error())
-				fmt.Fprintf(os.Stdout, "%010d %s\n", len(errs), errs)
+				w(os.Stdout, "syslogconferror", err.Error())
 			}
 		case "parserconf":
 			args = parts[1]
@@ -375,8 +362,7 @@ func (p *NetworkPluginProvider) Launch(typ string, test bool, binderClient *sys.
 				p.parserConfs = pc
 			} else {
 				p.parserConfs = nil
-				errs := fmt.Sprintf("parserconferror %s", err.Error())
-				fmt.Fprintf(os.Stdout, "%010d %s\n", len(errs), errs)
+				w(os.Stdout, "parserconferror", err.Error())
 			}
 		case "kafkaconf":
 			args = parts[1]
@@ -386,8 +372,7 @@ func (p *NetworkPluginProvider) Launch(typ string, test bool, binderClient *sys.
 				p.kafkaConf = &kc
 			} else {
 				p.kafkaConf = nil
-				errs := fmt.Sprintf("kafkaconferror %s", err.Error())
-				fmt.Fprintf(os.Stdout, "%010d %s\n", len(errs), errs)
+				w(os.Stdout, "kafkaconferror", err.Error())
 			}
 		case "auditconf":
 			args = parts[1]
@@ -397,8 +382,7 @@ func (p *NetworkPluginProvider) Launch(typ string, test bool, binderClient *sys.
 				p.auditConf = &ac
 			} else {
 				p.auditConf = nil
-				errs := fmt.Sprintf("auditconferror %s", err.Error())
-				fmt.Fprintf(os.Stdout, "%010d %s\n", len(errs), errs)
+				w(os.Stdout, "auditconferror", err.Error())
 			}
 		default:
 			return fmt.Errorf("Unknown command")
@@ -407,7 +391,7 @@ func (p *NetworkPluginProvider) Launch(typ string, test bool, binderClient *sys.
 	}
 	e := scanner.Err()
 	if e != nil {
-		logger.Error("In plugin, scanning stdin met error", "error", e)
+		logger.Error("In plugin controller, scanning stdin met error", "error", e)
 		return e
 	}
 	return nil

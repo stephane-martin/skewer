@@ -24,42 +24,51 @@ import (
 	"github.com/stephane-martin/skewer/utils"
 )
 
-type BaseConfig struct {
-	Syslog   []*SyslogConfig `mapstructure:"syslog" toml:"syslog"`
-	Kafka    KafkaConfig     `mapstructure:"kafka" toml:"kafka"`
-	Store    StoreConfig     `mapstructure:"store" toml:"store"`
-	Parsers  []ParserConfig  `mapstructure:"parser" toml:"parser"`
-	Watchers []WatcherConfig `mapstructure:"watcher" toml:"watcher"`
-	Journald *JournaldConfig `mapstructure:"journald" toml:"journald"`
-	Audit    *AuditConfig    `mapstructure:"audit" toml:"audit"`
-	Metrics  MetricsConfig   `mapstructure:"metrics" toml:"metrics"`
-}
+func (source *BaseConfig) DeepCopy() *BaseConfig {
+	dest := newBaseConf()
 
-type GConfig struct {
-	BaseConfig
-	Dirname      string
-	ConsulPrefix string
-	ConsulParams consul.ConnParams
-	Logger       log15.Logger
+	for _, sysconf := range source.Syslog {
+		c := *sysconf
+		dest.Syslog = append(dest.Syslog, &c)
+	}
+
+	dest.Kafka = source.Kafka
+	dest.Kafka.Brokers = []string{}
+	for _, broker := range source.Kafka.Brokers {
+		dest.Kafka.Brokers = append(dest.Kafka.Brokers, broker)
+	}
+
+	dest.Store = source.Store
+
+	for _, pconf := range source.Parsers {
+		dest.Parsers = append(dest.Parsers, pconf)
+	}
+
+	j := *source.Journald
+	dest.Journald = &j
+
+	a := *source.Audit
+	dest.Audit = &a
+
+	dest.Metrics = source.Metrics
+	return dest
 }
 
 func newBaseConf() *BaseConfig {
 	brokers := []string{}
-	kafka := KafkaConfig{Brokers: brokers}
-	syslog := []*SyslogConfig{}
-	parsers := []ParserConfig{}
-	baseConf := BaseConfig{Syslog: syslog, Kafka: kafka, Parsers: parsers}
+	baseConf := BaseConfig{
+		Syslog:   []*SyslogConfig{},
+		Kafka:    KafkaConfig{Brokers: brokers},
+		Store:    StoreConfig{},
+		Parsers:  []ParserConfig{},
+		Journald: &JournaldConfig{},
+		Audit:    &AuditConfig{},
+		Metrics:  MetricsConfig{},
+	}
 	return &baseConf
 }
 
-func newConf() *GConfig {
-	baseConf := newBaseConf()
-	conf := GConfig{BaseConfig: *baseConf}
-	conf.Logger = log15.New()
-	return &conf
-}
-
-func Default() (*GConfig, error) {
+func Default() (*BaseConfig, error) {
 	v := viper.New()
 	SetDefaults(v)
 	baseConf := newBaseConf()
@@ -67,40 +76,15 @@ func Default() (*GConfig, error) {
 	if err != nil {
 		return nil, ConfigurationSyntaxError{Err: err}
 	}
-	c := &GConfig{BaseConfig: *baseConf}
-	err = c.Complete()
+	err = baseConf.Complete()
 	if err != nil {
 		return nil, ConfigurationSyntaxError{Err: err}
 	}
-	return c, nil
+	return baseConf, nil
 }
 
-func (c *GConfig) String() string {
+func (c *BaseConfig) String() string {
 	return c.Export()
-}
-
-type MetricsConfig struct {
-	Enabled bool   `mapstructure:"enabled" toml:"enabled"`
-	Path    string `mapstructure:"path" toml:"path"`
-	Port    int    `mapstructure:"port" toml:"port"`
-}
-
-type WatcherConfig struct {
-	Filename string `mapstructure:"filename" toml:"filename"`
-	Whence   int    `mapstructure:"whence" toml:"whence"`
-}
-
-type ParserConfig struct {
-	Name string `mapstructure:"name" toml:"name" json:"name"`
-	Func string `mapstructure:"func" toml:"func" json:"func"`
-}
-
-type StoreConfig struct {
-	Dirname string   `mapstructure:"-" toml:"-"`
-	Maxsize int64    `mapstructure:"max_size" toml:"max_size"`
-	FSync   bool     `mapstructure:"fsync" toml:"fsync"`
-	Secret  string   `mapstructure:"secret" toml:"-"`
-	SecretB [32]byte `mapstructure:"-" toml:"-"`
 }
 
 type KafkaVersion [4]int
@@ -180,91 +164,6 @@ func (l KafkaVersion) Greater(r KafkaVersion) bool {
 		return true
 	}
 	return false
-}
-
-type KafkaConfig struct {
-	Brokers                  []string      `mapstructure:"brokers" toml:"brokers" json:"brokers"`
-	ClientID                 string        `mapstructure:"client_id" toml:"client_id" json:"client_id"`
-	Version                  string        `mapstructure:"version" toml:"version" json:"version"`
-	ChannelBufferSize        int           `mapstructure:"channel_buffer_size" toml:"channel_buffer_size" json:"channel_buffer_size"`
-	MaxOpenRequests          int           `mapstructure:"max_open_requests" toml:"max_open_requests" json:"max_open_requests"`
-	DialTimeout              time.Duration `mapstructure:"dial_timeout" toml:"dial_timeout" json:"dial_timeout"`
-	ReadTimeout              time.Duration `mapstructure:"read_timeout" toml:"read_timeout" json:"read_timeout"`
-	WriteTimeout             time.Duration `mapstructure:"write_timeout" toml:"write_timeout" json:"write_timeout"`
-	KeepAlive                time.Duration `mapstructure:"keepalive" toml:"keepalive" json:"keepalive"`
-	MetadataRetryMax         int           `mapstructure:"metadata_retry_max" toml:"metadata_retry_max" json:"metadata_retry_max"`
-	MetadataRetryBackoff     time.Duration `mapstructure:"metadata_retry_backoff" toml:"metadata_retry_backoff" json:"metadata_retry_backoff"`
-	MetadataRefreshFrequency time.Duration `mapstructure:"metadata_refresh_frequency" toml:"metadata_refresh_frequency" json:"metadata_refresh_frequency"`
-	MessageBytesMax          int           `mapstructure:"message_bytes_max" toml:"message_bytes_max" json:"message_bytes_max"`
-	RequiredAcks             int16         `mapstructure:"required_acks" toml:"required_acks" json:"required_acks"`
-	ProducerTimeout          time.Duration `mapstructure:"producer_timeout" toml:"producer_timeout" json:"producer_timeout"`
-	Compression              string        `mapstructure:"compression" toml:"compression" json:"compression"`
-	FlushBytes               int           `mapstructure:"flush_bytes" toml:"flush_bytes" json:"flush_bytes"`
-	FlushMessages            int           `mapstructure:"flush_messages" toml:"flush_messages" json:"flush_messages"`
-	FlushFrequency           time.Duration `mapstructure:"flush_frequency" toml:"flush_frequency" json:"flush_frequency"`
-	FlushMessagesMax         int           `mapstructure:"flush_messages_max" toml:"flush_messages_max" json:"flush_messages_max"`
-	RetrySendMax             int           `mapstructure:"retry_send_max" toml:"retry_send_max" json:"retry_send_max"`
-	RetrySendBackoff         time.Duration `mapstructure:"retry_send_backoff" toml:"retry_send_backoff" json:"retry_send_backoff"`
-	TLSEnabled               bool          `mapstructure:"tls_enabled" toml:"tls_enabled" json:"tls_enabled"`
-	CAFile                   string        `mapstructure:"ca_file" toml:"ca_file" json:"ca_file"`
-	CAPath                   string        `mapstructure:"ca_path" toml:"ca_path" json:"ca_path"`
-	KeyFile                  string        `mapstructure:"key_file" toml:"key_file" json:"key_file"`
-	CertFile                 string        `mapstructure:"cert_file" toml:"cert_file" json:"cert_file"`
-	Insecure                 bool          `mapstructure:"insecure" toml:"insecure" json:"insecure"`
-}
-
-type JournaldConfig struct {
-	Enabled       bool   `mapstructure:"enabled" toml:"enabled"`
-	TopicTmpl     string `mapstructure:"topic_tmpl" toml:"topic_tmpl"`
-	TopicFunc     string `mapstructure:"topic_function" toml:"topic_function"`
-	PartitionTmpl string `mapstructure:"partition_key_tmpl" toml:"partition_key_tmpl"`
-	PartitionFunc string `mapstructure:"partition_key_func" toml:"partition_key_func"`
-	FilterFunc    string `mapstructure:"filter_func" toml:"filter_func"`
-	ConfID        string `mapstructure:"-" toml:"-"`
-}
-
-type AuditConfig struct {
-	Enabled         bool   `mapstructure:"enabled" toml:"enabled" json:"enabled"`
-	SocketBuffer    int    `mapstructure:"socket_buffer" toml:"socket_buffer" json:"socket_buffer"`
-	EventsMin       int    `mapstructure:"events_min" toml:"events_min" json:"events_min"`
-	EventsMax       int    `mapstructure:"events_max" toml:"events_max" json:"events_max"`
-	MessageTracking bool   `mapstructure:"message_tracking" toml:"message_tracking" json:"message_tracking"`
-	LogOutOfOrder   bool   `mapstructure:"log_out_of_order" toml:"log_out_of_order" json:"log_out_of_order"`
-	MaxOutOfOrder   int    `mapstructure:"max_out_of_order" toml:"max_out_of_order" json:"max_out_of_order"`
-	Appname         string `mapstructure:"appname" toml:"appname" json:"appname"`
-	Severity        int    `mapstructure:"severity" toml:"severity" json:"severity"`
-	Facility        int    `mapstructure:"facility" toml:"facility" json:"facility"`
-	TopicTmpl       string `mapstructure:"topic_tmpl" toml:"topic_tmpl" json:"topic_tmpl"`
-	TopicFunc       string `mapstructure:"topic_function" toml:"topic_function" json:"topic_function"`
-	PartitionTmpl   string `mapstructure:"partition_key_tmpl" toml:"partition_key_tmpl" json:"partition_key_tmpl"`
-	PartitionFunc   string `mapstructure:"partition_key_func" toml:"partition_key_func" json:"partition_key_func"`
-	FilterFunc      string `mapstructure:"filter_func" toml:"filter_func" json:"filter_func"`
-	ConfID          string `mapstructure:"-" toml:"-" json:"conf_id"`
-}
-
-type SyslogConfig struct {
-	Port            int           `mapstructure:"port" toml:"port" json:"port"`
-	BindAddr        string        `mapstructure:"bind_addr" toml:"bind_addr" json:"bind_addr"`
-	UnixSocketPath  string        `mapstructure:"unix_socket_path" toml:"unix_socket_path" json:"unix_socket_path"`
-	Format          string        `mapstructure:"format" toml:"format" json:"format"`
-	TopicTmpl       string        `mapstructure:"topic_tmpl" toml:"topic_tmpl" json:"topic_tmpl"`
-	TopicFunc       string        `mapstructure:"topic_function" toml:"topic_function" json:"topic_function"`
-	PartitionTmpl   string        `mapstructure:"partition_key_tmpl" toml:"partition_key_tmpl" json:"partition_key_tmpl"`
-	PartitionFunc   string        `mapstructure:"partition_key_func" toml:"partition_key_func" json:"partition_key_func"`
-	FilterFunc      string        `mapstructure:"filter_func" toml:"filter_func" json:"filter_func"`
-	Protocol        string        `mapstructure:"protocol" toml:"protocol" json:"protocol"`
-	DontParseSD     bool          `mapstructure:"dont_parse_structured_data" toml:"dont_parse_structured_data" json:"dont_parse_structured_data"`
-	KeepAlive       bool          `mapstructure:"keepalive" toml:"keepalive" json:"keepalive"`
-	KeepAlivePeriod time.Duration `mapstructure:"keepalive_period" toml:"keepalive_period" json:"keepalive_period"`
-	Timeout         time.Duration `mapstructure:"timeout" toml:"timeout" json:"timeout"`
-	TLSEnabled      bool          `mapstructure:"tls_enabled" toml:"tls_enabled" json:"tls_enabled"`
-	CAFile          string        `mapstructure:"ca_file" toml:"ca_file" json:"ca_file"`
-	CAPath          string        `mapstructure:"ca_path" toml:"ca_path" json:"ca_path"`
-	KeyFile         string        `mapstructure:"key_file" toml:"key_file" json:"key_file"`
-	CertFile        string        `mapstructure:"cert_file" toml:"cert_file" json:"cert_file"`
-	ClientAuthType  string        `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
-	ConfID          string        `mapstructure:"-" toml:"-" json:"conf_id"`
-	// todo: Partitioner ?
 }
 
 func (c *SyslogConfig) GetClientAuthType() tls.ClientAuthType {
@@ -398,7 +297,7 @@ func (c *KafkaConfig) GetClient() (sarama.Client, error) {
 	return nil, KafkaError{Err: err}
 }
 
-func InitLoad(ctx context.Context, confDir, storeDir, prefix string, params consul.ConnParams, logger log15.Logger) (c *GConfig, updated chan bool, err error) {
+func InitLoad(ctx context.Context, confDir string, params consul.ConnParams, logger log15.Logger) (c *BaseConfig, updated chan *BaseConfig, err error) {
 	defer func() {
 		// sometimes viper panics... let's catch that
 		if r := recover(); r != nil {
@@ -450,13 +349,7 @@ func InitLoad(ctx context.Context, confDir, storeDir, prefix string, params cons
 		return nil, nil, ConfigurationSyntaxError{Err: err, Filename: v.ConfigFileUsed()}
 	}
 
-	c = &GConfig{BaseConfig: *baseConf}
-
-	c.Dirname = confDir
-	c.Store.Dirname = storeDir
-	c.ConsulParams = params
-	c.ConsulPrefix = prefix
-	c.Logger = logger
+	c = baseConf.DeepCopy()
 
 	var watchCtx context.Context
 	var cancelWatch context.CancelFunc
@@ -467,14 +360,14 @@ func InitLoad(ctx context.Context, confDir, storeDir, prefix string, params cons
 		if err == nil {
 			consulResults = make(chan map[string]string, 10)
 			watchCtx, cancelWatch = context.WithCancel(ctx)
-			firstResults, err = consul.WatchTree(watchCtx, clt, c.ConsulPrefix, consulResults, logger)
+			firstResults, err = consul.WatchTree(watchCtx, clt, params.Prefix, consulResults, logger)
 			if err == nil {
-				err = c.ParseParamsFromConsul(firstResults)
+				err = c.ParseParamsFromConsul(firstResults, params.Prefix, logger)
 				if err != nil {
-					c.Logger.Error("Error decoding configuration from Consul", "error", err)
+					logger.Error("Error decoding configuration from Consul", "error", err)
 				}
 			} else {
-				c.Logger.Error("Error reading from Consul", "error", err)
+				logger.Error("Error reading from Consul", "error", err)
 				cancelWatch()
 				consulResults = nil
 			}
@@ -495,23 +388,20 @@ func InitLoad(ctx context.Context, confDir, storeDir, prefix string, params cons
 
 	if consulResults != nil {
 		// watch for updates from Consul
-		updated = make(chan bool)
+		updated = make(chan *BaseConfig)
 		go func() {
 			for result := range consulResults {
-				var newConfig *GConfig
-				*newConfig = *c
-				err := newConfig.ParseParamsFromConsul(result)
+				newConfig := baseConf.DeepCopy()
+				err := newConfig.ParseParamsFromConsul(result, params.Prefix, logger)
 				if err == nil {
 					err = newConfig.Complete()
-					newConfig.Store = c.Store
 					if err == nil {
-						*c = *newConfig
-						updated <- true
+						updated <- newConfig
 					} else {
 						logger.Error("Error updating conf from Consul", "error", err)
 					}
 				} else {
-					c.Logger.Error("Error decoding conf from Consul", "error", err)
+					logger.Error("Error decoding conf from Consul", "error", err)
 				}
 			}
 			close(updated)
@@ -521,7 +411,7 @@ func InitLoad(ctx context.Context, confDir, storeDir, prefix string, params cons
 	return c, updated, nil
 }
 
-func (c *GConfig) ParseParamsFromConsul(params map[string]string) error {
+func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix string, logger log15.Logger) error {
 	syslogConfMap := map[string]map[string]string{}
 	journaldConf := map[string]string{}
 	kafkaConf := map[string]string{}
@@ -529,7 +419,7 @@ func (c *GConfig) ParseParamsFromConsul(params map[string]string) error {
 	auditConf := map[string]string{}
 	metricsConf := map[string]string{}
 	parsersConfMap := map[string]map[string]string{}
-	prefixLen := len(c.ConsulPrefix)
+	prefixLen := len(prefix)
 
 	for k, v := range params {
 		k = strings.Trim(k[prefixLen:], "/")
@@ -542,31 +432,31 @@ func (c *GConfig) ParseParamsFromConsul(params map[string]string) error {
 				}
 				syslogConfMap[splits[1]][splits[2]] = v
 			} else {
-				c.Logger.Debug("Ignoring Consul KV", "key", k, "value", v)
+				logger.Debug("Ignoring Consul KV", "key", k, "value", v)
 			}
 		case "journald":
 			if len(splits) == 2 {
 				journaldConf[splits[1]] = v
 			} else {
-				c.Logger.Debug("Ignoring Consul KV", "key", k, "value", v)
+				logger.Debug("Ignoring Consul KV", "key", k, "value", v)
 			}
 		case "audit":
 			if len(splits) == 2 {
 				auditConf[splits[1]] = v
 			} else {
-				c.Logger.Debug("Ignoring Consul KV", "key", k, "value", v)
+				logger.Debug("Ignoring Consul KV", "key", k, "value", v)
 			}
 		case "kafka":
 			if len(splits) == 2 {
 				kafkaConf[splits[1]] = v
 			} else {
-				c.Logger.Debug("Ignoring Consul KV", "key", k, "value", v)
+				logger.Debug("Ignoring Consul KV", "key", k, "value", v)
 			}
 		case "store":
 			if len(splits) == 2 {
 				storeConf[splits[1]] = v
 			} else {
-				c.Logger.Debug("Ignoring Consul KV", "key", k, "value", v)
+				logger.Debug("Ignoring Consul KV", "key", k, "value", v)
 			}
 		case "parsers":
 			if len(splits) == 3 {
@@ -575,16 +465,16 @@ func (c *GConfig) ParseParamsFromConsul(params map[string]string) error {
 				}
 				parsersConfMap[splits[1]][splits[2]] = v
 			} else {
-				c.Logger.Debug("Ignoring Consul KV", "key", k, "value", v)
+				logger.Debug("Ignoring Consul KV", "key", k, "value", v)
 			}
 		case "metrics":
 			if len(splits) == 2 {
 				metricsConf[splits[1]] = v
 			} else {
-				c.Logger.Debug("Ignoring Consul KV", "key", k, "value", v)
+				logger.Debug("Ignoring Consul KV", "key", k, "value", v)
 			}
 		default:
-			c.Logger.Debug("Ignoring Consul KV", "key", k, "value", v)
+			logger.Debug("Ignoring Consul KV", "key", k, "value", v)
 		}
 	}
 
@@ -706,23 +596,14 @@ func (c *GConfig) ParseParamsFromConsul(params map[string]string) error {
 	return nil
 }
 
-func (c *GConfig) Reload(ctx context.Context) (newConf *GConfig, updated chan bool, err error) {
-	newConf, updated, err = InitLoad(ctx, c.Dirname, c.Store.Dirname, c.ConsulPrefix, c.ConsulParams, c.Logger)
-	if err != nil {
-		return nil, nil, err
-	}
-	newConf.Store = c.Store // we don't change the parameters of the badger databases when doing a reload
-	return newConf, updated, nil
-}
-
-func (c *GConfig) Export() string {
+func (c *BaseConfig) Export() string {
 	buf := new(bytes.Buffer)
 	encoder := toml.NewEncoder(buf)
-	encoder.Encode(c.BaseConfig)
+	encoder.Encode(c)
 	return buf.String()
 }
 
-func (c *GConfig) Complete() (err error) {
+func (c *BaseConfig) Complete() (err error) {
 	parsersNames := map[string]bool{}
 	for _, parserConf := range c.Parsers {
 		name := strings.TrimSpace(parserConf.Name)

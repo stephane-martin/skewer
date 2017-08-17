@@ -195,8 +195,11 @@ connects to Kafka, and forwards messages to Kafka.`,
 		loggerAuditHandle, loggerParentAuditHandle := mustSocketPair(syscall.SOCK_DGRAM)
 		loggerAuditConn := getLoggerConn(loggerParentAuditHandle)
 
+		loggerConfigurationHandle, loggerParentConfigurationHandle := mustSocketPair(syscall.SOCK_DGRAM)
+		loggerConfigurationConn := getLoggerConn(loggerParentConfigurationHandle)
+
 		utils.LogReceiver(context.Background(), rootlogger, []net.Conn{
-			loggerChildConn, loggerTcpConn, loggerUdpConn, loggerRelpConn, loggerJournalConn, loggerAuditConn,
+			loggerChildConn, loggerTcpConn, loggerUdpConn, loggerRelpConn, loggerJournalConn, loggerAuditConn, loggerConfigurationConn,
 		})
 
 		logger.Debug("Target user", "uid", numuid, "gid", numgid)
@@ -225,6 +228,7 @@ connects to Kafka, and forwards messages to Kafka.`,
 				os.NewFile(uintptr(loggerRelpHandle), "relp_logger_file"),
 				os.NewFile(uintptr(loggerJournalHandle), "journal_logger_file"),
 				os.NewFile(uintptr(loggerAuditHandle), "audit_logger_file"),
+				os.NewFile(uintptr(loggerConfigurationHandle), "config_logger_file"),
 			},
 			Env: []string{"SKEWER_CHILD=TRUE", "PATH=/bin:/usr/bin"},
 		}
@@ -246,6 +250,7 @@ connects to Kafka, and forwards messages to Kafka.`,
 		syscall.Close(loggerRelpHandle)
 		syscall.Close(loggerJournalHandle)
 		syscall.Close(loggerAuditHandle)
+		syscall.Close(loggerConfigurationHandle)
 
 		sig_chan := make(chan os.Signal, 10)
 		once := sync.Once{}
@@ -300,7 +305,6 @@ func init() {
 func Serve() error {
 	gctx, gCancel := context.WithCancel(context.Background())
 	shutdownCtx, shutdown := context.WithCancel(gctx)
-	watchCtx, stopWatch := context.WithCancel(shutdownCtx)
 	var logger log15.Logger
 
 	binderFile := os.NewFile(3, "binder")
@@ -324,9 +328,7 @@ func Serve() error {
 		defer binderClient.Quit()
 	}
 
-	var c *conf.GConfig
 	var st store.Store
-	var updated chan bool
 
 	params := consul.ConnParams{
 		Address:    consulAddr,
@@ -337,17 +339,20 @@ func Serve() error {
 		CertFile:   consulCertFile,
 		KeyFile:    consulKeyFile,
 		Insecure:   consulInsecure,
+		Prefix:     consulPrefix,
 	}
 
-	// read configuration
-	for {
-		c, updated, err = conf.InitLoad(watchCtx, configDirName, storeDirname, consulPrefix, params, logger)
-		if err == nil {
-			break
-		}
-		logger.Error("Error getting configuration. Sleep and retry.", "error", err)
-		time.Sleep(30 * time.Second)
+	confSvc := conf.NewConfigurationService(13, logger)
+	confSvc.SetConfDir(configDirName)
+	confSvc.SetConsulParams(params)
+	err = confSvc.Start()
+	if err != nil {
+		logger.Crit("Error starting the configuration service", "error", err)
+		return err
 	}
+	newConfChannel := confSvc.Chan()
+	c := <-confSvc.Chan()
+	c.Store.Dirname = storeDirname
 	logger.Info("Store location", "path", c.Store.Dirname)
 
 	// create a consul registry
@@ -423,7 +428,7 @@ func Serve() error {
 	var auditServicePlugin *services.NetworkPlugin
 	var journalServicePlugin *services.NetworkPlugin
 
-	startAudit := func(curconf *conf.GConfig) {
+	startAudit := func(curconf *conf.BaseConfig) {
 		if auditlogs.Supported {
 			logger.Info("Linux audit logs are supported")
 			if c.Audit.Enabled {
@@ -456,7 +461,7 @@ func Serve() error {
 		}
 	}
 
-	startJournal := func(curconf *conf.GConfig) {
+	startJournal := func(curconf *conf.BaseConfig) {
 		// retrieve messages from journald
 		if journald.Supported {
 			logger.Info("Journald is supported")
@@ -492,7 +497,7 @@ func Serve() error {
 		}
 	}
 
-	startRELP := func(curconf *conf.GConfig) {
+	startRELP := func(curconf *conf.BaseConfig) {
 		relpServicePlugin = services.NewNetworkPlugin("relp", st, 6, 10, metricStore, logger)
 		if relpServicePlugin == nil {
 			logger.Error("Error starting RELP plugin")
@@ -502,7 +507,7 @@ func Serve() error {
 			relpServicePlugin.SetAuditConf(curconf.Audit)
 			_, err := relpServicePlugin.Start(testFlag)
 			if err != nil {
-				logger.Error("Error starting RELP plugin", "error", err)
+				logger.Warn("Error starting RELP plugin", "error", err)
 			} else {
 				logger.Debug("RELP plugin has been started")
 			}
@@ -511,7 +516,7 @@ func Serve() error {
 
 	var tcpinfos []*model.ListenerInfo
 
-	startTCP := func(curconf *conf.GConfig) {
+	startTCP := func(curconf *conf.BaseConfig) {
 		tcpServicePlugin = services.NewNetworkPlugin("tcp", st, 4, 8, metricStore, logger)
 		if tcpServicePlugin == nil {
 			logger.Error("Error starting TCP plugin")
@@ -521,7 +526,7 @@ func Serve() error {
 			tcpServicePlugin.SetAuditConf(curconf.Audit)
 			tcpinfos, err = tcpServicePlugin.Start(testFlag)
 			if err != nil {
-				logger.Error("Error starting TCP plugin", "error", err)
+				logger.Warn("Error starting TCP plugin", "error", err)
 			} else if len(tcpinfos) == 0 {
 				logger.Info("TCP plugin not started")
 			} else {
@@ -535,7 +540,7 @@ func Serve() error {
 		}
 	}
 
-	startUDP := func(curconf *conf.GConfig) {
+	startUDP := func(curconf *conf.BaseConfig) {
 		udpServicePlugin = services.NewNetworkPlugin("udp", st, 5, 9, metricStore, logger)
 		if udpServicePlugin == nil {
 			logger.Error("Error starting UDP plugin")
@@ -545,7 +550,7 @@ func Serve() error {
 			udpServicePlugin.SetAuditConf(curconf.Audit)
 			udpinfos, err := udpServicePlugin.Start(testFlag)
 			if err != nil {
-				logger.Error("Error starting UDP plugin", "error", err)
+				logger.Warn("Error starting UDP plugin", "error", err)
 			} else if len(udpinfos) == 0 {
 				logger.Info("UDP plugin not started")
 			} else {
@@ -608,7 +613,7 @@ func Serve() error {
 		}
 	}
 
-	Reload := func(newConf *conf.GConfig) {
+	Reload := func(newConf *conf.BaseConfig) {
 		err := st.StoreAllSyslogConfigs(newConf)
 		if err != nil {
 			logger.Crit("Can't store the syslog configurations", "error", err)
@@ -689,14 +694,13 @@ func Serve() error {
 
 			return nil
 
-		case _, more := <-updated:
+		case newConf, more := <-newConfChannel:
 			if more {
-				select {
-				case <-shutdownCtx.Done():
-				default:
-					logger.Info("Configuration was updated by Consul")
-					Reload(c)
-				}
+				newConf.Store = c.Store
+				c = newConf
+				Reload(c)
+			} else {
+				newConfChannel = nil
 			}
 
 		case sig := <-sig_chan:
@@ -707,18 +711,7 @@ func Serve() error {
 				case <-shutdownCtx.Done():
 				default:
 					logger.Info("SIGHUP received: reloading configuration")
-					newWatchCtx, newStopWatch := context.WithCancel(shutdownCtx)
-					newConf, newUpdated, err := c.Reload(newWatchCtx) // try to reload the configuration
-					if err == nil {
-						stopWatch() // stop watch the old config
-						stopWatch = newStopWatch
-						updated = newUpdated
-						Reload(newConf)
-						*c = *newConf
-					} else {
-						newStopWatch()
-						logger.Error("Error reloading configuration. Configuration was left untouched.", "error", err)
-					}
+					confSvc.Reload()
 					sig_chan = make(chan os.Signal, 10)
 					signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 				}

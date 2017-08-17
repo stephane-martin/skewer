@@ -20,7 +20,7 @@ var printStoreCmd = &cobra.Command{
 		fmt.Println("print-store called")
 
 		var err error
-		var c *conf.GConfig
+		var c *conf.BaseConfig
 		var st store.Store
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -35,9 +35,10 @@ var printStoreCmd = &cobra.Command{
 			CertFile:   consulCertFile,
 			KeyFile:    consulKeyFile,
 			Insecure:   consulInsecure,
+			Prefix:     consulPrefix,
 		}
 
-		c, _, err = conf.InitLoad(ctx, configDirName, storeDirname, consulPrefix, params, logger)
+		c, _, err = conf.InitLoad(ctx, configDirName, params, logger)
 		if err != nil {
 			fmt.Println("bleh", err)
 			return
