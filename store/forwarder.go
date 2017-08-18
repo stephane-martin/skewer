@@ -144,14 +144,20 @@ ForOutputs:
 			switch filterResult {
 			case javascript.DROPPED:
 				from.ACK(message.Uid)
-				fwder.metrics.MessageFilteringCounter.WithLabelValues("dropped", message.Parsed.Client).Inc()
+				if fwder.metrics != nil {
+					fwder.metrics.MessageFilteringCounter.WithLabelValues("dropped", message.Parsed.Client).Inc()
+				}
 				continue ForOutputs
 			case javascript.REJECTED:
-				fwder.metrics.MessageFilteringCounter.WithLabelValues("rejected", message.Parsed.Client).Inc()
+				if fwder.metrics != nil {
+					fwder.metrics.MessageFilteringCounter.WithLabelValues("rejected", message.Parsed.Client).Inc()
+				}
 				from.NACK(message.Uid)
 				continue ForOutputs
 			case javascript.PASS:
-				fwder.metrics.MessageFilteringCounter.WithLabelValues("passing", message.Parsed.Client).Inc()
+				if fwder.metrics != nil {
+					fwder.metrics.MessageFilteringCounter.WithLabelValues("passing", message.Parsed.Client).Inc()
+				}
 				if tmsg == nil {
 					from.ACK(message.Uid)
 					continue ForOutputs
@@ -159,7 +165,9 @@ ForOutputs:
 			default:
 				from.PermError(message.Uid)
 				fwder.logger.Warn("Error happened processing message", "uid", message.Uid, "error", err)
-				fwder.metrics.MessageFilteringCounter.WithLabelValues("unknown", message.Parsed.Client).Inc()
+				if fwder.metrics != nil {
+					fwder.metrics.MessageFilteringCounter.WithLabelValues("unknown", message.Parsed.Client).Inc()
+				}
 				continue ForOutputs
 			}
 
@@ -201,7 +209,9 @@ func (fwder *kafkaForwarder) getProducer(ctx context.Context, to *conf.KafkaConf
 			fwder.logger.Debug("Got a Kafka producer")
 			return producer
 		} else {
-			fwder.metrics.KafkaConnectionErrorCounter.Inc()
+			if fwder.metrics != nil {
+				fwder.metrics.KafkaConnectionErrorCounter.Inc()
+			}
 			fwder.logger.Warn("Error getting a Kafka client", "error", err)
 			select {
 			case <-ctx.Done():
@@ -225,7 +235,9 @@ func (fwder *kafkaForwarder) listenKafkaResponses(from Store, succChan <-chan *s
 		case succ, more := <-succChan:
 			if more {
 				from.ACK(succ.Metadata.(string))
-				fwder.metrics.KafkaAckNackCounter.WithLabelValues("ack", succ.Topic).Inc()
+				if fwder.metrics != nil {
+					fwder.metrics.KafkaAckNackCounter.WithLabelValues("ack", succ.Topic).Inc()
+				}
 			} else {
 				succChan = nil
 			}
@@ -237,7 +249,9 @@ func (fwder *kafkaForwarder) listenKafkaResponses(from Store, succChan <-chan *s
 				if model.IsFatalKafkaError(fail.Err) {
 					once.Do(func() { close(fwder.errorChan) })
 				}
-				fwder.metrics.KafkaAckNackCounter.WithLabelValues("nack", fail.Msg.Topic).Inc()
+				if fwder.metrics != nil {
+					fwder.metrics.KafkaAckNackCounter.WithLabelValues("nack", fail.Msg.Topic).Inc()
+				}
 			} else {
 				failChan = nil
 			}

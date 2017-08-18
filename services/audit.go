@@ -87,10 +87,8 @@ func (s *AuditService) Start(test bool) ([]*model.ListenerInfo, error) {
 			uid := <-s.generator
 			m := auditToSyslog(msg)
 			parsed := &model.ParsedMessage{
-				Client:         "audit",
-				Fields:         m,
-				LocalPort:      0,
-				UnixSocketPath: "",
+				Client: "audit",
+				Fields: m,
 			}
 			full := &model.TcpUdpParsedMessage{
 				ConfId: s.aconf.ConfID,

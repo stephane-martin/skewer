@@ -291,7 +291,9 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 
 	logger := s.logger.New("protocol", s.protocol, "client", client, "local_port", local_port, "unix_socket_path", path, "format", config.Format)
 	logger.Info("New client connection")
-	s.metrics.ClientConnectionCounter.WithLabelValues(s.protocol, client, local_port_s, path).Inc()
+	if s.metrics != nil {
+		s.metrics.ClientConnectionCounter.WithLabelValues(s.protocol, client, local_port_s, path).Inc()
+	}
 
 	// pull messages from raw_messages_chan and push them to parsed_messages_chan
 	s.wg.Add(1)
@@ -317,7 +319,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 					Txnr: m.Txnr,
 				}
 				parsed_messages_chan <- &parsed_msg
-			} else {
+			} else if s.metrics != nil {
 				s.metrics.ParsingErrorCounter.WithLabelValues(config.Format, client).Inc()
 				logger.Warn("Parsing error", "message", m.Raw.Message, "error", err)
 			}
@@ -348,7 +350,9 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 					if more {
 						answer := fmt.Sprintf("%d rsp 6 200 OK\n", other_txnr)
 						conn.Write([]byte(answer))
-						s.metrics.RelpAnswersCounter.WithLabelValues("200", client).Inc()
+						if s.metrics != nil {
+							s.metrics.RelpAnswersCounter.WithLabelValues("200", client).Inc()
+						}
 					} else {
 						other_successes_chan = nil
 					}
@@ -356,7 +360,9 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 					if more {
 						answer := fmt.Sprintf("%d rsp 6 500 KO\n", other_txnr)
 						conn.Write([]byte(answer))
-						s.metrics.RelpAnswersCounter.WithLabelValues("500", client).Inc()
+						if s.metrics != nil {
+							s.metrics.RelpAnswersCounter.WithLabelValues("500", client).Inc()
+						}
 					} else {
 						other_fails_chan = nil
 					}
@@ -367,7 +373,9 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 	} else {
 		producer, err = s.kafkaConf.GetAsyncProducer()
 		if err != nil {
-			s.metrics.KafkaConnectionErrorCounter.Inc()
+			if s.metrics != nil {
+				s.metrics.KafkaConnectionErrorCounter.Inc()
+			}
 			logger.Warn("Can't get a kafka producer. Aborting handleConn.")
 			return
 		}
@@ -397,7 +405,9 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 						// forward the ACK to rsyslog
 						txnr := succ.Metadata.(int)
 						successes[txnr] = true
-						s.metrics.KafkaAckNackCounter.WithLabelValues("ack", succ.Topic).Inc()
+						if s.metrics != nil {
+							s.metrics.KafkaAckNackCounter.WithLabelValues("ack", succ.Topic).Inc()
+						}
 					} else {
 						successChan = nil
 					}
@@ -407,7 +417,9 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 						failures[txnr] = true
 						logger.Info("NACK from Kafka", "error", fail.Error(), "txnr", txnr, "topic", fail.Msg.Topic)
 						fatal = model.IsFatalKafkaError(fail.Err)
-						s.metrics.KafkaAckNackCounter.WithLabelValues("nack", fail.Msg.Topic).Inc()
+						if s.metrics != nil {
+							s.metrics.KafkaAckNackCounter.WithLabelValues("nack", fail.Msg.Topic).Inc()
+						}
 					} else {
 						failureChan = nil
 					}
@@ -433,13 +445,17 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 						delete(successes, last_committed_txnr)
 						answer := fmt.Sprintf("%d rsp 6 200 OK\n", last_committed_txnr)
 						conn.Write([]byte(answer))
-						s.metrics.RelpAnswersCounter.WithLabelValues("200", client).Inc()
+						if s.metrics != nil {
+							s.metrics.RelpAnswersCounter.WithLabelValues("200", client).Inc()
+						}
 					} else if _, ok := failures[last_committed_txnr+1]; ok {
 						last_committed_txnr++
 						delete(failures, last_committed_txnr)
 						answer := fmt.Sprintf("%d rsp 6 500 KO\n", last_committed_txnr)
 						conn.Write([]byte(answer))
-						s.metrics.RelpAnswersCounter.WithLabelValues("500", client).Inc()
+						if s.metrics != nil {
+							s.metrics.RelpAnswersCounter.WithLabelValues("500", client).Inc()
+						}
 					} else {
 						break
 					}
@@ -485,14 +501,20 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 			switch filterResult {
 			case javascript.DROPPED:
 				other_successes_chan <- m.Txnr
-				s.metrics.MessageFilteringCounter.WithLabelValues("dropped", client).Inc()
+				if s.metrics != nil {
+					s.metrics.MessageFilteringCounter.WithLabelValues("dropped", client).Inc()
+				}
 				continue ForParsedChan
 			case javascript.REJECTED:
 				other_fails_chan <- m.Txnr
-				s.metrics.MessageFilteringCounter.WithLabelValues("rejected", client).Inc()
+				if s.metrics != nil {
+					s.metrics.MessageFilteringCounter.WithLabelValues("rejected", client).Inc()
+				}
 				continue ForParsedChan
 			case javascript.PASS:
-				s.metrics.MessageFilteringCounter.WithLabelValues("passing", client).Inc()
+				if s.metrics != nil {
+					s.metrics.MessageFilteringCounter.WithLabelValues("passing", client).Inc()
+				}
 				if tmsg == nil {
 					other_successes_chan <- m.Txnr
 					continue ForParsedChan
@@ -501,7 +523,9 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 				other_fails_chan <- m.Txnr
 				content, _ := json.Marshal(m.Parsed.Fields)
 				logger.Warn("Error happened processing message", "txnr", m.Txnr, "message", content, "error", err)
-				s.metrics.MessageFilteringCounter.WithLabelValues("unknown", client).Inc()
+				if s.metrics != nil {
+					s.metrics.MessageFilteringCounter.WithLabelValues("unknown", client).Inc()
+				}
 				continue ForParsedChan
 			}
 
@@ -556,7 +580,9 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 			case "open":
 				if relpIsOpen {
 					logger.Warn("Received open command twice")
-					s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
+					if s.metrics != nil {
+						s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
+					}
 					return
 				}
 				answer := fmt.Sprintf("%d rsp %d 200 OK\n%s\n", txnr, len(data)+7, data)
@@ -566,7 +592,9 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 			case "close":
 				if !relpIsOpen {
 					logger.Warn("Received close command before open")
-					s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
+					if s.metrics != nil {
+						s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
+					}
 					return
 				}
 				answer := fmt.Sprintf("%d rsp 0\n0 serverclose 0\n", txnr)
@@ -576,7 +604,9 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 			case "syslog":
 				if !relpIsOpen {
 					logger.Warn("Received syslog command before open")
-					s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
+					if s.metrics != nil {
+						s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
+					}
 					return
 				}
 				raw := model.RelpRawMessage{
@@ -587,11 +617,15 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 						LocalPort: local_port,
 					},
 				}
-				s.metrics.IncomingMsgsCounter.WithLabelValues(s.protocol, client, local_port_s, path).Inc()
+				if s.metrics != nil {
+					s.metrics.IncomingMsgsCounter.WithLabelValues(s.protocol, client, local_port_s, path).Inc()
+				}
 				raw_messages_chan <- &raw
 			default:
 				logger.Warn("Unknown RELP command", "command", command)
-				s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
+				if s.metrics != nil {
+					s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
+				}
 				return
 			}
 		} else {

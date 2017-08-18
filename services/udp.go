@@ -240,7 +240,9 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config *conf.SyslogCon
 				}
 				s.stasher.Stash(&parsed_msg)
 			} else {
-				s.metrics.ParsingErrorCounter.WithLabelValues(config.Format, m.Client).Inc()
+				if s.metrics != nil {
+					s.metrics.ParsingErrorCounter.WithLabelValues(config.Format, m.Client).Inc()
+				}
 				logger.Info("Parsing error", "client", m.Client, "message", m.Message, "error", err)
 			}
 		}
@@ -268,7 +270,9 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config *conf.SyslogCon
 			UnixSocketPath: path,
 			Message:        string(packet[:size]),
 		}
-		s.metrics.IncomingMsgsCounter.WithLabelValues(s.protocol, client, local_port_s, path).Inc()
+		if s.metrics != nil {
+			s.metrics.IncomingMsgsCounter.WithLabelValues(s.protocol, client, local_port_s, path).Inc()
+		}
 		raw_messages_chan <- &raw
 	}
 
