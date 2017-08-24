@@ -20,7 +20,6 @@ func SetMetricsDefaults(v *viper.Viper, prefixed bool) {
 	if prefixed {
 		prefix = "metrics."
 	}
-	v.SetDefault(prefix+"enabled", true)
 	v.SetDefault(prefix+"path", "/metrics")
 	v.SetDefault(prefix+"port", 8080)
 }

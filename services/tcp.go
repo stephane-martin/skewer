@@ -10,8 +10,9 @@ import (
 
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
-	"github.com/stephane-martin/skewer/metrics"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/sys"
 )
@@ -23,32 +24,71 @@ const (
 	TcpStarted
 )
 
+type tcpMetrics struct {
+	ClientConnectionCounter *prometheus.CounterVec
+	IncomingMsgsCounter     *prometheus.CounterVec
+	ParsingErrorCounter     *prometheus.CounterVec
+}
+
+func NewTcpMetrics() *tcpMetrics {
+	m := &tcpMetrics{}
+	m.IncomingMsgsCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "skw_incoming_messages_total",
+			Help: "total number of syslog messages that were received",
+		},
+		[]string{"protocol", "client", "port", "path"},
+	)
+	m.ClientConnectionCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "skw_client_connections_total",
+			Help: "total number of client connections",
+		},
+		[]string{"protocol", "client", "port", "path"},
+	)
+	m.ParsingErrorCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "skw_parsing_errors_total",
+			Help: "total number of times there was a parsing error",
+		},
+		[]string{"protocol", "client", "parser_name"},
+	)
+	return m
+}
+
 type tcpServerImpl struct {
 	StreamingService
 	status     TcpServerStatus
 	statusChan chan TcpServerStatus
 	stasher    model.Stasher
-	metrics    *metrics.Metrics
 	generator  chan ulid.ULID
+	metrics    *tcpMetrics
+	registry   *prometheus.Registry
 }
 
 func (s *tcpServerImpl) init() {
 	s.StreamingService.init()
 }
 
-func NewTcpService(stasher model.Stasher, gen chan ulid.ULID, b *sys.BinderClient, m *metrics.Metrics, l log15.Logger) NetworkService {
+func NewTcpService(stasher model.Stasher, gen chan ulid.ULID, b *sys.BinderClient, l log15.Logger) NetworkService {
 	s := tcpServerImpl{
 		status:    TcpStopped,
 		stasher:   stasher,
-		metrics:   m,
 		generator: gen,
+		metrics:   NewTcpMetrics(),
+		registry:  prometheus.NewRegistry(),
 	}
-	s.logger = l.New("class", "TcpServer")
-	s.binder = b
-	s.protocol = "tcp"
-	s.init()
-	s.handler = tcpHandler{Server: &s}
+	s.StreamingService.init()
+	s.registry.MustRegister(s.metrics.ClientConnectionCounter, s.metrics.IncomingMsgsCounter, s.metrics.ParsingErrorCounter)
+	s.StreamingService.GenericService.logger = l.New("class", "TcpServer")
+	s.StreamingService.GenericService.binder = b
+	s.StreamingService.GenericService.protocol = "tcp"
+	s.StreamingService.handler = tcpHandler{Server: &s}
 	return &s
+}
+
+func (s *tcpServerImpl) Gather() ([]*dto.MetricFamily, error) {
+	return s.registry.Gather()
 }
 
 func (s *tcpServerImpl) SetKafkaConf(kc *conf.KafkaConfig) {}
@@ -175,7 +215,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) {
 				s.stasher.Stash(&parsed_msg)
 			} else {
 				if s.metrics != nil {
-					s.metrics.ParsingErrorCounter.WithLabelValues(config.Format, client).Inc()
+					s.metrics.ParsingErrorCounter.WithLabelValues(s.protocol, client, config.Format).Inc()
 				}
 				logger.Info("Parsing error", "Message", m.Message, "error", err)
 			}

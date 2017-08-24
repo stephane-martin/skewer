@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 )
@@ -19,10 +20,12 @@ type Store interface {
 	//StoreSyslogConfig(config *conf.SyslogConfig) error
 	StoreAllSyslogConfigs(c *conf.BaseConfig) error
 	ReadAllBadgers() (map[string]string, map[string]string, map[string]string)
+	Gather() ([]*dto.MetricFamily, error)
 }
 
 type Forwarder interface {
 	Forward(ctx context.Context, from Store, to conf.KafkaConfig) bool
 	ErrorChan() chan struct{}
 	WaitFinished()
+	Gather() ([]*dto.MetricFamily, error)
 }

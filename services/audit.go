@@ -11,15 +11,14 @@ import (
 
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/auditlogs"
 	"github.com/stephane-martin/skewer/conf"
-	"github.com/stephane-martin/skewer/metrics"
 	"github.com/stephane-martin/skewer/model"
 )
 
 type AuditService struct {
 	stasher   model.Stasher
-	metrics   *metrics.Metrics
 	logger    log15.Logger
 	wgroup    *sync.WaitGroup
 	generator chan ulid.ULID
@@ -27,10 +26,14 @@ type AuditService struct {
 	aconf     *conf.AuditConfig
 }
 
-func NewAuditService(stasher model.Stasher, generator chan ulid.ULID, metric *metrics.Metrics, logger log15.Logger) *AuditService {
-	s := AuditService{stasher: stasher, metrics: metric, generator: generator}
+func NewAuditService(stasher model.Stasher, generator chan ulid.ULID, logger log15.Logger) *AuditService {
+	s := AuditService{stasher: stasher, generator: generator}
 	s.logger = logger.New("class", "audit")
 	return &s
+}
+
+func (s *AuditService) Gather() ([]*dto.MetricFamily, error) {
+	return []*dto.MetricFamily{}, nil
 }
 
 func (s *AuditService) Start(test bool) ([]*model.ListenerInfo, error) {
@@ -71,10 +74,8 @@ func (s *AuditService) Start(test bool) ([]*model.ListenerInfo, error) {
 		}
 
 		if len(auditMsg.UidMap) > 0 {
-			m.Properties = map[string]interface{}{}
-			props := map[string]map[string]string{}
-			props["uid_map"] = auditMsg.UidMap
-			m.Properties["audit"] = props
+			m.Properties = map[string]map[string]string{}
+			m.Properties["uid_map"] = auditMsg.UidMap
 		}
 
 		return &m

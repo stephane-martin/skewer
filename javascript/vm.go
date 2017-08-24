@@ -74,7 +74,7 @@ type iSyslogMessage struct {
 	Structured    string
 	Message       string
 	SubMessages   []string
-	Properties    map[string]interface{}
+	Properties    map[string]map[string]string
 }
 
 type Parser interface {

@@ -364,10 +364,9 @@ func Serve() error {
 		}
 	}
 
-	metricStore := metrics.SetupMetrics(c.Metrics)
-
+	metricsServer := &metrics.MetricsServer{}
 	// prepare the message store
-	st, err = store.NewStore(gctx, c.Store, metricStore, logger)
+	st, err = store.NewStore(gctx, c.Store, logger)
 	if err != nil {
 		logger.Crit("Can't create the message Store", "error", err)
 		time.Sleep(100 * time.Millisecond)
@@ -385,7 +384,7 @@ func Serve() error {
 	}
 
 	// prepare the kafka forwarder
-	forwarder := store.NewForwarder(testFlag, metricStore, logger)
+	forwarder := store.NewForwarder(testFlag, logger)
 	forwarderMutex := &sync.Mutex{}
 	var cancelForwarder context.CancelFunc
 
@@ -422,11 +421,11 @@ func Serve() error {
 	signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 
 	// retrieve linux audit logs
-	var relpServicePlugin *services.NetworkPlugin
-	var tcpServicePlugin *services.NetworkPlugin
-	var udpServicePlugin *services.NetworkPlugin
-	var auditServicePlugin *services.NetworkPlugin
-	var journalServicePlugin *services.NetworkPlugin
+	relpServicePlugin := services.NewNetworkPlugin("relp", st, 6, 10, logger)
+	tcpServicePlugin := services.NewNetworkPlugin("tcp", st, 4, 8, logger)
+	udpServicePlugin := services.NewNetworkPlugin("udp", st, 5, 9, logger)
+	auditServicePlugin := services.NewNetworkPlugin("audit", st, 0, 12, logger)
+	journalServicePlugin := services.NewNetworkPlugin("journal", st, 0, 11, logger)
 
 	startAudit := func(curconf *conf.BaseConfig) {
 		if auditlogs.Supported {
@@ -438,19 +437,19 @@ func Serve() error {
 					logger.Warn("Audit logs are requested, but go-audit or auditd process is already running, so we disable audit logs in skewer")
 				} else {
 					logger.Info("Linux audit logs are enabled")
-					auditServicePlugin = services.NewNetworkPlugin("audit", st, 0, 12, metricStore, logger)
-					if auditServicePlugin == nil {
-						logger.Error("Error starting Linux Audit plugin")
+					err := auditServicePlugin.Create(testFlag)
+					if err != nil {
+						logger.Warn("Error creating Audit plugin", "error", err)
+						return
+					}
+					auditServicePlugin.SetConf(curconf.Syslog, curconf.Parsers)
+					auditServicePlugin.SetKafkaConf(&curconf.Kafka)
+					auditServicePlugin.SetAuditConf(curconf.Audit)
+					_, err = auditServicePlugin.Start()
+					if err == nil {
+						logger.Debug("Linux audit plugin has been started")
 					} else {
-						auditServicePlugin.SetConf(curconf.Syslog, curconf.Parsers)
-						auditServicePlugin.SetKafkaConf(&curconf.Kafka)
-						auditServicePlugin.SetAuditConf(curconf.Audit)
-						_, err := auditServicePlugin.Start(testFlag)
-						if err == nil {
-							logger.Debug("Linux audit plugin has been started")
-						} else {
-							logger.Error("Error starting Linux Audit plugin", "error", err)
-						}
+						logger.Error("Error starting Linux Audit plugin", "error", err)
 					}
 				}
 			} else {
@@ -467,27 +466,27 @@ func Serve() error {
 			logger.Info("Journald is supported")
 			if c.Journald.Enabled {
 				logger.Info("Journald service is enabled")
-				journalServicePlugin = services.NewNetworkPlugin("journal", st, 0, 11, metricStore, logger)
-				if journalServicePlugin == nil {
-					logger.Error("Error starting Journald plugin")
+				curjconf := &conf.SyslogConfig{
+					ConfID:        curconf.Journald.ConfID,
+					FilterFunc:    curconf.Journald.FilterFunc,
+					PartitionFunc: curconf.Journald.PartitionFunc,
+					PartitionTmpl: curconf.Journald.PartitionTmpl,
+					TopicFunc:     curconf.Journald.TopicFunc,
+					TopicTmpl:     curconf.Journald.TopicTmpl,
+				}
+				err := journalServicePlugin.Create(testFlag)
+				if err != nil {
+					logger.Warn("Error creating Journald plugin", "error", err)
+					return
+				}
+				journalServicePlugin.SetConf([]*conf.SyslogConfig{curjconf}, curconf.Parsers)
+				journalServicePlugin.SetKafkaConf(&curconf.Kafka)
+				journalServicePlugin.SetAuditConf(curconf.Audit)
+				_, err = journalServicePlugin.Start()
+				if err != nil {
+					logger.Error("Error starting Journald plugin", "error", err)
 				} else {
-					curjconf := &conf.SyslogConfig{
-						ConfID:        curconf.Journald.ConfID,
-						FilterFunc:    curconf.Journald.FilterFunc,
-						PartitionFunc: curconf.Journald.PartitionFunc,
-						PartitionTmpl: curconf.Journald.PartitionTmpl,
-						TopicFunc:     curconf.Journald.TopicFunc,
-						TopicTmpl:     curconf.Journald.TopicTmpl,
-					}
-					journalServicePlugin.SetConf([]*conf.SyslogConfig{curjconf}, curconf.Parsers)
-					journalServicePlugin.SetKafkaConf(&curconf.Kafka)
-					journalServicePlugin.SetAuditConf(curconf.Audit)
-					_, err = journalServicePlugin.Start(testFlag)
-					if err != nil {
-						logger.Error("Error starting Journald plugin", "error", err)
-					} else {
-						logger.Debug("Journald plugin has been started")
-					}
+					logger.Debug("Journald plugin has been started")
 				}
 			} else {
 				logger.Info("Journald service is disabled")
@@ -498,64 +497,64 @@ func Serve() error {
 	}
 
 	startRELP := func(curconf *conf.BaseConfig) {
-		relpServicePlugin = services.NewNetworkPlugin("relp", st, 6, 10, metricStore, logger)
-		if relpServicePlugin == nil {
-			logger.Error("Error starting RELP plugin")
+		err := relpServicePlugin.Create(testFlag)
+		if err != nil {
+			logger.Warn("Error creating RELP plugin", "error", err)
+			return
+		}
+		relpServicePlugin.SetConf(curconf.Syslog, curconf.Parsers)
+		relpServicePlugin.SetKafkaConf(&curconf.Kafka)
+		relpServicePlugin.SetAuditConf(curconf.Audit)
+		_, err = relpServicePlugin.Start()
+		if err != nil {
+			logger.Warn("Error starting RELP plugin", "error", err)
 		} else {
-			relpServicePlugin.SetConf(curconf.Syslog, curconf.Parsers)
-			relpServicePlugin.SetKafkaConf(&curconf.Kafka)
-			relpServicePlugin.SetAuditConf(curconf.Audit)
-			_, err := relpServicePlugin.Start(testFlag)
-			if err != nil {
-				logger.Warn("Error starting RELP plugin", "error", err)
-			} else {
-				logger.Debug("RELP plugin has been started")
-			}
+			logger.Debug("RELP plugin has been started")
 		}
 	}
 
 	var tcpinfos []*model.ListenerInfo
 
 	startTCP := func(curconf *conf.BaseConfig) {
-		tcpServicePlugin = services.NewNetworkPlugin("tcp", st, 4, 8, metricStore, logger)
-		if tcpServicePlugin == nil {
-			logger.Error("Error starting TCP plugin")
+		err := tcpServicePlugin.Create(testFlag)
+		if err != nil {
+			logger.Warn("Error creating TCP plugin", "error", err)
+			return
+		}
+		tcpServicePlugin.SetConf(curconf.Syslog, curconf.Parsers)
+		tcpServicePlugin.SetKafkaConf(&curconf.Kafka)
+		tcpServicePlugin.SetAuditConf(curconf.Audit)
+		tcpinfos, err = tcpServicePlugin.Start()
+		if err != nil {
+			logger.Warn("Error starting TCP plugin", "error", err)
+		} else if len(tcpinfos) == 0 {
+			logger.Info("TCP plugin not started")
 		} else {
-			tcpServicePlugin.SetConf(curconf.Syslog, curconf.Parsers)
-			tcpServicePlugin.SetKafkaConf(&curconf.Kafka)
-			tcpServicePlugin.SetAuditConf(curconf.Audit)
-			tcpinfos, err = tcpServicePlugin.Start(testFlag)
-			if err != nil {
-				logger.Warn("Error starting TCP plugin", "error", err)
-			} else if len(tcpinfos) == 0 {
-				logger.Info("TCP plugin not started")
-			} else {
-				logger.Debug("TCP plugin has been started", "listeners", len(tcpinfos))
-				if registry != nil {
-					for _, infos := range tcpinfos {
-						registry.RegisterTcpListener(infos)
-					}
+			logger.Debug("TCP plugin has been started", "listeners", len(tcpinfos))
+			if registry != nil {
+				for _, infos := range tcpinfos {
+					registry.RegisterTcpListener(infos)
 				}
 			}
 		}
 	}
 
 	startUDP := func(curconf *conf.BaseConfig) {
-		udpServicePlugin = services.NewNetworkPlugin("udp", st, 5, 9, metricStore, logger)
-		if udpServicePlugin == nil {
-			logger.Error("Error starting UDP plugin")
+		err := udpServicePlugin.Create(testFlag)
+		if err != nil {
+			logger.Warn("Error creating UDP plugin", "error", err)
+			return
+		}
+		udpServicePlugin.SetConf(curconf.Syslog, curconf.Parsers)
+		udpServicePlugin.SetKafkaConf(&curconf.Kafka)
+		udpServicePlugin.SetAuditConf(curconf.Audit)
+		udpinfos, err := udpServicePlugin.Start()
+		if err != nil {
+			logger.Warn("Error starting UDP plugin", "error", err)
+		} else if len(udpinfos) == 0 {
+			logger.Info("UDP plugin not started")
 		} else {
-			udpServicePlugin.SetConf(curconf.Syslog, curconf.Parsers)
-			udpServicePlugin.SetKafkaConf(&curconf.Kafka)
-			udpServicePlugin.SetAuditConf(curconf.Audit)
-			udpinfos, err := udpServicePlugin.Start(testFlag)
-			if err != nil {
-				logger.Warn("Error starting UDP plugin", "error", err)
-			} else if len(udpinfos) == 0 {
-				logger.Info("UDP plugin not started")
-			} else {
-				logger.Debug("UDP plugin started", "listeners", len(udpinfos))
-			}
+			logger.Debug("UDP plugin started", "listeners", len(udpinfos))
 		}
 	}
 
@@ -565,12 +564,19 @@ func Serve() error {
 	startTCP(c)
 	startUDP(c)
 
+	metricsServer.NewConf(
+		c.Metrics,
+		journalServicePlugin,
+		auditServicePlugin,
+		relpServicePlugin,
+		tcpServicePlugin,
+		udpServicePlugin,
+		st,
+		forwarder,
+	)
+
 	stopTCP := func() {
-		if tcpServicePlugin == nil {
-			return
-		}
-		tcpServicePlugin.Shutdown()
-		tcpServicePlugin.WaitPluginShutdown()
+		tcpServicePlugin.Shutdown(time.Second)
 		if len(tcpinfos) > 0 && registry != nil {
 			for _, infos := range tcpinfos {
 				registry.UnregisterTcpListener(infos)
@@ -580,36 +586,29 @@ func Serve() error {
 	}
 
 	stopUDP := func() {
-		if udpServicePlugin == nil {
-			return
-		}
-		udpServicePlugin.Shutdown()
-		udpServicePlugin.WaitPluginShutdown()
+		udpServicePlugin.Shutdown(time.Second)
 	}
 
 	stopRELP := func() {
-		if relpServicePlugin == nil {
-			return
-		}
-		relpServicePlugin.Shutdown()
-		relpServicePlugin.WaitPluginShutdown()
+		relpServicePlugin.Shutdown(time.Second)
 	}
 
 	stopJournal := func(shutdown bool) {
-		if journald.Supported && journalServicePlugin != nil {
+		if journald.Supported && c.Journald.Enabled {
 			if shutdown {
-				journalServicePlugin.Shutdown()
-				journalServicePlugin.WaitPluginShutdown()
+				journalServicePlugin.Shutdown(time.Second)
 			} else {
+				// we keep the same instance of the journald plugin, so
+				// that we can continue to fetch messages from a
+				// consistent position in journald
 				journalServicePlugin.Stop()
 			}
 		}
 	}
 
 	stopAudit := func() {
-		if auditlogs.Supported && auditServicePlugin != nil {
-			auditServicePlugin.Shutdown()
-			auditServicePlugin.WaitPluginShutdown()
+		if auditlogs.Supported && c.Audit.Enabled {
+			auditServicePlugin.Shutdown(time.Second)
 		}
 	}
 
@@ -617,9 +616,10 @@ func Serve() error {
 		err := st.StoreAllSyslogConfigs(newConf)
 		if err != nil {
 			logger.Crit("Can't store the syslog configurations", "error", err)
+			// TODO: what to do then ?
 		}
-
-		metricStore.NewConf(newConf.Metrics)
+		// first, let's stop the HTTP server for metrics
+		metricsServer.Stop()
 		// reset the kafka forwarder
 		stopForwarder()
 		startForwarder(newConf.Kafka)
@@ -669,6 +669,18 @@ func Serve() error {
 			wg.Done()
 		}()
 		wg.Wait()
+
+		// restart the HTTP server for metrics
+		metricsServer.NewConf(
+			newConf.Metrics,
+			journalServicePlugin,
+			auditServicePlugin,
+			relpServicePlugin,
+			tcpServicePlugin,
+			udpServicePlugin,
+			st,
+			forwarder,
+		)
 	}
 
 	logger.Debug("Main loop is starting")

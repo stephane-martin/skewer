@@ -8,18 +8,45 @@ import (
 	"time"
 
 	"github.com/inconshreveable/log15"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/javascript"
-	"github.com/stephane-martin/skewer/metrics"
 	"github.com/stephane-martin/skewer/model"
 	sarama "gopkg.in/Shopify/sarama.v1"
 )
 
-func NewForwarder(test bool, m *metrics.Metrics, logger log15.Logger) (fwder Forwarder) {
-	f := kafkaForwarder{test: test, logger: logger.New("class", "kafkaForwarder"), metrics: m}
-	f.errorChan = make(chan struct{})
-	f.wg = &sync.WaitGroup{}
-	return &f
+type forwarderMetrics struct {
+	KafkaConnectionErrorCounter prometheus.Counter
+	KafkaAckNackCounter         *prometheus.CounterVec
+	MessageFilteringCounter     *prometheus.CounterVec
+}
+
+func NewForwarderMetrics() *forwarderMetrics {
+	m := &forwarderMetrics{}
+	m.KafkaConnectionErrorCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "skw_fwder_kafka_connection_errors_total",
+			Help: "number of kafka connection errors",
+		},
+	)
+
+	m.KafkaAckNackCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "skw_fwder_kafka_ack_total",
+			Help: "number of kafka acknowledgments",
+		},
+		[]string{"status", "topic"},
+	)
+
+	m.MessageFilteringCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "skw_fwder_messages_filtering_total",
+			Help: "number of filtered messages by status",
+		},
+		[]string{"status", "client"},
+	)
+	return m
 }
 
 type kafkaForwarder struct {
@@ -27,8 +54,30 @@ type kafkaForwarder struct {
 	errorChan  chan struct{}
 	wg         *sync.WaitGroup
 	forwarding int32
-	metrics    *metrics.Metrics
 	test       bool
+	metrics    *forwarderMetrics
+	registry   *prometheus.Registry
+}
+
+func NewForwarder(test bool, logger log15.Logger) (fwder Forwarder) {
+	f := kafkaForwarder{
+		test:     test,
+		logger:   logger.New("class", "kafkaForwarder"),
+		metrics:  NewForwarderMetrics(),
+		registry: prometheus.NewRegistry(),
+	}
+	f.registry.MustRegister(
+		f.metrics.KafkaAckNackCounter,
+		f.metrics.KafkaConnectionErrorCounter,
+		f.metrics.MessageFilteringCounter,
+	)
+	f.errorChan = make(chan struct{})
+	f.wg = &sync.WaitGroup{}
+	return &f
+}
+
+func (fwder *kafkaForwarder) Gather() ([]*dto.MetricFamily, error) {
+	return fwder.registry.Gather()
 }
 
 func (fwder *kafkaForwarder) ErrorChan() chan struct{} {
@@ -39,17 +88,8 @@ func (fwder *kafkaForwarder) WaitFinished() {
 	fwder.wg.Wait()
 }
 
-type dummyKafkaForwarder struct {
-	logger     log15.Logger
-	errorChan  chan struct{}
-	wg         *sync.WaitGroup
-	forwarding int32
-	metrics    *metrics.Metrics
-	test       bool
-}
-
 func (fwder *kafkaForwarder) Forward(ctx context.Context, from Store, to conf.KafkaConfig) bool {
-	// ensure Forward is only executing once
+	// ensure Forward is only executed once
 	if !atomic.CompareAndSwapInt32(&fwder.forwarding, 0, 1) {
 		return false
 	}

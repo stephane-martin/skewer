@@ -66,7 +66,7 @@ func ParseRfc5424Format(m string, dont_parse_sd bool) (*SyslogMessage, error) {
 			return nil, err
 		}
 		smsg.Message = s2
-		smsg.Properties = map[string]interface{}{}
+		smsg.Properties = map[string]map[string]string{}
 		if dont_parse_sd {
 			smsg.Structured = s1
 		} else {
@@ -76,7 +76,7 @@ func ParseRfc5424Format(m string, dont_parse_sd bool) (*SyslogMessage, error) {
 				return nil, err
 			}
 			if props != nil {
-				smsg.Properties["rfc5424-sd"] = props
+				smsg.Properties = props
 			}
 		}
 	} else {

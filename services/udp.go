@@ -7,8 +7,9 @@ import (
 
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
-	"github.com/stephane-martin/skewer/metrics"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/sys"
 )
@@ -26,8 +27,9 @@ type udpServiceImpl struct {
 	statusChan chan UdpServerStatus
 	stasher    model.Stasher
 	handler    PacketHandler
-	metrics    *metrics.Metrics
 	generator  chan ulid.ULID
+	metrics    *udpMetrics
+	registry   *prometheus.Registry
 }
 
 type PacketHandler interface {
@@ -42,14 +44,49 @@ func (s *udpServiceImpl) init() {
 	s.GenericService.init()
 }
 
-func NewUdpService(stasher model.Stasher, gen chan ulid.ULID, b *sys.BinderClient, m *metrics.Metrics, l log15.Logger) NetworkService {
-	s := udpServiceImpl{status: UdpStopped, metrics: m, stasher: stasher, generator: gen}
-	s.logger = l.New("class", "UdpServer")
-	s.binder = b
-	s.init()
-	s.protocol = "udp"
+type udpMetrics struct {
+	IncomingMsgsCounter *prometheus.CounterVec
+	ParsingErrorCounter *prometheus.CounterVec
+}
+
+func NewUdpMetrics() *udpMetrics {
+	m := &udpMetrics{}
+	m.IncomingMsgsCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "skw_incoming_messages_total",
+			Help: "total number of syslog messages that were received",
+		},
+		[]string{"protocol", "client", "port", "path"},
+	)
+	m.ParsingErrorCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "skw_parsing_errors_total",
+			Help: "total number of times there was a parsing error",
+		},
+		[]string{"protocol", "client", "parser_name"},
+	)
+	return m
+}
+
+func NewUdpService(stasher model.Stasher, gen chan ulid.ULID, b *sys.BinderClient, l log15.Logger) NetworkService {
+	s := udpServiceImpl{
+		status:    UdpStopped,
+		metrics:   NewUdpMetrics(),
+		registry:  prometheus.NewRegistry(),
+		stasher:   stasher,
+		generator: gen,
+	}
+	s.GenericService.init()
+	s.registry.MustRegister(s.metrics.IncomingMsgsCounter, s.metrics.ParsingErrorCounter)
+	s.GenericService.logger = l.New("class", "UdpServer")
+	s.GenericService.binder = b
+	s.GenericService.protocol = "udp"
 	s.handler = UdpHandler{Server: &s}
 	return &s
+}
+
+func (s *udpServiceImpl) Gather() ([]*dto.MetricFamily, error) {
+	return s.registry.Gather()
 }
 
 func (s *udpServiceImpl) handleConnection(conn net.PacketConn, config *conf.SyslogConfig) {
@@ -241,7 +278,7 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config *conf.SyslogCon
 				s.stasher.Stash(&parsed_msg)
 			} else {
 				if s.metrics != nil {
-					s.metrics.ParsingErrorCounter.WithLabelValues(config.Format, m.Client).Inc()
+					s.metrics.ParsingErrorCounter.WithLabelValues(s.protocol, m.Client, config.Format).Inc()
 				}
 				logger.Info("Parsing error", "client", m.Client, "message", m.Message, "error", err)
 			}

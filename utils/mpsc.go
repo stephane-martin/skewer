@@ -43,6 +43,19 @@ func (q *MPSC) Get() *model.TcpUdpParsedMessage {
 	return nil
 }
 
+func (q *MPSC) GetMany(max int) []*model.TcpUdpParsedMessage {
+	var elt *model.TcpUdpParsedMessage
+	res := make([]*model.TcpUdpParsedMessage, 0, max)
+	for {
+		elt = q.Get()
+		if elt == nil || len(res) > max {
+			break
+		}
+		res = append(res, elt)
+	}
+	return res
+}
+
 /*
 void mpscq_push(mpscq_t* self, mpscq_node_t* n)
 {

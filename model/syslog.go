@@ -2,57 +2,19 @@ package model
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
-	"time"
 	"unicode/utf8"
-
-	sarama "gopkg.in/Shopify/sarama.v1"
 )
-
-type Priority int
-type Facility int
-type Severity int
-type Version int
 
 type Stasher interface {
 	Stash(m *TcpUdpParsedMessage)
 }
 
 type ListenerInfo struct {
-	Port           int    `json:"port"`
-	BindAddr       string `json:"bind_addr"`
-	UnixSocketPath string `json:"unix_socket_path"`
-	Protocol       string `json:"protocol"`
-}
-
-type AuditSubMessage struct {
-	Type uint16 `json:"type"`
-	Data string `json:"data"`
-}
-
-type AuditMessageGroup struct {
-	Seq       int                `json:"sequence"`
-	AuditTime string             `json:"timestamp"`
-	Msgs      []*AuditSubMessage `json:"messages"`
-	UidMap    map[string]string  `json:"uid_map"`
-}
-
-type SyslogMessage struct {
-	Priority         Priority               `json:"priority,string"`
-	Facility         Facility               `json:"facility,string"`
-	Severity         Severity               `json:"severity,string"`
-	Version          Version                `json:"version,string"`
-	TimeReported     time.Time              `json:"timereported,omitempty"`
-	TimeGenerated    time.Time              `json:"timegenerated,omitempty"`
-	Hostname         string                 `json:"hostname"`
-	Appname          string                 `json:"appname"`
-	Procid           string                 `json:"procid,omitempty"`
-	Msgid            string                 `json:"msgid,omitempty"`
-	Structured       string                 `json:"structured,omitempty"`
-	Message          string                 `json:"message"`
-	AuditSubMessages []*AuditSubMessage     `json:"audit,omitempty"`
-	Properties       map[string]interface{} `json:"properties,omitempty"`
+	Port           int    `json:"port" msg:"port"`
+	BindAddr       string `json:"bind_addr" mdg:"bind_addr"`
+	UnixSocketPath string `json:"unix_socket_path" msg:"unix_socket_path"`
+	Protocol       string `json:"protocol" msg:"protocol"`
 }
 
 type RawMessage struct {
@@ -62,85 +24,9 @@ type RawMessage struct {
 	UnixSocketPath string
 }
 
-type ParsedMessage struct {
-	Fields         *SyslogMessage `json:"fields"`
-	Client         string         `json:"client,omitempty"`
-	LocalPort      int            `json:"local_port,string"`
-	UnixSocketPath string         `json:"unix_socket_path,omitempty"`
-}
-
-type TcpUdpParsedMessage struct {
-	Parsed *ParsedMessage `json:"parsed"`
-	Uid    string         `json:"uid"`
-	ConfId string         `json:"conf_id"`
-}
-
 type RelpRawMessage struct {
 	Raw  *RawMessage
 	Txnr int
-}
-
-type RelpParsedMessage struct {
-	Parsed *ParsedMessage `json:"parsed"`
-	Txnr   int            `json:"txnr"`
-}
-
-func (m *ParsedMessage) ToKafkaMessage(partitionKey string, topic string) (km *sarama.ProducerMessage, err error) {
-	value, err := json.Marshal(m)
-	if err != nil {
-		return nil, err
-	}
-
-	kafka_msg := sarama.ProducerMessage{
-		Key:       sarama.StringEncoder(partitionKey),
-		Value:     sarama.ByteEncoder(value),
-		Topic:     topic,
-		Timestamp: m.Fields.TimeReported,
-	}
-	return &kafka_msg, nil
-}
-
-var SyslogMessageFmt string = `Facility: %d
-Severity: %d
-Version: %d
-TimeReported: %s
-TimeGenerated: %s
-Hostname: %s
-Appname: %s
-ProcID: %s
-MsgID: %s
-Structured: %s
-Message: %s
-AuditSubMessages: %s
-Properties: %s`
-
-func (m *SyslogMessage) String() string {
-	props := ""
-	b, err := json.Marshal(m.Properties)
-	if err == nil {
-		props = string(b)
-	}
-	subs := ""
-	b, err = json.Marshal(m.AuditSubMessages)
-	if err == nil {
-		subs = string(b)
-	}
-	return fmt.Sprintf(
-		SyslogMessageFmt,
-		m.Facility,
-		m.Severity,
-		m.Version,
-		m.TimeReported.Format(time.RFC3339),
-		m.TimeGenerated.Format(time.RFC3339),
-		m.Hostname,
-		m.Appname,
-		m.Procid,
-		m.Msgid,
-		m.Structured,
-		m.Message,
-		subs,
-		props,
-	)
 }
 
 type Parser struct {
@@ -201,11 +87,12 @@ func Parse(m string, format string, dont_parse_sd bool) (sm *SyslogMessage, err 
 		sm.AuditSubMessages = auditMsg.Msgs
 		if len(auditMsg.UidMap) > 0 {
 			if sm.Properties == nil {
-				sm.Properties = map[string]interface{}{}
+				sm.Properties = map[string]map[string]string{}
+
 			}
 			props := map[string]map[string]string{}
 			props["uid_map"] = auditMsg.UidMap
-			sm.Properties["audit"] = props
+			sm.Properties = props
 		}
 		sm.Message = ""
 	}

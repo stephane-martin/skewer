@@ -12,12 +12,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	sarama "gopkg.in/Shopify/sarama.v1"
 
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/javascript"
-	"github.com/stephane-martin/skewer/metrics"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/sys"
 )
@@ -31,20 +32,101 @@ const (
 	Waiting
 )
 
-func NewRelpService(b *sys.BinderClient, m *metrics.Metrics, l log15.Logger) NetworkService {
-	s := &RelpService{b: b, m: m, logger: l}
-	s.impl = NewRelpServiceImpl(s.b, s.m, s.logger)
-	return s
+type relpMetrics struct {
+	IncomingMsgsCounter         *prometheus.CounterVec
+	ClientConnectionCounter     *prometheus.CounterVec
+	ParsingErrorCounter         *prometheus.CounterVec
+	RelpAnswersCounter          *prometheus.CounterVec
+	RelpProtocolErrorsCounter   *prometheus.CounterVec
+	KafkaConnectionErrorCounter prometheus.Counter
+	KafkaAckNackCounter         *prometheus.CounterVec
+	MessageFilteringCounter     *prometheus.CounterVec
+}
+
+func NewRelpMetrics() *relpMetrics {
+	m := &relpMetrics{}
+	m.IncomingMsgsCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "skw_incoming_messages_total",
+			Help: "total number of syslog messages that were received",
+		},
+		[]string{"protocol", "client", "port", "path"},
+	)
+
+	m.ClientConnectionCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "skw_client_connections_total",
+			Help: "total number of client connections",
+		},
+		[]string{"protocol", "client", "port", "path"},
+	)
+
+	m.ParsingErrorCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "skw_parsing_errors_total",
+			Help: "total number of times there was a parsing error",
+		},
+		[]string{"protocol", "client", "parser_name"},
+	)
+
+	m.RelpAnswersCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "skw_relp_answers_total",
+			Help: "number of RELP rsp answers",
+		},
+		[]string{"status", "client"},
+	)
+
+	m.RelpProtocolErrorsCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "skw_relp_protocol_errors_total",
+			Help: "Number of RELP protocol errors",
+		},
+		[]string{"client"},
+	)
+
+	m.KafkaConnectionErrorCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "skw_relp_kafka_connection_errors_total",
+			Help: "number of kafka connection errors",
+		},
+	)
+
+	m.KafkaAckNackCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "skw_relp_kafka_ack_total",
+			Help: "number of kafka acknowledgments",
+		},
+		[]string{"status", "topic"},
+	)
+
+	m.MessageFilteringCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "skw_relp_messages_filtering_total",
+			Help: "number of filtered messages by status",
+		},
+		[]string{"status", "client"},
+	)
+	return m
 }
 
 type RelpService struct {
 	impl   *RelpServiceImpl
 	logger log15.Logger
 	b      *sys.BinderClient
-	m      *metrics.Metrics
 	sc     []*conf.SyslogConfig
 	pc     []conf.ParserConfig
 	kc     *conf.KafkaConfig
+}
+
+func NewRelpService(b *sys.BinderClient, l log15.Logger) NetworkService {
+	s := &RelpService{b: b, logger: l}
+	s.impl = NewRelpServiceImpl(s.b, s.logger)
+	return s
+}
+
+func (s *RelpService) Gather() ([]*dto.MetricFamily, error) {
+	return s.impl.registry.Gather()
 }
 
 func (s *RelpService) Start(test bool) (infos []*model.ListenerInfo, err error) {
@@ -52,7 +134,7 @@ func (s *RelpService) Start(test bool) (infos []*model.ListenerInfo, err error) 
 	// therefore does not report infos
 
 	infos = []*model.ListenerInfo{}
-	s.impl = NewRelpServiceImpl(s.b, s.m, s.logger)
+	s.impl = NewRelpServiceImpl(s.b, s.logger)
 
 	go func() {
 		for {
@@ -125,21 +207,28 @@ type RelpServiceImpl struct {
 	status      RelpServerStatus
 	StatusChan  chan RelpServerStatus
 	kafkaClient sarama.Client
-	metrics     *metrics.Metrics
 	test        bool
+	metrics     *relpMetrics
+	registry    *prometheus.Registry
 }
 
-func (s *RelpServiceImpl) init() {
+func NewRelpServiceImpl(b *sys.BinderClient, logger log15.Logger) *RelpServiceImpl {
+	s := RelpServiceImpl{status: Stopped, metrics: NewRelpMetrics(), registry: prometheus.NewRegistry()}
 	s.StreamingService.init()
-}
-
-func NewRelpServiceImpl(b *sys.BinderClient, metrics *metrics.Metrics, logger log15.Logger) *RelpServiceImpl {
-	s := RelpServiceImpl{status: Stopped, metrics: metrics}
-	s.logger = logger.New("class", "RelpServer")
-	s.binder = b
-	s.init()
-	s.protocol = "relp"
-	s.handler = RelpHandler{Server: &s}
+	s.registry.MustRegister(
+		s.metrics.ClientConnectionCounter,
+		s.metrics.IncomingMsgsCounter,
+		s.metrics.KafkaAckNackCounter,
+		s.metrics.KafkaConnectionErrorCounter,
+		s.metrics.MessageFilteringCounter,
+		s.metrics.ParsingErrorCounter,
+		s.metrics.RelpAnswersCounter,
+		s.metrics.RelpProtocolErrorsCounter,
+	)
+	s.StreamingService.GenericService.logger = logger.New("class", "RelpServer")
+	s.StreamingService.GenericService.binder = b
+	s.StreamingService.GenericService.protocol = "relp"
+	s.StreamingService.handler = RelpHandler{Server: &s}
 	s.StatusChan = make(chan RelpServerStatus, 10)
 	return &s
 }
@@ -157,6 +246,7 @@ func (s *RelpServiceImpl) Start(test bool) ([]*model.ListenerInfo, error) {
 	if s.status != Stopped && s.status != Waiting {
 		return nil, ServerNotStopped
 	}
+	s.test = test
 
 	infos := s.initTCPListeners()
 	if len(infos) == 0 {
@@ -165,7 +255,7 @@ func (s *RelpServiceImpl) Start(test bool) ([]*model.ListenerInfo, error) {
 	} else {
 		s.logger.Info("Listening on RELP", "nb_services", len(infos))
 	}
-	s.test = test
+
 	if !s.test {
 		var err error
 		s.kafkaClient, err = s.kafkaConf.GetClient()
@@ -320,7 +410,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 				}
 				parsed_messages_chan <- &parsed_msg
 			} else if s.metrics != nil {
-				s.metrics.ParsingErrorCounter.WithLabelValues(config.Format, client).Inc()
+				s.metrics.ParsingErrorCounter.WithLabelValues(s.protocol, client, config.Format).Inc()
 				logger.Warn("Parsing error", "message", m.Raw.Message, "error", err)
 			}
 		}

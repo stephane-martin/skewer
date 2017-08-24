@@ -15,9 +15,8 @@ type BaseConfig struct {
 }
 
 type MetricsConfig struct {
-	Enabled bool   `mapstructure:"enabled" toml:"enabled" json:"enabled"`
-	Path    string `mapstructure:"path" toml:"path" json:"path"`
-	Port    int    `mapstructure:"port" toml:"port" json:"port"`
+	Path string `mapstructure:"path" toml:"path" json:"path"`
+	Port int    `mapstructure:"port" toml:"port" json:"port"`
 }
 
 type WatcherConfig struct {

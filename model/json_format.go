@@ -8,17 +8,17 @@ import (
 )
 
 type jsonRsyslogMessage struct {
-	Message       string                 `json:"msg"`
-	TimeReported  string                 `json:"timereported"`
-	TimeGenerated string                 `json:"timegenerated"`
-	Hostname      string                 `json:"hostname"`
-	Priority      string                 `json:"pri"`
-	Appname       string                 `json:"app-name"`
-	Procid        string                 `json:"procid"`
-	Msgid         string                 `json:"msgid"`
-	Uuid          string                 `json:"uuid"`
-	Structured    string                 `json:"structured-data"`
-	Properties    map[string]interface{} `json:"$!"`
+	Message       string                       `json:"msg"`
+	TimeReported  string                       `json:"timereported"`
+	TimeGenerated string                       `json:"timegenerated"`
+	Hostname      string                       `json:"hostname"`
+	Priority      string                       `json:"pri"`
+	Appname       string                       `json:"app-name"`
+	Procid        string                       `json:"procid"`
+	Msgid         string                       `json:"msgid"`
+	Uuid          string                       `json:"uuid"`
+	Structured    string                       `json:"structured-data"`
+	Properties    map[string]map[string]string `json:"$!"`
 }
 
 func ParseJsonFormat(m string) (*SyslogMessage, error) {
@@ -94,7 +94,7 @@ func ParseJsonFormat(m string) (*SyslogMessage, error) {
 	}
 
 	if sourceMsg.Properties == nil {
-		msg.Properties = map[string]interface{}{}
+		msg.Properties = map[string]map[string]string{}
 	} else {
 		msg.Properties = sourceMsg.Properties
 	}

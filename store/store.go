@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha512"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"os"
 	"sync"
@@ -12,11 +11,28 @@ import (
 
 	"github.com/dgraph-io/badger"
 	"github.com/inconshreveable/log15"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
-	"github.com/stephane-martin/skewer/metrics"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
 )
+
+type storeMetrics struct {
+	BadgerGauge *prometheus.GaugeVec
+}
+
+func NewStoreMetrics() *storeMetrics {
+	m := &storeMetrics{}
+	m.BadgerGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "skw_badger_entries_gauge",
+			Help: "number of messages stored in the badger database",
+		},
+		[]string{"partition"},
+	)
+	return m
+}
 
 type MessageStore struct {
 	badger          *badger.KV
@@ -27,17 +43,16 @@ type MessageStore struct {
 	permerrorsDB    utils.Partition
 	syslogConfigsDB utils.Partition
 
-	metrics *metrics.Metrics
+	metrics  *storeMetrics
+	registry *prometheus.Registry
 
 	ready_mu     *sync.Mutex
 	availMsgCond *sync.Cond
 	failed_mu    *sync.Mutex
 	messages_mu  *sync.Mutex
 
-	stashqueue_mu *sync.Mutex
-	toStashCond   *sync.Cond
-	ack_mu        *sync.Mutex
-	ackCond       *sync.Cond
+	ack_mu  *sync.Mutex
+	ackCond *sync.Cond
 
 	wg *sync.WaitGroup
 
@@ -47,12 +62,16 @@ type MessageStore struct {
 	closedChan     chan struct{}
 	FatalErrorChan chan struct{}
 
-	toStashQueue    []*model.TcpUdpParsedMessage
+	toStashQueue    *utils.MPSC
 	ackQueue        []string
 	nackQueue       []string
 	permerrorsQueue []string
 
 	OutputsChan chan *model.TcpUdpParsedMessage
+}
+
+func (s *MessageStore) Gather() ([]*dto.MetricFamily, error) {
+	return s.registry.Gather()
 }
 
 func (s *MessageStore) Outputs() chan *model.TcpUdpParsedMessage {
@@ -63,7 +82,7 @@ func (s *MessageStore) Errors() chan struct{} {
 	return s.FatalErrorChan
 }
 
-func NewStore(ctx context.Context, cfg conf.StoreConfig, m *metrics.Metrics, l log15.Logger) (Store, error) {
+func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store, error) {
 
 	badgerOpts := badger.DefaultOptions
 	badgerOpts.Dir = cfg.Dirname
@@ -76,10 +95,11 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, m *metrics.Metrics, l l
 		return nil, err
 	}
 
-	store := &MessageStore{metrics: m}
+	store := &MessageStore{metrics: NewStoreMetrics(), registry: prometheus.NewRegistry()}
+	store.registry.MustRegister(store.metrics.BadgerGauge)
 	store.logger = l.New("class", "MessageStore")
 
-	store.toStashQueue = make([]*model.TcpUdpParsedMessage, 0, 1000)
+	store.toStashQueue = utils.NewMPSC()
 	store.ackQueue = make([]string, 0, 300)
 	store.nackQueue = make([]string, 0, 300)
 	store.permerrorsQueue = make([]string, 0, 300)
@@ -90,8 +110,6 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, m *metrics.Metrics, l l
 	store.messages_mu = &sync.Mutex{}
 	store.wg = &sync.WaitGroup{}
 
-	store.stashqueue_mu = &sync.Mutex{}
-	store.toStashCond = sync.NewCond(store.stashqueue_mu)
 	store.ack_mu = &sync.Mutex{}
 	store.ackCond = sync.NewCond(store.ack_mu)
 
@@ -177,32 +195,18 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, m *metrics.Metrics, l l
 	store.wg.Add(1)
 	go func() {
 		done := ctx.Done()
-		store.stashqueue_mu.Lock()
 		defer func() {
-			store.stashqueue_mu.Unlock()
 			store.wg.Done()
 		}()
 		for {
-		wait_for_input:
-			for {
-				if len(store.toStashQueue) > 0 {
-					break wait_for_input
-				} else {
-					select {
-					case <-done:
-						return
-					default:
-						store.toStashCond.Wait()
-					}
+			for !store.toStashQueue.Has() {
+				select {
+				case <-done:
+					return
+				case <-time.After(200 * time.Millisecond):
 				}
 			}
-			if len(store.toStashQueue) > 0 {
-				copyQueue := store.toStashQueue
-				store.toStashQueue = make([]*model.TcpUdpParsedMessage, 0, 1000)
-				store.stashqueue_mu.Unlock() // while we ingest the previous queue, clients can send more into the new queue
-				store.ingest(copyQueue)
-				store.stashqueue_mu.Lock()
-			}
+			store.ingest(store.toStashQueue.GetMany(1000))
 		}
 	}()
 
@@ -236,9 +240,8 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, m *metrics.Metrics, l l
 	store.wg.Add(1)
 	go func() {
 		<-ctx.Done()
-		// unblock the blocked waiting conditions
+		// unblock the blocked conditions
 		store.availMsgCond.Signal()
-		store.toStashCond.Signal()
 		store.ackCond.Signal()
 		store.wg.Done()
 	}()
@@ -508,10 +511,7 @@ func (s *MessageStore) resetFailures() {
 }
 
 func (s *MessageStore) Stash(m *model.TcpUdpParsedMessage) {
-	s.stashqueue_mu.Lock()
-	s.toStashQueue = append(s.toStashQueue, m)
-	s.toStashCond.Signal()
-	s.stashqueue_mu.Unlock()
+	s.toStashQueue.Put(m)
 }
 
 func (s *MessageStore) ingest(queue []*model.TcpUdpParsedMessage) (int, error) {
@@ -523,7 +523,7 @@ func (s *MessageStore) ingest(queue []*model.TcpUdpParsedMessage) (int, error) {
 
 	marshalledQueue := map[string][]byte{}
 	for _, m := range queue {
-		b, err := json.Marshal(m)
+		b, err := m.MarshalMsg(nil)
 		if err == nil {
 			marshalledQueue[m.Uid] = b
 		} else {
@@ -597,7 +597,7 @@ func (s *MessageStore) retrieve(n int) (messages map[string]*model.TcpUdpParsedM
 		if err == nil {
 			if message_b != nil {
 				message := model.TcpUdpParsedMessage{}
-				err := json.Unmarshal(message_b, &message)
+				_, err := message.UnmarshalMsg(message_b)
 				if err == nil {
 					messages[uid] = &message
 					fetched++

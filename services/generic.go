@@ -10,9 +10,9 @@ import (
 
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/javascript"
-	"github.com/stephane-martin/skewer/metrics"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/sys"
 	"github.com/stephane-martin/skewer/utils"
@@ -25,20 +25,20 @@ type NetworkService interface {
 	SetConf(sc []*conf.SyslogConfig, pc []conf.ParserConfig)
 	SetKafkaConf(kc *conf.KafkaConfig)
 	SetAuditConf(ac *conf.AuditConfig)
+	Gather() ([]*dto.MetricFamily, error)
 }
 
-func NewNetworkService(t string, stasher model.Stasher, gen chan ulid.ULID,
-	b *sys.BinderClient, m *metrics.Metrics, l log15.Logger) (NetworkService, context.CancelFunc) {
+func NewNetworkService(t string, stasher model.Stasher, gen chan ulid.ULID, b *sys.BinderClient, l log15.Logger) (NetworkService, context.CancelFunc) {
 	switch t {
 	case "skewer-tcp":
-		return NewTcpService(stasher, gen, b, m, l), nil
+		return NewTcpService(stasher, gen, b, l), nil
 	case "skewer-udp":
-		return NewUdpService(stasher, gen, b, m, l), nil
+		return NewUdpService(stasher, gen, b, l), nil
 	case "skewer-relp":
-		return NewRelpService(b, m, l), nil
+		return NewRelpService(b, l), nil
 	case "skewer-journal":
 		ctx, cancel := context.WithCancel(context.Background())
-		s, err := NewJournalService(ctx, stasher, gen, m, l)
+		s, err := NewJournalService(ctx, stasher, gen, l)
 		if err == nil {
 			return s, cancel
 		} else {
@@ -47,7 +47,7 @@ func NewNetworkService(t string, stasher model.Stasher, gen chan ulid.ULID,
 			return nil, nil
 		}
 	case "skewer-audit":
-		return NewAuditService(stasher, gen, m, l), nil
+		return NewAuditService(stasher, gen, l), nil
 	default:
 		return nil, nil
 	}

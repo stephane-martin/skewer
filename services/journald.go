@@ -9,9 +9,10 @@ import (
 
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/journald"
-	"github.com/stephane-martin/skewer/metrics"
 	"github.com/stephane-martin/skewer/model"
 )
 
@@ -64,39 +65,60 @@ func EntryToSyslog(entry map[string]string) *model.SyslogMessage {
 		m.TimeReported = m.TimeGenerated
 	}
 	m.Priority = model.Priority(int(m.Facility)*8 + int(m.Severity))
-	m.Properties = map[string]interface{}{}
+	m.Properties = map[string]map[string]string{}
 	m.Properties["journald"] = properties
 	return &m
+}
+
+type journalMetrics struct {
+	IncomingMsgsCounter *prometheus.CounterVec
+}
+
+func NewJournalMetrics() *journalMetrics {
+	m := &journalMetrics{}
+	m.IncomingMsgsCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "skw_incoming_messages_total",
+			Help: "total number of syslog messages that were received",
+		},
+		[]string{"protocol", "client", "port", "path"},
+	)
+	return m
 }
 
 type JournalService struct {
 	stasher   model.Stasher
 	reader    journald.JournaldReader
-	metrics   *metrics.Metrics
 	logger    log15.Logger
 	stopchan  chan struct{}
 	Conf      *conf.JournaldConfig
 	wgroup    *sync.WaitGroup
 	generator chan ulid.ULID
+	metrics   *journalMetrics
+	registry  *prometheus.Registry
 }
 
-func NewJournalService(
-	ctx context.Context,
-	stasher model.Stasher,
-	generator chan ulid.ULID,
-	metric *metrics.Metrics,
-	logger log15.Logger) (*JournalService, error) {
-
+func NewJournalService(ctx context.Context, stasher model.Stasher, gen chan ulid.ULID, l log15.Logger) (*JournalService, error) {
 	var err error
-	s := JournalService{stasher: stasher, metrics: metric, generator: generator}
-	s.logger = logger.New("class", "journald")
+	s := JournalService{
+		stasher:   stasher,
+		generator: gen,
+		metrics:   NewJournalMetrics(),
+		registry:  prometheus.NewRegistry(),
+		logger:    l.New("class", "journald"),
+		wgroup:    &sync.WaitGroup{},
+	}
+	s.registry.MustRegister(s.metrics.IncomingMsgsCounter)
 	s.reader, err = journald.NewReader(ctx, s.logger)
 	if err != nil {
 		return nil, err
 	}
-	s.wgroup = &sync.WaitGroup{}
 	s.reader.Start()
 	return &s, nil
+}
+
+func (s *JournalService) Gather() ([]*dto.MetricFamily, error) {
+	return s.registry.Gather()
 }
 
 func (s *JournalService) Start(test bool) ([]*model.ListenerInfo, error) {

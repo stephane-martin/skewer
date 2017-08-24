@@ -34,7 +34,7 @@ var testauditCmd = &cobra.Command{
 		logger := log15.New()
 		ctx, _ := context.WithCancel(context.Background())
 		generator := utils.Generator(ctx, logger)
-		auditsvc := services.NewAuditService(nil, generator, nil, logger)
+		auditsvc := services.NewAuditService(nil, generator, logger)
 		auditsvc.SetAuditConf(&c)
 		_, err := auditsvc.Start(false)
 		if err != nil {

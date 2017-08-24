@@ -25,7 +25,7 @@ func ParseRfc3164Format(m string) (*SyslogMessage, error) {
 	def_smsg.TimeGenerated = n
 	def_smsg.TimeReported = n
 
-	smsg.Properties = map[string]interface{}{}
+	smsg.Properties = map[string]map[string]string{}
 	if !strings.HasPrefix(m, "<") {
 		return &def_smsg, nil
 	}
