@@ -325,6 +325,12 @@
 			"revisionTime": "2017-05-16T17:14:30Z"
 		},
 		{
+			"checksumSHA1": "8U5pEHFpXd1/Klgp+C/a6TqWoh8=",
+			"path": "github.com/philhofer/fwd",
+			"revision": "1612a298117663d7bc9a760ae20d383413859798",
+			"revisionTime": "2017-06-16T20:40:54Z"
+		},
+		{
 			"checksumSHA1": "FGg99nQ56Fo3radSCuU1AeEUJug=",
 			"path": "github.com/pierrec/lz4",
 			"revision": "5a3d2245f97fc249850e7802e3c01fad02a1c316",
@@ -471,6 +477,12 @@
 			"path": "github.com/syndtr/gocapability/capability",
 			"revision": "db04d3cc01c8b54962a58ec7e491717d06cfcc16",
 			"revisionTime": "2017-07-04T07:02:18Z"
+		},
+		{
+			"checksumSHA1": "JfcyRh0rxqwrYvFmsuqo1oU73i4=",
+			"path": "github.com/tinylib/msgp/msgp",
+			"revision": "bfa68fe30b555b40d68871606ee725537f8023a1",
+			"revisionTime": "2017-08-23T13:43:00Z"
 		},
 		{
 			"checksumSHA1": "MxLnUmfrP+r5HfCZM29+WPKebn8=",
