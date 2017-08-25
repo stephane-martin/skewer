@@ -154,27 +154,10 @@ func (s *udpServiceImpl) ListenPacket() []*model.ListenerInfo {
 	for _, syslogConf := range s.SyslogConfigs {
 		if syslogConf.Protocol == "udp" {
 			if len(syslogConf.UnixSocketPath) > 0 {
-				conn, err := net.ListenPacket("unixgram", syslogConf.UnixSocketPath)
+				conn, err := s.Binder.ListenPacket("unixgram", syslogConf.UnixSocketPath)
 				if err != nil {
-					switch err.(type) {
-					case *net.OpError:
-						if s.Binder == nil {
-							s.Logger.Warn("Listen unixgram OpError", "error", err)
-							conn = nil
-						} else {
-							s.Logger.Info("Listen unixgram OpError. Retrying as root.", "error", err)
-							conn, err = s.Binder.ListenPacket("unixgram", syslogConf.UnixSocketPath)
-							if err != nil {
-								s.Logger.Warn("Listen unixgram OpError", "error", err)
-								conn = nil
-							}
-						}
-					default:
-						s.Logger.Warn("Listen unixgram error", "error", err)
-						conn = nil
-					}
-				}
-				if conn != nil && err == nil {
+					s.Logger.Warn("Listen unixgram error", "error", err)
+				} else {
 					s.Logger.Debug("Listener", "protocol", s.Protocol, "path", syslogConf.UnixSocketPath, "format", syslogConf.Format)
 					udpinfos = append(udpinfos, &model.ListenerInfo{
 						UnixSocketPath: syslogConf.UnixSocketPath,
@@ -186,28 +169,10 @@ func (s *udpServiceImpl) ListenPacket() []*model.ListenerInfo {
 				}
 			} else {
 				listenAddr, _ := syslogConf.GetListenAddr()
-				conn, err := net.ListenPacket("udp", listenAddr)
+				conn, err := s.Binder.ListenPacket("udp", listenAddr)
 				if err != nil {
-					switch err.(type) {
-					case *net.OpError:
-						if s.Binder == nil || syslogConf.Port > 1024 {
-							s.Logger.Warn("Listen UDP OpError", "error", err)
-							conn = nil
-						} else {
-							s.Logger.Info("Listen unixgram OpError. Retrying as root.", "error", err)
-							conn, err = s.Binder.ListenPacket("udp", listenAddr)
-							if err != nil {
-								s.Logger.Warn("Listen UDP OpError", "error", err)
-								conn = nil
-							}
-						}
-					default:
-						s.Logger.Warn("Listen UDP error", "error", err)
-						conn = nil
-					}
-
-				}
-				if conn != nil && err == nil {
+					s.Logger.Warn("Listen UDP error", "error", err)
+				} else {
 					s.Logger.Debug("Listener", "protocol", s.Protocol, "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
 					udpinfos = append(udpinfos, &model.ListenerInfo{
 						BindAddr: syslogConf.BindAddr,

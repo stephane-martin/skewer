@@ -53,21 +53,10 @@ func (s *StreamingService) initTCPListeners() []*model.ListenerInfo {
 			continue
 		}
 		if len(syslogConf.UnixSocketPath) > 0 {
-			l, err := net.Listen("unix", syslogConf.UnixSocketPath)
+			l, err := s.Binder.Listen("unix", syslogConf.UnixSocketPath)
 			if err != nil {
-				if s.Binder == nil {
-					s.Logger.Warn("Error listening on stream unix socket", "path", syslogConf.UnixSocketPath, "error", err)
-					l = nil
-				} else {
-					s.Logger.Info("Error listening on stream unix socket. Retrying as root.", "path", syslogConf.UnixSocketPath, "error", err)
-					l, err = s.Binder.Listen("unix", syslogConf.UnixSocketPath)
-					if err != nil {
-						s.Logger.Warn("Parent could not listen either", "path", syslogConf.UnixSocketPath, "error", err)
-						l = nil
-					}
-				}
-			}
-			if l != nil {
+				s.Logger.Warn("Error listening on stream unix socket", "path", syslogConf.UnixSocketPath, "error", err)
+			} else {
 				s.Logger.Debug("Listener", "protocol", s.Protocol, "path", syslogConf.UnixSocketPath, "format", syslogConf.Format)
 				nb++
 				lc := UnixListenerConf{
@@ -79,21 +68,10 @@ func (s *StreamingService) initTCPListeners() []*model.ListenerInfo {
 			}
 		} else {
 			listenAddr, _ := syslogConf.GetListenAddr()
-			l, err := net.Listen("tcp", listenAddr)
+			l, err := s.Binder.Listen("tcp", listenAddr)
 			if err != nil {
-				if s.Binder == nil || syslogConf.Port > 1024 {
-					s.Logger.Warn("Error listening on stream (TCP or RELP)", "listen_addr", listenAddr, "error", err)
-					l = nil
-				} else {
-					s.Logger.Info("Error listening on stream (TCP or RELP). Retrying as root.", "listen_addr", listenAddr, "error", err)
-					l, err = s.Binder.Listen("tcp", listenAddr)
-					if err != nil {
-						s.Logger.Warn("Parent could not listen either", "listen_addr", listenAddr, "error", err)
-						l = nil
-					}
-				}
-			}
-			if l != nil {
+				s.Logger.Warn("Error listening on stream (TCP or RELP)", "listen_addr", listenAddr, "error", err)
+			} else {
 				s.Logger.Debug("Listener", "protocol", s.Protocol, "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
 				nb++
 				lc := TCPListenerConf{
