@@ -23,7 +23,7 @@ import (
 	"github.com/stephane-martin/skewer/services"
 	"github.com/stephane-martin/skewer/store"
 	"github.com/stephane-martin/skewer/sys"
-	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/logging"
 )
 
 var serveCmd = &cobra.Command{
@@ -142,7 +142,7 @@ connects to Kafka, and forwards messages to Kafka.`,
 			}
 		}
 
-		rootlogger := utils.SetLogging(loglevelFlag, logjsonFlag, syslogFlag, logfilenameFlag)
+		rootlogger := logging.SetLogging(loglevelFlag, logjsonFlag, syslogFlag, logfilenameFlag)
 		logger := rootlogger.New("proc", "parent")
 
 		mustSocketPair := func(typ int) (int, int) {
@@ -202,7 +202,7 @@ connects to Kafka, and forwards messages to Kafka.`,
 		loggerConfigurationHandle, loggerParentConfigurationHandle := mustSocketPair(syscall.SOCK_DGRAM)
 		loggerConfigurationConn := getLoggerConn(loggerParentConfigurationHandle)
 
-		utils.LogReceiver(context.Background(), rootlogger, []net.Conn{
+		logging.LogReceiver(context.Background(), rootlogger, []net.Conn{
 			loggerChildConn, loggerTcpConn, loggerUdpConn, loggerRelpConn, loggerJournalConn, loggerAuditConn, loggerConfigurationConn,
 		})
 
@@ -317,7 +317,7 @@ func Serve() error {
 	loggerConn.(*net.UnixConn).SetReadBuffer(65536)
 	loggerConn.(*net.UnixConn).SetWriteBuffer(65536)
 	loggerCtx, cancelLogger := context.WithCancel(context.Background())
-	logger = utils.NewRemoteLogger(loggerCtx, loggerConn).New("proc", "child")
+	logger = logging.NewRemoteLogger(loggerCtx, loggerConn).New("proc", "child")
 
 	logger.Debug("Serve() runs under user", "uid", os.Getuid(), "gid", os.Getgid())
 	if sys.CapabilitiesSupported {

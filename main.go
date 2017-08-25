@@ -15,7 +15,7 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/services"
 	"github.com/stephane-martin/skewer/sys"
-	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/logging"
 )
 
 func main() {
@@ -34,7 +34,7 @@ func main() {
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
-		return utils.NewRemoteLogger(ctx, loggerConn).New("proc", name)
+		return logging.NewRemoteLogger(ctx, loggerConn).New("proc", name)
 	}
 
 	switch name := os.Args[0]; name {
