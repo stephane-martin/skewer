@@ -9,6 +9,7 @@ import (
 
 func Encrypt(message []byte, secret [32]byte) (encrypted []byte, err error) {
 	prenonce := make([]byte, 24)
+	// todo: avoid contention on rand.Read
 	_, err = rand.Read(prenonce)
 	if err != nil {
 		return nil, err

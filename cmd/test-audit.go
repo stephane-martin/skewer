@@ -9,7 +9,7 @@ import (
 	"github.com/inconshreveable/log15"
 	"github.com/spf13/cobra"
 	"github.com/stephane-martin/skewer/conf"
-	"github.com/stephane-martin/skewer/services"
+	"github.com/stephane-martin/skewer/services/linux"
 	"github.com/stephane-martin/skewer/utils"
 )
 
@@ -34,7 +34,7 @@ var testauditCmd = &cobra.Command{
 		logger := log15.New()
 		ctx, _ := context.WithCancel(context.Background())
 		generator := utils.Generator(ctx, logger)
-		auditsvc := services.NewAuditService(nil, generator, logger)
+		auditsvc := linux.NewAuditService(nil, generator, logger)
 		auditsvc.SetAuditConf(&c)
 		_, err := auditsvc.Start(false)
 		if err != nil {

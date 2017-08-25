@@ -1,4 +1,4 @@
-package services
+package network
 
 import (
 	"bufio"
@@ -14,6 +14,7 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/services/errors"
 	"github.com/stephane-martin/skewer/sys"
 )
 
@@ -70,7 +71,7 @@ func (s *tcpServerImpl) init() {
 	s.StreamingService.init()
 }
 
-func NewTcpService(stasher model.Stasher, gen chan ulid.ULID, b *sys.BinderClient, l log15.Logger) NetworkService {
+func NewTcpService(stasher model.Stasher, gen chan ulid.ULID, b *sys.BinderClient, l log15.Logger) *tcpServerImpl {
 	s := tcpServerImpl{
 		status:    TcpStopped,
 		stasher:   stasher,
@@ -80,9 +81,9 @@ func NewTcpService(stasher model.Stasher, gen chan ulid.ULID, b *sys.BinderClien
 	}
 	s.StreamingService.init()
 	s.registry.MustRegister(s.metrics.ClientConnectionCounter, s.metrics.IncomingMsgsCounter, s.metrics.ParsingErrorCounter)
-	s.StreamingService.GenericService.logger = l.New("class", "TcpServer")
-	s.StreamingService.GenericService.binder = b
-	s.StreamingService.GenericService.protocol = "tcp"
+	s.StreamingService.BaseService.Logger = l.New("class", "TcpServer")
+	s.StreamingService.BaseService.Binder = b
+	s.StreamingService.BaseService.Protocol = "tcp"
 	s.StreamingService.handler = tcpHandler{Server: &s}
 	return &s
 }
@@ -106,10 +107,10 @@ func (s *tcpServerImpl) WaitClosed() {
 }
 
 func (s *tcpServerImpl) Start(test bool) ([]*model.ListenerInfo, error) {
-	s.statusMutex.Lock()
-	defer s.statusMutex.Unlock()
+	s.LockStatus()
 	if s.status != TcpStopped {
-		return nil, ServerNotStopped
+		s.UnlockStatus()
+		return nil, errors.ServerNotStopped
 	}
 	s.statusChan = make(chan TcpServerStatus, 1)
 
@@ -118,28 +119,30 @@ func (s *tcpServerImpl) Start(test bool) ([]*model.ListenerInfo, error) {
 	if len(infos) > 0 {
 		s.status = TcpStarted
 		s.Listen()
-		s.logger.Info("Listening on TCP", "nb_services", len(infos))
+		s.Logger.Info("Listening on TCP", "nb_services", len(infos))
 	} else {
-		s.logger.Debug("TCP Server not started: no listener")
+		s.Logger.Debug("TCP Server not started: no listener")
 		close(s.statusChan)
 	}
+	s.UnlockStatus()
 	return infos, nil
 }
 
 func (s *tcpServerImpl) Stop() {
-	s.statusMutex.Lock()
-	defer s.statusMutex.Unlock()
+	s.LockStatus()
 	if s.status != TcpStarted {
+		s.UnlockStatus()
 		return
 	}
 	s.resetTCPListeners() // close the listeners. This will make Listen to return and close all current connections.
 	s.wg.Wait()           // wait that all HandleConnection goroutines have ended
-	s.logger.Debug("TcpServer goroutines have ended")
+	s.Logger.Debug("TcpServer goroutines have ended")
 
 	s.status = TcpStopped
 	s.statusChan <- TcpStopped
 	close(s.statusChan)
-	s.logger.Debug("TCP server has stopped")
+	s.Logger.Debug("TCP server has stopped")
+	s.UnlockStatus()
 }
 
 type tcpHandler struct {
@@ -181,17 +184,17 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) {
 	path = strings.TrimSpace(path)
 	local_port_s := strconv.FormatInt(int64(local_port), 10)
 
-	logger := s.logger.New("protocol", s.protocol, "client", client, "local_port", local_port, "unix_socket_path", path, "format", config.Format)
+	logger := s.Logger.New("protocol", s.Protocol, "client", client, "local_port", local_port, "unix_socket_path", path, "format", config.Format)
 	logger.Info("New client")
 	if s.metrics != nil {
-		s.metrics.ClientConnectionCounter.WithLabelValues(s.protocol, client, local_port_s, path).Inc()
+		s.metrics.ClientConnectionCounter.WithLabelValues(s.Protocol, client, local_port_s, path).Inc()
 	}
 
 	// pull messages from raw_messages_chan, parse them and push them to the Store
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		e := NewParsersEnv(s.ParserConfigs, s.logger)
+		e := NewParsersEnv(s.ParserConfigs, s.Logger)
 		for m := range raw_messages_chan {
 			parser := e.GetParser(config.Format)
 			if parser == nil {
@@ -215,7 +218,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) {
 				s.stasher.Stash(&parsed_msg)
 			} else {
 				if s.metrics != nil {
-					s.metrics.ParsingErrorCounter.WithLabelValues(s.protocol, client, config.Format).Inc()
+					s.metrics.ParsingErrorCounter.WithLabelValues(s.Protocol, client, config.Format).Inc()
 				}
 				logger.Info("Parsing error", "Message", m.Message, "error", err)
 			}
@@ -245,7 +248,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) {
 				Message:   scanner.Text(),
 			}
 			if s.metrics != nil {
-				s.metrics.IncomingMsgsCounter.WithLabelValues(s.protocol, client, local_port_s, path).Inc()
+				s.metrics.IncomingMsgsCounter.WithLabelValues(s.Protocol, client, local_port_s, path).Inc()
 			}
 			raw_messages_chan <- &raw
 		} else {

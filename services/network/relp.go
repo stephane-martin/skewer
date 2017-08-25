@@ -1,4 +1,4 @@
-package services
+package network
 
 import (
 	"bufio"
@@ -9,7 +9,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -20,6 +19,7 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/javascript"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/services/errors"
 	"github.com/stephane-martin/skewer/sys"
 )
 
@@ -119,7 +119,7 @@ type RelpService struct {
 	kc     *conf.KafkaConfig
 }
 
-func NewRelpService(b *sys.BinderClient, l log15.Logger) NetworkService {
+func NewRelpService(b *sys.BinderClient, l log15.Logger) *RelpService {
 	s := &RelpService{b: b, logger: l}
 	s.impl = NewRelpServiceImpl(s.b, s.logger)
 	return s
@@ -141,12 +141,12 @@ func (s *RelpService) Start(test bool) (infos []*model.ListenerInfo, err error) 
 			state := <-s.impl.StatusChan
 			switch state {
 			case FinalStopped:
-				s.impl.logger.Debug("The RELP service has been definitely halted")
+				s.impl.Logger.Debug("The RELP service has been definitely halted")
 				// TODO: unregister from Consul if necessary
 				return
 
 			case Stopped:
-				s.impl.logger.Debug("The RELP service is stopped")
+				s.impl.Logger.Debug("The RELP service is stopped")
 				s.impl.SetConf(s.sc, s.pc)
 				s.impl.SetKafkaConf(*s.kc)
 				//infos, err := s.impl.Start(test)
@@ -155,19 +155,19 @@ func (s *RelpService) Start(test bool) (infos []*model.ListenerInfo, err error) 
 					//fmt.Println(infos)
 					// TODO: the first time it happens, register in Consul
 				} else {
-					s.impl.logger.Warn("The RELP service has failed to start", "error", err)
+					s.impl.Logger.Warn("The RELP service has failed to start", "error", err)
 					s.impl.StopAndWait()
 				}
 
 			case Waiting:
-				s.impl.logger.Debug("RELP waiting")
+				s.impl.Logger.Debug("RELP waiting")
 				go func() {
 					time.Sleep(time.Duration(30) * time.Second)
 					s.impl.EndWait()
 				}()
 
 			case Started:
-				s.impl.logger.Debug("The RELP service has been started")
+				s.impl.Logger.Debug("The RELP service has been started")
 			}
 		}
 	}()
@@ -225,9 +225,9 @@ func NewRelpServiceImpl(b *sys.BinderClient, logger log15.Logger) *RelpServiceIm
 		s.metrics.RelpAnswersCounter,
 		s.metrics.RelpProtocolErrorsCounter,
 	)
-	s.StreamingService.GenericService.logger = logger.New("class", "RelpServer")
-	s.StreamingService.GenericService.binder = b
-	s.StreamingService.GenericService.protocol = "relp"
+	s.StreamingService.BaseService.Logger = logger.New("class", "RelpServer")
+	s.StreamingService.BaseService.Binder = b
+	s.StreamingService.BaseService.Protocol = "relp"
 	s.StreamingService.handler = RelpHandler{Server: &s}
 	s.StatusChan = make(chan RelpServerStatus, 10)
 	return &s
@@ -238,22 +238,22 @@ func (s *RelpServiceImpl) SetKafkaConf(c conf.KafkaConfig) {
 }
 
 func (s *RelpServiceImpl) Start(test bool) ([]*model.ListenerInfo, error) {
-	s.statusMutex.Lock()
-	defer s.statusMutex.Unlock()
+	s.LockStatus()
+	defer s.UnlockStatus()
 	if s.status == FinalStopped {
-		return nil, ServerDefinitelyStopped
+		return nil, errors.ServerDefinitelyStopped
 	}
 	if s.status != Stopped && s.status != Waiting {
-		return nil, ServerNotStopped
+		return nil, errors.ServerNotStopped
 	}
 	s.test = test
 
 	infos := s.initTCPListeners()
 	if len(infos) == 0 {
-		s.logger.Debug("RELP service not started: no listener")
+		s.Logger.Debug("RELP service not started: no listener")
 		return infos, nil
 	} else {
-		s.logger.Info("Listening on RELP", "nb_services", len(infos))
+		s.Logger.Info("Listening on RELP", "nb_services", len(infos))
 	}
 
 	if !s.test {
@@ -274,32 +274,35 @@ func (s *RelpServiceImpl) Start(test bool) ([]*model.ListenerInfo, error) {
 }
 
 func (s *RelpServiceImpl) Stop() {
-	s.doStop(false, false, s.statusMutex)
+	s.LockStatus()
+	s.doStop(false, false)
+	s.UnlockStatus()
 }
 
 func (s *RelpServiceImpl) FinalStop() {
-	s.doStop(true, false, s.statusMutex)
+	s.LockStatus()
+	s.doStop(true, false)
+	s.UnlockStatus()
 }
 
 func (s *RelpServiceImpl) StopAndWait() {
-	s.doStop(false, true, s.statusMutex)
+	s.LockStatus()
+	s.doStop(false, true)
+	s.UnlockStatus()
 }
 
 func (s *RelpServiceImpl) EndWait() {
-	s.statusMutex.Lock()
-	defer s.statusMutex.Unlock()
+	s.LockStatus()
 	if s.status != Waiting {
+		s.UnlockStatus()
 		return
 	}
 	s.status = Stopped
 	s.StatusChan <- Stopped
+	s.UnlockStatus()
 }
 
-func (s *RelpServiceImpl) doStop(final bool, wait bool, mu *sync.Mutex) {
-	if mu != nil {
-		mu.Lock()
-		defer mu.Unlock()
-	}
+func (s *RelpServiceImpl) doStop(final bool, wait bool) {
 	if final && (s.status == Waiting || s.status == Stopped || s.status == FinalStopped) {
 		if s.status != FinalStopped {
 			s.status = FinalStopped
@@ -379,17 +382,17 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 	path = strings.TrimSpace(path)
 	local_port_s := strconv.FormatInt(int64(local_port), 10)
 
-	logger := s.logger.New("protocol", s.protocol, "client", client, "local_port", local_port, "unix_socket_path", path, "format", config.Format)
+	logger := s.Logger.New("protocol", s.Protocol, "client", client, "local_port", local_port, "unix_socket_path", path, "format", config.Format)
 	logger.Info("New client connection")
 	if s.metrics != nil {
-		s.metrics.ClientConnectionCounter.WithLabelValues(s.protocol, client, local_port_s, path).Inc()
+		s.metrics.ClientConnectionCounter.WithLabelValues(s.Protocol, client, local_port_s, path).Inc()
 	}
 
 	// pull messages from raw_messages_chan and push them to parsed_messages_chan
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		e := NewParsersEnv(s.ParserConfigs, s.logger)
+		e := NewParsersEnv(s.ParserConfigs, s.Logger)
 		for m := range raw_messages_chan {
 
 			parser := e.GetParser(config.Format)
@@ -410,7 +413,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 				}
 				parsed_messages_chan <- &parsed_msg
 			} else if s.metrics != nil {
-				s.metrics.ParsingErrorCounter.WithLabelValues(s.protocol, client, config.Format).Inc()
+				s.metrics.ParsingErrorCounter.WithLabelValues(s.Protocol, client, config.Format).Inc()
 				logger.Warn("Parsing error", "message", m.Raw.Message, "error", err)
 			}
 		}
@@ -567,7 +570,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 			close(other_fails_chan)
 			s.wg.Done()
 		}()
-		e := javascript.NewFilterEnvironment(config.FilterFunc, config.TopicFunc, config.TopicTmpl, config.PartitionFunc, config.PartitionTmpl, s.logger)
+		e := javascript.NewFilterEnvironment(config.FilterFunc, config.TopicFunc, config.TopicTmpl, config.PartitionFunc, config.PartitionTmpl, s.Logger)
 
 	ForParsedChan:
 		for m := range parsed_messages_chan {
@@ -708,7 +711,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 					},
 				}
 				if s.metrics != nil {
-					s.metrics.IncomingMsgsCounter.WithLabelValues(s.protocol, client, local_port_s, path).Inc()
+					s.metrics.IncomingMsgsCounter.WithLabelValues(s.Protocol, client, local_port_s, path).Inc()
 				}
 				raw_messages_chan <- &raw
 			default:
