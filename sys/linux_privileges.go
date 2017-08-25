@@ -61,6 +61,7 @@ func Predrop() (bool, error) {
 	toKeepMap[capability.CAP_SETUID] = true
 	toKeepMap[capability.CAP_SETGID] = true
 	toKeepMap[capability.CAP_SETPCAP] = true
+	toKeepMap[capability.CAP_DAC_OVERRIDE] = true
 
 	applied := false
 
@@ -109,7 +110,7 @@ func Predrop() (bool, error) {
 }
 
 func NeedFixLinuxPrivileges(uid, gid string) (bool, error) {
-	numuid, numgid, err := LookupUid(uid, gid)
+	numuid, _, err := LookupUid(uid, gid)
 	if err != nil {
 		return false, err
 	}
@@ -117,7 +118,7 @@ func NeedFixLinuxPrivileges(uid, gid string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	needfix := numuid != os.Getuid() || numgid != os.Getgid() || c.NeedDrop()
+	needfix := numuid != os.Getuid() || c.NeedDrop()
 	return needfix, nil
 }
 
@@ -187,7 +188,18 @@ func DropNetBind() error {
 func GetCaps() string {
 	c, err := NewCapabilitiesQuery()
 	if err == nil {
-		return strings.Replace(c.caps.String(), "\"", "'", -1)
+		eff := strings.Replace(c.caps.StringCap(capability.EFFECTIVE), "\"", "'", -1)
+		perm := strings.Replace(c.caps.StringCap(capability.PERMITTED), "\"", "'", -1)
+		inher := strings.Replace(c.caps.StringCap(capability.INHERITABLE), "\"", "'", -1)
+		bound := strings.Replace(c.caps.StringCap(capability.BOUNDING), "\"", "'", -1)
+		ambient := strings.Replace(c.caps.StringCap(capability.AMBIENT), "\"", "'", -1)
+		return strings.Join([]string{
+			fmt.Sprintf("Effective: %s", eff),
+			fmt.Sprintf("Permitted: %s", perm),
+			fmt.Sprintf("Inheritable: %s", inher),
+			fmt.Sprintf("Bounding: %s", bound),
+			fmt.Sprintf("Ambient: %s", ambient),
+		}, "\n")
 	}
 	return ""
 }
@@ -300,8 +312,8 @@ func Drop(uid int, gid int) error {
 			}
 		}
 
-		// drop caps SETUID, SETGID, SETPCAP
-		c.caps.Unset(capability.CAPS, capability.CAP_SETUID, capability.CAP_SETGID, capability.CAP_SETPCAP)
+		// drop caps SETUID, SETGID, SETPCAP, DAC_OVERRIDE
+		c.caps.Unset(capability.CAPS, capability.CAP_SETUID, capability.CAP_SETGID, capability.CAP_SETPCAP, capability.CAP_DAC_OVERRIDE)
 		err = c.caps.Apply(capability.CAPS)
 		if err != nil {
 			return err

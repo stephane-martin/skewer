@@ -19,17 +19,6 @@ import (
 	"github.com/stephane-martin/skewer/utils"
 )
 
-func w(dest io.Writer, header string, message []byte) {
-	l := len(header) + len(message) + 1
-	fmt.Fprintf(dest, "%010d ", l)
-	dest.Write([]byte(header))
-	dest.Write([]byte(" "))
-	dest.Write(message)
-	dest.Write([]byte("\n"))
-}
-
-var NOW []byte = []byte("now")
-
 func NewNetworkPlugin(t string, stasher model.Stasher, binderHandle int, loggerHandle int, l log15.Logger) *NetworkPlugin {
 	s := &NetworkPlugin{
 		t:            t,
@@ -83,7 +72,7 @@ func (s *NetworkPlugin) Gather() ([]*dto.MetricFamily, error) {
 		if s.started {
 			s.stdinMu.Lock()
 			if s.stdin != nil {
-				w(s.stdin, "gathermetrics", NOW)
+				utils.W(s.stdin, "gathermetrics", utils.NOW)
 			} else {
 				return []*dto.MetricFamily{}, nil
 			}
@@ -116,7 +105,7 @@ func (s *NetworkPlugin) Stop() {
 		}()
 		if s.started {
 			if s.stdin != nil {
-				w(s.stdin, "stop", NOW)
+				utils.W(s.stdin, "stop", utils.NOW)
 			}
 		}
 	}
@@ -138,7 +127,7 @@ func (s *NetworkPlugin) Shutdown(killTimeOut time.Duration) {
 		// ask to shutdown
 		s.stdinMu.Lock()
 		if s.stdin != nil {
-			w(s.stdin, "shutdown", NOW)
+			utils.W(s.stdin, "shutdown", utils.NOW)
 		}
 		s.stdinMu.Unlock()
 
@@ -175,12 +164,20 @@ func (s *NetworkPlugin) SetAuditConf(ac *conf.AuditConfig) {
 func (s *NetworkPlugin) Start() ([]*model.ListenerInfo, error) {
 	s.startedMu.Lock()
 	if s.started {
+		s.startedMu.Unlock()
 		return nil, fmt.Errorf("Plugin already started")
 	}
 
 	infos := []*model.ListenerInfo{}
 	startErrorChan := make(chan error)
 	var once sync.Once
+
+	doKill := func() {
+		s.logger.Crit("killing misbehaving plugin", "type", s.t)
+		s.stdinMu.Lock()
+		s.cmd.Process.Kill()
+		s.stdinMu.Unlock()
+	}
 
 	go func() {
 		kill := false
@@ -193,52 +190,36 @@ func (s *NetworkPlugin) Start() ([]*model.ListenerInfo, error) {
 			// or 2/ if scanner faces a formatting error
 			// or 3/ if the plugin sent a badly JSON encoded message
 			// or 4/ if the plugin sent an unexpected message
-			s.logger.Debug("End of plugin controller", "type", s.t)
-			s.createdMu.Lock()
-			s.startedMu.Lock()
+			s.logger.Debug("Plugin controller is stopping", "type", s.t)
+			once.Do(func() {
+				startErrorChan <- fmt.Errorf("Unexpected end of plugin before it was initialized")
+				close(startErrorChan)
+			})
 
 			if kill {
-				s.logger.Crit("killing misbehaving plugin", "type", s.t)
-				s.stdinMu.Lock()
-				s.cmd.Process.Kill()
-				s.stdinMu.Unlock()
-				s.cmd.Wait()
-				s.created = false
-				s.started = false
-				close(s.shutdown)
-				s.startedMu.Unlock()
-				s.createdMu.Unlock()
-				return
-			} else if !s.created {
-				// plugin process hasd exited normally (typically because we asked for it)
-				s.logger.Debug("Normal end of plugin process", "type", s.t)
-				s.cmd.Wait()
-				s.created = false
-				s.started = false
-				close(s.shutdown)
-				s.startedMu.Unlock()
-				s.createdMu.Unlock()
-				return
-			} else if !s.started {
-				// normal stop, the plugin process continues to live
-				s.logger.Debug("Plugin process has stopped and is inactive", "type", s.t)
-				s.startedMu.Unlock()
-				s.createdMu.Unlock()
-				return
+				doKill()
 			} else {
-				s.logger.Crit("killing misbehaving plugin", "type", s.t)
-				s.stdinMu.Lock()
-				s.cmd.Process.Kill()
-				s.stdinMu.Unlock()
-				s.cmd.Wait()
-				s.created = false
-				s.started = false
-				close(s.shutdown)
-				s.startedMu.Unlock()
-				s.createdMu.Unlock()
-				return
+				select {
+				case <-s.shutdown:
+					// child has exited
+					s.logger.Debug("End of plugin child process", "type", s.t)
+				default:
+					// child is still alive
+					s.startedMu.Lock()
+					if s.started {
+						// if the child had been inactive in a normal way,
+						// it would have sent the "stopped" message first,
+						// and s.started would be false
+						// so we know that something is going wrong
+						s.startedMu.Unlock()
+						doKill()
+					} else {
+						s.startedMu.Unlock()
+						s.logger.Debug("Plugin process has stopped and is inactive", "type", s.t)
+					}
+				}
 			}
-		}()
+		}() // end of defer
 
 		// read JSON encoded messages that the plugin is going to write on stdout
 		scanner := bufio.NewScanner(s.stdout)
@@ -288,13 +269,7 @@ func (s *NetworkPlugin) Start() ([]*model.ListenerInfo, error) {
 				s.startedMu.Unlock()
 				return
 			case "shutdown":
-				s.createdMu.Lock()
-				s.startedMu.Lock()
-				s.started = false
-				s.created = false
-				s.startedMu.Unlock()
-				s.createdMu.Unlock()
-				return
+				// plugin child is shutting down, eventually the scanner will return normally
 			case "starterror":
 				if len(parts) == 2 {
 					err := fmt.Errorf(parts[1])
@@ -344,7 +319,13 @@ func (s *NetworkPlugin) Start() ([]*model.ListenerInfo, error) {
 			}
 		}
 		err := scanner.Err()
-		if err != nil {
+		if err == nil {
+			// scanner has returned without error
+			// it means that the plugin child stdin has been closed
+			// so we know that the plugin child has exited
+			// let's wait that the shutdown channel has been closed before executing the defer()
+			<-s.shutdown
+		} else {
 			once.Do(func() { startErrorChan <- err; close(startErrorChan) })
 			s.logger.Error("Plugin scanner error", "error", err)
 			kill = true
@@ -358,11 +339,11 @@ func (s *NetworkPlugin) Start() ([]*model.ListenerInfo, error) {
 	acb, _ := json.Marshal(s.auditConf)
 
 	s.stdinMu.Lock()
-	w(s.stdin, "syslogconf", scb)
-	w(s.stdin, "parserconf", pcb)
-	w(s.stdin, "kafkaconf", kcb)
-	w(s.stdin, "auditconf", acb)
-	w(s.stdin, "start", NOW)
+	utils.W(s.stdin, "syslogconf", scb)
+	utils.W(s.stdin, "parserconf", pcb)
+	utils.W(s.stdin, "kafkaconf", kcb)
+	utils.W(s.stdin, "auditconf", acb)
+	utils.W(s.stdin, "start", utils.NOW)
 	s.stdinMu.Unlock()
 
 	rerr := <-startErrorChan
@@ -380,8 +361,8 @@ func (s *NetworkPlugin) Start() ([]*model.ListenerInfo, error) {
 
 func (s *NetworkPlugin) Create(test bool) error {
 	s.createdMu.Lock()
-	defer s.createdMu.Unlock()
 	if s.created {
+		s.createdMu.Unlock()
 		return nil
 	}
 
@@ -416,12 +397,14 @@ func (s *NetworkPlugin) Create(test bool) error {
 
 	if err != nil {
 		close(s.shutdown)
+		s.createdMu.Unlock()
 		return err
 	}
 
 	s.stdout, err = s.cmd.StdoutPipe()
 	if err != nil {
 		close(s.shutdown)
+		s.createdMu.Unlock()
 		return err
 	}
 
@@ -434,9 +417,24 @@ func (s *NetworkPlugin) Create(test bool) error {
 	err = s.cmd.Start()
 	if err != nil {
 		close(s.shutdown)
+		s.createdMu.Unlock()
 		return err
 	}
 	s.created = true
+	s.createdMu.Unlock()
+
+	go func() {
+		// monitor for plugin process termination
+		s.cmd.Wait()
+		close(s.shutdown)
+		s.createdMu.Lock()
+		s.startedMu.Lock()
+		s.created = false
+		s.started = false
+		s.startedMu.Unlock()
+		s.createdMu.Unlock()
+	}()
+
 	return nil
 
 }

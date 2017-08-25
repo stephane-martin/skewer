@@ -17,11 +17,6 @@ import (
 	"github.com/stephane-martin/skewer/utils"
 )
 
-func w(dest io.Writer, header string, message string) {
-	m := header + " " + message
-	fmt.Fprintf(dest, "%010d %s\n", len(m), m)
-}
-
 type ConfigurationService struct {
 	logger       log15.Logger
 	loggerHandle int
@@ -51,7 +46,7 @@ func (c *ConfigurationService) SetConsulParams(params consul.ConnParams) {
 func (c *ConfigurationService) Stop() {
 	c.mu.Lock()
 	if c.stdin != nil {
-		w(c.stdin, "stop", "now")
+		utils.W(c.stdin, "stop", utils.NOW)
 		c.stdin = nil
 	}
 	c.mu.Unlock()
@@ -60,7 +55,7 @@ func (c *ConfigurationService) Stop() {
 func (c *ConfigurationService) Reload() {
 	c.mu.Lock()
 	if c.stdin != nil {
-		w(c.stdin, "reload", "now")
+		utils.W(c.stdin, "reload", utils.NOW)
 	}
 	c.mu.Unlock()
 }
@@ -121,7 +116,7 @@ func (c *ConfigurationService) Start() error {
 		scanner := bufio.NewScanner(stdout)
 		scanner.Split(utils.PluginSplit)
 		for scanner.Scan() {
-			parts := strings.SplitN(strings.Trim(scanner.Text(), "\r\n "), " ", 2)
+			parts := strings.SplitN(scanner.Text(), " ", 2)
 			command = parts[0]
 			switch command {
 			case "newconf":
@@ -173,9 +168,9 @@ func (c *ConfigurationService) Start() error {
 	cparams, _ := json.Marshal(c.params)
 
 	c.mu.Lock()
-	w(c.stdin, "confdir", c.confdir)
-	w(c.stdin, "consulparams", string(cparams))
-	w(c.stdin, "start", "now")
+	utils.W(c.stdin, "confdir", []byte(c.confdir))
+	utils.W(c.stdin, "consulparams", cparams)
+	utils.W(c.stdin, "start", utils.NOW)
 	c.mu.Unlock()
 	err = <-startedChan
 	if err != nil {
@@ -194,7 +189,7 @@ type ConfigurationProvider struct {
 func (c *ConfigurationProvider) Write(newconf *BaseConfig) {
 	b, err := json.Marshal(newconf)
 	if err == nil {
-		w(os.Stdout, "newconf", string(b))
+		utils.W(os.Stdout, "newconf", b)
 	} else {
 		c.logger.Warn("Error marshaling new configuration", "error", err)
 	}
@@ -215,8 +210,8 @@ func (c *ConfigurationProvider) Launch(logger log15.Logger) error {
 		if err == nil {
 			confb, err := json.Marshal(gconf)
 			if err == nil {
-				w(os.Stdout, "started", "ok")
-				w(os.Stdout, "newconf", string(confb))
+				utils.W(os.Stdout, "started", utils.NOW)
+				utils.W(os.Stdout, "newconf", confb)
 				go func() {
 					for {
 						select {
@@ -226,7 +221,7 @@ func (c *ConfigurationProvider) Launch(logger log15.Logger) error {
 							if more {
 								confb, err := json.Marshal(newconf)
 								if err == nil {
-									w(os.Stdout, "newconf", string(confb))
+									utils.W(os.Stdout, "newconf", confb)
 								} else {
 									logger.Warn("Error serializing new configuration", "error", err)
 								}
@@ -250,14 +245,14 @@ func (c *ConfigurationProvider) Launch(logger log15.Logger) error {
 	var command string
 
 	for scanner.Scan() {
-		parts := strings.SplitN(strings.Trim(scanner.Text(), "\r\n "), " ", 2)
+		parts := strings.SplitN(scanner.Text(), " ", 2)
 		command = parts[0]
 
 		switch command {
 		case "start":
 			err := start()
 			if err != nil {
-				w(os.Stdout, "starterror", err.Error())
+				utils.W(os.Stdout, "starterror", []byte(err.Error()))
 				return err
 			}
 
@@ -268,7 +263,7 @@ func (c *ConfigurationProvider) Launch(logger log15.Logger) error {
 				if oldcancel != nil {
 					oldcancel()
 				}
-				w(os.Stdout, "reloaded", "ok")
+				utils.W(os.Stdout, "reloaded", utils.NOW)
 			} else {
 				logger.Warn("Error reloading configuration", "error", err)
 			}

@@ -113,6 +113,10 @@ connects to Kafka, and forwards messages to Kafka.`,
 			if need_fix {
 				if os.Getenv("SKEWER_DROPPED") == "TRUE" {
 					fmt.Fprintln(os.Stderr, "Dropping privileges failed!")
+					fmt.Fprintln(os.Stderr, "Uid", os.Getuid())
+					fmt.Fprintln(os.Stderr, "Gid", os.Getgid())
+					fmt.Fprintln(os.Stderr, "Capabilities")
+					fmt.Fprintln(os.Stderr, sys.GetCaps())
 					os.Exit(-1)
 				}
 				err = sys.FixLinuxPrivileges(uidFlag, gidFlag)

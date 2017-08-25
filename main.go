@@ -110,21 +110,31 @@ func main() {
 		if sys.CapabilitiesSupported {
 			runtime.LockOSThread()
 			// very early we drop most of linux capabilities
+
 			applied, err := sys.Predrop()
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				os.Exit(-1)
 				return
 			}
+
 			if applied {
 				exe, err := os.Executable()
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					os.Exit(-1)
 				}
-				err = syscall.Exec(exe, os.Args, os.Environ())
+				envs := os.Environ()
+				args := os.Args
+				err = syscall.Exec(exe, args, envs)
 				if err != nil {
-					fmt.Fprintln(os.Stderr, "Error executing self", err)
+					fmt.Fprintln(os.Stderr, "Error executing self")
+					fmt.Fprintln(os.Stderr, "- Capabilities")
+					fmt.Fprintln(os.Stderr, sys.GetCaps())
+					fmt.Fprintf(os.Stderr, "- Exe='%s'\n", exe)
+					fmt.Fprintf(os.Stderr, "- Args='%s'\n", args)
+					fmt.Fprintf(os.Stderr, "- Env='%s'\n", envs)
+					fmt.Fprintf(os.Stderr, "- Error='%s'\n", err)
 					os.Exit(-1)
 				}
 			}

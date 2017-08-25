@@ -29,7 +29,7 @@ type NetworkPluginProvider struct {
 func (p *NetworkPluginProvider) Stash(m *model.TcpUdpParsedMessage) {
 	b, err := m.MarshalMsg(nil)
 	if err == nil {
-		w(os.Stdout, "syslog", b)
+		utils.W(os.Stdout, "syslog", b)
 	} else {
 		// should not happen
 		p.logger.Warn("In plugin, a syslog message could not be serialized to JSON ?!")
@@ -49,34 +49,34 @@ func (p *NetworkPluginProvider) Launch(typ string, test bool, binderClient *sys.
 	scanner.Split(utils.PluginSplit)
 
 	for scanner.Scan() {
-		parts := strings.SplitN(strings.Trim(scanner.Text(), "\r\n "), " ", 2)
+		parts := strings.SplitN(scanner.Text(), " ", 2)
 		command = parts[0]
 		switch command {
 		case "start":
 			if p.syslogConfs == nil || p.parserConfs == nil || p.kafkaConf == nil || p.auditConf == nil {
-				w(os.Stdout, "syslogconferror", []byte("syslog conf or parser conf was not provided to plugin"))
+				utils.W(os.Stdout, "syslogconferror", []byte("syslog conf or parser conf was not provided to plugin"))
 				p.svc = nil
 				// TODO: return
 			} else {
 				p.svc, cancel = Factory(typ, p, generator, binderClient, logger)
 				if p.svc == nil {
-					w(os.Stdout, "starterror", []byte("NewNetworkService returned nil"))
+					utils.W(os.Stdout, "starterror", []byte("NewNetworkService returned nil"))
 				} else {
 					p.svc.SetConf(p.syslogConfs, p.parserConfs)
 					p.svc.SetKafkaConf(p.kafkaConf)
 					p.svc.SetAuditConf(p.auditConf)
 					infos, err := p.svc.Start(test)
 					if err != nil {
-						w(os.Stdout, "starterror", []byte(err.Error()))
+						utils.W(os.Stdout, "starterror", []byte(err.Error()))
 						p.svc = nil
 					} else if len(infos) == 0 && typ != "skewer-relp" && typ != "skewer-journal" && typ != "skewer-audit" {
 						// (RELP, Journal and audit never report info about listening ports)
 						p.svc.Stop()
 						p.svc = nil
-						w(os.Stdout, "nolistenererror", []byte("plugin is inactive"))
+						utils.W(os.Stdout, "nolistenererror", []byte("plugin is inactive"))
 					} else {
 						infosb, _ := json.Marshal(infos)
-						w(os.Stdout, "started", infosb)
+						utils.W(os.Stdout, "started", infosb)
 					}
 				}
 			}
@@ -86,7 +86,7 @@ func (p *NetworkPluginProvider) Launch(typ string, test bool, binderClient *sys.
 				p.svc.WaitClosed()
 
 			}
-			w(os.Stdout, "stopped", []byte("success"))
+			utils.W(os.Stdout, "stopped", []byte("success"))
 			// at the end of the stop return, we *do not return*. So the
 			// plugin process continues to listenn for subsequent commands
 		case "shutdown":
@@ -98,7 +98,7 @@ func (p *NetworkPluginProvider) Launch(typ string, test bool, binderClient *sys.
 				cancel()
 				time.Sleep(400 * time.Millisecond) // give a chance for cleaning to be executed before plugin process ends
 			}
-			w(os.Stdout, "shutdown", []byte("success"))
+			utils.W(os.Stdout, "shutdown", []byte("success"))
 			// at the end of shutdown command, we *return*. And the plugin process stops.
 			return nil
 		case "syslogconf":
@@ -109,7 +109,7 @@ func (p *NetworkPluginProvider) Launch(typ string, test bool, binderClient *sys.
 				p.syslogConfs = sc
 			} else {
 				p.syslogConfs = nil
-				w(os.Stdout, "syslogconferror", []byte(err.Error()))
+				utils.W(os.Stdout, "syslogconferror", []byte(err.Error()))
 			}
 		case "parserconf":
 			args = parts[1]
@@ -119,7 +119,7 @@ func (p *NetworkPluginProvider) Launch(typ string, test bool, binderClient *sys.
 				p.parserConfs = pc
 			} else {
 				p.parserConfs = nil
-				w(os.Stdout, "parserconferror", []byte(err.Error()))
+				utils.W(os.Stdout, "parserconferror", []byte(err.Error()))
 			}
 		case "kafkaconf":
 			args = parts[1]
@@ -129,7 +129,7 @@ func (p *NetworkPluginProvider) Launch(typ string, test bool, binderClient *sys.
 				p.kafkaConf = &kc
 			} else {
 				p.kafkaConf = nil
-				w(os.Stdout, "kafkaconferror", []byte(err.Error()))
+				utils.W(os.Stdout, "kafkaconferror", []byte(err.Error()))
 			}
 		case "auditconf":
 			args = parts[1]
@@ -139,7 +139,7 @@ func (p *NetworkPluginProvider) Launch(typ string, test bool, binderClient *sys.
 				p.auditConf = &ac
 			} else {
 				p.auditConf = nil
-				w(os.Stdout, "auditconferror", []byte(err.Error()))
+				utils.W(os.Stdout, "auditconferror", []byte(err.Error()))
 			}
 		case "gathermetrics":
 			families, err := p.svc.Gather()
@@ -148,7 +148,7 @@ func (p *NetworkPluginProvider) Launch(typ string, test bool, binderClient *sys.
 			}
 			familiesb, err := json.Marshal(families)
 			if err == nil {
-				w(os.Stdout, "metrics", familiesb)
+				utils.W(os.Stdout, "metrics", familiesb)
 			} else {
 				// TODO
 			}
@@ -160,7 +160,7 @@ func (p *NetworkPluginProvider) Launch(typ string, test bool, binderClient *sys.
 	}
 	e := scanner.Err()
 	if e != nil {
-		logger.Error("In plugin controller, scanning stdin met error", "error", e)
+		logger.Error("In plugin provider, scanning stdin met error", "error", e)
 		return e
 	}
 	return nil
