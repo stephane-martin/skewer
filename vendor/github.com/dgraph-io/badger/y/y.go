@@ -18,10 +18,10 @@ package y
 
 import (
 	"hash/crc32"
-	"log"
 	"os"
 	"sync"
-	"sync/atomic"
+
+	"github.com/pkg/errors"
 )
 
 // Constants used in serialization sizes, and in ValueStruct serialization
@@ -30,6 +30,10 @@ const (
 	UserMetaSize = 1
 	CasSize      = 8
 )
+
+// ErrEOF indicates an end of file when trying to read from a memory mapped file
+// and encountering the end of slice.
+var ErrEOF = errors.New("End of mapped region")
 
 var (
 	// This is O_DSYNC (datasync) on platforms that support it -- see file_unix.go
@@ -94,106 +98,41 @@ func (s *Slice) Resize(sz int) []byte {
 	return s.buf[0:sz]
 }
 
-type LevelCloser struct {
-	Name    string
-	running int32
-	nomore  int32
+// Closer holds the two things we need to close a goroutine and wait for it to finish: a chan
+// to tell the goroutine to shut down, and a WaitGroup with which to wait for it to finish shutting
+// down.
+type Closer struct {
 	closed  chan struct{}
 	waiting sync.WaitGroup
 }
 
-type Closer struct {
-	sync.RWMutex
-	levels map[string]*LevelCloser
+func NewCloser(initial int) *Closer {
+	ret := &Closer{closed: make(chan struct{}, 10)}
+	ret.waiting.Add(initial)
+	return ret
 }
 
-func NewCloser() *Closer {
-	return &Closer{
-		levels: make(map[string]*LevelCloser),
-	}
+func (lc *Closer) AddRunning(delta int) {
+	lc.waiting.Add(delta)
 }
 
-func (c *Closer) Register(name string) *LevelCloser {
-	c.Lock()
-	defer c.Unlock()
-
-	lc, has := c.levels[name]
-	if !has {
-		lc = &LevelCloser{Name: name, closed: make(chan struct{}, 10)}
-		lc.waiting.Add(1)
-		c.levels[name] = lc
-	}
-
-	AssertTruef(atomic.LoadInt32(&lc.nomore) == 0, "Can't register with closer after signal.")
-	atomic.AddInt32(&lc.running, 1)
-	return lc
-}
-
-func (c *Closer) Get(name string) *LevelCloser {
-	c.RLock()
-	defer c.RUnlock()
-
-	lc, has := c.levels[name]
-	if !has {
-		log.Fatalf("%q not present in Closer", name)
-		return nil
-	}
-	return lc
-}
-
-func (c *Closer) SignalAll() {
-	c.RLock()
-	defer c.RUnlock()
-
-	for _, l := range c.levels {
-		l.Signal()
-	}
-}
-
-func (c *Closer) WaitForAll() {
-	c.RLock()
-	defer c.RUnlock()
-
-	for _, l := range c.levels {
-		l.Wait()
-	}
-}
-
-func (lc *LevelCloser) AddRunning(delta int32) {
-	atomic.AddInt32(&lc.running, delta)
-}
-
-func (lc *LevelCloser) Signal() {
-	if !atomic.CompareAndSwapInt32(&lc.nomore, 0, 1) {
-		return
-	}
+func (lc *Closer) Signal() {
 	close(lc.closed)
 }
 
-func (lc *LevelCloser) HasBeenClosed() <-chan struct{} {
+func (lc *Closer) HasBeenClosed() <-chan struct{} {
 	return lc.closed
 }
 
-func (lc *LevelCloser) GotSignal() bool {
-	return atomic.LoadInt32(&lc.nomore) == 1
+func (lc *Closer) Done() {
+	lc.waiting.Done()
 }
 
-func (lc *LevelCloser) Done() {
-	if atomic.LoadInt32(&lc.running) <= 0 {
-		return
-	}
-
-	running := atomic.AddInt32(&lc.running, -1)
-	if running == 0 {
-		lc.waiting.Done()
-	}
-}
-
-func (lc *LevelCloser) Wait() {
+func (lc *Closer) Wait() {
 	lc.waiting.Wait()
 }
 
-func (lc *LevelCloser) SignalAndWait() {
+func (lc *Closer) SignalAndWait() {
 	lc.Signal()
 	lc.Wait()
 }

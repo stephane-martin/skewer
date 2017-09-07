@@ -38,6 +38,7 @@ type partitionImpl struct {
 }
 
 func (p *partitionImpl) Get(key string) ([]byte, error) {
+	val := []byte{}
 	item := &badger.KVItem{}
 	err := p.parent.Get([]byte(p.prefix+key), item)
 	if err != nil {
@@ -46,7 +47,11 @@ func (p *partitionImpl) Get(key string) ([]byte, error) {
 	if item == nil {
 		return nil, nil
 	}
-	return item.Value(), nil
+	err = item.Value(func(v []byte) { val = append(val, v...) })
+	if err != nil {
+		return nil, err
+	}
+	return val, nil
 }
 
 func (p *partitionImpl) Set(key string, value []byte) error {
@@ -125,9 +130,9 @@ func (p *partitionImpl) Count() int {
 
 func (p *partitionImpl) KeyIterator(prefetchSize int) PartitionKeyIterator {
 	opts := badger.IteratorOptions{
-		FetchValues:  false,
-		PrefetchSize: prefetchSize,
-		Reverse:      false,
+		PrefetchValues: false,
+		PrefetchSize:   prefetchSize,
+		Reverse:        false,
 	}
 	iter := p.parent.NewIterator(opts)
 	return &partitionIterImpl{partition: p, iterator: iter}
@@ -135,9 +140,9 @@ func (p *partitionImpl) KeyIterator(prefetchSize int) PartitionKeyIterator {
 
 func (p *partitionImpl) KeyValueIterator(prefetchSize int) PartitionKeyValueIterator {
 	opts := badger.IteratorOptions{
-		FetchValues:  true,
-		PrefetchSize: prefetchSize,
-		Reverse:      false,
+		PrefetchValues: true,
+		PrefetchSize:   prefetchSize,
+		Reverse:        false,
 	}
 	iter := p.parent.NewIterator(opts)
 	return &partitionIterImpl{partition: p, iterator: iter}
@@ -179,11 +184,13 @@ func (i *partitionIterImpl) Key() string {
 }
 
 func (i *partitionIterImpl) Value() []byte {
+	val := []byte{}
 	item := i.iterator.Item()
 	if item == nil {
 		return nil
 	} else {
-		return item.Value()
+		item.Value(func(v []byte) { val = append(val, v...) })
+		return val
 	}
 }
 

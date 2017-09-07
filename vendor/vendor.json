@@ -63,10 +63,10 @@
 			"revisionTime": "2016-10-29T20:57:26Z"
 		},
 		{
-			"checksumSHA1": "jmObSxfFyVDWd0e3uUwsDO1We+s=",
+			"checksumSHA1": "xRfD1NPtULnES09k7CHYf13rRAw=",
 			"path": "github.com/dgraph-io/badger",
-			"revision": "ad23a425b3c87b8223780cb882bed568ca14b9f0",
-			"revisionTime": "2017-08-15T01:13:50Z",
+			"revision": "de9a90f058064a76f04153a91a8b0f7125116085",
+			"revisionTime": "2017-09-07T08:30:54Z",
 			"tree": true
 		},
 		{

@@ -100,7 +100,7 @@ func newLevelsController(kv *KV, mf *Manifest) (*levelsController, error) {
 		s.cstatus.levels[i] = new(levelCompactStatus)
 	}
 
-	// Compare manifest against directory, check for existant/non-existant files, and remove.
+	// Compare manifest against directory, check for existent/non-existent files, and remove.
 	if err := revertToManifest(kv, mf, getIDMap(kv.opt.Dir)); err != nil {
 		return nil, err
 	}
@@ -116,7 +116,7 @@ func newLevelsController(kv *KV, mf *Manifest) (*levelsController, error) {
 			return nil, errors.Wrapf(err, "Opening file: %q", fname)
 		}
 
-		t, err := table.OpenTable(fd, kv.opt.MapTablesTo)
+		t, err := table.OpenTable(fd, kv.opt.TableLoadingMode)
 		if err != nil {
 			closeAllTables(tables)
 			return nil, errors.Wrapf(err, "Opening table: %q", fname)
@@ -144,7 +144,7 @@ func newLevelsController(kv *KV, mf *Manifest) (*levelsController, error) {
 	// manifest file).
 	if err := syncDir(kv.opt.Dir); err != nil {
 		_ = s.close()
-		return nil, errors.Wrap(err, "Directory entry for compaction log")
+		return nil, err
 	}
 
 	return s, nil
@@ -171,27 +171,28 @@ func (s *levelsController) cleanupLevels() error {
 	return firstErr
 }
 
-func (s *levelsController) startCompact(lc *y.LevelCloser) {
+func (s *levelsController) startCompact(lc *y.Closer) {
 	n := s.kv.opt.NumCompactors
-	lc.AddRunning(int32(n - 1))
+	lc.AddRunning(n - 1)
 	for i := 0; i < n; i++ {
 		go s.runWorker(lc)
 	}
 }
 
-func (s *levelsController) runWorker(lc *y.LevelCloser) {
+func (s *levelsController) runWorker(lc *y.Closer) {
 	defer lc.Done()
 	if s.kv.opt.DoNotCompact {
 		return
 	}
 
 	time.Sleep(time.Duration(rand.Int31n(1000)) * time.Millisecond)
-	timeChan := time.Tick(time.Second)
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
 
 	for {
 		select {
 		// Can add a done channel or other stuff.
-		case <-timeChan:
+		case <-ticker.C:
 			prios := s.pickCompactLevels()
 			for _, p := range prios {
 				// TODO: Handle error.
@@ -206,16 +207,32 @@ func (s *levelsController) runWorker(lc *y.LevelCloser) {
 	}
 }
 
+// Returns true if level zero may be compacted, without accounting for compactions that already
+// might be happening.
+func (s *levelsController) isLevel0Compactable() bool {
+	return s.levels[0].numTables() >= s.kv.opt.NumLevelZeroTables
+}
+
+// Returns true if the non-zero level may be compacted.  delSize provides the size of the tables
+// which are currently being compacted so that we treat them as already having started being
+// compacted (because they have been, yet their size is already counted in getTotalSize).
+func (l *levelHandler) isCompactable(delSize int64) bool {
+	return l.getTotalSize()-delSize >= l.maxTotalSize
+}
+
 type compactionPriority struct {
 	level int
 	score float64
 }
 
-// pickCompactLevel determines which level to compact. Return -1 if not found.
+// pickCompactLevel determines which level to compact.
 // Based on: https://github.com/facebook/rocksdb/wiki/Leveled-Compaction
 func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
-	if !s.cstatus.overlapsWith(0, infRange) && // already being compacted.
-		s.levels[0].numTables() >= s.kv.opt.NumLevelZeroTables {
+	// This function must use identical criteria for guaranteeing compaction's progress that
+	// addLevel0Table uses.
+
+	// cstatus is checked to see if level 0's tables are already being compacted
+	if !s.cstatus.overlapsWith(0, infRange) && s.isLevel0Compactable() {
 		pri := compactionPriority{
 			level: 0,
 			score: float64(s.levels[0].numTables()) / float64(s.kv.opt.NumLevelZeroTables),
@@ -224,10 +241,10 @@ func (s *levelsController) pickCompactLevels() (prios []compactionPriority) {
 	}
 
 	for i, l := range s.levels[1:] {
-		// Don't consider those tables that are being compacted right now.
+		// Don't consider those tables that are already being compacted right now.
 		delSize := s.cstatus.delSize(i + 1)
 
-		if l.getTotalSize()-delSize >= l.maxTotalSize {
+		if l.isCompactable(delSize) {
 			pri := compactionPriority{
 				level: i + 1,
 				score: float64(l.getTotalSize()-delSize) / float64(l.maxTotalSize),
@@ -300,7 +317,7 @@ func (s *levelsController) compactBuildTables(
 				return
 			}
 
-			tbl, err := table.OpenTable(fd, s.kv.opt.MapTablesTo)
+			tbl, err := table.OpenTable(fd, s.kv.opt.TableLoadingMode)
 			// decrRef is added below.
 			resultCh <- newTableResult{tbl, errors.Wrapf(err, "Unable to open table: %q", fd.Name())}
 		}(builder)
@@ -624,9 +641,11 @@ func (s *levelsController) addLevel0Table(t *table.Table) error {
 		// will very quickly fill up level 0 again and if the compaction strategy favors level 0,
 		// then level 1 is going to super full.
 		for {
-			// fmt.Printf("level zero size=%d\n", s.levels[0].getTotalSize())
-			// fmt.Printf("level one size=%d/%d\n", s.levels[1].getTotalSize(), s.levels[1].maxTotalSize)
-			if s.levels[0].getTotalSize() == 0 && s.levels[1].getTotalSize() < s.levels[1].maxTotalSize {
+			// Passing 0 for delSize to compactable means we're treating incomplete compactions as
+			// not having finished -- we wait for them to finish.  Also, it's crucial this behavior
+			// replicates pickCompactLevels' behavior in computing compactability in order to
+			// guarantee progress.
+			if !s.isLevel0Compactable() && !s.levels[1].isCompactable(0) {
 				break
 			}
 			time.Sleep(10 * time.Millisecond)
