@@ -12,8 +12,8 @@ import (
 	"sync"
 
 	"github.com/inconshreveable/log15"
+	"github.com/kardianos/osext"
 	"github.com/stephane-martin/skewer/consul"
-	"github.com/stephane-martin/skewer/sys"
 	"github.com/stephane-martin/skewer/utils"
 )
 
@@ -65,7 +65,7 @@ func (c *ConfigurationService) Chan() chan *BaseConfig {
 }
 
 func (c *ConfigurationService) Start() error {
-	exe, err := sys.Executable()
+	exe, err := osext.Executable()
 	if err != nil {
 		close(c.output)
 		return err

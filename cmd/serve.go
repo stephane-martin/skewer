@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/inconshreveable/log15"
+	"github.com/kardianos/osext"
 	"github.com/spf13/cobra"
 	"github.com/stephane-martin/skewer/auditlogs"
 	"github.com/stephane-martin/skewer/conf"
@@ -74,7 +75,7 @@ connects to Kafka, and forwards messages to Kafka.`,
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 				}
-				exe, err := os.Executable()
+				exe, err := osext.Executable()
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
 					os.Exit(-1)
@@ -215,7 +216,7 @@ connects to Kafka, and forwards messages to Kafka.`,
 		logger.Debug("Target user", "uid", numuid, "gid", numgid)
 
 		// execute child under the new user
-		exe, err := sys.Executable() // custom Executable function to support OpenBSD
+		exe, err := osext.Executable() // custom Executable function to support OpenBSD
 		if err != nil {
 			logger.Crit("Error getting executable name", "error", err)
 			os.Exit(-1)

@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/inconshreveable/log15"
+	"github.com/kardianos/osext"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
-	"github.com/stephane-martin/skewer/sys"
 	"github.com/stephane-martin/skewer/utils"
 )
 
@@ -335,7 +335,7 @@ func (s *NetworkPlugin) Create(test bool) error {
 
 	s.ShutdownChan = make(chan struct{})
 
-	exe, err := sys.Executable()
+	exe, err := osext.Executable()
 	if err != nil {
 		return err
 	}
