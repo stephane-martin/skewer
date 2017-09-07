@@ -1,7 +1,6 @@
 package linux
 
 import (
-	"context"
 	"strconv"
 	"strings"
 	"sync"
@@ -91,14 +90,14 @@ type JournalService struct {
 	reader    journald.JournaldReader
 	logger    log15.Logger
 	stopchan  chan struct{}
-	Conf      *conf.JournaldConfig
+	Conf      conf.JournaldConfig
 	wgroup    *sync.WaitGroup
 	generator chan ulid.ULID
 	metrics   *journalMetrics
 	registry  *prometheus.Registry
 }
 
-func NewJournalService(ctx context.Context, stasher model.Stasher, gen chan ulid.ULID, l log15.Logger) (*JournalService, error) {
+func NewJournalService(stasher model.Stasher, gen chan ulid.ULID, l log15.Logger) (*JournalService, error) {
 	var err error
 	s := JournalService{
 		stasher:   stasher,
@@ -109,7 +108,7 @@ func NewJournalService(ctx context.Context, stasher model.Stasher, gen chan ulid
 		wgroup:    &sync.WaitGroup{},
 	}
 	s.registry.MustRegister(s.metrics.IncomingMsgsCounter)
-	s.reader, err = journald.NewReader(ctx, s.logger)
+	s.reader, err = journald.NewReader(s.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -167,21 +166,15 @@ func (s *JournalService) Stop() {
 	s.wgroup.Wait()
 }
 
+func (s *JournalService) Shutdown() {
+	s.Stop()
+	s.reader.Shutdown()
+}
+
 func (s *JournalService) WaitClosed() {
 	s.wgroup.Wait()
 }
 
-func (s *JournalService) SetConf(sc []*conf.SyslogConfig, pc []conf.ParserConfig) {
-	s.Conf = &conf.JournaldConfig{
-		ConfID:        sc[0].ConfID,
-		FilterFunc:    sc[0].FilterFunc,
-		PartitionFunc: sc[0].PartitionFunc,
-		PartitionTmpl: sc[0].PartitionTmpl,
-		TopicFunc:     sc[0].TopicFunc,
-		TopicTmpl:     sc[0].TopicTmpl,
-	}
+func (s *JournalService) SetConf(c conf.JournaldConfig) {
+	s.Conf = c
 }
-
-func (s *JournalService) SetKafkaConf(kc *conf.KafkaConfig) {}
-
-func (s *JournalService) SetAuditConf(ac *conf.AuditConfig) {}

@@ -17,14 +17,13 @@ type Store interface {
 	Errors() chan struct{}
 	WaitFinished()
 	GetSyslogConfig(configID string) (*conf.SyslogConfig, error)
-	//StoreSyslogConfig(config *conf.SyslogConfig) error
-	StoreAllSyslogConfigs(c *conf.BaseConfig) error
+	StoreAllSyslogConfigs(c conf.BaseConfig) error
 	ReadAllBadgers() (map[string]string, map[string]string, map[string]string)
 	Gather() ([]*dto.MetricFamily, error)
 }
 
 type Forwarder interface {
-	Forward(ctx context.Context, from Store, to conf.KafkaConfig) bool
+	Forward(ctx context.Context, from Store, to conf.KafkaConfig)
 	ErrorChan() chan struct{}
 	WaitFinished()
 	Gather() ([]*dto.MetricFamily, error)

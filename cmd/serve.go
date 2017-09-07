@@ -21,7 +21,6 @@ import (
 	"github.com/stephane-martin/skewer/metrics"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services"
-	"github.com/stephane-martin/skewer/store"
 	"github.com/stephane-martin/skewer/sys"
 	"github.com/stephane-martin/skewer/utils/logging"
 )
@@ -145,12 +144,15 @@ connects to Kafka, and forwards messages to Kafka.`,
 		rootlogger := logging.SetLogging(loglevelFlag, logjsonFlag, syslogFlag, logfilenameFlag)
 		logger := rootlogger.New("proc", "parent")
 
+		handlesToClose := []int{}
+
 		mustSocketPair := func(typ int) (int, int) {
 			a, b, err := sys.SocketPair(typ)
 			if err != nil {
 				logger.Crit("SocketPair() error", "error", err)
 				os.Exit(-1)
 			}
+			handlesToClose = append(handlesToClose, a)
 			return a, b
 		}
 		getLoggerConn := func(handle int) net.Conn {
@@ -202,8 +204,12 @@ connects to Kafka, and forwards messages to Kafka.`,
 		loggerConfigurationHandle, loggerParentConfigurationHandle := mustSocketPair(syscall.SOCK_DGRAM)
 		loggerConfigurationConn := getLoggerConn(loggerParentConfigurationHandle)
 
+		loggerStoreHandle, loggerParentStoreHandle := mustSocketPair(syscall.SOCK_DGRAM)
+		loggerStoreConn := getLoggerConn(loggerParentStoreHandle)
+
 		logging.LogReceiver(context.Background(), rootlogger, []net.Conn{
 			loggerChildConn, loggerTcpConn, loggerUdpConn, loggerRelpConn, loggerJournalConn, loggerAuditConn, loggerConfigurationConn,
+			loggerStoreConn,
 		})
 
 		logger.Debug("Target user", "uid", numuid, "gid", numgid)
@@ -233,6 +239,7 @@ connects to Kafka, and forwards messages to Kafka.`,
 				os.NewFile(uintptr(loggerJournalHandle), "journal_logger_file"),
 				os.NewFile(uintptr(loggerAuditHandle), "audit_logger_file"),
 				os.NewFile(uintptr(loggerConfigurationHandle), "config_logger_file"),
+				os.NewFile(uintptr(loggerStoreHandle), "store_logger_file"),
 			},
 			Env: []string{"SKEWER_CHILD=TRUE", "PATH=/bin:/usr/bin"},
 		}
@@ -244,17 +251,9 @@ connects to Kafka, and forwards messages to Kafka.`,
 			logger.Crit("Error starting child", "error", err)
 			os.Exit(-1)
 		}
-		syscall.Close(binderChildHandle)
-		syscall.Close(binderTcpHandle)
-		syscall.Close(binderUdpHandle)
-		syscall.Close(binderRelpHandle)
-		syscall.Close(loggerChildHandle)
-		syscall.Close(loggerTcpHandle)
-		syscall.Close(loggerUdpHandle)
-		syscall.Close(loggerRelpHandle)
-		syscall.Close(loggerJournalHandle)
-		syscall.Close(loggerAuditHandle)
-		syscall.Close(loggerConfigurationHandle)
+		for _, handle := range handlesToClose {
+			syscall.Close(handle)
+		}
 
 		sig_chan := make(chan os.Signal, 10)
 		once := sync.Once{}
@@ -332,8 +331,6 @@ func Serve() error {
 		defer binderClient.Quit()
 	}
 
-	var st store.Store
-
 	params := consul.ConnParams{
 		Address:    consulAddr,
 		Datacenter: consulDC,
@@ -369,8 +366,51 @@ func Serve() error {
 	}
 
 	metricsServer := &metrics.MetricsServer{}
-	// prepare the message store
-	st, err = store.NewStore(gctx, c.Store, logger)
+
+	st := services.NewStorePlugin(14, logger)
+	/*
+		st, err := store.NewStore(gctx, c.Store, logger)
+		if err != nil {
+			logger.Crit("Can't create the message Store", "error", err)
+			time.Sleep(100 * time.Millisecond)
+			gCancel()
+			cancelLogger()
+			return err
+		}
+		err = st.StoreAllSyslogConfigs(c)
+		if err != nil {
+			logger.Crit("Can't store the syslog configurations", "error", err)
+			time.Sleep(100 * time.Millisecond)
+			gCancel()
+			cancelLogger()
+			return err
+		}
+
+		// prepare the kafka forwarder
+		forwarder := store.NewForwarder(testFlag, logger)
+		forwarderMutex := &sync.Mutex{}
+		var cancelForwarder context.CancelFunc
+
+		startForwarder := func(kafkaConf conf.KafkaConfig) {
+			forwarderMutex.Lock()
+			newForwarderCtx, newCancelForwarder := context.WithCancel(shutdownCtx)
+			if forwarder.Forward(newForwarderCtx, st, kafkaConf) { // returns true when success
+				cancelForwarder = newCancelForwarder
+			}
+			forwarderMutex.Unlock()
+		}
+
+		stopForwarder := func() {
+			forwarderMutex.Lock()
+			cancelForwarder()
+			forwarder.WaitFinished()
+			forwarderMutex.Unlock()
+		}
+
+		startForwarder(c.Kafka)
+	*/
+	st.SetConf(*c)
+	err = st.Create(testFlag)
 	if err != nil {
 		logger.Crit("Can't create the message Store", "error", err)
 		time.Sleep(100 * time.Millisecond)
@@ -378,58 +418,24 @@ func Serve() error {
 		cancelLogger()
 		return err
 	}
-	err = st.StoreAllSyslogConfigs(c)
+	_, err = st.Start()
 	if err != nil {
-		logger.Crit("Can't store the syslog configurations", "error", err)
+		logger.Crit("Can't start the message Store", "error", err)
 		time.Sleep(100 * time.Millisecond)
 		gCancel()
 		cancelLogger()
 		return err
 	}
 
-	// prepare the kafka forwarder
-	forwarder := store.NewForwarder(testFlag, logger)
-	forwarderMutex := &sync.Mutex{}
-	var cancelForwarder context.CancelFunc
-
-	startForwarder := func(kafkaConf conf.KafkaConfig) {
-		forwarderMutex.Lock()
-		defer forwarderMutex.Unlock()
-		newForwarderCtx, newCancelForwarder := context.WithCancel(shutdownCtx)
-		if forwarder.Forward(newForwarderCtx, st, kafkaConf) {
-			cancelForwarder = newCancelForwarder
-		}
-	}
-	stopForwarder := func() {
-		forwarderMutex.Lock()
-		defer forwarderMutex.Unlock()
-		cancelForwarder()
-		forwarder.WaitFinished()
-	}
-
-	startForwarder(c.Kafka)
-
-	defer func() {
-		// wait that the forwarder has been closed to shutdown the store
-		stopForwarder()   // after stopForwarder() has returned, no more ACK/NACK will be sent to the store
-		gCancel()         // stop the Store goroutines (close the inputs channel)
-		st.WaitFinished() // wait that the badger databases are correctly closed
-		if registry != nil {
-			registry.WaitFinished() // wait that the services have been unregistered from Consul
-		}
-		cancelLogger()
-		time.Sleep(time.Second)
-	}()
-
 	sig_chan := make(chan os.Signal, 10)
 	signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 
 	// retrieve linux audit logs
-	relpServicePlugin := services.NewNetworkPlugin("relp", st, 6, 10, logger)
-	tcpServicePlugin := services.NewNetworkPlugin("tcp", st, 4, 8, logger)
-	udpServicePlugin := services.NewNetworkPlugin("udp", st, 5, 9, logger)
-	auditServicePlugin := services.NewNetworkPlugin("audit", st, 0, 12, logger)
-	journalServicePlugin := services.NewNetworkPlugin("journal", st, 0, 11, logger)
+	relpServicePlugin := services.NewNetworkPlugin(services.RELP, st, 6, 10, logger)
+	tcpServicePlugin := services.NewNetworkPlugin(services.TCP, st, 4, 8, logger)
+	udpServicePlugin := services.NewNetworkPlugin(services.UDP, st, 5, 9, logger)
+	auditServicePlugin := services.NewNetworkPlugin(services.Audit, st, 0, 12, logger)
+	journalServicePlugin := services.NewNetworkPlugin(services.Journal, st, 0, 11, logger)
 
 	startAudit := func(curconf *conf.BaseConfig) {
 		if auditlogs.Supported {
@@ -446,9 +452,7 @@ func Serve() error {
 						logger.Warn("Error creating Audit plugin", "error", err)
 						return
 					}
-					auditServicePlugin.SetConf(curconf.Syslog, curconf.Parsers)
-					auditServicePlugin.SetKafkaConf(&curconf.Kafka)
-					auditServicePlugin.SetAuditConf(curconf.Audit)
+					auditServicePlugin.SetConf(*curconf)
 					_, err = auditServicePlugin.Start()
 					if err == nil {
 						logger.Debug("Linux audit plugin has been started")
@@ -470,22 +474,12 @@ func Serve() error {
 			logger.Info("Journald is supported")
 			if c.Journald.Enabled {
 				logger.Info("Journald service is enabled")
-				curjconf := &conf.SyslogConfig{
-					ConfID:        curconf.Journald.ConfID,
-					FilterFunc:    curconf.Journald.FilterFunc,
-					PartitionFunc: curconf.Journald.PartitionFunc,
-					PartitionTmpl: curconf.Journald.PartitionTmpl,
-					TopicFunc:     curconf.Journald.TopicFunc,
-					TopicTmpl:     curconf.Journald.TopicTmpl,
-				}
 				err := journalServicePlugin.Create(testFlag)
 				if err != nil {
 					logger.Warn("Error creating Journald plugin", "error", err)
 					return
 				}
-				journalServicePlugin.SetConf([]*conf.SyslogConfig{curjconf}, curconf.Parsers)
-				journalServicePlugin.SetKafkaConf(&curconf.Kafka)
-				journalServicePlugin.SetAuditConf(curconf.Audit)
+				journalServicePlugin.SetConf(*curconf)
 				_, err = journalServicePlugin.Start()
 				if err != nil {
 					logger.Error("Error starting Journald plugin", "error", err)
@@ -506,9 +500,7 @@ func Serve() error {
 			logger.Warn("Error creating RELP plugin", "error", err)
 			return
 		}
-		relpServicePlugin.SetConf(curconf.Syslog, curconf.Parsers)
-		relpServicePlugin.SetKafkaConf(&curconf.Kafka)
-		relpServicePlugin.SetAuditConf(curconf.Audit)
+		relpServicePlugin.SetConf(*curconf)
 		_, err = relpServicePlugin.Start()
 		if err != nil {
 			logger.Warn("Error starting RELP plugin", "error", err)
@@ -525,9 +517,7 @@ func Serve() error {
 			logger.Warn("Error creating TCP plugin", "error", err)
 			return
 		}
-		tcpServicePlugin.SetConf(curconf.Syslog, curconf.Parsers)
-		tcpServicePlugin.SetKafkaConf(&curconf.Kafka)
-		tcpServicePlugin.SetAuditConf(curconf.Audit)
+		tcpServicePlugin.SetConf(*curconf)
 		tcpinfos, err = tcpServicePlugin.Start()
 		if err != nil {
 			logger.Warn("Error starting TCP plugin", "error", err)
@@ -549,9 +539,7 @@ func Serve() error {
 			logger.Warn("Error creating UDP plugin", "error", err)
 			return
 		}
-		udpServicePlugin.SetConf(curconf.Syslog, curconf.Parsers)
-		udpServicePlugin.SetKafkaConf(&curconf.Kafka)
-		udpServicePlugin.SetAuditConf(curconf.Audit)
+		udpServicePlugin.SetConf(*curconf)
 		udpinfos, err := udpServicePlugin.Start()
 		if err != nil {
 			logger.Warn("Error starting UDP plugin", "error", err)
@@ -576,7 +564,6 @@ func Serve() error {
 		tcpServicePlugin,
 		udpServicePlugin,
 		st,
-		forwarder,
 	)
 
 	stopTCP := func() {
@@ -617,16 +604,12 @@ func Serve() error {
 	}
 
 	Reload := func(newConf *conf.BaseConfig) {
-		err := st.StoreAllSyslogConfigs(newConf)
-		if err != nil {
-			logger.Crit("Can't store the syslog configurations", "error", err)
-			// TODO: what to do then ?
-		}
 		// first, let's stop the HTTP server for metrics
 		metricsServer.Stop()
 		// reset the kafka forwarder
-		stopForwarder()
-		startForwarder(newConf.Kafka)
+		st.Stop()
+		st.SetConf(*newConf)
+		st.Start() // TODO: check err
 
 		wg := &sync.WaitGroup{}
 
@@ -683,31 +666,41 @@ func Serve() error {
 			tcpServicePlugin,
 			udpServicePlugin,
 			st,
-			forwarder,
 		)
 	}
+
+	destructor := func() {
+		stopRELP()
+		logger.Debug("The RELP service has been stopped")
+
+		stopJournal(true)
+		logger.Debug("Stopped journald service")
+
+		stopAudit()
+		logger.Debug("Stopped linux audit service")
+
+		stopTCP()
+		logger.Debug("The TCP service has been stopped")
+
+		stopUDP()
+		logger.Debug("The UDP service has been stopped")
+
+		gCancel()
+		st.Shutdown(2 * time.Second)
+		if registry != nil {
+			registry.WaitFinished() // wait that the services have been unregistered from Consul
+		}
+		cancelLogger()
+		time.Sleep(time.Second)
+	}
+
+	defer destructor()
 
 	logger.Debug("Main loop is starting")
 	for {
 		select {
 		case <-shutdownCtx.Done():
 			logger.Info("Shutting down")
-
-			stopRELP()
-			logger.Debug("The RELP service has been stopped")
-
-			stopJournal(true)
-			logger.Debug("Stopped journald service")
-
-			stopAudit()
-			logger.Debug("Stopped linux audit service")
-
-			stopTCP()
-			logger.Debug("The TCP service has been stopped")
-
-			stopUDP()
-			logger.Debug("The UDP service has been stopped")
-
 			return nil
 
 		case newConf, more := <-newConfChannel:
@@ -742,20 +735,21 @@ func Serve() error {
 				logger.Warn("Unknown signal received", "signal", sig)
 			}
 
-		case <-st.Errors():
-			logger.Warn("The store had a fatal error")
+		case <-st.ShutdownChan:
+			logger.Crit("The store had a fatal error")
 			shutdown()
+			/*
+				case <-forwarder.ErrorChan():
+					logger.Warn("Forwarder has received a fatal Kafka error: resetting connection to Kafka")
+					kafkaConf := c.Kafka
+					stopForwarder()
+					go func() {
+						time.Sleep(time.Second)
+						startForwarder(kafkaConf)
+					}()
 
-		case <-forwarder.ErrorChan():
-			logger.Warn("Forwarder has received a fatal Kafka error: resetting connection to Kafka")
-			kafkaConf := c.Kafka
-			stopForwarder()
-			go func() {
-				time.Sleep(time.Second)
-				startForwarder(kafkaConf)
-			}()
+			*/
 
 		}
-
 	}
 }

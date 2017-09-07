@@ -3,8 +3,8 @@ package store
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/inconshreveable/log15"
@@ -88,19 +88,10 @@ func (fwder *kafkaForwarder) WaitFinished() {
 	fwder.wg.Wait()
 }
 
-func (fwder *kafkaForwarder) Forward(ctx context.Context, from Store, to conf.KafkaConfig) bool {
-	// ensure Forward is only executed once
-	if !atomic.CompareAndSwapInt32(&fwder.forwarding, 0, 1) {
-		return false
-	}
+func (fwder *kafkaForwarder) Forward(ctx context.Context, from Store, to conf.KafkaConfig) {
 	fwder.errorChan = make(chan struct{})
 	fwder.wg.Add(1)
 	go fwder.doForward(ctx, from, to)
-	go func() {
-		fwder.wg.Wait()
-		atomic.StoreInt32(&fwder.forwarding, 0)
-	}()
-	return true
 }
 
 func (fwder *kafkaForwarder) doForward(ctx context.Context, from Store, to conf.KafkaConfig) {
@@ -230,8 +221,7 @@ ForOutputs:
 				v, _ := kafkaMsg.Value.Encode()
 				pkey, _ := kafkaMsg.Key.Encode()
 				fwder.logger.Info("Message", "partitionkey", string(pkey), "topic", kafkaMsg.Topic, "msgid", message.Uid)
-				fmt.Println(string(v))
-				fmt.Println()
+				fmt.Fprintln(os.Stderr, string(v))
 				from.ACK(message.Uid)
 			} else {
 				producer.Input() <- kafkaMsg

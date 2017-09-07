@@ -57,7 +57,7 @@ func NewTcpMetrics() *tcpMetrics {
 	return m
 }
 
-type tcpServerImpl struct {
+type TcpServiceImpl struct {
 	StreamingService
 	status     TcpServerStatus
 	statusChan chan TcpServerStatus
@@ -67,12 +67,12 @@ type tcpServerImpl struct {
 	registry   *prometheus.Registry
 }
 
-func (s *tcpServerImpl) init() {
+func (s *TcpServiceImpl) init() {
 	s.StreamingService.init()
 }
 
-func NewTcpService(stasher model.Stasher, gen chan ulid.ULID, b *sys.BinderClient, l log15.Logger) *tcpServerImpl {
-	s := tcpServerImpl{
+func NewTcpService(stasher model.Stasher, gen chan ulid.ULID, b *sys.BinderClient, l log15.Logger) *TcpServiceImpl {
+	s := TcpServiceImpl{
 		status:    TcpStopped,
 		stasher:   stasher,
 		generator: gen,
@@ -88,25 +88,17 @@ func NewTcpService(stasher model.Stasher, gen chan ulid.ULID, b *sys.BinderClien
 	return &s
 }
 
-func (s *tcpServerImpl) Gather() ([]*dto.MetricFamily, error) {
+func (s *TcpServiceImpl) Gather() ([]*dto.MetricFamily, error) {
 	return s.registry.Gather()
 }
 
-func (s *tcpServerImpl) SetKafkaConf(kc *conf.KafkaConfig) {}
-
-func (s *tcpServerImpl) SetAuditConf(ac *conf.AuditConfig) {}
-
-func (s *tcpServerImpl) WaitClosed() {
-	var more bool
-	for {
-		_, more = <-s.statusChan
-		if !more {
-			return
-		}
+func (s *TcpServiceImpl) WaitClosed() {
+	// wait that statusChan is closed
+	for range s.statusChan {
 	}
 }
 
-func (s *tcpServerImpl) Start(test bool) ([]*model.ListenerInfo, error) {
+func (s *TcpServiceImpl) Start(test bool) ([]*model.ListenerInfo, error) {
 	s.LockStatus()
 	if s.status != TcpStopped {
 		s.UnlockStatus()
@@ -128,7 +120,11 @@ func (s *tcpServerImpl) Start(test bool) ([]*model.ListenerInfo, error) {
 	return infos, nil
 }
 
-func (s *tcpServerImpl) Stop() {
+func (s *TcpServiceImpl) Shutdown() {
+	s.Stop()
+}
+
+func (s *TcpServiceImpl) Stop() {
 	s.LockStatus()
 	if s.status != TcpStarted {
 		s.UnlockStatus()
@@ -146,7 +142,7 @@ func (s *tcpServerImpl) Stop() {
 }
 
 type tcpHandler struct {
-	Server *tcpServerImpl
+	Server *TcpServiceImpl
 }
 
 func (h tcpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) {

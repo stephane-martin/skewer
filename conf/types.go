@@ -5,13 +5,13 @@ import (
 )
 
 type BaseConfig struct {
-	Syslog   []*SyslogConfig `mapstructure:"syslog" toml:"syslog" json:"syslog"`
-	Kafka    KafkaConfig     `mapstructure:"kafka" toml:"kafka" json:"kafka"`
-	Store    StoreConfig     `mapstructure:"store" toml:"store" json:"store"`
-	Parsers  []ParserConfig  `mapstructure:"parser" toml:"parser" json:"parser"`
-	Journald *JournaldConfig `mapstructure:"journald" toml:"journald" json:"journald"`
-	Audit    *AuditConfig    `mapstructure:"audit" toml:"audit" json:"audit"`
-	Metrics  MetricsConfig   `mapstructure:"metrics" toml:"metrics" json:"metrics"`
+	Syslog   []SyslogConfig `mapstructure:"syslog" toml:"syslog" json:"syslog"`
+	Kafka    KafkaConfig    `mapstructure:"kafka" toml:"kafka" json:"kafka"`
+	Store    StoreConfig    `mapstructure:"store" toml:"store" json:"store"`
+	Parsers  []ParserConfig `mapstructure:"parser" toml:"parser" json:"parser"`
+	Journald JournaldConfig `mapstructure:"journald" toml:"journald" json:"journald"`
+	Audit    AuditConfig    `mapstructure:"audit" toml:"audit" json:"audit"`
+	Metrics  MetricsConfig  `mapstructure:"metrics" toml:"metrics" json:"metrics"`
 }
 
 type MetricsConfig struct {
@@ -30,11 +30,11 @@ type ParserConfig struct {
 }
 
 type StoreConfig struct {
-	Dirname string   `mapstructure:"-" toml:"-" json:"-"`
+	Dirname string   `mapstructure:"-" toml:"-" json:"dirname"`
 	Maxsize int64    `mapstructure:"max_size" toml:"max_size" json:"max_size"`
 	FSync   bool     `mapstructure:"fsync" toml:"fsync" json:"fsync"`
 	Secret  string   `mapstructure:"secret" toml:"-" json:"secret"`
-	SecretB [32]byte `mapstructure:"-" toml:"-" json:"-"`
+	SecretB [32]byte `mapstructure:"-" toml:"-" json:"secretb"`
 }
 
 type KafkaConfig struct {
@@ -75,7 +75,7 @@ type JournaldConfig struct {
 	PartitionTmpl string `mapstructure:"partition_key_tmpl" toml:"partition_key_tmpl" json:"partition_key_tmpl"`
 	PartitionFunc string `mapstructure:"partition_key_func" toml:"partition_key_func" json:"partition_key_func"`
 	FilterFunc    string `mapstructure:"filter_func" toml:"filter_func" json:"filter_func"`
-	ConfID        string `mapstructure:"-" toml:"-" json:"-"`
+	ConfID        string `mapstructure:"-" toml:"-" json:"conf_id"`
 }
 
 type AuditConfig struct {

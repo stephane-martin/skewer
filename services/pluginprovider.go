@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/conf"
@@ -16,143 +15,126 @@ import (
 	"github.com/stephane-martin/skewer/utils"
 )
 
-// NetworkPluginProvider implements the TCP service in a separated process
-type NetworkPluginProvider struct {
-	svc         NetworkService
-	logger      log15.Logger
-	syslogConfs []*conf.SyslogConfig
-	parserConfs []conf.ParserConfig
-	kafkaConf   *conf.KafkaConfig
-	auditConf   *conf.AuditConfig
+type Stasher struct {
+	typ    NetworkServiceType
+	logger log15.Logger
 }
 
-func (p *NetworkPluginProvider) Stash(m *model.TcpUdpParsedMessage) {
+func (s *Stasher) Stash(m *model.TcpUdpParsedMessage) {
+	// when the plugin *produces* a syslog message, write it to stdout
 	b, err := m.MarshalMsg(nil)
 	if err == nil {
 		utils.W(os.Stdout, "syslog", b)
 	} else {
 		// should not happen
-		p.logger.Warn("In plugin, a syslog message could not be serialized to JSON ?!")
+		s.logger.Warn("A syslog message could not be serialized", "type", s.typ)
 	}
 }
 
-func (p *NetworkPluginProvider) Launch(typ string, test bool, binderClient *sys.BinderClient, logger log15.Logger) error {
+func Launch(typ NetworkServiceType, test bool, binderClient *sys.BinderClient, logger log15.Logger) error {
 	generator := utils.Generator(context.Background(), logger)
-	p.logger = logger
 
-	var scanner *bufio.Scanner
 	var command string
 	var args string
-	var cancel context.CancelFunc
 
-	scanner = bufio.NewScanner(os.Stdin)
+	stasher := Stasher{typ: typ, logger: logger}
+	svc := Factory(typ, &stasher, generator, binderClient, logger)
+	if svc == nil {
+		err := fmt.Errorf("The Service Factory returned nil!")
+		utils.W(os.Stdout, "starterror", []byte(err.Error()))
+		return err
+	}
+
+	var fatalChan chan struct{}
+
+	var globalConf conf.BaseConfig
+	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Split(utils.PluginSplit)
 
 	for scanner.Scan() {
+		select {
+		case <-fatalChan:
+			svc.Shutdown()
+			svc.WaitClosed()
+			utils.W(os.Stdout, "shutdown", []byte("fatal"))
+			return fmt.Errorf("Store fatal error")
+		default:
+		}
+
 		parts := strings.SplitN(scanner.Text(), " ", 2)
 		command = parts[0]
 		switch command {
 		case "start":
-			if p.syslogConfs == nil || p.parserConfs == nil || p.kafkaConf == nil || p.auditConf == nil {
-				utils.W(os.Stdout, "syslogconferror", []byte("syslog conf or parser conf was not provided to plugin"))
-				p.svc = nil
-				// TODO: return
+			// TODO
+			//			if provider.syslogConfs == nil || provider.parserConfs == nil || provider.kafkaConf == nil || provider.auditConf == nil {
+			//				err := fmt.Errorf("syslog conf or parser conf was not provided to plugin")
+			//				utils.W(os.Stdout, "syslogconferror", []byte(err.Error()))
+			//				return err
+			//} else {
+			infos, err := ConfigureAndStartService(svc, globalConf, test)
+			if err != nil {
+				utils.W(os.Stdout, "starterror", []byte(err.Error()))
+				return err
+			} else if len(infos) == 0 && typ != RELP && typ != Journal && typ != Audit && typ != Store {
+				// (RELP, Journal and audit never report info about listening ports)
+				svc.Stop()
+				utils.W(os.Stdout, "nolistenererror", []byte("plugin is inactive"))
 			} else {
-				p.svc, cancel = Factory(typ, p, generator, binderClient, logger)
-				if p.svc == nil {
-					utils.W(os.Stdout, "starterror", []byte("NewNetworkService returned nil"))
-				} else {
-					p.svc.SetConf(p.syslogConfs, p.parserConfs)
-					p.svc.SetKafkaConf(p.kafkaConf)
-					p.svc.SetAuditConf(p.auditConf)
-					infos, err := p.svc.Start(test)
-					if err != nil {
-						utils.W(os.Stdout, "starterror", []byte(err.Error()))
-						p.svc = nil
-					} else if len(infos) == 0 && typ != "skewer-relp" && typ != "skewer-journal" && typ != "skewer-audit" {
-						// (RELP, Journal and audit never report info about listening ports)
-						p.svc.Stop()
-						p.svc = nil
-						utils.W(os.Stdout, "nolistenererror", []byte("plugin is inactive"))
-					} else {
-						infosb, _ := json.Marshal(infos)
-						utils.W(os.Stdout, "started", infosb)
-					}
-				}
+				infosb, _ := json.Marshal(infos)
+				utils.W(os.Stdout, "started", infosb)
+			}
+			if typ == Store {
+				// monitor for the Store fatal errors
+				fatalChan = svc.(StoreService).Errors()
 			}
 		case "stop":
-			if p.svc != nil {
-				p.svc.Stop()
-				p.svc.WaitClosed()
+			svc.Stop()
+			svc.WaitClosed()
 
-			}
 			utils.W(os.Stdout, "stopped", []byte("success"))
 			// at the end of the stop return, we *do not return*. So the
 			// plugin process continues to listenn for subsequent commands
 		case "shutdown":
-			if p.svc != nil {
-				p.svc.Stop()
-				p.svc.WaitClosed()
-			}
-			if cancel != nil {
-				cancel()
-				time.Sleep(400 * time.Millisecond) // give a chance for cleaning to be executed before plugin process ends
-			}
+			svc.Shutdown()
+			svc.WaitClosed()
 			utils.W(os.Stdout, "shutdown", []byte("success"))
 			// at the end of shutdown command, we *return*. And the plugin process stops.
 			return nil
-		case "syslogconf":
+		case "conf":
 			args = parts[1]
-			sc := []*conf.SyslogConfig{}
-			err := json.Unmarshal([]byte(args), &sc)
+			c := conf.BaseConfig{}
+			err := json.Unmarshal([]byte(args), &c)
 			if err == nil {
-				p.syslogConfs = sc
+				globalConf = c
 			} else {
-				p.syslogConfs = nil
-				utils.W(os.Stdout, "syslogconferror", []byte(err.Error()))
-			}
-		case "parserconf":
-			args = parts[1]
-			pc := []conf.ParserConfig{}
-			err := json.Unmarshal([]byte(args), &pc)
-			if err == nil {
-				p.parserConfs = pc
-			} else {
-				p.parserConfs = nil
-				utils.W(os.Stdout, "parserconferror", []byte(err.Error()))
-			}
-		case "kafkaconf":
-			args = parts[1]
-			kc := conf.KafkaConfig{}
-			err := json.Unmarshal([]byte(args), &kc)
-			if err == nil {
-				p.kafkaConf = &kc
-			} else {
-				p.kafkaConf = nil
-				utils.W(os.Stdout, "kafkaconferror", []byte(err.Error()))
-			}
-		case "auditconf":
-			args = parts[1]
-			ac := conf.AuditConfig{}
-			err := json.Unmarshal([]byte(args), &ac)
-			if err == nil {
-				p.auditConf = &ac
-			} else {
-				p.auditConf = nil
-				utils.W(os.Stdout, "auditconferror", []byte(err.Error()))
+				utils.W(os.Stdout, "conferror", []byte(err.Error()))
+				return err
 			}
 		case "gathermetrics":
-			families, err := p.svc.Gather()
+			families, err := svc.Gather()
 			if err != nil {
 				// TODO
-			}
-			familiesb, err := json.Marshal(families)
-			if err == nil {
-				utils.W(os.Stdout, "metrics", familiesb)
 			} else {
-				// TODO
+				familiesb, err := json.Marshal(families)
+				if err != nil {
+					// TODO
+				} else {
+					utils.W(os.Stdout, "metrics", familiesb)
+				}
 			}
-
+		case "stash":
+			// the service is asked to store a syslog message
+			args = parts[1]
+			m := &model.TcpUdpParsedMessage{}
+			_, err := m.UnmarshalMsg([]byte(args))
+			if err == nil {
+				// does the service support stashing?
+				if stasher, ok := svc.(model.Stasher); ok {
+					stasher.Stash(m)
+				} else {
+					return fmt.Errorf("Plugin provider was asked to store a message but does not implement Stasher")
+				}
+			}
 		default:
 			return fmt.Errorf("Unknown command")
 		}

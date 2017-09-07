@@ -3,7 +3,6 @@
 package journald
 
 import (
-	"context"
 	"sync"
 	"time"
 
@@ -16,6 +15,7 @@ var Supported bool = true
 type JournaldReader interface {
 	Start()
 	Stop()
+	Shutdown()
 	Entries() chan map[string]string
 }
 
@@ -27,7 +27,7 @@ type reader struct {
 	logger   log15.Logger
 }
 
-func NewReader(ctx context.Context, logger log15.Logger) (JournaldReader, error) {
+func NewReader(logger log15.Logger) (JournaldReader, error) {
 	var err error
 	r := &reader{logger: logger}
 	r.journal, err = sdjournal.NewJournal()
@@ -46,14 +46,6 @@ func NewReader(ctx context.Context, logger log15.Logger) (JournaldReader, error)
 	}
 	r.entries = make(chan map[string]string)
 	r.wgroup = &sync.WaitGroup{}
-
-	go func() {
-		<-ctx.Done()
-		r.Stop()
-		close(r.entries)
-		r.journal.Close()
-	}()
-
 	return r, nil
 }
 
@@ -137,4 +129,10 @@ func (r *reader) Stop() {
 		close(r.stopchan)
 	}
 	r.wgroup.Wait()
+}
+
+func (r *reader) Shutdown() {
+	r.Stop()
+	close(r.entries)
+	r.journal.Close()
 }

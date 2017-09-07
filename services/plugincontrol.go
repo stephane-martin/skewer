@@ -19,30 +19,11 @@ import (
 	"github.com/stephane-martin/skewer/utils"
 )
 
-func NewNetworkPlugin(t string, stasher model.Stasher, binderHandle int, loggerHandle int, l log15.Logger) *NetworkPlugin {
-	s := &NetworkPlugin{
-		t:            t,
-		stasher:      stasher,
-		binderHandle: binderHandle,
-		loggerHandle: loggerHandle,
-		logger:       l,
-		stdinMu:      &sync.Mutex{},
-		startedMu:    &sync.Mutex{},
-		createdMu:    &sync.Mutex{},
-	}
-	s.metricsChan = make(chan []*dto.MetricFamily)
-	s.shutdown = make(chan struct{})
-	return s
-}
-
-// NetworkPlugin launches and controls the TCP service
+// NetworkPlugin launches and controls the plugins services
 type NetworkPlugin struct {
-	t string
+	typ NetworkServiceType
 
-	syslogConfs []*conf.SyslogConfig
-	parserConfs []conf.ParserConfig
-	kafkaConf   *conf.KafkaConfig
-	auditConf   *conf.AuditConfig
+	conf conf.BaseConfig
 
 	binderHandle int
 	loggerHandle int
@@ -54,17 +35,33 @@ type NetworkPlugin struct {
 	stdout      io.ReadCloser
 	cmd         *exec.Cmd
 
-	shutdown  chan struct{}
-	stdinMu   *sync.Mutex
-	startedMu *sync.Mutex
-	createdMu *sync.Mutex
-	started   bool
-	created   bool
+	ShutdownChan chan struct{}
+	stdinMu      *sync.Mutex
+	startedMu    *sync.Mutex
+	createdMu    *sync.Mutex
+	started      bool
+	created      bool
+}
+
+func NewNetworkPlugin(typ NetworkServiceType, stasher model.Stasher, binderHandle int, loggerHandle int, l log15.Logger) *NetworkPlugin {
+	s := &NetworkPlugin{
+		typ:          typ,
+		stasher:      stasher,
+		binderHandle: binderHandle,
+		loggerHandle: loggerHandle,
+		logger:       l,
+		stdinMu:      &sync.Mutex{},
+		startedMu:    &sync.Mutex{},
+		createdMu:    &sync.Mutex{},
+	}
+	s.metricsChan = make(chan []*dto.MetricFamily)
+	s.ShutdownChan = make(chan struct{})
+	return s
 }
 
 func (s *NetworkPlugin) Gather() ([]*dto.MetricFamily, error) {
 	select {
-	case <-s.shutdown:
+	case <-s.ShutdownChan:
 		return []*dto.MetricFamily{}, nil
 	default:
 		s.startedMu.Lock()
@@ -95,7 +92,7 @@ func (s *NetworkPlugin) Gather() ([]*dto.MetricFamily, error) {
 
 func (s *NetworkPlugin) Stop() {
 	select {
-	case <-s.shutdown:
+	case <-s.ShutdownChan:
 	default:
 		s.startedMu.Lock()
 		s.stdinMu.Lock()
@@ -121,7 +118,7 @@ func (s *NetworkPlugin) Shutdown(killTimeOut time.Duration) {
 	s.createdMu.Unlock()
 
 	select {
-	case <-s.shutdown:
+	case <-s.ShutdownChan:
 		// the plugin is already dead
 	default:
 		// ask to shutdown
@@ -133,10 +130,10 @@ func (s *NetworkPlugin) Shutdown(killTimeOut time.Duration) {
 
 		// wait for plugin process termination
 		if killTimeOut == 0 {
-			<-s.shutdown
+			<-s.ShutdownChan
 		} else {
 			select {
-			case <-s.shutdown:
+			case <-s.ShutdownChan:
 			case <-time.After(killTimeOut):
 				// after timeout kill the process
 				s.stdinMu.Lock()
@@ -148,17 +145,8 @@ func (s *NetworkPlugin) Shutdown(killTimeOut time.Duration) {
 
 }
 
-func (s *NetworkPlugin) SetConf(sc []*conf.SyslogConfig, pc []conf.ParserConfig) {
-	s.syslogConfs = sc
-	s.parserConfs = pc
-}
-
-func (s *NetworkPlugin) SetKafkaConf(kc *conf.KafkaConfig) {
-	s.kafkaConf = kc
-}
-
-func (s *NetworkPlugin) SetAuditConf(ac *conf.AuditConfig) {
-	s.auditConf = ac
+func (s *NetworkPlugin) SetConf(c conf.BaseConfig) {
+	s.conf = c
 }
 
 func (s *NetworkPlugin) Start() ([]*model.ListenerInfo, error) {
@@ -173,7 +161,7 @@ func (s *NetworkPlugin) Start() ([]*model.ListenerInfo, error) {
 	var once sync.Once
 
 	doKill := func() {
-		s.logger.Crit("killing misbehaving plugin", "type", s.t)
+		s.logger.Crit("killing misbehaving plugin", "type", s.typ)
 		s.stdinMu.Lock()
 		s.cmd.Process.Kill()
 		s.stdinMu.Unlock()
@@ -190,7 +178,7 @@ func (s *NetworkPlugin) Start() ([]*model.ListenerInfo, error) {
 			// or 2/ if scanner faces a formatting error
 			// or 3/ if the plugin sent a badly JSON encoded message
 			// or 4/ if the plugin sent an unexpected message
-			s.logger.Debug("Plugin controller is stopping", "type", s.t)
+			s.logger.Debug("Plugin controller is stopping", "type", s.typ)
 			once.Do(func() {
 				startErrorChan <- fmt.Errorf("Unexpected end of plugin before it was initialized")
 				close(startErrorChan)
@@ -200,9 +188,9 @@ func (s *NetworkPlugin) Start() ([]*model.ListenerInfo, error) {
 				doKill()
 			} else {
 				select {
-				case <-s.shutdown:
+				case <-s.ShutdownChan:
 					// child has exited
-					s.logger.Debug("End of plugin child process", "type", s.t)
+					s.logger.Debug("End of plugin child process", "type", s.typ)
 				default:
 					// child is still alive
 					s.startedMu.Lock()
@@ -215,7 +203,7 @@ func (s *NetworkPlugin) Start() ([]*model.ListenerInfo, error) {
 						doKill()
 					} else {
 						s.startedMu.Unlock()
-						s.logger.Debug("Plugin process has stopped and is inactive", "type", s.t)
+						s.logger.Debug("Plugin process has stopped and is inactive", "type", s.typ)
 					}
 				}
 			}
@@ -275,22 +263,7 @@ func (s *NetworkPlugin) Start() ([]*model.ListenerInfo, error) {
 					err := fmt.Errorf(parts[1])
 					once.Do(func() { startErrorChan <- err; close(startErrorChan) })
 				}
-			case "syslogconferror":
-				if len(parts) == 2 {
-					err := fmt.Errorf(parts[1])
-					once.Do(func() { startErrorChan <- err; close(startErrorChan) })
-				}
-			case "parserconferror":
-				if len(parts) == 2 {
-					err := fmt.Errorf(parts[1])
-					once.Do(func() { startErrorChan <- err; close(startErrorChan) })
-				}
-			case "kafkaconferror":
-				if len(parts) == 2 {
-					err := fmt.Errorf(parts[1])
-					once.Do(func() { startErrorChan <- err; close(startErrorChan) })
-				}
-			case "auditconferror":
+			case "conferror":
 				if len(parts) == 2 {
 					err := fmt.Errorf(parts[1])
 					once.Do(func() { startErrorChan <- err; close(startErrorChan) })
@@ -324,7 +297,7 @@ func (s *NetworkPlugin) Start() ([]*model.ListenerInfo, error) {
 			// it means that the plugin child stdin has been closed
 			// so we know that the plugin child has exited
 			// let's wait that the shutdown channel has been closed before executing the defer()
-			<-s.shutdown
+			<-s.ShutdownChan
 		} else {
 			once.Do(func() { startErrorChan <- err; close(startErrorChan) })
 			s.logger.Error("Plugin scanner error", "error", err)
@@ -333,16 +306,10 @@ func (s *NetworkPlugin) Start() ([]*model.ListenerInfo, error) {
 		}
 	}()
 
-	scb, _ := json.Marshal(s.syslogConfs)
-	pcb, _ := json.Marshal(s.parserConfs)
-	kcb, _ := json.Marshal(s.kafkaConf)
-	acb, _ := json.Marshal(s.auditConf)
+	cb, _ := json.Marshal(s.conf)
 
 	s.stdinMu.Lock()
-	utils.W(s.stdin, "syslogconf", scb)
-	utils.W(s.stdin, "parserconf", pcb)
-	utils.W(s.stdin, "kafkaconf", kcb)
-	utils.W(s.stdin, "auditconf", acb)
+	utils.W(s.stdin, "conf", cb)
 	utils.W(s.stdin, "start", utils.NOW)
 	s.stdinMu.Unlock()
 
@@ -366,7 +333,7 @@ func (s *NetworkPlugin) Create(test bool) error {
 		return nil
 	}
 
-	s.shutdown = make(chan struct{})
+	s.ShutdownChan = make(chan struct{})
 
 	exe, err := sys.Executable()
 	if err != nil {
@@ -396,19 +363,19 @@ func (s *NetworkPlugin) Create(test bool) error {
 	s.stdinMu.Unlock()
 
 	if err != nil {
-		close(s.shutdown)
+		close(s.ShutdownChan)
 		s.createdMu.Unlock()
 		return err
 	}
 
 	s.stdout, err = s.cmd.StdoutPipe()
 	if err != nil {
-		close(s.shutdown)
+		close(s.ShutdownChan)
 		s.createdMu.Unlock()
 		return err
 	}
 
-	args := []string{fmt.Sprintf("skewer-%s", s.t)}
+	args := []string{ReverseNetworkServiceMap[s.typ]}
 	if test {
 		args = append(args, "--test")
 	}
@@ -416,7 +383,7 @@ func (s *NetworkPlugin) Create(test bool) error {
 
 	err = s.cmd.Start()
 	if err != nil {
-		close(s.shutdown)
+		close(s.ShutdownChan)
 		s.createdMu.Unlock()
 		return err
 	}
@@ -426,7 +393,7 @@ func (s *NetworkPlugin) Create(test bool) error {
 	go func() {
 		// monitor for plugin process termination
 		s.cmd.Wait()
-		close(s.shutdown)
+		close(s.ShutdownChan)
 		s.createdMu.Lock()
 		s.startedMu.Lock()
 		s.created = false
@@ -437,4 +404,27 @@ func (s *NetworkPlugin) Create(test bool) error {
 
 	return nil
 
+}
+
+type StorePlugin struct {
+	*NetworkPlugin
+}
+
+func (s *StorePlugin) Stash(m *model.TcpUdpParsedMessage) {
+	select {
+	case <-s.ShutdownChan:
+		return
+	default:
+		mb, err := m.MarshalMsg(nil)
+		if err == nil {
+			utils.W(s.stdin, "stash", mb)
+		} else {
+			// TODO
+		}
+	}
+}
+
+func NewStorePlugin(loggerHandle int, l log15.Logger) *StorePlugin {
+	plug := NewNetworkPlugin(Store, nil, 0, loggerHandle, l)
+	return &StorePlugin{NetworkPlugin: plug}
 }

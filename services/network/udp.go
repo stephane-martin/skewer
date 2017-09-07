@@ -24,7 +24,7 @@ const (
 	UdpStarted
 )
 
-type udpServiceImpl struct {
+type UdpServiceImpl struct {
 	base.BaseService
 	status     UdpServerStatus
 	statusChan chan UdpServerStatus
@@ -37,11 +37,11 @@ type udpServiceImpl struct {
 }
 
 type PacketHandler interface {
-	HandleConnection(conn net.PacketConn, config *conf.SyslogConfig)
+	HandleConnection(conn net.PacketConn, config conf.SyslogConfig)
 }
 
 type UdpHandler struct {
-	Server *udpServiceImpl
+	Server *UdpServiceImpl
 }
 
 type udpMetrics struct {
@@ -68,8 +68,8 @@ func NewUdpMetrics() *udpMetrics {
 	return m
 }
 
-func NewUdpService(stasher model.Stasher, gen chan ulid.ULID, b *sys.BinderClient, l log15.Logger) *udpServiceImpl {
-	s := udpServiceImpl{
+func NewUdpService(stasher model.Stasher, gen chan ulid.ULID, b *sys.BinderClient, l log15.Logger) *UdpServiceImpl {
+	s := UdpServiceImpl{
 		status:    UdpStopped,
 		metrics:   NewUdpMetrics(),
 		registry:  prometheus.NewRegistry(),
@@ -86,19 +86,15 @@ func NewUdpService(stasher model.Stasher, gen chan ulid.ULID, b *sys.BinderClien
 	return &s
 }
 
-func (s *udpServiceImpl) Gather() ([]*dto.MetricFamily, error) {
+func (s *UdpServiceImpl) Gather() ([]*dto.MetricFamily, error) {
 	return s.registry.Gather()
 }
 
-func (s *udpServiceImpl) handleConnection(conn net.PacketConn, config *conf.SyslogConfig) {
+func (s *UdpServiceImpl) handleConnection(conn net.PacketConn, config conf.SyslogConfig) {
 	s.handler.HandleConnection(conn, config)
 }
 
-func (s *udpServiceImpl) SetKafkaConf(kc *conf.KafkaConfig) {}
-
-func (s *udpServiceImpl) SetAuditConf(ac *conf.AuditConfig) {}
-
-func (s *udpServiceImpl) Start(test bool) ([]*model.ListenerInfo, error) {
+func (s *UdpServiceImpl) Start(test bool) ([]*model.ListenerInfo, error) {
 	s.LockStatus()
 	if s.status != UdpStopped {
 		s.UnlockStatus()
@@ -119,7 +115,11 @@ func (s *udpServiceImpl) Start(test bool) ([]*model.ListenerInfo, error) {
 	return infos, nil
 }
 
-func (s *udpServiceImpl) Stop() {
+func (s *UdpServiceImpl) Shutdown() {
+	s.Stop()
+}
+
+func (s *UdpServiceImpl) Stop() {
 	s.LockStatus()
 	if s.status != UdpStarted {
 		s.UnlockStatus()
@@ -138,7 +138,7 @@ func (s *udpServiceImpl) Stop() {
 	s.UnlockStatus()
 }
 
-func (s *udpServiceImpl) WaitClosed() {
+func (s *UdpServiceImpl) WaitClosed() {
 	var more bool
 	for {
 		_, more = <-s.statusChan
@@ -148,7 +148,7 @@ func (s *udpServiceImpl) WaitClosed() {
 	}
 }
 
-func (s *udpServiceImpl) ListenPacket() []*model.ListenerInfo {
+func (s *UdpServiceImpl) ListenPacket() []*model.ListenerInfo {
 	udpinfos := []*model.ListenerInfo{}
 	s.UnixSocketPaths = []string{}
 	for _, syslogConf := range s.SyslogConfigs {
@@ -188,7 +188,7 @@ func (s *udpServiceImpl) ListenPacket() []*model.ListenerInfo {
 	return udpinfos
 }
 
-func (h UdpHandler) HandleConnection(conn net.PacketConn, config *conf.SyslogConfig) {
+func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConfig) {
 	var local_port int
 	var err error
 

@@ -61,7 +61,7 @@ func (s *StreamingService) initTCPListeners() []*model.ListenerInfo {
 				nb++
 				lc := UnixListenerConf{
 					Listener: l,
-					Conf:     syslogConf,
+					Conf:     &syslogConf,
 				}
 				s.unixListeners = append(s.unixListeners, &lc)
 				s.UnixSocketPaths = append(s.UnixSocketPaths, syslogConf.UnixSocketPath)
@@ -76,7 +76,7 @@ func (s *StreamingService) initTCPListeners() []*model.ListenerInfo {
 				nb++
 				lc := TCPListenerConf{
 					Listener: l,
-					Conf:     syslogConf,
+					Conf:     &syslogConf,
 				}
 				s.tcpListeners = append(s.tcpListeners, &lc)
 			}

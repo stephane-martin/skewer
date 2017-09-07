@@ -3,6 +3,7 @@ package conf
 import (
 	"bytes"
 	"context"
+	"crypto/sha512"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
@@ -28,8 +29,7 @@ func (source *BaseConfig) DeepCopy() *BaseConfig {
 	dest := newBaseConf()
 
 	for _, sysconf := range source.Syslog {
-		c := *sysconf
-		dest.Syslog = append(dest.Syslog, &c)
+		dest.Syslog = append(dest.Syslog, sysconf)
 	}
 
 	dest.Kafka = source.Kafka
@@ -38,31 +38,26 @@ func (source *BaseConfig) DeepCopy() *BaseConfig {
 		dest.Kafka.Brokers = append(dest.Kafka.Brokers, broker)
 	}
 
-	dest.Store = source.Store
-
 	for _, pconf := range source.Parsers {
 		dest.Parsers = append(dest.Parsers, pconf)
 	}
 
-	j := *source.Journald
-	dest.Journald = &j
-
-	a := *source.Audit
-	dest.Audit = &a
-
+	dest.Journald = source.Journald
+	dest.Audit = source.Audit
 	dest.Metrics = source.Metrics
+	dest.Store = source.Store
 	return dest
 }
 
 func newBaseConf() *BaseConfig {
 	brokers := []string{}
 	baseConf := BaseConfig{
-		Syslog:   []*SyslogConfig{},
+		Syslog:   []SyslogConfig{},
 		Kafka:    KafkaConfig{Brokers: brokers},
 		Store:    StoreConfig{},
 		Parsers:  []ParserConfig{},
-		Journald: &JournaldConfig{},
-		Audit:    &AuditConfig{},
+		Journald: JournaldConfig{},
+		Audit:    AuditConfig{},
 		Metrics:  MetricsConfig{},
 	}
 	return &baseConf
@@ -164,6 +159,36 @@ func (l KafkaVersion) Greater(r KafkaVersion) bool {
 		return true
 	}
 	return false
+}
+
+func (c *SyslogConfig) CalculateID() *SyslogConfig {
+	h := sha512.Sum512(c.Export())
+	c.ConfID = base64.StdEncoding.EncodeToString(h[:])
+	return c
+}
+
+func (c *AuditConfig) CalculateID() *AuditConfig {
+	auditSyslogConf := &SyslogConfig{
+		TopicTmpl:     c.TopicTmpl,
+		TopicFunc:     c.TopicFunc,
+		PartitionTmpl: c.PartitionTmpl,
+		PartitionFunc: c.PartitionFunc,
+		FilterFunc:    c.FilterFunc,
+	}
+	c.ConfID = auditSyslogConf.CalculateID().ConfID
+	return c
+}
+
+func (c *JournaldConfig) CalculateID() *JournaldConfig {
+	journalSyslogConf := &SyslogConfig{
+		TopicTmpl:     c.TopicTmpl,
+		TopicFunc:     c.TopicFunc,
+		PartitionTmpl: c.PartitionTmpl,
+		PartitionFunc: c.PartitionFunc,
+		FilterFunc:    c.FilterFunc,
+	}
+	c.ConfID = journalSyslogConf.CalculateID().ConfID
+	return c
 }
 
 func (c *SyslogConfig) GetClientAuthType() tls.ClientAuthType {
@@ -480,7 +505,7 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 
 	var vi *viper.Viper
 
-	syslogConfs := []*SyslogConfig{}
+	syslogConfs := []SyslogConfig{}
 	for _, syslogConf := range syslogConfMap {
 		vi = viper.New()
 		for k, v := range syslogConf {
@@ -489,7 +514,7 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 		sconf := &SyslogConfig{}
 		err := vi.Unmarshal(sconf)
 		if err == nil {
-			syslogConfs = append(syslogConfs, sconf)
+			syslogConfs = append(syslogConfs, *sconf)
 		} else {
 			return err
 		}
@@ -584,10 +609,10 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 		c.Store = sconf
 	}
 	if len(journaldConf) > 0 {
-		c.Journald = &jconf
+		c.Journald = jconf
 	}
 	if len(auditConf) > 0 {
-		c.Audit = &aconf
+		c.Audit = aconf
 	}
 	if len(metricsConf) > 0 {
 		c.Metrics = mconf
@@ -638,7 +663,7 @@ func (c *BaseConfig) Complete() (err error) {
 			TopicTmpl:     "rsyslog-{{.Appname}}",
 			PartitionTmpl: "mypk-{{.Hostname}}",
 		}
-		c.Syslog = []*SyslogConfig{&syslogConf}
+		c.Syslog = []SyslogConfig{syslogConf}
 	}
 
 	for i, syslogConf := range c.Syslog {
@@ -737,6 +762,12 @@ func (c *BaseConfig) Complete() (err error) {
 		}
 		copy(c.Store.SecretB[:], s[:32])
 	}
+
+	for i := range c.Syslog {
+		c.Syslog[i] = *c.Syslog[i].CalculateID()
+	}
+	c.Journald = *c.Journald.CalculateID()
+	c.Audit = *c.Audit.CalculateID()
 
 	return nil
 }

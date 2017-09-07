@@ -19,7 +19,6 @@ import (
 )
 
 func main() {
-
 	getLogger := func(ctx context.Context, name string, handle int) log15.Logger {
 		loggerConn, err := net.FileConn(os.NewFile(uintptr(handle), "logger"))
 		if err != nil {
@@ -61,7 +60,7 @@ func main() {
 			os.Exit(-1)
 		}
 
-	case "skewer-tcp", "skewer-udp", "skewer-relp", "skewer-journal", "skewer-audit":
+	case "skewer-tcp", "skewer-udp", "skewer-relp", "skewer-journal", "skewer-audit", "skewer-store":
 		signal.Ignore(syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
 
 		var binderClient *sys.BinderClient
@@ -85,15 +84,10 @@ func main() {
 			os.Exit(-1)
 		}
 
-		svc := services.NetworkPluginProvider{}
 		if len(os.Args) >= 2 {
-			if os.Args[1] == "--test" {
-				err = svc.Launch(name, true, binderClient, logger)
-			} else {
-				err = svc.Launch(name, false, binderClient, logger)
-			}
+			err = services.Launch(services.NetworkServiceMap[name], os.Args[1] == "--test", binderClient, logger)
 		} else {
-			err = svc.Launch(name, false, binderClient, logger)
+			err = services.Launch(services.NetworkServiceMap[name], false, binderClient, logger)
 		}
 
 		if err != nil {

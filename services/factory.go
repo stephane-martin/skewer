@@ -1,7 +1,8 @@
 package services
 
 import (
-	"context"
+	"fmt"
+	"os"
 
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
@@ -13,37 +14,96 @@ import (
 	"github.com/stephane-martin/skewer/sys"
 )
 
+type NetworkServiceType int
+
+const (
+	TCP NetworkServiceType = iota
+	UDP
+	RELP
+	Journal
+	Audit
+	Store
+)
+
+var NetworkServiceMap map[string]NetworkServiceType = map[string]NetworkServiceType{
+	"skewer-tcp":     TCP,
+	"skewer-udp":     UDP,
+	"skewer-relp":    RELP,
+	"skewer-journal": Journal,
+	"skewer-audit":   Audit,
+	"skewer-store":   Store,
+}
+
+var ReverseNetworkServiceMap map[NetworkServiceType]string
+
+func init() {
+	ReverseNetworkServiceMap = map[NetworkServiceType]string{}
+	for k, v := range NetworkServiceMap {
+		ReverseNetworkServiceMap[v] = k
+	}
+}
+
 type NetworkService interface {
 	Start(test bool) ([]*model.ListenerInfo, error)
 	Stop()
+	Shutdown()
 	WaitClosed()
-	SetConf(sc []*conf.SyslogConfig, pc []conf.ParserConfig)
-	SetKafkaConf(kc *conf.KafkaConfig)
-	SetAuditConf(ac *conf.AuditConfig)
 	Gather() ([]*dto.MetricFamily, error)
 }
 
-func Factory(t string, stasher model.Stasher, gen chan ulid.ULID, b *sys.BinderClient, l log15.Logger) (NetworkService, context.CancelFunc) {
-	switch t {
-	case "skewer-tcp":
-		return network.NewTcpService(stasher, gen, b, l), nil
-	case "skewer-udp":
-		return network.NewUdpService(stasher, gen, b, l), nil
-	case "skewer-relp":
-		return network.NewRelpService(b, l), nil
-	case "skewer-journal":
-		ctx, cancel := context.WithCancel(context.Background())
-		s, err := linux.NewJournalService(ctx, stasher, gen, l)
-		if err == nil {
-			return s, cancel
-		} else {
-			l.Error("Error initializing journal service", "error", err)
-			cancel()
-			return nil, nil
-		}
-	case "skewer-audit":
-		return linux.NewAuditService(stasher, gen, l), nil
+type StoreService interface {
+	NetworkService
+	model.Stasher
+	Errors() chan struct{}
+}
+
+func ConfigureAndStartService(s NetworkService, c conf.BaseConfig, test bool) ([]*model.ListenerInfo, error) {
+	switch s := s.(type) {
+	case *network.TcpServiceImpl:
+		s.SetConf(c.Syslog, c.Parsers)
+		return s.Start(test)
+	case *network.UdpServiceImpl:
+		s.SetConf(c.Syslog, c.Parsers)
+		return s.Start(test)
+	case *network.RelpService:
+		s.SetConf(c.Syslog, c.Parsers, c.Kafka)
+		return s.Start(test)
+	case *linux.JournalService:
+		s.SetConf(c.Journald)
+		return s.Start(test)
+	case *linux.AuditService:
+		s.SetAuditConf(c.Audit)
+		return s.Start(test)
+	case *StoreServiceImpl:
+		return s.SetConf(c, test)
 	default:
+		// TODO
 		return nil, nil
+	}
+
+}
+func Factory(t NetworkServiceType, stasher model.Stasher, gen chan ulid.ULID, b *sys.BinderClient, l log15.Logger) NetworkService {
+	switch t {
+	case TCP:
+		return network.NewTcpService(stasher, gen, b, l)
+	case UDP:
+		return network.NewUdpService(stasher, gen, b, l)
+	case RELP:
+		return network.NewRelpService(b, l)
+	case Journal:
+		svc, err := linux.NewJournalService(stasher, gen, l)
+		if err == nil {
+			return svc
+		} else {
+			l.Error("Error creating the journal service", "error", err)
+			return nil
+		}
+	case Audit:
+		return linux.NewAuditService(stasher, gen, l)
+	case Store:
+		return NewStoreService(l)
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown service type: %d\n", t)
+		return nil
 	}
 }

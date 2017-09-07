@@ -114,9 +114,9 @@ type RelpService struct {
 	impl   *RelpServiceImpl
 	logger log15.Logger
 	b      *sys.BinderClient
-	sc     []*conf.SyslogConfig
+	sc     []conf.SyslogConfig
 	pc     []conf.ParserConfig
-	kc     *conf.KafkaConfig
+	kc     conf.KafkaConfig
 }
 
 func NewRelpService(b *sys.BinderClient, l log15.Logger) *RelpService {
@@ -148,7 +148,7 @@ func (s *RelpService) Start(test bool) (infos []*model.ListenerInfo, err error) 
 			case Stopped:
 				s.impl.Logger.Debug("The RELP service is stopped")
 				s.impl.SetConf(s.sc, s.pc)
-				s.impl.SetKafkaConf(*s.kc)
+				s.impl.SetKafkaConf(s.kc)
 				//infos, err := s.impl.Start(test)
 				_, err := s.impl.Start(test)
 				if err == nil {
@@ -176,6 +176,10 @@ func (s *RelpService) Start(test bool) (infos []*model.ListenerInfo, err error) 
 	return
 }
 
+func (s *RelpService) Shutdown() {
+	s.Stop()
+}
+
 func (s *RelpService) Stop() {
 	s.impl.FinalStop()
 }
@@ -190,16 +194,11 @@ func (s *RelpService) WaitClosed() {
 	}
 }
 
-func (s *RelpService) SetConf(sc []*conf.SyslogConfig, pc []conf.ParserConfig) {
+func (s *RelpService) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig, kc conf.KafkaConfig) {
 	s.sc = sc
 	s.pc = pc
-}
-
-func (s *RelpService) SetKafkaConf(kc *conf.KafkaConfig) {
 	s.kc = kc
 }
-
-func (s *RelpService) SetAuditConf(ac *conf.AuditConfig) {}
 
 type RelpServiceImpl struct {
 	StreamingService

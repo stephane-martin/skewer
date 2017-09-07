@@ -15,7 +15,7 @@ type Connection interface {
 }
 
 type BaseService struct {
-	SyslogConfigs   []*conf.SyslogConfig
+	SyslogConfigs   []conf.SyslogConfig
 	ParserConfigs   []conf.ParserConfig
 	Logger          log15.Logger
 	Binder          *sys.BinderClient
@@ -42,7 +42,7 @@ func (s *BaseService) UnlockStatus() {
 	s.statusMutex.Unlock()
 }
 
-func (s *BaseService) SetConf(sc []*conf.SyslogConfig, pc []conf.ParserConfig) {
+func (s *BaseService) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig) {
 	s.SyslogConfigs = sc
 	s.ParserConfigs = pc
 }

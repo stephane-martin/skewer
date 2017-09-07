@@ -23,7 +23,7 @@ type AuditService struct {
 	wgroup    *sync.WaitGroup
 	generator chan ulid.ULID
 	cancel    context.CancelFunc
-	aconf     *conf.AuditConfig
+	aconf     conf.AuditConfig
 }
 
 func NewAuditService(stasher model.Stasher, generator chan ulid.ULID, logger log15.Logger) *AuditService {
@@ -108,12 +108,12 @@ func (s *AuditService) Start(test bool) ([]*model.ListenerInfo, error) {
 	return infos, nil
 }
 
-func (s *AuditService) SetConf(sc []*conf.SyslogConfig, pc []conf.ParserConfig) {}
-
-func (s *AuditService) SetKafkaConf(kc *conf.KafkaConfig) {}
-
-func (s *AuditService) SetAuditConf(ac *conf.AuditConfig) {
+func (s *AuditService) SetAuditConf(ac conf.AuditConfig) {
 	s.aconf = ac
+}
+
+func (s *AuditService) Shutdown() {
+	s.Stop()
 }
 
 func (s *AuditService) Stop() {

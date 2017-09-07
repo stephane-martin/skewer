@@ -281,7 +281,7 @@ func (c *ConfigurationProvider) Launch(logger log15.Logger) error {
 				if err == nil {
 					c.params = params
 				} else {
-					return fmt.Errorf("Error unmarshaling consulparams received from parent:", err.Error())
+					return fmt.Errorf("Error unmarshaling consulparams received from parent: %s", err.Error())
 				}
 			} else {
 				return fmt.Errorf("Empty consulparams command")
