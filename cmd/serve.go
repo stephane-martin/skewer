@@ -368,47 +368,6 @@ func Serve() error {
 	metricsServer := &metrics.MetricsServer{}
 
 	st := services.NewStorePlugin(14, logger)
-	/*
-		st, err := store.NewStore(gctx, c.Store, logger)
-		if err != nil {
-			logger.Crit("Can't create the message Store", "error", err)
-			time.Sleep(100 * time.Millisecond)
-			gCancel()
-			cancelLogger()
-			return err
-		}
-		err = st.StoreAllSyslogConfigs(c)
-		if err != nil {
-			logger.Crit("Can't store the syslog configurations", "error", err)
-			time.Sleep(100 * time.Millisecond)
-			gCancel()
-			cancelLogger()
-			return err
-		}
-
-		// prepare the kafka forwarder
-		forwarder := store.NewForwarder(testFlag, logger)
-		forwarderMutex := &sync.Mutex{}
-		var cancelForwarder context.CancelFunc
-
-		startForwarder := func(kafkaConf conf.KafkaConfig) {
-			forwarderMutex.Lock()
-			newForwarderCtx, newCancelForwarder := context.WithCancel(shutdownCtx)
-			if forwarder.Forward(newForwarderCtx, st, kafkaConf) { // returns true when success
-				cancelForwarder = newCancelForwarder
-			}
-			forwarderMutex.Unlock()
-		}
-
-		stopForwarder := func() {
-			forwarderMutex.Lock()
-			cancelForwarder()
-			forwarder.WaitFinished()
-			forwarderMutex.Unlock()
-		}
-
-		startForwarder(c.Kafka)
-	*/
 	st.SetConf(*c)
 	err = st.Create(testFlag)
 	if err != nil {
@@ -420,7 +379,7 @@ func Serve() error {
 	}
 	_, err = st.Start()
 	if err != nil {
-		logger.Crit("Can't start the message Store", "error", err)
+		logger.Crit("Can't start the forwarder", "error", err)
 		time.Sleep(100 * time.Millisecond)
 		gCancel()
 		cancelLogger()

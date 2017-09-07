@@ -90,7 +90,6 @@ func Launch(typ NetworkServiceType, test bool, binderClient *sys.BinderClient, l
 		case "stop":
 			svc.Stop()
 			svc.WaitClosed()
-
 			utils.W(os.Stdout, "stopped", []byte("success"))
 			// at the end of the stop return, we *do not return*. So the
 			// plugin process continues to listenn for subsequent commands
