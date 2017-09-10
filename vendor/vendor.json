@@ -15,6 +15,30 @@
 			"revisionTime": "2017-03-28T06:15:53Z"
 		},
 		{
+			"checksumSHA1": "jp948Q3nVYprBM7TNAHIvBzZMos=",
+			"path": "github.com/EricLagergren/go-gnulib/dirent",
+			"revision": "cb7a6e136427e242099b2c29d661016c19458801",
+			"revisionTime": "2016-03-05T23:33:25Z"
+		},
+		{
+			"checksumSHA1": "vBSAOT2U7zHr3CrlVoEd3zjvl7k=",
+			"path": "github.com/EricLagergren/go-gnulib/ttyname",
+			"revision": "cb7a6e136427e242099b2c29d661016c19458801",
+			"revisionTime": "2016-03-05T23:33:25Z"
+		},
+		{
+			"checksumSHA1": "hCRJl1FOfaWQrIK5Rhs8hly5OMg=",
+			"path": "github.com/EricLagergren/go-gnulib/util",
+			"revision": "cb7a6e136427e242099b2c29d661016c19458801",
+			"revisionTime": "2016-03-05T23:33:25Z"
+		},
+		{
+			"checksumSHA1": "mGK2EuYPGhk6OPi7slDWrq/DimI=",
+			"path": "github.com/EricLagergren/go-gnulib/windows",
+			"revision": "cb7a6e136427e242099b2c29d661016c19458801",
+			"revisionTime": "2016-03-05T23:33:25Z"
+		},
+		{
 			"checksumSHA1": "qtjd74+bErubh+qyv3s+lWmn9wc=",
 			"path": "github.com/StackExchange/wmi",
 			"revision": "ea383cf3ba6ec950874b8486cd72356d007c768f",
