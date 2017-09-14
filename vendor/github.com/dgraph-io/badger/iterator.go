@@ -54,17 +54,19 @@ func (item *KVItem) Key() []byte {
 
 // Value retrieves the value of the item from the value log. It calls the
 // consumer function with a slice argument representing the value. In case
-// of error, the consumer function is not called
+// of error, the consumer function is not called.
+//
+// Note that the call to the consumer func happens synchronously.
 //
 // Remember to parse or copy it if you need to reuse it. DO NOT modify or
 // append to this slice; it would result in a panic.
-func (item *KVItem) Value(consumer func([]byte)) error {
+func (item *KVItem) Value(consumer func([]byte) error) error {
 	item.wg.Wait()
 	if item.status == prefetched {
 		if item.err != nil {
 			return item.err
 		}
-		consumer(item.val)
+		return consumer(item.val)
 	}
 	return item.kv.yieldItemValue(item, consumer)
 }
@@ -82,16 +84,17 @@ func (item *KVItem) hasValue() bool {
 }
 
 func (item *KVItem) prefetchValue() {
-	item.err = item.kv.yieldItemValue(item, func(val []byte) {
+	item.err = item.kv.yieldItemValue(item, func(val []byte) error {
 		if val == nil {
-			return
+			item.status = prefetched
+			return nil
 		}
+
 		buf := item.slice.Resize(len(val))
-		// FIXME in case of non-mmaped read buf and val might be the same location, in
-		// which case this is redundant. Not sure if this is a no-op in that case.
 		copy(buf, val)
 		item.val = buf
 		item.status = prefetched
+		return nil
 	})
 }
 
@@ -165,7 +168,7 @@ type IteratorOptions struct {
 
 // DefaultIteratorOptions contains default options when iterating over Badger key-value stores.
 var DefaultIteratorOptions = IteratorOptions{
-	PrefetchValues: false,
+	PrefetchValues: true,
 	PrefetchSize:   100,
 	Reverse:        false,
 }
@@ -205,6 +208,8 @@ func (it *Iterator) ValidForPrefix(prefix []byte) bool {
 // Close would close the iterator. It is important to call this when you're done with iteration.
 func (it *Iterator) Close() {
 	it.iitr.Close()
+	// TODO: We could handle this error.
+	_ = it.kv.vlog.decrIteratorCount()
 }
 
 // Next would advance the iterator by one. Always check it.Valid() after a Next()
@@ -325,9 +330,13 @@ func (it *Iterator) Rewind() {
 //   for itr.Rewind(); itr.Valid(); itr.Next() {
 //     item := itr.Item()
 //     key := item.Key()
-//     val := item.Value() // This could block while value is fetched from value log.
-//                         // For key only iteration, set opt.FetchValues to false, and don't call
-//                         // item.Value().
+//     var val []byte
+//     err = item.Value(func(v []byte) {
+//         val = make([]byte, len(v))
+// 	       copy(val, v)
+//     }) 	// This could block while value is fetched from value log.
+//          // For key only iteration, set opt.PrefetchValues to false, and don't call
+//          // item.Value(func(v []byte)).
 //
 //     // Remember that both key, val would become invalid in the next iteration of the loop.
 //     // So, if you need access to them outside, copy them or parse them.
@@ -336,6 +345,7 @@ func (it *Iterator) Rewind() {
 func (s *KV) NewIterator(opt IteratorOptions) *Iterator {
 	tables, decr := s.getMemTables()
 	defer decr()
+	s.vlog.incrIteratorCount()
 	var iters []y.Iterator
 	for i := 0; i < len(tables); i++ {
 		iters = append(iters, tables[i].NewUniIterator(opt.Reverse))

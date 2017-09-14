@@ -47,7 +47,10 @@ func (p *partitionImpl) Get(key string) ([]byte, error) {
 	if item == nil {
 		return nil, nil
 	}
-	err = item.Value(func(v []byte) { val = append(val, v...) })
+	err = item.Value(func(v []byte) error {
+		val = append(val, v...)
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +192,10 @@ func (i *partitionIterImpl) Value() []byte {
 	if item == nil {
 		return nil
 	} else {
-		item.Value(func(v []byte) { val = append(val, v...) })
+		item.Value(func(v []byte) error {
+			val = append(val, v...)
+			return nil
+		})
 		return val
 	}
 }
