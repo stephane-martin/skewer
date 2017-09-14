@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/inconshreveable/log15"
@@ -16,11 +17,12 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/sys"
 	"github.com/stephane-martin/skewer/utils"
 )
 
-// NetworkPlugin launches and controls the plugins services
-type NetworkPlugin struct {
+// PluginController launches and controls the plugins services
+type PluginController struct {
 	typ NetworkServiceType
 
 	conf conf.BaseConfig
@@ -36,15 +38,18 @@ type NetworkPlugin struct {
 	cmd         *exec.Cmd
 
 	ShutdownChan chan struct{}
-	stdinMu      *sync.Mutex
-	startedMu    *sync.Mutex
-	createdMu    *sync.Mutex
-	started      bool
-	created      bool
+	StopChan     chan struct{}
+	// ExitCode should be read only after ShutdownChan has been closed
+	ExitCode  int
+	stdinMu   *sync.Mutex
+	startedMu *sync.Mutex
+	createdMu *sync.Mutex
+	started   bool
+	created   bool
 }
 
-func NewNetworkPlugin(typ NetworkServiceType, stasher model.Stasher, binderHandle int, loggerHandle int, l log15.Logger) *NetworkPlugin {
-	s := &NetworkPlugin{
+func NewPluginController(typ NetworkServiceType, stasher model.Stasher, binderHandle int, loggerHandle int, l log15.Logger) *PluginController {
+	s := &PluginController{
 		typ:          typ,
 		stasher:      stasher,
 		binderHandle: binderHandle,
@@ -59,7 +64,18 @@ func NewNetworkPlugin(typ NetworkServiceType, stasher model.Stasher, binderHandl
 	return s
 }
 
-func (s *NetworkPlugin) Gather() ([]*dto.MetricFamily, error) {
+func (s *PluginController) W(header string, message []byte) (err error) {
+	s.stdinMu.Lock()
+	if s.stdin != nil {
+		err = utils.W(s.stdin, header, message)
+	} else {
+		err = fmt.Errorf("stdin is nil")
+	}
+	s.stdinMu.Unlock()
+	return err
+}
+
+func (s *PluginController) Gather() ([]*dto.MetricFamily, error) {
 	select {
 	case <-s.ShutdownChan:
 		return []*dto.MetricFamily{}, nil
@@ -67,19 +83,20 @@ func (s *NetworkPlugin) Gather() ([]*dto.MetricFamily, error) {
 		s.startedMu.Lock()
 		defer s.startedMu.Unlock()
 		if s.started {
-			s.stdinMu.Lock()
-			if s.stdin != nil {
-				utils.W(s.stdin, "gathermetrics", utils.NOW)
-			} else {
+			if s.W("gathermetrics", utils.NOW) != nil {
 				return []*dto.MetricFamily{}, nil
 			}
-			s.stdinMu.Unlock()
+
 			select {
 			case <-time.After(2 * time.Second):
 				return []*dto.MetricFamily{}, nil
 			case metrics, more := <-s.metricsChan:
 				if more {
-					return metrics, nil
+					if metrics != nil {
+						return metrics, nil
+					} else {
+						return []*dto.MetricFamily{}, nil
+					}
 				} else {
 					return []*dto.MetricFamily{}, nil
 				}
@@ -90,26 +107,8 @@ func (s *NetworkPlugin) Gather() ([]*dto.MetricFamily, error) {
 	}
 }
 
-func (s *NetworkPlugin) Stop() {
-	select {
-	case <-s.ShutdownChan:
-	default:
-		s.startedMu.Lock()
-		s.stdinMu.Lock()
-		defer func() {
-			s.stdinMu.Unlock()
-			s.startedMu.Unlock()
-		}()
-		if s.started {
-			if s.stdin != nil {
-				utils.W(s.stdin, "stop", utils.NOW)
-			}
-		}
-	}
-}
-
-func (s *NetworkPlugin) Shutdown(killTimeOut time.Duration) {
-	// in case the plugin was in fact never used...
+func (s *PluginController) Stop() {
+	// in case the plugin was in fact never created...
 	s.createdMu.Lock()
 	if !s.created {
 		s.createdMu.Unlock()
@@ -119,94 +118,124 @@ func (s *NetworkPlugin) Shutdown(killTimeOut time.Duration) {
 
 	select {
 	case <-s.ShutdownChan:
-		// the plugin is already dead
+	case <-s.StopChan:
+	default:
+		err := s.W("stop", utils.NOW)
+		if err != nil {
+			s.logger.Warn("Error writing stop to plugin stdin", "error", err)
+		} else {
+			<-s.StopChan
+		}
+	}
+}
+
+func (s *PluginController) Shutdown(killTimeOut time.Duration) {
+	// in case the plugin was in fact never created...
+	s.createdMu.Lock()
+	if !s.created {
+		s.createdMu.Unlock()
+		return
+	}
+	s.createdMu.Unlock()
+
+	select {
+	case <-s.ShutdownChan:
+		// the plugin process is already dead
+		<-s.StopChan
 	default:
 		// ask to shutdown
-		s.stdinMu.Lock()
-		if s.stdin != nil {
-			utils.W(s.stdin, "shutdown", utils.NOW)
+		err := s.W("shutdown", utils.NOW)
+		if err != nil {
+			s.logger.Warn("Error writing shutdown to plugin stdin. Kill brutally.", "error", err)
+			killTimeOut = time.Second
 		}
-		s.stdinMu.Unlock()
 
 		// wait for plugin process termination
 		if killTimeOut == 0 {
 			<-s.ShutdownChan
+			<-s.StopChan
 		} else {
 			select {
 			case <-s.ShutdownChan:
+				<-s.StopChan
 			case <-time.After(killTimeOut):
 				// after timeout kill the process
-				s.stdinMu.Lock()
-				s.cmd.Process.Kill()
-				s.stdinMu.Unlock()
+				s.logger.Warn("Plugin failed to shutdown before timeout")
+				s.kill(false)
+				<-s.ShutdownChan
+				<-s.StopChan
 			}
 		}
 	}
 
 }
 
-func (s *NetworkPlugin) SetConf(c conf.BaseConfig) {
+func (s *PluginController) SetConf(c conf.BaseConfig) {
 	s.conf = c
 }
 
-func (s *NetworkPlugin) Start() ([]*model.ListenerInfo, error) {
-	s.startedMu.Lock()
-	if s.started {
-		s.startedMu.Unlock()
-		return nil, fmt.Errorf("Plugin already started")
+func (s *PluginController) kill(misbevave bool) {
+	if misbevave {
+		s.logger.Crit("killing misbehaving plugin", "type", ReverseNetworkServiceMap[s.typ])
 	}
+	s.stdinMu.Lock()
+	s.cmd.Process.Kill()
+	s.stdinMu.Unlock()
+}
 
-	infos := []*model.ListenerInfo{}
-	startErrorChan := make(chan error)
-	var once sync.Once
+type InfosAndError struct {
+	infos []model.ListenerInfo
+	err   error
+}
 
-	doKill := func() {
-		s.logger.Crit("killing misbehaving plugin", "type", s.typ)
-		s.stdinMu.Lock()
-		s.cmd.Process.Kill()
-		s.stdinMu.Unlock()
-	}
+func (s *PluginController) listen() chan InfosAndError {
+	startErrorChan := make(chan InfosAndError)
 
 	go func() {
-		kill := false
+		var once sync.Once
 		initialized := false
+		kill := false
+		name := ReverseNetworkServiceMap[s.typ]
+		normalStop := false
 
 		defer func() {
-			// we arrive here
-			// 0/ when the plugin has been normally stopped
-			// 1/ when the plugin process has been shut down (stdout is closed, so scanner returns)
-			// or 2/ if scanner faces a formatting error
-			// or 3/ if the plugin sent a badly JSON encoded message
-			// or 4/ if the plugin sent an unexpected message
-			s.logger.Debug("Plugin controller is stopping", "type", s.typ)
+			s.logger.Debug("Plugin controller is stopping", "type", name)
 			once.Do(func() {
-				startErrorChan <- fmt.Errorf("Unexpected end of plugin before it was initialized")
+				startErrorChan <- InfosAndError{
+					err:   fmt.Errorf("Unexpected end of plugin before it was initialized"),
+					infos: nil,
+				}
 				close(startErrorChan)
 			})
+			s.createdMu.Lock()
+			s.startedMu.Lock()
+			s.started = false
 
-			if kill {
-				doKill()
-			} else {
-				select {
-				case <-s.ShutdownChan:
-					// child has exited
-					s.logger.Debug("End of plugin child process", "type", s.typ)
-				default:
-					// child is still alive
-					s.startedMu.Lock()
-					if s.started {
-						// if the child had been inactive in a normal way,
-						// it would have sent the "stopped" message first,
-						// and s.started would be false
-						// so we know that something is going wrong
-						s.startedMu.Unlock()
-						doKill()
-					} else {
-						s.startedMu.Unlock()
-						s.logger.Debug("Plugin process has stopped and is inactive", "type", s.typ)
-					}
+			select {
+			case <-s.ShutdownChan:
+				// child process has already exited
+				s.logger.Debug("Plugin child process has shut down", "type", name)
+				s.created = false
+			default:
+				// child process is still alive, but we are in the defer(). why ?
+				if kill {
+					// the child misbehaved and deserved to be killed
+					s.kill(true)
+					<-s.ShutdownChan
+					s.created = false
+				} else if normalStop {
+					s.logger.Debug("Plugin child process has stopped normally", "type", name)
+				} else {
+					// should not happen, we assume an anomaly
+					s.kill(true)
+					<-s.ShutdownChan
+					s.created = false
 				}
 			}
+
+			s.startedMu.Unlock()
+			s.createdMu.Unlock()
+			close(s.StopChan)
 		}() // end of defer
 
 		// read JSON encoded messages that the plugin is going to write on stdout
@@ -219,11 +248,18 @@ func (s *NetworkPlugin) Start() ([]*model.ListenerInfo, error) {
 			command = parts[0]
 			switch command {
 			case "syslog":
+				// the plugin emitted a syslog message to be sent to the Store
 				if len(parts) == 2 {
 					if !initialized {
 						msg := "Plugin sent a syslog message before being initialized"
 						s.logger.Error(msg)
-						once.Do(func() { startErrorChan <- fmt.Errorf(msg); close(startErrorChan) })
+						once.Do(func() {
+							startErrorChan <- InfosAndError{
+								err:   fmt.Errorf(msg),
+								infos: nil,
+							}
+							close(startErrorChan)
+						})
 						kill = true
 						return
 					} else {
@@ -240,37 +276,67 @@ func (s *NetworkPlugin) Start() ([]*model.ListenerInfo, error) {
 				}
 			case "started":
 				if len(parts) == 2 {
+					// fill infos about listening ports
+					infos := []model.ListenerInfo{}
 					err := json.Unmarshal([]byte(parts[1]), &infos)
 					if err == nil {
 						initialized = true
-						once.Do(func() { close(startErrorChan) })
+						once.Do(func() {
+							startErrorChan <- InfosAndError{
+								infos: infos,
+								err:   nil,
+							}
+							close(startErrorChan)
+						})
 					} else {
 						s.logger.Warn("Plugin sent a badly encoded JSON listener info", "error", err)
-						once.Do(func() { startErrorChan <- err; close(startErrorChan) })
+						once.Do(func() {
+							startErrorChan <- InfosAndError{
+								infos: nil,
+								err:   err,
+							}
+							close(startErrorChan)
+						})
 						kill = true
 						return
 					}
 				}
 			case "stopped":
-				s.startedMu.Lock()
-				s.started = false
-				s.startedMu.Unlock()
+				normalStop = true
 				return
 			case "shutdown":
-				// plugin child is shutting down, eventually the scanner will return normally
+				// plugin child is shutting down, eventually the scanner will return normally, we just wait for that
 			case "starterror":
 				if len(parts) == 2 {
 					err := fmt.Errorf(parts[1])
-					once.Do(func() { startErrorChan <- err; close(startErrorChan) })
+					once.Do(func() {
+						startErrorChan <- InfosAndError{
+							infos: nil,
+							err:   err,
+						}
+						close(startErrorChan)
+					})
 				}
 			case "conferror":
 				if len(parts) == 2 {
 					err := fmt.Errorf(parts[1])
-					once.Do(func() { startErrorChan <- err; close(startErrorChan) })
+					once.Do(func() {
+						startErrorChan <- InfosAndError{
+							infos: nil,
+							err:   err,
+						}
+						close(startErrorChan)
+					})
 				}
 			case "nolistenererror":
 				err := fmt.Errorf("No listener")
-				once.Do(func() { startErrorChan <- err; close(startErrorChan) })
+				once.Do(func() {
+					startErrorChan <- InfosAndError{
+						infos: nil,
+						err:   err,
+					}
+					close(startErrorChan)
+				})
 			case "metrics":
 				if len(parts) == 2 {
 					families := []*dto.MetricFamily{}
@@ -278,55 +344,142 @@ func (s *NetworkPlugin) Start() ([]*model.ListenerInfo, error) {
 					if err == nil {
 						s.metricsChan <- families
 					} else {
-						// TODO
+						s.logger.Error("Plugin returned invalid metrics")
+						close(s.metricsChan)
+						kill = true
+						return
 					}
 				} else {
-					// TODO
+					s.logger.Error("Plugin returned empty metrics")
+					close(s.metricsChan)
+					kill = true
+					return
 				}
 			default:
 				err := fmt.Errorf("Unexpected message from plugin")
 				s.logger.Error("Unexpected message from plugin", "command", command)
-				once.Do(func() { startErrorChan <- err; close(startErrorChan) })
+				once.Do(func() {
+					startErrorChan <- InfosAndError{
+						infos: nil,
+						err:   err,
+					}
+					close(startErrorChan)
+				})
 				kill = true
 				return
 			}
 		}
 		err := scanner.Err()
 		if err == nil {
-			// scanner has returned without error
-			// it means that the plugin child stdin has been closed
-			// so we know that the plugin child has exited
-			// let's wait that the shutdown channel has been closed before executing the defer()
+			// 'scanner' has returned without error.
+			// It means that the plugin child stdout is EOF = closed.
+			// So we know that the plugin child has exited
+			// Let's wait that the shutdown channel has been closed before executing the defer()
 			<-s.ShutdownChan
+			return
 		} else {
-			once.Do(func() { startErrorChan <- err; close(startErrorChan) })
+			// plugin has sent an invalid message that could not be interpreted by scanner
+			once.Do(func() {
+				startErrorChan <- InfosAndError{
+					infos: nil,
+					err:   err,
+				}
+				close(startErrorChan)
+			})
 			s.logger.Error("Plugin scanner error", "error", err)
 			kill = true
 			return
 		}
+
 	}()
+	return startErrorChan
+}
+
+func (s *PluginController) Start() ([]model.ListenerInfo, error) {
+	s.createdMu.Lock()
+	s.startedMu.Lock()
+	name := ReverseNetworkServiceMap[s.typ]
+	if !s.created {
+		s.startedMu.Unlock()
+		s.createdMu.Unlock()
+		return nil, fmt.Errorf("Can not start, plugin '%s' has not been created", name)
+	}
+	if s.started {
+		s.startedMu.Unlock()
+		s.createdMu.Unlock()
+		return nil, fmt.Errorf("Plugin already started: %s", name)
+	}
+	s.StopChan = make(chan struct{})
 
 	cb, _ := json.Marshal(s.conf)
 
-	s.stdinMu.Lock()
-	utils.W(s.stdin, "conf", cb)
-	utils.W(s.stdin, "start", utils.NOW)
-	s.stdinMu.Unlock()
+	rerr := s.W("conf", cb)
+	if rerr == nil {
+		rerr = s.W("start", utils.NOW)
+	}
+	infos := []model.ListenerInfo{}
+	if rerr == nil {
+		select {
+		case infoserr := <-s.listen():
+			rerr = infoserr.err
+			infos = infoserr.infos
+		case <-time.After(3 * time.Second):
+			rerr = fmt.Errorf("Plugin failed to start before timeout")
+		}
+	}
 
-	rerr := <-startErrorChan
 	if rerr == nil {
 		s.started = true
 		s.startedMu.Unlock()
+		s.createdMu.Unlock()
 		return infos, nil
 	} else {
 		s.startedMu.Unlock()
-		infos = nil
-		s.Shutdown(time.Second)
-		return infos, rerr
+		s.createdMu.Unlock()
+		s.Shutdown(3 * time.Second)
+		return nil, rerr
 	}
 }
 
-func (s *NetworkPlugin) Create(test bool) error {
+func setupCmd(name string, binderHandle int, loggerHandle int, test bool) (*exec.Cmd, io.WriteCloser, io.ReadCloser, error) {
+	exe, err := osext.Executable()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	envs := []string{"PATH=/bin:/usr/bin"}
+	files := []*os.File{}
+	if binderHandle != 0 {
+		files = append(files, os.NewFile(uintptr(binderHandle), "binder"))
+		envs = append(envs, "SKEWER_HAS_BINDER=TRUE")
+	}
+	if loggerHandle != 0 {
+		files = append(files, os.NewFile(uintptr(loggerHandle), "logger"))
+		envs = append(envs, "SKEWER_HAS_LOGGER=TRUE")
+	}
+	if test {
+		envs = append(envs, "SKEWER_TEST=TRUE")
+	}
+
+	cmd := &exec.Cmd{
+		Path:       exe,
+		Stderr:     os.Stderr,
+		ExtraFiles: files,
+		Env:        envs,
+		Args:       []string{name},
+	}
+	in, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return cmd, in, out, nil
+}
+
+func (s *PluginController) Create(test bool, dumpable bool, storePath string, confDir string) error {
+	// if the provider process already lives, Create() just returns
 	s.createdMu.Lock()
 	if s.created {
 		s.createdMu.Unlock()
@@ -334,54 +487,94 @@ func (s *NetworkPlugin) Create(test bool) error {
 	}
 
 	s.ShutdownChan = make(chan struct{})
+	s.ExitCode = 0
 
-	exe, err := osext.Executable()
-	if err != nil {
-		return err
+	var err error
+	name := ReverseNetworkServiceMap[s.typ]
+
+	switch s.typ {
+	case RELP, TCP, UDP:
+		// if creating the namespaces fails, fallback to classical start
+		// this way we can support environments where user namespaces are not
+		// available
+		s.cmd, s.stdin, s.stdout, err = setupCmd(fmt.Sprintf("confined-%s", name), s.binderHandle, s.loggerHandle, test)
+		if err != nil {
+			close(s.ShutdownChan)
+			s.createdMu.Unlock()
+			return err
+		}
+
+		err = sys.StartInNamespaces(s.cmd, dumpable, "", "")
+
+		if err != nil {
+			s.logger.Warn("Starting plugin in user namespace failed", "error", err, "type", name)
+			s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.binderHandle, s.loggerHandle, test)
+			if err != nil {
+				close(s.ShutdownChan)
+				s.createdMu.Unlock()
+				return err
+			}
+			err = s.cmd.Start()
+		}
+
+	case Store:
+		s.cmd, s.stdin, s.stdout, err = setupCmd(fmt.Sprintf("confined-%s", name), s.binderHandle, s.loggerHandle, test)
+		if err != nil {
+			close(s.ShutdownChan)
+			s.createdMu.Unlock()
+			return err
+		}
+
+		err = sys.StartInNamespaces(s.cmd, dumpable, storePath, "")
+
+		if err != nil {
+			s.logger.Warn("Starting plugin in user namespace failed", "error", err, "type", name)
+			s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.binderHandle, s.loggerHandle, test)
+			if err != nil {
+				close(s.ShutdownChan)
+				s.createdMu.Unlock()
+				return err
+			}
+			err = s.cmd.Start()
+		}
+
+	case Journal:
+		s.cmd, s.stdin, s.stdout, err = setupCmd(fmt.Sprintf("confined-%s", name), s.binderHandle, s.loggerHandle, test)
+		//s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.binderHandle, s.loggerHandle, test)
+
+		if err != nil {
+			close(s.ShutdownChan)
+			s.createdMu.Unlock()
+			return err
+		}
+
+		//err = s.cmd.Start()
+		err = sys.StartInNamespaces(s.cmd, dumpable, "", "")
+		/*
+			err = sys.StartInNamespaces(s.cmd, dumpable, storePath, "", true)
+
+			if err != nil {
+				s.logger.Warn("Starting plugin in user namespace failed", "error", err, "type", name)
+				s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.binderHandle, s.loggerHandle, test)
+				if err != nil {
+					close(s.ShutdownChan)
+					s.createdMu.Unlock()
+					return err
+				}
+				err = s.cmd.Start()
+			}
+		*/
+
+	default:
+		s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.binderHandle, s.loggerHandle, test)
+		if err != nil {
+			close(s.ShutdownChan)
+			s.createdMu.Unlock()
+			return err
+		}
+		err = s.cmd.Start()
 	}
 
-	envs := []string{"PATH=/bin:/usr/bin"}
-	files := []*os.File{}
-	if s.binderHandle != 0 {
-		files = append(files, os.NewFile(uintptr(s.binderHandle), "binder"))
-		envs = append(envs, "HAS_BINDER=TRUE")
-	}
-	if s.loggerHandle != 0 {
-		files = append(files, os.NewFile(uintptr(s.loggerHandle), "logger"))
-		envs = append(envs, "HAS_LOGGER=TRUE")
-	}
-
-	s.cmd = &exec.Cmd{
-		Path:       exe,
-		Stderr:     os.Stderr,
-		ExtraFiles: files,
-		Env:        envs,
-	}
-
-	s.stdinMu.Lock()
-	s.stdin, err = s.cmd.StdinPipe()
-	s.stdinMu.Unlock()
-
-	if err != nil {
-		close(s.ShutdownChan)
-		s.createdMu.Unlock()
-		return err
-	}
-
-	s.stdout, err = s.cmd.StdoutPipe()
-	if err != nil {
-		close(s.ShutdownChan)
-		s.createdMu.Unlock()
-		return err
-	}
-
-	args := []string{ReverseNetworkServiceMap[s.typ]}
-	if test {
-		args = append(args, "--test")
-	}
-	s.cmd.Args = args
-
-	err = s.cmd.Start()
 	if err != nil {
 		close(s.ShutdownChan)
 		s.createdMu.Unlock()
@@ -391,40 +584,58 @@ func (s *NetworkPlugin) Create(test bool) error {
 	s.createdMu.Unlock()
 
 	go func() {
-		// monitor for plugin process termination
-		s.cmd.Wait()
+		// monitor plugin process termination
+		err := s.cmd.Wait()
+		if err == nil {
+			s.logger.Debug("Plugin process has exited without reporting error", "type", name)
+			s.ExitCode = 0
+		} else if e, ok := err.(*exec.ExitError); ok {
+			s.logger.Error("Plugin process has shutdown with error", "stderr", string(e.Stderr), "type", name, "error", e.Error())
+			status := e.ProcessState.Sys()
+			if cstatus, ok := status.(syscall.WaitStatus); ok {
+				s.ExitCode = cstatus.ExitStatus()
+				s.logger.Error("Plugin process return code", "type", name, "code", s.ExitCode)
+			} else {
+				s.ExitCode = -1
+				s.logger.Warn("Could not interpret plugin process return code", "type", name)
+			}
+		} else {
+			s.logger.Error("Plugin process has exited abnormally, but the error could not be interpreted", "type", name, "error", err.Error())
+		}
 		close(s.ShutdownChan)
-		s.createdMu.Lock()
-		s.startedMu.Lock()
-		s.created = false
-		s.started = false
-		s.startedMu.Unlock()
-		s.createdMu.Unlock()
+		// after some client has waited ShutdownChan to be closed, it can safely read ExitCode
 	}()
-
 	return nil
 
 }
 
 type StorePlugin struct {
-	*NetworkPlugin
+	*PluginController
 }
 
-func (s *StorePlugin) Stash(m *model.TcpUdpParsedMessage) {
-	select {
-	case <-s.ShutdownChan:
-		return
-	default:
-		mb, err := m.MarshalMsg(nil)
-		if err == nil {
-			utils.W(s.stdin, "stash", mb)
+// Stash stores the given message into the Store
+func (s *StorePlugin) Stash(m *model.TcpUdpParsedMessage) (fatal error, nonfatal error) {
+	// this method is called very frequently, so we avoid to lock or receive from channel
+	if s.typ != Store {
+		return fmt.Errorf("Plugin was asked to store a message, but the plugin '%s' is not a Store", ReverseNetworkServiceMap[s.typ]), nil
+	}
+	mb, err := m.MarshalMsg(nil)
+	if err == nil {
+		err = s.W("storemessage", mb)
+		if err != nil {
+			// abort the store and yell
+			s.logger.Crit("Could not write to Store. There was message loss", "error", err)
+			s.Shutdown(2 * time.Second)
+			return err, nil
 		} else {
-			// TODO
+			return nil, nil
 		}
+	} else {
+		s.logger.Error("Error marshalling message", "error", err)
+		return nil, err
 	}
 }
 
 func NewStorePlugin(loggerHandle int, l log15.Logger) *StorePlugin {
-	plug := NewNetworkPlugin(Store, nil, 0, loggerHandle, l)
-	return &StorePlugin{NetworkPlugin: plug}
+	return &StorePlugin{PluginController: NewPluginController(Store, nil, 0, loggerHandle, l)}
 }

@@ -49,9 +49,6 @@ type MessageStore struct {
 	failed_mu    *sync.Mutex
 	messages_mu  *sync.Mutex
 
-	ack_mu  *sync.Mutex
-	ackCond *sync.Cond
-
 	wg *sync.WaitGroup
 
 	ticker *time.Ticker
@@ -60,10 +57,10 @@ type MessageStore struct {
 	closedChan     chan struct{}
 	FatalErrorChan chan struct{}
 
-	toStashQueue    *utils.MPSC
-	ackQueue        []string
-	nackQueue       []string
-	permerrorsQueue []string
+	toStashQueue    *utils.MessageQueue
+	ackQueue        *utils.AckQueue
+	nackQueue       *utils.AckQueue
+	permerrorsQueue *utils.AckQueue
 
 	OutputsChan chan *model.TcpUdpParsedMessage
 }
@@ -97,19 +94,16 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 	store.registry.MustRegister(store.metrics.BadgerGauge)
 	store.logger = l.New("class", "MessageStore")
 
-	store.toStashQueue = utils.NewMPSC()
-	store.ackQueue = make([]string, 0, 300)
-	store.nackQueue = make([]string, 0, 300)
-	store.permerrorsQueue = make([]string, 0, 300)
+	store.toStashQueue = utils.NewMessageQueue()
+	store.ackQueue = utils.NewAckQueue()
+	store.nackQueue = utils.NewAckQueue()
+	store.permerrorsQueue = utils.NewAckQueue()
 
 	store.ready_mu = &sync.Mutex{}
 	store.availMsgCond = sync.NewCond(store.ready_mu)
 	store.failed_mu = &sync.Mutex{}
 	store.messages_mu = &sync.Mutex{}
 	store.wg = &sync.WaitGroup{}
-
-	store.ack_mu = &sync.Mutex{}
-	store.ackCond = sync.NewCond(store.ack_mu)
 
 	store.closedChan = make(chan struct{})
 
@@ -145,67 +139,24 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 
 	store.wg.Add(1)
 	go func() {
-		store.ack_mu.Lock()
-		defer func() {
-			store.ack_mu.Unlock()
-			store.wg.Done()
-		}()
-		for {
-		wait_for_acks:
-			for {
-				if len(store.ackQueue) > 0 || len(store.nackQueue) > 0 || len(store.permerrorsQueue) > 0 {
-					break wait_for_acks
-				} else {
-					select {
-					case <-ctx.Done():
-						return
-					default:
-						store.ackCond.Wait()
-					}
-				}
-
-			}
-			if len(store.ackQueue) > 0 || len(store.nackQueue) > 0 || len(store.permerrorsQueue) > 0 {
-				var ackCopy []string
-				var nackCopy []string
-				var permCopy []string
-				if len(store.ackQueue) > 0 {
-					ackCopy = store.ackQueue
-					store.ackQueue = make([]string, 0, 300)
-				}
-				if len(store.nackQueue) > 0 {
-					nackCopy = store.nackQueue
-					store.nackQueue = make([]string, 0, 300)
-				}
-				if len(store.permerrorsQueue) > 0 {
-					permCopy = store.permerrorsQueue
-					store.permerrorsQueue = make([]string, 0, 300)
-				}
-				store.ack_mu.Unlock()
-				store.doACK(ackCopy)
-				store.doNACK(nackCopy)
-				store.doPermanentError(permCopy)
-				store.ack_mu.Lock()
-			}
+		defer store.wg.Done()
+		done := ctx.Done()
+		for utils.WaitManyAckQueues(done, store.ackQueue, store.nackQueue, store.permerrorsQueue) {
+			store.doACK(store.ackQueue.GetMany(300))
+			store.doNACK(store.nackQueue.GetMany(300))
+			store.doPermanentError(store.permerrorsQueue.GetMany(300))
 		}
+		store.logger.Debug("Store goroutine WaitAck ended")
 	}()
 
 	store.wg.Add(1)
 	go func() {
+		defer store.wg.Done()
 		done := ctx.Done()
-		defer func() {
-			store.wg.Done()
-		}()
-		for {
-			for !store.toStashQueue.Has() {
-				select {
-				case <-done:
-					return
-				case <-time.After(200 * time.Millisecond):
-				}
-			}
+		for store.toStashQueue.Wait(done) {
 			store.ingest(store.toStashQueue.GetMany(1000))
 		}
+		store.logger.Debug("Store goroutine WaitMessages ended")
 	}()
 
 	store.wg.Add(1)
@@ -227,22 +178,13 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 				store.resetFailures()
 			case <-ctx.Done():
 				store.ticker.Stop()
+				store.logger.Debug("Store ticker has been stopped")
 				return
 			}
-
 		}
 	}()
 
 	store.OutputsChan = make(chan *model.TcpUdpParsedMessage)
-
-	store.wg.Add(1)
-	go func() {
-		<-ctx.Done()
-		// unblock the blocked conditions
-		store.availMsgCond.Signal()
-		store.ackCond.Signal()
-		store.wg.Done()
-	}()
 
 	store.wg.Add(1)
 	go func() {
@@ -284,6 +226,11 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 				store.ready_mu.Lock()
 			}
 		}
+	}()
+
+	go func() {
+		<-ctx.Done()
+		store.availMsgCond.Signal()
 	}()
 
 	go func() {
@@ -505,8 +452,9 @@ func (s *MessageStore) resetFailures() {
 	}
 }
 
-func (s *MessageStore) Stash(m *model.TcpUdpParsedMessage) {
+func (s *MessageStore) Stash(m *model.TcpUdpParsedMessage) (fatal error, nonfatal error) {
 	s.toStashQueue.Put(m)
+	return nil, nil
 }
 
 func (s *MessageStore) ingest(queue []*model.TcpUdpParsedMessage) (int, error) {
@@ -665,10 +613,7 @@ func (s *MessageStore) retrieve(n int) (messages map[string]*model.TcpUdpParsedM
 }
 
 func (s *MessageStore) ACK(uid string) {
-	s.ack_mu.Lock()
-	s.ackQueue = append(s.ackQueue, uid)
-	s.ackCond.Signal()
-	s.ack_mu.Unlock()
+	s.ackQueue.Put(uid)
 }
 
 func (s *MessageStore) doACK(uids []string) {
@@ -707,10 +652,7 @@ func (s *MessageStore) doACK(uids []string) {
 }
 
 func (s *MessageStore) NACK(uid string) {
-	s.ack_mu.Lock()
-	s.nackQueue = append(s.nackQueue, uid)
-	s.ackCond.Signal()
-	s.ack_mu.Unlock()
+	s.nackQueue.Put(uid)
 }
 
 func (s *MessageStore) doNACK(uids []string) {
@@ -750,10 +692,7 @@ func (s *MessageStore) doNACK(uids []string) {
 }
 
 func (s *MessageStore) PermError(uid string) {
-	s.ack_mu.Lock()
-	s.permerrorsQueue = append(s.permerrorsQueue, uid)
-	s.ackCond.Signal()
-	s.ack_mu.Unlock()
+	s.permerrorsQueue.Put(uid)
 }
 
 func (s *MessageStore) doPermanentError(uids []string) {

@@ -6,7 +6,6 @@ import (
 
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
-	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/linux"
@@ -43,21 +42,7 @@ func init() {
 	}
 }
 
-type NetworkService interface {
-	Start(test bool) ([]*model.ListenerInfo, error)
-	Stop()
-	Shutdown()
-	WaitClosed()
-	Gather() ([]*dto.MetricFamily, error)
-}
-
-type StoreService interface {
-	NetworkService
-	model.Stasher
-	Errors() chan struct{}
-}
-
-func ConfigureAndStartService(s NetworkService, c conf.BaseConfig, test bool) ([]*model.ListenerInfo, error) {
+func ConfigureAndStartService(s NetworkService, c conf.BaseConfig, test bool) ([]model.ListenerInfo, error) {
 	switch s := s.(type) {
 	case *network.TcpServiceImpl:
 		s.SetConf(c.Syslog, c.Parsers)
@@ -74,14 +59,14 @@ func ConfigureAndStartService(s NetworkService, c conf.BaseConfig, test bool) ([
 	case *linux.AuditService:
 		s.SetAuditConf(c.Audit)
 		return s.Start(test)
-	case *StoreServiceImpl:
-		return s.SetConf(c, test)
+	case *storeServiceImpl:
+		return s.SetConfAndRestart(c, test)
 	default:
-		// TODO
-		return nil, nil
+		return nil, fmt.Errorf("Unknown network service: %T", s)
 	}
 
 }
+
 func Factory(t NetworkServiceType, stasher model.Stasher, gen chan ulid.ULID, b *sys.BinderClient, l log15.Logger) NetworkService {
 	switch t {
 	case TCP:

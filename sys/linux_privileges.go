@@ -42,9 +42,37 @@ func Setgid(gid int) {
 
 func NoNewPriv() error {
 	return unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
+	//return nil
+}
+
+func DropAllCapabilities() error {
+	c, err := NewCapabilitiesQuery()
+	if err != nil {
+		return err
+	}
+	err = unix.Prctl(unix.PR_SET_SECUREBITS, uintptr(1)|uintptr(3)|uintptr(5), 0, 0, 0)
+	if err != nil {
+		return err
+	}
+	c.caps.Clear(capability.AMBIENT)
+	c.caps.Clear(capability.INHERITABLE)
+	c.caps.Clear(capability.EFFECTIVE)
+	c.caps.Clear(capability.PERMITTED)
+	err = c.caps.Apply(capability.AMBIENT)
+	if err != nil {
+		return err
+	}
+	err = c.caps.Apply(capability.CAPS)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func KeepCaps() error {
+	// /usr/include/linux/securebits.h
+	// #define SECURE_NO_SETUID_FIXUP_LOCKED 3
+	// #define SECURE_KEEP_CAPS_LOCKED 5
 	return unix.Prctl(unix.PR_SET_SECUREBITS, uintptr(5)|uintptr(3), 0, 0, 0)
 }
 

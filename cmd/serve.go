@@ -33,247 +33,7 @@ var serveCmd = &cobra.Command{
 running process that listens to syslog messages according to the configuration,
 connects to Kafka, and forwards messages to Kafka.`,
 	Run: func(cmd *cobra.Command, args []string) {
-
-		// try to set mlock and non-dumpable for both child and parent
-		if sys.MlockSupported && !noMlockFlag {
-			err := sys.MlockAll()
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error executing MlockAll(): %s\n", err)
-			}
-		}
-
-		if sys.CapabilitiesSupported && !dumpableFlag {
-			err := sys.SetNonDumpable()
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error setting PR_SET_DUMPABLE: %s\n", err)
-			}
-		}
-
-		if os.Getenv("SKEWER_LINUX_CHILD") == "TRUE" {
-			// we are in the final child on linux
-			err := sys.NoNewPriv()
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				os.Exit(-1)
-			}
-			err = Serve()
-			if err != nil {
-				fmt.Fprintln(os.Stderr, "Fatal error in Serve()", err)
-				os.Exit(-1)
-			}
-			os.Exit(0)
-		}
-
-		if os.Getenv("SKEWER_CHILD") == "TRUE" {
-			// we are in the child
-			if sys.CapabilitiesSupported {
-				// another execve is necessary on Linux to ensure that
-				// the following capability drop will be effective on
-				// all go threads
-				runtime.LockOSThread()
-				err := sys.DropNetBind()
-				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
-				}
-				exe, err := osext.Executable()
-				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					os.Exit(-1)
-				}
-				err = syscall.Exec(exe, os.Args, []string{"PATH=/bin:/usr/bin", "SKEWER_LINUX_CHILD=TRUE"})
-				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					os.Exit(-1)
-				}
-			} else {
-				err := sys.NoNewPriv()
-				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					os.Exit(-1)
-				}
-				err = Serve()
-				if err != nil {
-					fmt.Fprintln(os.Stderr, "Fatal error in Serve()", err)
-					os.Exit(-1)
-				}
-				os.Exit(0)
-			}
-		}
-
-		// we are in the parent
-
-		if sys.CapabilitiesSupported {
-			// under Linux, re-exec ourself immediately with fewer privileges
-			runtime.LockOSThread()
-			need_fix, err := sys.NeedFixLinuxPrivileges(uidFlag, gidFlag)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				os.Exit(-1)
-			}
-			if need_fix {
-				if os.Getenv("SKEWER_DROPPED") == "TRUE" {
-					fmt.Fprintln(os.Stderr, "Dropping privileges failed!")
-					fmt.Fprintln(os.Stderr, "Uid", os.Getuid())
-					fmt.Fprintln(os.Stderr, "Gid", os.Getgid())
-					fmt.Fprintln(os.Stderr, "Capabilities")
-					fmt.Fprintln(os.Stderr, sys.GetCaps())
-					os.Exit(-1)
-				}
-				err = sys.FixLinuxPrivileges(uidFlag, gidFlag)
-				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					os.Exit(-1)
-				}
-				err = sys.NoNewPriv()
-				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					os.Exit(-1)
-				}
-				exe, err := os.Executable()
-				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					os.Exit(-1)
-				}
-				err = syscall.Exec(exe, os.Args, []string{"PATH=/bin:/usr/bin", "SKEWER_DROPPED=TRUE"})
-				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					os.Exit(-1)
-				}
-			}
-		}
-
-		rootlogger := logging.SetLogging(loglevelFlag, logjsonFlag, syslogFlag, logfilenameFlag)
-		logger := rootlogger.New("proc", "parent")
-
-		handlesToClose := []int{}
-
-		mustSocketPair := func(typ int) (int, int) {
-			a, b, err := sys.SocketPair(typ)
-			if err != nil {
-				logger.Crit("SocketPair() error", "error", err)
-				os.Exit(-1)
-			}
-			handlesToClose = append(handlesToClose, a)
-			return a, b
-		}
-		getLoggerConn := func(handle int) net.Conn {
-			loggerConn, _ := net.FileConn(os.NewFile(uintptr(handle), "logger"))
-			loggerConn.(*net.UnixConn).SetReadBuffer(65536)
-			loggerConn.(*net.UnixConn).SetWriteBuffer(65536)
-			return loggerConn
-		}
-
-		numuid, numgid, err := sys.LookupUid(uidFlag, gidFlag)
-		if err != nil {
-			logger.Crit("Error looking up uid", "error", err, "uid", uidFlag, "gid", gidFlag)
-			os.Exit(-1)
-		}
-		if numuid == 0 {
-			logger.Crit("Provide a non-privileged user with --uid flag")
-			os.Exit(-1)
-		}
-
-		binderChildHandle, binderParentHandle := mustSocketPair(syscall.SOCK_STREAM)
-		binderTcpHandle, binderParentTcpHandle := mustSocketPair(syscall.SOCK_STREAM)
-		binderUdpHandle, binderParentUdpHandle := mustSocketPair(syscall.SOCK_STREAM)
-		binderRelpHandle, binderParentRelpHandle := mustSocketPair(syscall.SOCK_STREAM)
-
-		err = sys.Binder([]int{binderParentHandle, binderParentTcpHandle, binderParentUdpHandle, binderParentRelpHandle}, logger) // returns immediately
-		if err != nil {
-			logger.Crit("Error setting the root binder", "error", err)
-			os.Exit(-1)
-		}
-
-		loggerChildHandle, loggerParentHandle := mustSocketPair(syscall.SOCK_DGRAM)
-		loggerChildConn := getLoggerConn(loggerParentHandle)
-
-		loggerTcpHandle, loggerParentTcpHandle := mustSocketPair(syscall.SOCK_DGRAM)
-		loggerTcpConn := getLoggerConn(loggerParentTcpHandle)
-
-		loggerUdpHandle, loggerParentUdpHandle := mustSocketPair(syscall.SOCK_DGRAM)
-		loggerUdpConn := getLoggerConn(loggerParentUdpHandle)
-
-		loggerRelpHandle, loggerParentRelpHandle := mustSocketPair(syscall.SOCK_DGRAM)
-		loggerRelpConn := getLoggerConn(loggerParentRelpHandle)
-
-		loggerJournalHandle, loggerParentJournalHandle := mustSocketPair(syscall.SOCK_DGRAM)
-		loggerJournalConn := getLoggerConn(loggerParentJournalHandle)
-
-		loggerAuditHandle, loggerParentAuditHandle := mustSocketPair(syscall.SOCK_DGRAM)
-		loggerAuditConn := getLoggerConn(loggerParentAuditHandle)
-
-		loggerConfigurationHandle, loggerParentConfigurationHandle := mustSocketPair(syscall.SOCK_DGRAM)
-		loggerConfigurationConn := getLoggerConn(loggerParentConfigurationHandle)
-
-		loggerStoreHandle, loggerParentStoreHandle := mustSocketPair(syscall.SOCK_DGRAM)
-		loggerStoreConn := getLoggerConn(loggerParentStoreHandle)
-
-		logging.LogReceiver(context.Background(), rootlogger, []net.Conn{
-			loggerChildConn, loggerTcpConn, loggerUdpConn, loggerRelpConn, loggerJournalConn, loggerAuditConn, loggerConfigurationConn,
-			loggerStoreConn,
-		})
-
-		logger.Debug("Target user", "uid", numuid, "gid", numgid)
-
-		// execute child under the new user
-		exe, err := osext.Executable() // custom Executable function to support OpenBSD
-		if err != nil {
-			logger.Crit("Error getting executable name", "error", err)
-			os.Exit(-1)
-		}
-
-		childProcess := exec.Cmd{
-			Args:   os.Args,
-			Path:   exe,
-			Stdin:  nil,
-			Stdout: os.Stdout,
-			Stderr: os.Stderr,
-			ExtraFiles: []*os.File{
-				os.NewFile(uintptr(binderChildHandle), "child_binder_file"),
-				os.NewFile(uintptr(binderTcpHandle), "tcp_binder_file"),
-				os.NewFile(uintptr(binderUdpHandle), "udp_binder_file"),
-				os.NewFile(uintptr(binderRelpHandle), "relp_binder_file"),
-				os.NewFile(uintptr(loggerChildHandle), "child_logger_file"),
-				os.NewFile(uintptr(loggerTcpHandle), "tcp_logger_file"),
-				os.NewFile(uintptr(loggerUdpHandle), "udp_logger_file"),
-				os.NewFile(uintptr(loggerRelpHandle), "relp_logger_file"),
-				os.NewFile(uintptr(loggerJournalHandle), "journal_logger_file"),
-				os.NewFile(uintptr(loggerAuditHandle), "audit_logger_file"),
-				os.NewFile(uintptr(loggerConfigurationHandle), "config_logger_file"),
-				os.NewFile(uintptr(loggerStoreHandle), "store_logger_file"),
-			},
-			Env: []string{"SKEWER_CHILD=TRUE", "PATH=/bin:/usr/bin"},
-		}
-		if os.Getuid() != numuid {
-			childProcess.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uint32(numuid), Gid: uint32(numgid)}}
-		}
-		err = childProcess.Start()
-		if err != nil {
-			logger.Crit("Error starting child", "error", err)
-			os.Exit(-1)
-		}
-		for _, handle := range handlesToClose {
-			syscall.Close(handle)
-		}
-
-		sig_chan := make(chan os.Signal, 10)
-		once := sync.Once{}
-		go func() {
-			for sig := range sig_chan {
-				logger.Debug("parent received signal", "signal", sig)
-				if sig == syscall.SIGTERM {
-					once.Do(func() { childProcess.Process.Signal(sig) })
-				} else if sig == syscall.SIGHUP {
-					childProcess.Process.Signal(sig)
-				}
-			}
-		}()
-		signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT)
-		logger.Debug("PIDs", "parent", os.Getpid(), "child", childProcess.Process.Pid)
-
-		childProcess.Process.Wait()
-		os.Exit(0)
-
+		runserve()
 	},
 }
 
@@ -306,9 +66,252 @@ func init() {
 	serveCmd.Flags().BoolVar(&noMlockFlag, "no-mlock", false, "if set, skewer will not mlock() its memory")
 }
 
+func runserve() {
+
+	// try to set mlock and non-dumpable for both child and parent
+	if sys.MlockSupported && !noMlockFlag {
+		err := sys.MlockAll()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error executing MlockAll(): %s\n", err)
+		}
+	}
+
+	if !dumpableFlag {
+		err := sys.SetNonDumpable()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error setting PR_SET_DUMPABLE: %s\n", err)
+		}
+	}
+
+	if os.Getenv("SKEWER_LINUX_CHILD") == "TRUE" {
+		// we are in the final child on linux
+		err := sys.NoNewPriv()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(-1)
+		}
+		err = Serve()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Fatal error in Serve():", err)
+			os.Exit(-1)
+		}
+		os.Exit(0)
+	}
+
+	if os.Getenv("SKEWER_CHILD") == "TRUE" {
+		// we are in the child
+		if sys.CapabilitiesSupported {
+			// another execve is necessary on Linux to ensure that
+			// the following capability drop will be effective on
+			// all go threads
+			runtime.LockOSThread()
+			err := sys.DropNetBind()
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
+			exe, err := osext.Executable()
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(-1)
+			}
+			err = syscall.Exec(exe, os.Args, []string{"PATH=/bin:/usr/bin", "SKEWER_LINUX_CHILD=TRUE"})
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(-1)
+			}
+		} else {
+			err := sys.NoNewPriv()
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(-1)
+			}
+			err = Serve()
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "Fatal error in Serve()", err)
+				os.Exit(-1)
+			}
+			os.Exit(0)
+		}
+	}
+
+	// we are in the parent
+	if sys.CapabilitiesSupported {
+		// under Linux, re-exec ourself immediately with fewer privileges
+		runtime.LockOSThread()
+		need_fix, err := sys.NeedFixLinuxPrivileges(uidFlag, gidFlag)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(-1)
+		}
+		if need_fix {
+			if os.Getenv("SKEWER_DROPPED") == "TRUE" {
+				fmt.Fprintln(os.Stderr, "Dropping privileges failed!")
+				fmt.Fprintln(os.Stderr, "Uid", os.Getuid())
+				fmt.Fprintln(os.Stderr, "Gid", os.Getgid())
+				fmt.Fprintln(os.Stderr, "Capabilities")
+				fmt.Fprintln(os.Stderr, sys.GetCaps())
+				os.Exit(-1)
+			}
+			err = sys.FixLinuxPrivileges(uidFlag, gidFlag)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(-1)
+			}
+			err = sys.NoNewPriv()
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(-1)
+			}
+			exe, err := os.Executable()
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(-1)
+			}
+			err = syscall.Exec(exe, os.Args, []string{"PATH=/bin:/usr/bin", "SKEWER_DROPPED=TRUE"})
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(-1)
+			}
+		}
+	}
+
+	rootlogger := logging.SetLogging(loglevelFlag, logjsonFlag, syslogFlag, logfilenameFlag)
+	logger := rootlogger.New("proc", "parent")
+
+	handlesToClose := []int{}
+
+	mustSocketPair := func(typ int) (int, int) {
+		a, b, err := sys.SocketPair(typ)
+		if err != nil {
+			logger.Crit("SocketPair() error", "error", err)
+			os.Exit(-1)
+		}
+		handlesToClose = append(handlesToClose, a)
+		return a, b
+	}
+	getLoggerConn := func(handle int) net.Conn {
+		loggerConn, _ := net.FileConn(os.NewFile(uintptr(handle), "logger"))
+		loggerConn.(*net.UnixConn).SetReadBuffer(65536)
+		loggerConn.(*net.UnixConn).SetWriteBuffer(65536)
+		return loggerConn
+	}
+
+	numuid, numgid, err := sys.LookupUid(uidFlag, gidFlag)
+	if err != nil {
+		logger.Crit("Error looking up uid", "error", err, "uid", uidFlag, "gid", gidFlag)
+		os.Exit(-1)
+	}
+	if numuid == 0 {
+		logger.Crit("Provide a non-privileged user with --uid flag")
+		os.Exit(-1)
+	}
+
+	binderChildHandle, binderParentHandle := mustSocketPair(syscall.SOCK_STREAM)
+	binderTcpHandle, binderParentTcpHandle := mustSocketPair(syscall.SOCK_STREAM)
+	binderUdpHandle, binderParentUdpHandle := mustSocketPair(syscall.SOCK_STREAM)
+	binderRelpHandle, binderParentRelpHandle := mustSocketPair(syscall.SOCK_STREAM)
+
+	err = sys.Binder([]int{binderParentHandle, binderParentTcpHandle, binderParentUdpHandle, binderParentRelpHandle}, logger) // returns immediately
+	if err != nil {
+		logger.Crit("Error setting the root binder", "error", err)
+		os.Exit(-1)
+	}
+
+	loggerChildHandle, loggerParentHandle := mustSocketPair(syscall.SOCK_DGRAM)
+	loggerChildConn := getLoggerConn(loggerParentHandle)
+
+	loggerTcpHandle, loggerParentTcpHandle := mustSocketPair(syscall.SOCK_DGRAM)
+	loggerTcpConn := getLoggerConn(loggerParentTcpHandle)
+
+	loggerUdpHandle, loggerParentUdpHandle := mustSocketPair(syscall.SOCK_DGRAM)
+	loggerUdpConn := getLoggerConn(loggerParentUdpHandle)
+
+	loggerRelpHandle, loggerParentRelpHandle := mustSocketPair(syscall.SOCK_DGRAM)
+	loggerRelpConn := getLoggerConn(loggerParentRelpHandle)
+
+	loggerJournalHandle, loggerParentJournalHandle := mustSocketPair(syscall.SOCK_DGRAM)
+	loggerJournalConn := getLoggerConn(loggerParentJournalHandle)
+
+	loggerAuditHandle, loggerParentAuditHandle := mustSocketPair(syscall.SOCK_DGRAM)
+	loggerAuditConn := getLoggerConn(loggerParentAuditHandle)
+
+	loggerConfigurationHandle, loggerParentConfigurationHandle := mustSocketPair(syscall.SOCK_DGRAM)
+	loggerConfigurationConn := getLoggerConn(loggerParentConfigurationHandle)
+
+	loggerStoreHandle, loggerParentStoreHandle := mustSocketPair(syscall.SOCK_DGRAM)
+	loggerStoreConn := getLoggerConn(loggerParentStoreHandle)
+
+	logging.LogReceiver(context.Background(), rootlogger, []net.Conn{
+		loggerChildConn, loggerTcpConn, loggerUdpConn, loggerRelpConn, loggerJournalConn, loggerAuditConn, loggerConfigurationConn,
+		loggerStoreConn,
+	})
+
+	logger.Debug("Target user", "uid", numuid, "gid", numgid)
+
+	// execute child under the new user
+	exe, err := osext.Executable() // custom Executable function to support OpenBSD
+	if err != nil {
+		logger.Crit("Error getting executable name", "error", err)
+		os.Exit(-1)
+	}
+
+	childProcess := exec.Cmd{
+		Args:   os.Args,
+		Path:   exe,
+		Stdin:  nil,
+		Stdout: os.Stdout,
+		Stderr: os.Stderr,
+		ExtraFiles: []*os.File{
+			os.NewFile(uintptr(binderChildHandle), "child_binder_file"),
+			os.NewFile(uintptr(binderTcpHandle), "tcp_binder_file"),
+			os.NewFile(uintptr(binderUdpHandle), "udp_binder_file"),
+			os.NewFile(uintptr(binderRelpHandle), "relp_binder_file"),
+			os.NewFile(uintptr(loggerChildHandle), "child_logger_file"),
+			os.NewFile(uintptr(loggerTcpHandle), "tcp_logger_file"),
+			os.NewFile(uintptr(loggerUdpHandle), "udp_logger_file"),
+			os.NewFile(uintptr(loggerRelpHandle), "relp_logger_file"),
+			os.NewFile(uintptr(loggerJournalHandle), "journal_logger_file"),
+			os.NewFile(uintptr(loggerAuditHandle), "audit_logger_file"),
+			os.NewFile(uintptr(loggerConfigurationHandle), "config_logger_file"),
+			os.NewFile(uintptr(loggerStoreHandle), "store_logger_file"),
+		},
+		Env: []string{"SKEWER_CHILD=TRUE", "PATH=/bin:/usr/bin"},
+	}
+	if os.Getuid() != numuid {
+		childProcess.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uint32(numuid), Gid: uint32(numgid)}}
+	}
+	err = childProcess.Start()
+	if err != nil {
+		logger.Crit("Error starting child", "error", err)
+		os.Exit(-1)
+	}
+	for _, handle := range handlesToClose {
+		syscall.Close(handle)
+	}
+
+	sig_chan := make(chan os.Signal, 10)
+	once := sync.Once{}
+	go func() {
+		for sig := range sig_chan {
+			logger.Debug("parent received signal", "signal", sig)
+			if sig == syscall.SIGTERM {
+				once.Do(func() { childProcess.Process.Signal(sig) })
+			} else if sig == syscall.SIGHUP {
+				childProcess.Process.Signal(sig)
+			}
+		}
+	}()
+	signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT)
+	logger.Debug("PIDs", "parent", os.Getpid(), "child", childProcess.Process.Pid)
+
+	childProcess.Process.Wait()
+	os.Exit(0)
+
+}
+
 func Serve() error {
-	gctx, gCancel := context.WithCancel(context.Background())
-	shutdownCtx, shutdown := context.WithCancel(gctx)
+	globalCtx, gCancel := context.WithCancel(context.Background())
+	shutdownCtx, shutdown := context.WithCancel(globalCtx)
 	var logger log15.Logger
 
 	binderFile := os.NewFile(3, "binder")
@@ -344,23 +347,32 @@ func Serve() error {
 		Prefix:     consulPrefix,
 	}
 
-	confSvc := conf.NewConfigurationService(13, logger)
-	confSvc.SetConfDir(configDirName)
-	confSvc.SetConsulParams(params)
-	err = confSvc.Start()
-	if err != nil {
-		logger.Crit("Error starting the configuration service", "error", err)
-		return err
+	confSvc := services.NewConfigurationService(13, logger)
+	startConfSvc := func() chan *conf.BaseConfig {
+		confSvc.SetConfDir(configDirName)
+		confSvc.SetConsulParams(params)
+		err = confSvc.Start()
+		if err != nil {
+			logger.Error("Error starting the configuration service", "error", err)
+			return nil
+		}
+		return confSvc.Chan()
 	}
-	newConfChannel := confSvc.Chan()
-	c := <-confSvc.Chan()
+
+	newConfChannel := startConfSvc()
+	if newConfChannel == nil {
+		time.Sleep(200 * time.Millisecond)
+		return fmt.Errorf("Error starting the configuration service")
+	}
+
+	c := <-newConfChannel
 	c.Store.Dirname = storeDirname
 	logger.Info("Store location", "path", c.Store.Dirname)
 
 	// create a consul registry
 	var registry *consul.Registry
 	if registerFlag {
-		registry, err = consul.NewRegistry(gctx, params, serviceName, logger)
+		registry, err = consul.NewRegistry(globalCtx, params, serviceName, logger)
 		if err != nil {
 			registry = nil
 		}
@@ -368,9 +380,10 @@ func Serve() error {
 
 	metricsServer := &metrics.MetricsServer{}
 
+	// setup the Store
 	st := services.NewStorePlugin(14, logger)
 	st.SetConf(*c)
-	err = st.Create(testFlag)
+	err = st.Create(testFlag, dumpableFlag, storeDirname, "")
 	if err != nil {
 		logger.Crit("Can't create the message Store", "error", err)
 		time.Sleep(100 * time.Millisecond)
@@ -391,11 +404,11 @@ func Serve() error {
 	signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 
 	// retrieve linux audit logs
-	relpServicePlugin := services.NewNetworkPlugin(services.RELP, st, 6, 10, logger)
-	tcpServicePlugin := services.NewNetworkPlugin(services.TCP, st, 4, 8, logger)
-	udpServicePlugin := services.NewNetworkPlugin(services.UDP, st, 5, 9, logger)
-	auditServicePlugin := services.NewNetworkPlugin(services.Audit, st, 0, 12, logger)
-	journalServicePlugin := services.NewNetworkPlugin(services.Journal, st, 0, 11, logger)
+	relpServicePlugin := services.NewPluginController(services.RELP, st, 6, 10, logger)
+	tcpServicePlugin := services.NewPluginController(services.TCP, st, 4, 8, logger)
+	udpServicePlugin := services.NewPluginController(services.UDP, st, 5, 9, logger)
+	auditServicePlugin := services.NewPluginController(services.Audit, st, 0, 12, logger)
+	journalServicePlugin := services.NewPluginController(services.Journal, st, 0, 11, logger)
 
 	startAudit := func(curconf *conf.BaseConfig) {
 		if auditlogs.Supported {
@@ -407,7 +420,7 @@ func Serve() error {
 					logger.Warn("Audit logs are requested, but go-audit or auditd process is already running, so we disable audit logs in skewer")
 				} else {
 					logger.Info("Linux audit logs are enabled")
-					err := auditServicePlugin.Create(testFlag)
+					err := auditServicePlugin.Create(testFlag, dumpableFlag, "", "")
 					if err != nil {
 						logger.Warn("Error creating Audit plugin", "error", err)
 						return
@@ -434,7 +447,8 @@ func Serve() error {
 			logger.Info("Journald is supported")
 			if c.Journald.Enabled {
 				logger.Info("Journald service is enabled")
-				err := journalServicePlugin.Create(testFlag)
+				// in fact Create() will only do something the first time startJournal() is called
+				err := journalServicePlugin.Create(testFlag, dumpableFlag, "", "")
 				if err != nil {
 					logger.Warn("Error creating Journald plugin", "error", err)
 					return
@@ -455,7 +469,7 @@ func Serve() error {
 	}
 
 	startRELP := func(curconf *conf.BaseConfig) {
-		err := relpServicePlugin.Create(testFlag)
+		err := relpServicePlugin.Create(testFlag, dumpableFlag, "", "")
 		if err != nil {
 			logger.Warn("Error creating RELP plugin", "error", err)
 			return
@@ -469,10 +483,10 @@ func Serve() error {
 		}
 	}
 
-	var tcpinfos []*model.ListenerInfo
+	var tcpinfos []model.ListenerInfo
 
 	startTCP := func(curconf *conf.BaseConfig) {
-		err := tcpServicePlugin.Create(testFlag)
+		err := tcpServicePlugin.Create(testFlag, dumpableFlag, "", "")
 		if err != nil {
 			logger.Warn("Error creating TCP plugin", "error", err)
 			return
@@ -494,7 +508,7 @@ func Serve() error {
 	}
 
 	startUDP := func(curconf *conf.BaseConfig) {
-		err := udpServicePlugin.Create(testFlag)
+		err := udpServicePlugin.Create(testFlag, dumpableFlag, "", "")
 		if err != nil {
 			logger.Warn("Error creating UDP plugin", "error", err)
 			return
@@ -510,24 +524,8 @@ func Serve() error {
 		}
 	}
 
-	startJournal(c)
-	startAudit(c)
-	startRELP(c)
-	startTCP(c)
-	startUDP(c)
-
-	metricsServer.NewConf(
-		c.Metrics,
-		journalServicePlugin,
-		auditServicePlugin,
-		relpServicePlugin,
-		tcpServicePlugin,
-		udpServicePlugin,
-		st,
-	)
-
 	stopTCP := func() {
-		tcpServicePlugin.Shutdown(time.Second)
+		tcpServicePlugin.Shutdown(3 * time.Second)
 		if len(tcpinfos) > 0 && registry != nil {
 			for _, infos := range tcpinfos {
 				registry.UnregisterTcpListener(infos)
@@ -537,17 +535,17 @@ func Serve() error {
 	}
 
 	stopUDP := func() {
-		udpServicePlugin.Shutdown(time.Second)
+		udpServicePlugin.Shutdown(3 * time.Second)
 	}
 
 	stopRELP := func() {
-		relpServicePlugin.Shutdown(time.Second)
+		relpServicePlugin.Shutdown(3 * time.Second)
 	}
 
 	stopJournal := func(shutdown bool) {
 		if journald.Supported && c.Journald.Enabled {
 			if shutdown {
-				journalServicePlugin.Shutdown(time.Second)
+				journalServicePlugin.Shutdown(3 * time.Second)
 			} else {
 				// we keep the same instance of the journald plugin, so
 				// that we can continue to fetch messages from a
@@ -559,17 +557,22 @@ func Serve() error {
 
 	stopAudit := func() {
 		if auditlogs.Supported && c.Audit.Enabled {
-			auditServicePlugin.Shutdown(time.Second)
+			auditServicePlugin.Shutdown(3 * time.Second)
 		}
 	}
 
-	Reload := func(newConf *conf.BaseConfig) {
+	Reload := func(newConf *conf.BaseConfig) (fatal error) {
+		logger.Info("Reloading configuration")
 		// first, let's stop the HTTP server for metrics
 		metricsServer.Stop()
 		// reset the kafka forwarder
 		st.Stop()
+		logger.Debug("The forwarder has been stopped")
 		st.SetConf(*newConf)
-		st.Start() // TODO: check err
+		_, fatal = st.Start()
+		if fatal != nil {
+			return fatal
+		}
 
 		wg := &sync.WaitGroup{}
 
@@ -627,6 +630,7 @@ func Serve() error {
 			udpServicePlugin,
 			st,
 		)
+		return nil
 	}
 
 	destructor := func() {
@@ -645,8 +649,10 @@ func Serve() error {
 		stopUDP()
 		logger.Debug("The UDP service has been stopped")
 
+		confSvc.Stop()
+
 		gCancel()
-		st.Shutdown(2 * time.Second)
+		st.Shutdown(5 * time.Second)
 		if registry != nil {
 			registry.WaitFinished() // wait that the services have been unregistered from Consul
 		}
@@ -656,20 +662,66 @@ func Serve() error {
 
 	defer destructor()
 
+	startJournal(c)
+	startAudit(c)
+	startRELP(c)
+	startTCP(c)
+	startUDP(c)
+
+	metricsServer.NewConf(
+		c.Metrics,
+		journalServicePlugin,
+		auditServicePlugin,
+		relpServicePlugin,
+		tcpServicePlugin,
+		udpServicePlugin,
+		st,
+	)
+
 	logger.Debug("Main loop is starting")
 	for {
 		select {
 		case <-shutdownCtx.Done():
 			logger.Info("Shutting down")
 			return nil
+		default:
+		}
+
+		select {
+		case <-st.ShutdownChan:
+			logger.Crit("Abnormal shutdown of the Store: aborting all operations")
+			shutdown()
+		default:
+		}
+
+		select {
+		case <-shutdownCtx.Done():
+		case <-st.ShutdownChan:
 
 		case newConf, more := <-newConfChannel:
 			if more {
 				newConf.Store = c.Store
 				c = newConf
-				Reload(c)
+				err := Reload(c)
+				if err != nil {
+					logger.Crit("Fatal error when reloading configuration", "error", err)
+					shutdown()
+				}
 			} else {
-				newConfChannel = nil
+				// newConfChannel has been closed ?!
+				select {
+				case <-shutdownCtx.Done():
+					// this is normal, we are shutting down
+				default:
+					// not normal, let's try to restart the service
+					newConfChannel = startConfSvc()
+					if newConfChannel == nil {
+						logger.Crit("Can't restart the configuration service: aborting all operations")
+						shutdown()
+					} else {
+						logger.Warn("Configuration service has been restarted")
+					}
+				}
 			}
 
 		case sig := <-sig_chan:
@@ -694,21 +746,6 @@ func Serve() error {
 			} else {
 				logger.Warn("Unknown signal received", "signal", sig)
 			}
-
-		case <-st.ShutdownChan:
-			logger.Crit("The store had a fatal error")
-			shutdown()
-			/*
-				case <-forwarder.ErrorChan():
-					logger.Warn("Forwarder has received a fatal Kafka error: resetting connection to Kafka")
-					kafkaConf := c.Kafka
-					stopForwarder()
-					go func() {
-						time.Sleep(time.Second)
-						startForwarder(kafkaConf)
-					}()
-
-			*/
 
 		}
 	}

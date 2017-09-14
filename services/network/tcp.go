@@ -92,13 +92,7 @@ func (s *TcpServiceImpl) Gather() ([]*dto.MetricFamily, error) {
 	return s.registry.Gather()
 }
 
-func (s *TcpServiceImpl) WaitClosed() {
-	// wait that statusChan is closed
-	for range s.statusChan {
-	}
-}
-
-func (s *TcpServiceImpl) Start(test bool) ([]*model.ListenerInfo, error) {
+func (s *TcpServiceImpl) Start(test bool) ([]model.ListenerInfo, error) {
 	s.LockStatus()
 	if s.status != TcpStopped {
 		s.UnlockStatus()
@@ -211,7 +205,12 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) {
 					Uid:    uid.String(),
 					ConfId: config.ConfID,
 				}
-				s.stasher.Stash(&parsed_msg)
+				fatal, nonfatal := s.stasher.Stash(&parsed_msg)
+				if fatal != nil {
+					// the Store is not working properly
+				} else if nonfatal != nil {
+					logger.Warn("Error stashing TCP message", "error", nonfatal)
+				}
 			} else {
 				if s.metrics != nil {
 					s.metrics.ParsingErrorCounter.WithLabelValues(s.Protocol, client, config.Format).Inc()

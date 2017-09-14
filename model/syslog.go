@@ -7,7 +7,7 @@ import (
 )
 
 type Stasher interface {
-	Stash(m *TcpUdpParsedMessage)
+	Stash(m *TcpUdpParsedMessage) (error, error)
 }
 
 type ListenerInfo struct {

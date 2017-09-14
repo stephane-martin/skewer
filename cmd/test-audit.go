@@ -39,8 +39,6 @@ var testauditCmd = &cobra.Command{
 		_, err := auditsvc.Start(false)
 		if err != nil {
 			fmt.Println("doh", err)
-		} else {
-			auditsvc.WaitClosed()
 		}
 		cancel()
 	},

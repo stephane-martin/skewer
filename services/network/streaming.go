@@ -42,7 +42,7 @@ func (s *StreamingService) init() {
 	s.wg = &sync.WaitGroup{}
 }
 
-func (s *StreamingService) initTCPListeners() []*model.ListenerInfo {
+func (s *StreamingService) initTCPListeners() []model.ListenerInfo {
 	nb := 0
 	s.ClearConnections()
 	s.tcpListeners = []*TCPListenerConf{}
@@ -83,15 +83,15 @@ func (s *StreamingService) initTCPListeners() []*model.ListenerInfo {
 		}
 	}
 
-	infos := []*model.ListenerInfo{}
+	infos := []model.ListenerInfo{}
 	for _, unixc := range s.unixListeners {
-		infos = append(infos, &model.ListenerInfo{
+		infos = append(infos, model.ListenerInfo{
 			Protocol:       unixc.Conf.Protocol,
 			UnixSocketPath: unixc.Conf.UnixSocketPath,
 		})
 	}
 	for _, tcpc := range s.tcpListeners {
-		infos = append(infos, &model.ListenerInfo{
+		infos = append(infos, model.ListenerInfo{
 			BindAddr: tcpc.Conf.BindAddr,
 			Port:     tcpc.Conf.Port,
 			Protocol: tcpc.Conf.Protocol,

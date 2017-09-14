@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/inconshreveable/log15"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/sys"
@@ -20,14 +21,21 @@ type Stasher struct {
 	logger log15.Logger
 }
 
-func (s *Stasher) Stash(m *model.TcpUdpParsedMessage) {
+func (s *Stasher) Stash(m *model.TcpUdpParsedMessage) (fatal error, nonfatal error) {
 	// when the plugin *produces* a syslog message, write it to stdout
 	b, err := m.MarshalMsg(nil)
 	if err == nil {
-		utils.W(os.Stdout, "syslog", b)
+		err = utils.W(os.Stdout, "syslog", b)
+		if err != nil {
+			s.logger.Crit("Could not write message to upstream. There was message loss", "error", err)
+			return err, nil
+		} else {
+			return nil, nil
+		}
 	} else {
 		// should not happen
-		s.logger.Warn("A syslog message could not be serialized", "type", s.typ)
+		s.logger.Warn("A syslog message could not be serialized", "type", s.typ, "error", err)
+		return nil, err
 	}
 }
 
@@ -36,11 +44,13 @@ func Launch(typ NetworkServiceType, test bool, binderClient *sys.BinderClient, l
 
 	var command string
 	var args string
+	name := ReverseNetworkServiceMap[typ]
+	hasConf := false
 
 	stasher := Stasher{typ: typ, logger: logger}
 	svc := Factory(typ, &stasher, generator, binderClient, logger)
 	if svc == nil {
-		err := fmt.Errorf("The Service Factory returned nil!")
+		err := fmt.Errorf("The Service Factory returned 'nil' for plugin '%s'", name)
 		utils.W(os.Stdout, "starterror", []byte(err.Error()))
 		return err
 	}
@@ -55,9 +65,8 @@ func Launch(typ NetworkServiceType, test bool, binderClient *sys.BinderClient, l
 		select {
 		case <-fatalChan:
 			svc.Shutdown()
-			svc.WaitClosed()
 			utils.W(os.Stdout, "shutdown", []byte("fatal"))
-			return fmt.Errorf("Store fatal error")
+			return fmt.Errorf("Store fatal error in plugin '%s'", name)
 		default:
 		}
 
@@ -65,12 +74,11 @@ func Launch(typ NetworkServiceType, test bool, binderClient *sys.BinderClient, l
 		command = parts[0]
 		switch command {
 		case "start":
-			// TODO
-			//			if provider.syslogConfs == nil || provider.parserConfs == nil || provider.kafkaConf == nil || provider.auditConf == nil {
-			//				err := fmt.Errorf("syslog conf or parser conf was not provided to plugin")
-			//				utils.W(os.Stdout, "syslogconferror", []byte(err.Error()))
-			//				return err
-			//} else {
+			if !hasConf {
+				err := fmt.Errorf("Configuration was not provided to plugin '%s' before start", name)
+				utils.W(os.Stdout, "syslogconferror", []byte(err.Error()))
+				return err
+			}
 			infos, err := ConfigureAndStartService(svc, globalConf, test)
 			if err != nil {
 				utils.W(os.Stdout, "starterror", []byte(err.Error()))
@@ -89,15 +97,14 @@ func Launch(typ NetworkServiceType, test bool, binderClient *sys.BinderClient, l
 			}
 		case "stop":
 			svc.Stop()
-			svc.WaitClosed()
 			utils.W(os.Stdout, "stopped", []byte("success"))
-			// at the end of the stop return, we *do not return*. So the
-			// plugin process continues to listenn for subsequent commands
+			// here we *do not return*. So the plugin process continues to live
+			// and to listen for subsequent control commands
 		case "shutdown":
 			svc.Shutdown()
-			svc.WaitClosed()
 			utils.W(os.Stdout, "shutdown", []byte("success"))
-			// at the end of shutdown command, we *return*. And the plugin process stops.
+			// at the end of shutdown command, we *return*. So the plugin
+			// process stops right now.
 			return nil
 		case "conf":
 			args = parts[1]
@@ -105,37 +112,52 @@ func Launch(typ NetworkServiceType, test bool, binderClient *sys.BinderClient, l
 			err := json.Unmarshal([]byte(args), &c)
 			if err == nil {
 				globalConf = c
+				hasConf = true
 			} else {
 				utils.W(os.Stdout, "conferror", []byte(err.Error()))
 				return err
 			}
 		case "gathermetrics":
+			empty := []*dto.MetricFamily{}
 			families, err := svc.Gather()
 			if err != nil {
-				// TODO
-			} else {
-				familiesb, err := json.Marshal(families)
-				if err != nil {
-					// TODO
-				} else {
-					utils.W(os.Stdout, "metrics", familiesb)
-				}
+				logger.Warn("Error gathering metrics", "type", name, "error", err)
+				families = empty
 			}
-		case "stash":
+			familiesb, err := json.Marshal(families)
+			if err != nil {
+				logger.Warn("Error marshaling metrics", "type", name, "error", err)
+				familiesb, _ = json.Marshal(empty)
+			}
+			err = utils.W(os.Stdout, "metrics", familiesb)
+			if err != nil {
+				logger.Crit("Could not write metrics to upstream", "type", name, "error", err)
+				return err
+			}
+		case "storemessage":
 			// the service is asked to store a syslog message
-			args = parts[1]
-			m := &model.TcpUdpParsedMessage{}
-			_, err := m.UnmarshalMsg([]byte(args))
-			if err == nil {
-				// does the service support stashing?
-				if stasher, ok := svc.(model.Stasher); ok {
-					stasher.Stash(m)
+			if stasher, ok := svc.(model.Stasher); ok {
+				m := &model.TcpUdpParsedMessage{}
+				_, err := m.UnmarshalMsg([]byte(parts[1]))
+				if err == nil {
+					fatal, nonfatal := stasher.Stash(m)
+					if fatal != nil {
+						logger.Crit("storemessage fatal error", "error", fatal)
+						return fatal
+					} else if nonfatal != nil {
+						logger.Warn("storemessage error", "error", nonfatal)
+					}
+
 				} else {
-					return fmt.Errorf("Plugin provider was asked to store a message but does not implement Stasher")
+					logger.Error("Error unmarshaling message", "type", name, "error", err)
 				}
+			} else {
+				return fmt.Errorf("Plugin provider '%s' was asked to store a message but does not implement Stasher", name)
 			}
+
 		default:
-			return fmt.Errorf("Unknown command")
+			logger.Crit("Unknown command", "type", name, "command", command)
+			return fmt.Errorf("Unknown command '%s' in plugin '%s'", command, name)
 		}
 
 	}

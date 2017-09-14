@@ -11,7 +11,11 @@ func (e NotLinuxError) Error() string {
 }
 
 func SetNonDumpable() error {
-	return NotLinuxError{}
+	return nil
+}
+
+func SetDumpable() error {
+	return nil
 }
 
 func NeedFixLinuxPrivileges(uid, gid string) (bool, error) {

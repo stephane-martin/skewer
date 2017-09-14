@@ -36,8 +36,8 @@ func (s *AuditService) Gather() ([]*dto.MetricFamily, error) {
 	return []*dto.MetricFamily{}, nil
 }
 
-func (s *AuditService) Start(test bool) ([]*model.ListenerInfo, error) {
-	infos := []*model.ListenerInfo{}
+func (s *AuditService) Start(test bool) ([]model.ListenerInfo, error) {
+	infos := []model.ListenerInfo{}
 	hostname, err := os.Hostname()
 	if err != nil {
 		return infos, err
@@ -120,8 +120,5 @@ func (s *AuditService) Stop() {
 	if s.cancel != nil {
 		s.cancel()
 	}
-}
-
-func (s *AuditService) WaitClosed() {
 	s.wgroup.Wait()
 }

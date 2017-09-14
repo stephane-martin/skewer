@@ -4,16 +4,20 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 )
 
 var NOW []byte = []byte("now")
 
-func W(dest io.Writer, header string, message []byte) {
-	l := len(header) + len(message) + 1
+func W(dest io.Writer, header string, message []byte) (err error) {
+	header = strings.TrimSpace(header) + " "
+	l := len(header) + len(message)
 	fmt.Fprintf(dest, "%010d ", l)
-	dest.Write([]byte(header))
-	dest.Write([]byte(" "))
-	dest.Write(message)
+	_, err = dest.Write([]byte(header))
+	if err == nil {
+		_, err = dest.Write(message)
+	}
+	return err
 }
 
 func PluginSplit(data []byte, atEOF bool) (int, []byte, error) {

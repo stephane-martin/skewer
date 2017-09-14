@@ -129,11 +129,13 @@ func (s *RelpService) Gather() ([]*dto.MetricFamily, error) {
 	return s.impl.registry.Gather()
 }
 
-func (s *RelpService) Start(test bool) (infos []*model.ListenerInfo, err error) {
+func (s *RelpService) Start(test bool) (infos []model.ListenerInfo, err error) {
 	// the Relp service manages registration in Consul by itself and
 	// therefore does not report infos
-
-	infos = []*model.ListenerInfo{}
+	if sys.CapabilitiesSupported {
+		s.logger.Debug("Capabilities", "caps", sys.GetCaps())
+	}
+	infos = []model.ListenerInfo{}
 	s.impl = NewRelpServiceImpl(s.b, s.logger)
 
 	go func() {
@@ -182,15 +184,8 @@ func (s *RelpService) Shutdown() {
 
 func (s *RelpService) Stop() {
 	s.impl.FinalStop()
-}
+	for range s.impl.StatusChan {
 
-func (s *RelpService) WaitClosed() {
-	var more bool
-	for {
-		_, more = <-s.impl.StatusChan
-		if !more {
-			return
-		}
 	}
 }
 
@@ -236,7 +231,7 @@ func (s *RelpServiceImpl) SetKafkaConf(c conf.KafkaConfig) {
 	s.kafkaConf = c
 }
 
-func (s *RelpServiceImpl) Start(test bool) ([]*model.ListenerInfo, error) {
+func (s *RelpServiceImpl) Start(test bool) ([]model.ListenerInfo, error) {
 	s.LockStatus()
 	defer s.UnlockStatus()
 	if s.status == FinalStopped {

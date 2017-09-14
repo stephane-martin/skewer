@@ -6,13 +6,14 @@ import (
 	"time"
 
 	"github.com/inconshreveable/log15"
+	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/store"
 )
 
-type StoreServiceImpl struct {
+type storeServiceImpl struct {
 	st              store.Store
 	config          conf.BaseConfig
 	logger          log15.Logger
@@ -25,8 +26,11 @@ type StoreServiceImpl struct {
 	test            bool
 }
 
+// NewStoreService creates a StoreService.
+// The StoreService is responsible to manage the lifecycle of the Store and the
+// Kafka Forwarder that is fed by the Store.
 func NewStoreService(l log15.Logger) StoreService {
-	impl := &StoreServiceImpl{
+	impl := &storeServiceImpl{
 		logger: l,
 		mu:     &sync.Mutex{},
 		status: false,
@@ -35,7 +39,7 @@ func NewStoreService(l log15.Logger) StoreService {
 	return impl
 }
 
-func (s *StoreServiceImpl) SetConf(c conf.BaseConfig, test bool) ([]*model.ListenerInfo, error) {
+func (s *storeServiceImpl) SetConfAndRestart(c conf.BaseConfig, test bool) ([]model.ListenerInfo, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.doStop(nil)
@@ -43,15 +47,19 @@ func (s *StoreServiceImpl) SetConf(c conf.BaseConfig, test bool) ([]*model.Liste
 	return s.doStart(test, nil)
 }
 
-func (s *StoreServiceImpl) Errors() chan struct{} {
+// Errors return a channel to signal the Store fatal errors.
+// Typically no space left on disk.
+func (s *storeServiceImpl) Errors() chan struct{} {
 	return s.st.Errors()
 }
 
-func (s *StoreServiceImpl) Start(test bool) ([]*model.ListenerInfo, error) {
+// Start starts the Kafka forwarder
+func (s *storeServiceImpl) Start(test bool) ([]model.ListenerInfo, error) {
 	return s.doStart(test, s.mu)
 }
 
-func (s *StoreServiceImpl) doStart(test bool, mu *sync.Mutex) ([]*model.ListenerInfo, error) {
+func (s *storeServiceImpl) doStart(test bool, mu *sync.Mutex) ([]model.ListenerInfo, error) {
+	infos := []model.ListenerInfo{}
 	if mu != nil {
 		mu.Lock()
 		defer mu.Unlock()
@@ -60,13 +68,13 @@ func (s *StoreServiceImpl) doStart(test bool, mu *sync.Mutex) ([]*model.Listener
 	select {
 	case <-s.shutdownCtx.Done():
 		// the Store is shutdown
-		return nil, nil
+		return infos, nil
 	default:
 	}
 
 	if s.status {
 		// already started
-		return nil, nil
+		return infos, nil
 	}
 
 	// create the store if needed
@@ -76,11 +84,11 @@ func (s *StoreServiceImpl) doStart(test bool, mu *sync.Mutex) ([]*model.Listener
 
 		s.st, err = store.NewStore(s.shutdownCtx, s.config.Store, s.logger)
 		if err != nil {
-			return nil, err
+			return infos, err
 		}
 		err = s.st.StoreAllSyslogConfigs(s.config)
 		if err != nil {
-			return nil, err
+			return infos, err
 		}
 	}
 	// create and start the kafka forwarder
@@ -102,8 +110,16 @@ func (s *StoreServiceImpl) doStart(test bool, mu *sync.Mutex) ([]*model.Listener
 			// the Store was shutdown
 			return
 		case <-errorChan:
+			// when the kafka forwarder signals an error,
+			// the StoreService stops the forwarder,
+			// waits 10 seconds, and then restarts the
+			// forwarder.
+			// but at the same time the main process can
+			// decide to stop/start the StoreService (for
+			// instance because it received a SIHGUP).
+			// that's why we need the mutex stuff in Start(),
+			// Stop(), SetConfAndRestart() methods.
 			s.Stop()
-			// try to restart the forwarder after 10 seconds
 			select {
 			case <-s.shutdownCtx.Done():
 				return
@@ -113,14 +129,15 @@ func (s *StoreServiceImpl) doStart(test bool, mu *sync.Mutex) ([]*model.Listener
 
 		}
 	}()
-	return nil, nil
+	return infos, nil
 }
 
-func (s *StoreServiceImpl) Stop() {
+// Stop stops the Kafka forwarder
+func (s *storeServiceImpl) Stop() {
 	s.doStop(s.mu)
 }
 
-func (s *StoreServiceImpl) doStop(mu *sync.Mutex) {
+func (s *storeServiceImpl) doStop(mu *sync.Mutex) {
 	if mu != nil {
 		mu.Lock()
 		defer mu.Unlock()
@@ -144,8 +161,8 @@ func (s *StoreServiceImpl) doStop(mu *sync.Mutex) {
 	s.status = false
 }
 
-func (s *StoreServiceImpl) Shutdown() {
-	// stop the kafka forwarder and shutdown the store
+// Shutdown stops the kafka forwarder and shutdowns the Store
+func (s *storeServiceImpl) Shutdown() {
 	select {
 	case <-s.shutdownCtx.Done():
 		// the Store is already shutdown
@@ -158,17 +175,24 @@ func (s *StoreServiceImpl) Shutdown() {
 	s.st.WaitFinished()
 }
 
-func (s *StoreServiceImpl) WaitClosed() {
-	// wait that the kafka forwarder has stopped
-	s.forwarder.WaitFinished()
+// Gather returns the metrics for the Store and the Kafka forwarder
+func (s *storeServiceImpl) Gather() ([]*dto.MetricFamily, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.status {
+		// forwarder is started
+		var couple prometheus.Gatherers = []prometheus.Gatherer{s.st, s.forwarder}
+		return couple.Gather()
+	} else if s.st == nil {
+		return nil, nil
+	} else {
+		return s.st.Gather()
+	}
 }
 
-func (s *StoreServiceImpl) Gather() ([]*dto.MetricFamily, error) {
-	// gather metrics from the store and from the forwarder
-	return nil, nil
-}
-
-func (s *StoreServiceImpl) Stash(m *model.TcpUdpParsedMessage) {
+// Stash stores the given message into the Store.
+// This method is specific to the StoreService.
+func (s *storeServiceImpl) Stash(m *model.TcpUdpParsedMessage) (fatal error, nonfatal error) {
 	// store a message in the store
-	s.st.Stash(m)
+	return s.st.Stash(m)
 }

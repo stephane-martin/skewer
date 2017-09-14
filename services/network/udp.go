@@ -94,7 +94,7 @@ func (s *UdpServiceImpl) handleConnection(conn net.PacketConn, config conf.Syslo
 	s.handler.HandleConnection(conn, config)
 }
 
-func (s *UdpServiceImpl) Start(test bool) ([]*model.ListenerInfo, error) {
+func (s *UdpServiceImpl) Start(test bool) ([]model.ListenerInfo, error) {
 	s.LockStatus()
 	if s.status != UdpStopped {
 		s.UnlockStatus()
@@ -138,18 +138,8 @@ func (s *UdpServiceImpl) Stop() {
 	s.UnlockStatus()
 }
 
-func (s *UdpServiceImpl) WaitClosed() {
-	var more bool
-	for {
-		_, more = <-s.statusChan
-		if !more {
-			return
-		}
-	}
-}
-
-func (s *UdpServiceImpl) ListenPacket() []*model.ListenerInfo {
-	udpinfos := []*model.ListenerInfo{}
+func (s *UdpServiceImpl) ListenPacket() []model.ListenerInfo {
+	udpinfos := []model.ListenerInfo{}
 	s.UnixSocketPaths = []string{}
 	for _, syslogConf := range s.SyslogConfigs {
 		if syslogConf.Protocol == "udp" {
@@ -159,7 +149,7 @@ func (s *UdpServiceImpl) ListenPacket() []*model.ListenerInfo {
 					s.Logger.Warn("Listen unixgram error", "error", err)
 				} else {
 					s.Logger.Debug("Listener", "protocol", s.Protocol, "path", syslogConf.UnixSocketPath, "format", syslogConf.Format)
-					udpinfos = append(udpinfos, &model.ListenerInfo{
+					udpinfos = append(udpinfos, model.ListenerInfo{
 						UnixSocketPath: syslogConf.UnixSocketPath,
 						Protocol:       s.Protocol,
 					})
@@ -174,7 +164,7 @@ func (s *UdpServiceImpl) ListenPacket() []*model.ListenerInfo {
 					s.Logger.Warn("Listen UDP error", "error", err)
 				} else {
 					s.Logger.Debug("Listener", "protocol", s.Protocol, "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
-					udpinfos = append(udpinfos, &model.ListenerInfo{
+					udpinfos = append(udpinfos, model.ListenerInfo{
 						BindAddr: syslogConf.BindAddr,
 						Port:     syslogConf.Port,
 						Protocol: syslogConf.Protocol,

@@ -13,6 +13,7 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/journald"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/sys"
 )
 
 func EntryToSyslog(entry map[string]string) *model.SyslogMessage {
@@ -113,6 +114,9 @@ func NewJournalService(stasher model.Stasher, gen chan ulid.ULID, l log15.Logger
 		return nil, err
 	}
 	s.reader.Start()
+	if sys.CapabilitiesSupported {
+		l.Debug("Capabilities", "caps", sys.GetCaps())
+	}
 	return &s, nil
 }
 
@@ -120,7 +124,7 @@ func (s *JournalService) Gather() ([]*dto.MetricFamily, error) {
 	return s.registry.Gather()
 }
 
-func (s *JournalService) Start(test bool) ([]*model.ListenerInfo, error) {
+func (s *JournalService) Start(test bool) ([]model.ListenerInfo, error) {
 	s.wgroup.Add(1)
 	s.stopchan = make(chan struct{})
 	go func() {
@@ -157,8 +161,8 @@ func (s *JournalService) Start(test bool) ([]*model.ListenerInfo, error) {
 			}
 		}
 	}()
-	s.logger.Debug("Journald service is started")
-	return []*model.ListenerInfo{}, nil
+	s.logger.Debug("Journald service has started")
+	return []model.ListenerInfo{}, nil
 }
 
 func (s *JournalService) Stop() {
@@ -169,10 +173,6 @@ func (s *JournalService) Stop() {
 func (s *JournalService) Shutdown() {
 	s.Stop()
 	s.reader.Shutdown()
-}
-
-func (s *JournalService) WaitClosed() {
-	s.wgroup.Wait()
 }
 
 func (s *JournalService) SetConf(c conf.JournaldConfig) {

@@ -3,6 +3,7 @@ package logging
 import (
 	"context"
 	"net"
+	"sort"
 	"time"
 
 	"github.com/inconshreveable/log15"
@@ -28,9 +29,14 @@ func receive(ctx context.Context, l log15.Logger, c net.Conn) {
 			if e == nil {
 				logr := log15.Record{Lvl: log15.Lvl(r.Lvl), Msg: r.Msg, Time: r.Time, KeyNames: keyNames}
 				logr.Ctx = make([]interface{}, 0, 2*len(r.Ctx))
-				for k, v := range r.Ctx {
+				sortedKeys := make([]string, 0, len(r.Ctx))
+				for k := range r.Ctx {
+					sortedKeys = append(sortedKeys, k)
+				}
+				sort.Strings(sortedKeys)
+				for _, k := range sortedKeys {
 					logr.Ctx = append(logr.Ctx, k)
-					logr.Ctx = append(logr.Ctx, v)
+					logr.Ctx = append(logr.Ctx, r.Ctx[k])
 				}
 				h.Log(&logr)
 			}

@@ -91,10 +91,7 @@ func (r *Registry) WaitFinished() {
 	r.wgroup.Wait()
 }
 
-func (r *Registry) RegisterTcpListener(infos *model.ListenerInfo) {
-	if infos == nil {
-		return
-	}
+func (r *Registry) RegisterTcpListener(infos model.ListenerInfo) {
 	if infos.BindAddr == "" || infos.Port == 0 || infos.Protocol == "" {
 		return
 	}
@@ -105,10 +102,7 @@ func (r *Registry) RegisterTcpListener(infos *model.ListenerInfo) {
 	}
 }
 
-func (r *Registry) UnregisterTcpListener(infos *model.ListenerInfo) {
-	if infos == nil {
-		return
-	}
+func (r *Registry) UnregisterTcpListener(infos model.ListenerInfo) {
 	if infos.BindAddr == "" || infos.Port == 0 || infos.Protocol == "" {
 		return
 	}

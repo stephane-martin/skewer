@@ -78,7 +78,7 @@ func NewBinderClient(binderFile *os.File, logger log15.Logger) (*BinderClient, e
 			oob := make([]byte, syscall.CmsgSpace(4))
 			n, oobn, _, _, err := c.parentConn.ReadMsgUnix(buf, oob)
 			if err != nil {
-				logger.Error("Error reading message from parent binder", "error", err)
+				logger.Debug("Error reading message from parent binder", "error", err)
 				for _, ichan := range c.IncomingConn {
 					close(ichan)
 				}
