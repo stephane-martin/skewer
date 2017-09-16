@@ -2,6 +2,13 @@
 
 package conf
 
+// deriveCloneBaseConfig returns a clone of the src parameter.
+func deriveCloneBaseConfig(src BaseConfig) BaseConfig {
+	dst := new(BaseConfig)
+	deriveDeepCopy(dst, &src)
+	return *dst
+}
+
 // deriveDeepCopy recursively copies the contents of src into dst.
 func deriveDeepCopy(dst, src *BaseConfig) {
 	if src.Syslog == nil {

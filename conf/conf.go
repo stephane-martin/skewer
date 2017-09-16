@@ -27,34 +27,8 @@ import (
 	"github.com/stephane-martin/skewer/utils"
 )
 
-func (source *BaseConfig) DeepCopy() *BaseConfig {
-	if source == nil {
-		return nil
-	}
-	dest := &BaseConfig{}
-	deriveDeepCopy(dest, source)
-	/*
-
-		for _, sysconf := range source.Syslog {
-			dest.Syslog = append(dest.Syslog, sysconf)
-		}
-
-		dest.Kafka = source.Kafka
-		dest.Kafka.Brokers = []string{}
-		for _, broker := range source.Kafka.Brokers {
-			dest.Kafka.Brokers = append(dest.Kafka.Brokers, broker)
-		}
-
-		for _, pconf := range source.Parsers {
-			dest.Parsers = append(dest.Parsers, pconf)
-		}
-
-		dest.Journald = source.Journald
-		dest.Audit = source.Audit
-		dest.Metrics = source.Metrics
-		dest.Store = source.Store
-	*/
-	return dest
+func (source BaseConfig) Clone() BaseConfig {
+	return deriveCloneBaseConfig(source)
 }
 
 func newBaseConf() *BaseConfig {
@@ -381,8 +355,8 @@ func InitLoad(ctx context.Context, confDir string, params consul.ConnParams, log
 	if err != nil {
 		return nil, nil, ConfigurationSyntaxError{Err: err, Filename: v.ConfigFileUsed()}
 	}
-
-	c = baseConf.DeepCopy()
+	cop := baseConf.Clone()
+	c = &cop
 
 	var watchCtx context.Context
 	var cancelWatch context.CancelFunc
@@ -424,12 +398,12 @@ func InitLoad(ctx context.Context, confDir string, params consul.ConnParams, log
 		updated = make(chan *BaseConfig)
 		go func() {
 			for result := range consulResults {
-				newConfig := baseConf.DeepCopy()
+				newConfig := baseConf.Clone()
 				err := newConfig.ParseParamsFromConsul(result, params.Prefix, logger)
 				if err == nil {
 					err = newConfig.Complete()
 					if err == nil {
-						updated <- newConfig
+						updated <- &newConfig
 					} else {
 						logger.Error("Error updating conf from Consul", "error", err)
 					}
