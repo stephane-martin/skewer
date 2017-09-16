@@ -1,5 +1,7 @@
 package conf
 
+//go:generate goderive .
+
 import (
 	"bytes"
 	"context"
@@ -26,26 +28,32 @@ import (
 )
 
 func (source *BaseConfig) DeepCopy() *BaseConfig {
-	dest := newBaseConf()
-
-	for _, sysconf := range source.Syslog {
-		dest.Syslog = append(dest.Syslog, sysconf)
+	if source == nil {
+		return nil
 	}
+	dest := &BaseConfig{}
+	deriveDeepCopy(dest, source)
+	/*
 
-	dest.Kafka = source.Kafka
-	dest.Kafka.Brokers = []string{}
-	for _, broker := range source.Kafka.Brokers {
-		dest.Kafka.Brokers = append(dest.Kafka.Brokers, broker)
-	}
+		for _, sysconf := range source.Syslog {
+			dest.Syslog = append(dest.Syslog, sysconf)
+		}
 
-	for _, pconf := range source.Parsers {
-		dest.Parsers = append(dest.Parsers, pconf)
-	}
+		dest.Kafka = source.Kafka
+		dest.Kafka.Brokers = []string{}
+		for _, broker := range source.Kafka.Brokers {
+			dest.Kafka.Brokers = append(dest.Kafka.Brokers, broker)
+		}
 
-	dest.Journald = source.Journald
-	dest.Audit = source.Audit
-	dest.Metrics = source.Metrics
-	dest.Store = source.Store
+		for _, pconf := range source.Parsers {
+			dest.Parsers = append(dest.Parsers, pconf)
+		}
+
+		dest.Journald = source.Journald
+		dest.Audit = source.Audit
+		dest.Metrics = source.Metrics
+		dest.Store = source.Store
+	*/
 	return dest
 }
 
