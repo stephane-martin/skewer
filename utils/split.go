@@ -4,18 +4,19 @@ import (
 	"fmt"
 	"io"
 	"strconv"
-	"strings"
 )
 
 var NOW []byte = []byte("now")
+var SP []byte = []byte(" ")
 
 func W(dest io.Writer, header string, message []byte) (err error) {
-	header = strings.TrimSpace(header) + " "
-	l := len(header) + len(message)
-	fmt.Fprintf(dest, "%010d ", l)
-	_, err = dest.Write([]byte(header))
+	fmt.Fprintf(dest, "%010d ", len(header)+len(message)+1)
+	_, err = io.WriteString(dest, header)
 	if err == nil {
-		_, err = dest.Write(message)
+		_, err = dest.Write(SP)
+		if err == nil {
+			_, err = dest.Write(message)
+		}
 	}
 	return err
 }

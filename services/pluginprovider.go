@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/inconshreveable/log15"
 	dto "github.com/prometheus/client_model/go"
@@ -21,11 +22,20 @@ type Stasher struct {
 	logger log15.Logger
 }
 
+var stdoutLock sync.Mutex
+
+func W(header string, message []byte) (err error) {
+	stdoutLock.Lock()
+	err = utils.W(os.Stdout, header, message)
+	stdoutLock.Unlock()
+	return err
+}
+
 func (s *Stasher) Stash(m *model.TcpUdpParsedMessage) (fatal error, nonfatal error) {
 	// when the plugin *produces* a syslog message, write it to stdout
 	b, err := m.MarshalMsg(nil)
 	if err == nil {
-		err = utils.W(os.Stdout, "syslog", b)
+		err = W("syslog", b)
 		if err != nil {
 			s.logger.Crit("Could not write message to upstream. There was message loss", "error", err)
 			return err, nil
@@ -51,7 +61,7 @@ func Launch(typ NetworkServiceType, test bool, binderClient *sys.BinderClient, l
 	svc := Factory(typ, &stasher, generator, binderClient, logger)
 	if svc == nil {
 		err := fmt.Errorf("The Service Factory returned 'nil' for plugin '%s'", name)
-		utils.W(os.Stdout, "starterror", []byte(err.Error()))
+		W("starterror", []byte(err.Error()))
 		return err
 	}
 
@@ -65,7 +75,7 @@ func Launch(typ NetworkServiceType, test bool, binderClient *sys.BinderClient, l
 		select {
 		case <-fatalChan:
 			svc.Shutdown()
-			utils.W(os.Stdout, "shutdown", []byte("fatal"))
+			W("shutdown", []byte("fatal"))
 			return fmt.Errorf("Store fatal error in plugin '%s'", name)
 		default:
 		}
@@ -76,33 +86,33 @@ func Launch(typ NetworkServiceType, test bool, binderClient *sys.BinderClient, l
 		case "start":
 			if !hasConf {
 				err := fmt.Errorf("Configuration was not provided to plugin '%s' before start", name)
-				utils.W(os.Stdout, "syslogconferror", []byte(err.Error()))
+				W("syslogconferror", []byte(err.Error()))
 				return err
 			}
 			infos, err := ConfigureAndStartService(svc, globalConf, test)
 			if err != nil {
-				utils.W(os.Stdout, "starterror", []byte(err.Error()))
+				W("starterror", []byte(err.Error()))
 				return err
 			} else if len(infos) == 0 && typ != RELP && typ != Journal && typ != Audit && typ != Store {
 				// (RELP, Journal and audit never report info about listening ports)
 				svc.Stop()
-				utils.W(os.Stdout, "nolistenererror", []byte("plugin is inactive"))
+				W("nolistenererror", []byte("plugin is inactive"))
 			} else {
 				infosb, _ := json.Marshal(infos)
-				utils.W(os.Stdout, "started", infosb)
+				W("started", infosb)
 			}
 			if typ == Store {
-				// monitor for the Store fatal errors
+				// monitor the Store fatal errors
 				fatalChan = svc.(StoreService).Errors()
 			}
 		case "stop":
 			svc.Stop()
-			utils.W(os.Stdout, "stopped", []byte("success"))
+			W("stopped", []byte("success"))
 			// here we *do not return*. So the plugin process continues to live
 			// and to listen for subsequent control commands
 		case "shutdown":
 			svc.Shutdown()
-			utils.W(os.Stdout, "shutdown", []byte("success"))
+			W("shutdown", []byte("success"))
 			// at the end of shutdown command, we *return*. So the plugin
 			// process stops right now.
 			return nil
@@ -114,7 +124,7 @@ func Launch(typ NetworkServiceType, test bool, binderClient *sys.BinderClient, l
 				globalConf = c
 				hasConf = true
 			} else {
-				utils.W(os.Stdout, "conferror", []byte(err.Error()))
+				W("conferror", []byte(err.Error()))
 				return err
 			}
 		case "gathermetrics":
@@ -129,7 +139,7 @@ func Launch(typ NetworkServiceType, test bool, binderClient *sys.BinderClient, l
 				logger.Warn("Error marshaling metrics", "type", name, "error", err)
 				familiesb, _ = json.Marshal(empty)
 			}
-			err = utils.W(os.Stdout, "metrics", familiesb)
+			err = W("metrics", familiesb)
 			if err != nil {
 				logger.Crit("Could not write metrics to upstream", "type", name, "error", err)
 				return err

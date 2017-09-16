@@ -43,8 +43,8 @@ var loglevelFlag string
 var logfilenameFlag string
 var logjsonFlag bool
 var pidFilenameFlag string
-var registerFlag bool
-var serviceName string
+var consulRegisterFlag bool
+var consulServiceName string
 var uidFlag string
 var gidFlag string
 var dumpableFlag bool
@@ -58,8 +58,8 @@ func init() {
 	serveCmd.Flags().StringVar(&logfilenameFlag, "logfilename", "", "Write logs to a file instead of stderr")
 	serveCmd.Flags().BoolVar(&logjsonFlag, "logjson", false, "Write logs in JSON format")
 	serveCmd.Flags().StringVar(&pidFilenameFlag, "pidfile", "", "If given, write PID to file")
-	serveCmd.Flags().BoolVar(&registerFlag, "register", false, "Register services in consul")
-	serveCmd.Flags().StringVar(&serviceName, "servicename", "skewer", "Service name to register in consul")
+	serveCmd.Flags().BoolVar(&consulRegisterFlag, "register", false, "Register services in consul")
+	serveCmd.Flags().StringVar(&consulServiceName, "servicename", "skewer", "Service name to register in consul")
 	serveCmd.Flags().StringVar(&uidFlag, "uid", "", "Switch to this user ID (when launched as root)")
 	serveCmd.Flags().StringVar(&gidFlag, "gid", "", "Switch to this group ID (when launched as root)")
 	serveCmd.Flags().BoolVar(&dumpableFlag, "dumpable", false, "if set, the skewer process will be traceable/dumpable")
@@ -369,12 +369,12 @@ func Serve() error {
 	c.Store.Dirname = storeDirname
 	logger.Info("Store location", "path", c.Store.Dirname)
 
-	// create a consul registry
-	var registry *consul.Registry
-	if registerFlag {
-		registry, err = consul.NewRegistry(globalCtx, params, serviceName, logger)
+	// create a consul consulRegistry
+	var consulRegistry *consul.Registry
+	if consulRegisterFlag {
+		consulRegistry, err = consul.NewRegistry(globalCtx, params, consulServiceName, logger)
 		if err != nil {
-			registry = nil
+			consulRegistry = nil
 		}
 	}
 
@@ -499,9 +499,9 @@ func Serve() error {
 			logger.Info("TCP plugin not started")
 		} else {
 			logger.Debug("TCP plugin has been started", "listeners", len(tcpinfos))
-			if registry != nil {
+			if consulRegistry != nil && len(tcpinfos) > 0 {
 				for _, infos := range tcpinfos {
-					registry.RegisterTcpListener(infos)
+					consulRegistry.RegisterTcpListener(infos)
 				}
 			}
 		}
@@ -526,9 +526,9 @@ func Serve() error {
 
 	stopTCP := func() {
 		tcpServicePlugin.Shutdown(3 * time.Second)
-		if len(tcpinfos) > 0 && registry != nil {
+		if len(tcpinfos) > 0 && consulRegistry != nil {
 			for _, infos := range tcpinfos {
-				registry.UnregisterTcpListener(infos)
+				consulRegistry.UnregisterTcpListener(infos)
 			}
 			tcpinfos = nil
 		}
@@ -653,8 +653,8 @@ func Serve() error {
 
 		gCancel()
 		st.Shutdown(5 * time.Second)
-		if registry != nil {
-			registry.WaitFinished() // wait that the services have been unregistered from Consul
+		if consulRegistry != nil {
+			consulRegistry.WaitFinished() // wait that the services have been unregistered from Consul
 		}
 		cancelLogger()
 		time.Sleep(time.Second)
