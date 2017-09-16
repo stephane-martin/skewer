@@ -16,6 +16,7 @@ import (
 	"github.com/kardianos/osext"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
+	"github.com/stephane-martin/skewer/consul"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/sys"
 	"github.com/stephane-martin/skewer/utils"
@@ -31,6 +32,7 @@ type PluginController struct {
 	loggerHandle int
 	logger       log15.Logger
 	stasher      model.Stasher
+	registry     *consul.Registry
 
 	metricsChan chan []*dto.MetricFamily
 	stdin       io.WriteCloser
@@ -48,10 +50,11 @@ type PluginController struct {
 	created   bool
 }
 
-func NewPluginController(typ NetworkServiceType, stasher model.Stasher, binderHandle int, loggerHandle int, l log15.Logger) *PluginController {
+func NewPluginController(typ NetworkServiceType, stasher model.Stasher, r *consul.Registry, binderHandle int, loggerHandle int, l log15.Logger) *PluginController {
 	s := &PluginController{
 		typ:          typ,
 		stasher:      stasher,
+		registry:     r,
 		binderHandle: binderHandle,
 		loggerHandle: loggerHandle,
 		logger:       l,
@@ -241,7 +244,8 @@ func (s *PluginController) listen() chan InfosAndError {
 		// read JSON encoded messages that the plugin is going to write on stdout
 		scanner := bufio.NewScanner(s.stdout)
 		scanner.Split(utils.PluginSplit)
-		var command string
+		command := ""
+		infos := []model.ListenerInfo{}
 
 		for scanner.Scan() {
 			parts := strings.SplitN(scanner.Text(), " ", 2)
@@ -299,6 +303,27 @@ func (s *PluginController) listen() chan InfosAndError {
 						})
 						kill = true
 						return
+					}
+				}
+			case "infos":
+				if len(parts) == 2 {
+					newinfos := []model.ListenerInfo{}
+					err := json.Unmarshal([]byte(parts[1]), &newinfos)
+					if err == nil {
+						s.logger.Info("reported infos", "infos", newinfos, "type", name)
+						if s.registry != nil {
+							if len(infos) > 0 {
+								for _, info := range infos {
+									s.registry.UnregisterTcpListener(info)
+								}
+							}
+							if len(newinfos) > 0 {
+								for _, info := range newinfos {
+									s.registry.RegisterTcpListener(info)
+								}
+							}
+							infos = newinfos
+						}
 					}
 				}
 			case "stopped":
@@ -622,6 +647,7 @@ func (s *StorePlugin) Stash(m *model.TcpUdpParsedMessage) (fatal error, nonfatal
 	}
 	mb, err := m.MarshalMsg(nil)
 	if err == nil {
+		// TODO: examinate contention on s.W because of mutex that protects stdin
 		err = s.W("storemessage", mb)
 		if err != nil {
 			// abort the store and yell
@@ -638,5 +664,5 @@ func (s *StorePlugin) Stash(m *model.TcpUdpParsedMessage) (fatal error, nonfatal
 }
 
 func NewStorePlugin(loggerHandle int, l log15.Logger) *StorePlugin {
-	return &StorePlugin{PluginController: NewPluginController(Store, nil, 0, loggerHandle, l)}
+	return &StorePlugin{PluginController: NewPluginController(Store, nil, nil, 0, loggerHandle, l)}
 }

@@ -61,20 +61,16 @@ type TcpServiceImpl struct {
 	StreamingService
 	status     TcpServerStatus
 	statusChan chan TcpServerStatus
-	stasher    model.Stasher
+	reporter   model.Reporter
 	generator  chan ulid.ULID
 	metrics    *tcpMetrics
 	registry   *prometheus.Registry
 }
 
-func (s *TcpServiceImpl) init() {
-	s.StreamingService.init()
-}
-
-func NewTcpService(stasher model.Stasher, gen chan ulid.ULID, b *sys.BinderClient, l log15.Logger) *TcpServiceImpl {
+func NewTcpService(reporter model.Reporter, gen chan ulid.ULID, b *sys.BinderClient, l log15.Logger) *TcpServiceImpl {
 	s := TcpServiceImpl{
 		status:    TcpStopped,
-		stasher:   stasher,
+		reporter:  reporter,
 		generator: gen,
 		metrics:   NewTcpMetrics(),
 		registry:  prometheus.NewRegistry(),
@@ -205,7 +201,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) {
 					Uid:    uid.String(),
 					ConfId: config.ConfID,
 				}
-				fatal, nonfatal := s.stasher.Stash(&parsed_msg)
+				fatal, nonfatal := s.reporter.Stash(&parsed_msg)
 				if fatal != nil {
 					// the Store is not working properly
 				} else if nonfatal != nil {

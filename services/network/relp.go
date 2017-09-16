@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -111,16 +112,18 @@ func NewRelpMetrics() *relpMetrics {
 }
 
 type RelpService struct {
-	impl   *RelpServiceImpl
-	logger log15.Logger
-	b      *sys.BinderClient
-	sc     []conf.SyslogConfig
-	pc     []conf.ParserConfig
-	kc     conf.KafkaConfig
+	impl     *RelpServiceImpl
+	logger   log15.Logger
+	reporter model.Reporter
+	b        *sys.BinderClient
+	sc       []conf.SyslogConfig
+	pc       []conf.ParserConfig
+	kc       conf.KafkaConfig
+	wg       *sync.WaitGroup
 }
 
-func NewRelpService(b *sys.BinderClient, l log15.Logger) *RelpService {
-	s := &RelpService{b: b, logger: l}
+func NewRelpService(r model.Reporter, b *sys.BinderClient, l log15.Logger) *RelpService {
+	s := &RelpService{b: b, logger: l, reporter: r, wg: &sync.WaitGroup{}}
 	s.impl = NewRelpServiceImpl(s.b, s.logger)
 	return s
 }
@@ -138,25 +141,26 @@ func (s *RelpService) Start(test bool) (infos []model.ListenerInfo, err error) {
 	infos = []model.ListenerInfo{}
 	s.impl = NewRelpServiceImpl(s.b, s.logger)
 
+	s.wg.Add(1)
 	go func() {
+		defer s.wg.Done()
 		for {
 			state := <-s.impl.StatusChan
 			switch state {
 			case FinalStopped:
 				s.impl.Logger.Debug("The RELP service has been definitely halted")
-				// TODO: unregister from Consul if necessary
+				s.reporter.Report([]model.ListenerInfo{})
 				return
 
 			case Stopped:
 				s.impl.Logger.Debug("The RELP service is stopped")
 				s.impl.SetConf(s.sc, s.pc)
 				s.impl.SetKafkaConf(s.kc)
-				//infos, err := s.impl.Start(test)
-				_, err := s.impl.Start(test)
+				infos, err := s.impl.Start(test)
 				if err == nil {
-					//fmt.Println(infos)
-					// TODO: the first time it happens, register in Consul
+					s.reporter.Report(infos)
 				} else {
+					s.reporter.Report([]model.ListenerInfo{})
 					s.impl.Logger.Warn("The RELP service has failed to start", "error", err)
 					s.impl.StopAndWait()
 				}
@@ -184,9 +188,7 @@ func (s *RelpService) Shutdown() {
 
 func (s *RelpService) Stop() {
 	s.impl.FinalStop()
-	for range s.impl.StatusChan {
-
-	}
+	s.wg.Wait()
 }
 
 func (s *RelpService) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig, kc conf.KafkaConfig) {

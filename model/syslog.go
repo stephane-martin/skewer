@@ -10,6 +10,11 @@ type Stasher interface {
 	Stash(m *TcpUdpParsedMessage) (error, error)
 }
 
+type Reporter interface {
+	Stasher
+	Report(infos []ListenerInfo) error
+}
+
 type ListenerInfo struct {
 	Port           int    `json:"port" msg:"port"`
 	BindAddr       string `json:"bind_addr" mdg:"bind_addr"`

@@ -67,16 +67,16 @@ func ConfigureAndStartService(s NetworkService, c conf.BaseConfig, test bool) ([
 
 }
 
-func Factory(t NetworkServiceType, stasher model.Stasher, gen chan ulid.ULID, b *sys.BinderClient, l log15.Logger) NetworkService {
+func Factory(t NetworkServiceType, reporter model.Reporter, gen chan ulid.ULID, b *sys.BinderClient, l log15.Logger) NetworkService {
 	switch t {
 	case TCP:
-		return network.NewTcpService(stasher, gen, b, l)
+		return network.NewTcpService(reporter, gen, b, l)
 	case UDP:
-		return network.NewUdpService(stasher, gen, b, l)
+		return network.NewUdpService(reporter, gen, b, l)
 	case RELP:
-		return network.NewRelpService(b, l)
+		return network.NewRelpService(reporter, b, l)
 	case Journal:
-		svc, err := linux.NewJournalService(stasher, gen, l)
+		svc, err := linux.NewJournalService(reporter, gen, l)
 		if err == nil {
 			return svc
 		} else {
@@ -84,7 +84,7 @@ func Factory(t NetworkServiceType, stasher model.Stasher, gen chan ulid.ULID, b 
 			return nil
 		}
 	case Audit:
-		return linux.NewAuditService(stasher, gen, l)
+		return linux.NewAuditService(reporter, gen, l)
 	case Store:
 		return NewStoreService(l)
 	default:

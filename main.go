@@ -46,16 +46,18 @@ func main() {
 		if err != nil {
 			msg := fmt.Sprintf("Could not create a logger for the configuration service: '%s'", err.Error())
 			utils.W(os.Stdout, "starterror", []byte(msg))
+			time.Sleep(100 * time.Millisecond) 
 			cancelLogger()
 			os.Exit(-1)
 		}
 
 		err = services.LaunchConfProvider(logger)
 		if err == nil {
+			time.Sleep(100 * time.Millisecond) 
 			cancelLogger()
 		} else {
 			logger.Crit("ConfigurationProvider encountered a fatal error", "error", err)
-			time.Sleep(100 * time.Millisecond) // give a chance for the log message to be transmitted
+			time.Sleep(100 * time.Millisecond) 
 			cancelLogger()
 			os.Exit(-1)
 		}
@@ -162,6 +164,7 @@ func main() {
 		if err != nil {
 			msg := fmt.Sprintf("Could not create logger for plugin (%s): '%s'", name, err.Error())
 			utils.W(os.Stdout, "starterror", []byte(msg))
+			time.Sleep(100 * time.Millisecond) 
 			cancelLogger()
 			os.Exit(-1)
 		}
@@ -170,10 +173,11 @@ func main() {
 
 		if err != nil {
 			logger.Crit("Plugin encountered a fatal error", "type", name, "error", err)
-			time.Sleep(100 * time.Millisecond) // give a chance for the log message to be transmitted
+			time.Sleep(100 * time.Millisecond) 
 			cancelLogger()
 			os.Exit(-1)
 		} else {
+			time.Sleep(100 * time.Millisecond) 
 			cancelLogger()
 		}
 

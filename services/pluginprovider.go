@@ -17,12 +17,9 @@ import (
 	"github.com/stephane-martin/skewer/utils"
 )
 
-type Stasher struct {
-	typ    NetworkServiceType
-	logger log15.Logger
-}
-
 var stdoutLock sync.Mutex
+
+var SUCC []byte = []byte("SUCCESS")
 
 func W(header string, message []byte) (err error) {
 	stdoutLock.Lock()
@@ -31,7 +28,12 @@ func W(header string, message []byte) (err error) {
 	return err
 }
 
-func (s *Stasher) Stash(m *model.TcpUdpParsedMessage) (fatal error, nonfatal error) {
+type Reporter struct {
+	name   string
+	logger log15.Logger
+}
+
+func (s *Reporter) Stash(m *model.TcpUdpParsedMessage) (fatal error, nonfatal error) {
 	// when the plugin *produces* a syslog message, write it to stdout
 	b, err := m.MarshalMsg(nil)
 	if err == nil {
@@ -44,9 +46,17 @@ func (s *Stasher) Stash(m *model.TcpUdpParsedMessage) (fatal error, nonfatal err
 		}
 	} else {
 		// should not happen
-		s.logger.Warn("A syslog message could not be serialized", "type", s.typ, "error", err)
+		s.logger.Warn("A syslog message could not be serialized", "type", s.name, "error", err)
 		return nil, err
 	}
+}
+
+func (s *Reporter) Report(infos []model.ListenerInfo) error {
+	b, err := json.Marshal(infos)
+	if err != nil {
+		return err
+	}
+	return W("infos", b)
 }
 
 func Launch(typ NetworkServiceType, test bool, binderClient *sys.BinderClient, logger log15.Logger) error {
@@ -57,8 +67,8 @@ func Launch(typ NetworkServiceType, test bool, binderClient *sys.BinderClient, l
 	name := ReverseNetworkServiceMap[typ]
 	hasConf := false
 
-	stasher := Stasher{typ: typ, logger: logger}
-	svc := Factory(typ, &stasher, generator, binderClient, logger)
+	reporter := &Reporter{name: name, logger: logger}
+	svc := Factory(typ, reporter, generator, binderClient, logger)
 	if svc == nil {
 		err := fmt.Errorf("The Service Factory returned 'nil' for plugin '%s'", name)
 		W("starterror", []byte(err.Error()))
@@ -93,10 +103,14 @@ func Launch(typ NetworkServiceType, test bool, binderClient *sys.BinderClient, l
 			if err != nil {
 				W("starterror", []byte(err.Error()))
 				return err
-			} else if len(infos) == 0 && typ != RELP && typ != Journal && typ != Audit && typ != Store {
-				// (RELP, Journal and audit never report info about listening ports)
+			} else if len(infos) == 0 && (typ == TCP || typ == UDP) {
+				// only TCP and UDP directly report info about their effective listening ports
 				svc.Stop()
 				W("nolistenererror", []byte("plugin is inactive"))
+			} else if typ == TCP {
+				infosb, _ := json.Marshal(infos)
+				W("started", infosb)
+				reporter.Report(infos)
 			} else {
 				infosb, _ := json.Marshal(infos)
 				W("started", infosb)
@@ -107,12 +121,12 @@ func Launch(typ NetworkServiceType, test bool, binderClient *sys.BinderClient, l
 			}
 		case "stop":
 			svc.Stop()
-			W("stopped", []byte("success"))
+			W("stopped", SUCC)
 			// here we *do not return*. So the plugin process continues to live
 			// and to listen for subsequent control commands
 		case "shutdown":
 			svc.Shutdown()
-			W("shutdown", []byte("success"))
+			W("shutdown", SUCC)
 			// at the end of shutdown command, we *return*. So the plugin
 			// process stops right now.
 			return nil

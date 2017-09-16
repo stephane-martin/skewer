@@ -404,11 +404,11 @@ func Serve() error {
 	signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 
 	// retrieve linux audit logs
-	relpServicePlugin := services.NewPluginController(services.RELP, st, 6, 10, logger)
-	tcpServicePlugin := services.NewPluginController(services.TCP, st, 4, 8, logger)
-	udpServicePlugin := services.NewPluginController(services.UDP, st, 5, 9, logger)
-	auditServicePlugin := services.NewPluginController(services.Audit, st, 0, 12, logger)
-	journalServicePlugin := services.NewPluginController(services.Journal, st, 0, 11, logger)
+	relpServicePlugin := services.NewPluginController(services.RELP, st, consulRegistry, 6, 10, logger)
+	tcpServicePlugin := services.NewPluginController(services.TCP, st, consulRegistry, 4, 8, logger)
+	udpServicePlugin := services.NewPluginController(services.UDP, st, consulRegistry, 5, 9, logger)
+	auditServicePlugin := services.NewPluginController(services.Audit, st, consulRegistry, 0, 12, logger)
+	journalServicePlugin := services.NewPluginController(services.Journal, st, consulRegistry, 0, 11, logger)
 
 	startAudit := func(curconf *conf.BaseConfig) {
 		if auditlogs.Supported {
@@ -499,11 +499,6 @@ func Serve() error {
 			logger.Info("TCP plugin not started")
 		} else {
 			logger.Debug("TCP plugin has been started", "listeners", len(tcpinfos))
-			if consulRegistry != nil && len(tcpinfos) > 0 {
-				for _, infos := range tcpinfos {
-					consulRegistry.RegisterTcpListener(infos)
-				}
-			}
 		}
 	}
 
@@ -526,12 +521,6 @@ func Serve() error {
 
 	stopTCP := func() {
 		tcpServicePlugin.Shutdown(3 * time.Second)
-		if len(tcpinfos) > 0 && consulRegistry != nil {
-			for _, infos := range tcpinfos {
-				consulRegistry.UnregisterTcpListener(infos)
-			}
-			tcpinfos = nil
-		}
 	}
 
 	stopUDP := func() {
