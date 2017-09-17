@@ -2,6 +2,9 @@ package services
 
 import (
 	"context"
+	"fmt"
+	"io"
+	"os"
 	"sync"
 	"time"
 
@@ -11,6 +14,7 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/store"
+	"github.com/tinylib/msgp/msgp"
 )
 
 type storeServiceImpl struct {
@@ -22,6 +26,9 @@ type storeServiceImpl struct {
 	cancelForwarder context.CancelFunc
 	forwarder       store.Forwarder
 	mu              *sync.Mutex
+	reader          *msgp.Reader
+	ingestwg        *sync.WaitGroup
+	pipe            *os.File
 	status          bool
 	test            bool
 }
@@ -29,11 +36,18 @@ type storeServiceImpl struct {
 // NewStoreService creates a StoreService.
 // The StoreService is responsible to manage the lifecycle of the Store and the
 // Kafka Forwarder that is fed by the Store.
-func NewStoreService(l log15.Logger) StoreService {
+func NewStoreService(l log15.Logger, pipe *os.File) StoreService {
+	if pipe == nil {
+		l.Crit("The Store was not given a message pipe")
+		return nil
+	}
 	impl := &storeServiceImpl{
-		logger: l,
-		mu:     &sync.Mutex{},
-		status: false,
+		logger:   l,
+		mu:       &sync.Mutex{},
+		status:   false,
+		pipe:     pipe,
+		reader:   msgp.NewReader(pipe),
+		ingestwg: &sync.WaitGroup{},
 	}
 	impl.shutdownCtx, impl.shutdownStore = context.WithCancel(context.Background())
 	return impl
@@ -90,6 +104,25 @@ func (s *storeServiceImpl) doStart(test bool, mu *sync.Mutex) ([]model.ListenerI
 		if err != nil {
 			return infos, err
 		}
+		// receive syslog messages on the pipe
+		s.ingestwg.Add(1)
+		go func() {
+			defer s.ingestwg.Done()
+			var err error
+			var message *model.TcpUdpParsedMessage
+			for {
+				message = &model.TcpUdpParsedMessage{}
+				err = message.DecodeMsg(s.reader)
+				if err == nil {
+					s.st.Stash(message)
+				} else if err == io.EOF {
+					return
+				} else {
+					fmt.Fprintln(os.Stderr, "ZOOOOG", err)
+				}
+
+			}
+		}()
 	}
 	// create and start the kafka forwarder
 	var forwarderCtx context.Context
@@ -171,8 +204,10 @@ func (s *storeServiceImpl) Shutdown() {
 	}
 
 	s.Stop()
+	s.ingestwg.Wait() // wait until we are done ingesting new messages
 	s.shutdownStore()
 	s.st.WaitFinished()
+	s.pipe.Close()
 }
 
 // Gather returns the metrics for the Store and the Kafka forwarder

@@ -18,6 +18,7 @@ type RemoteLoggerHandler struct {
 }
 
 func NewRemoteLogger(ctx context.Context, remote net.Conn) log15.Logger {
+	// the h.msgChan ensures that we write log messages sequentially to the remote socket
 	logger := log15.New()
 	h := RemoteLoggerHandler{remote: remote, ctx: ctx}
 	h.msgChan = make(chan *log15.Record, 1000)

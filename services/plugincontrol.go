@@ -30,6 +30,7 @@ type PluginController struct {
 
 	binderHandle int
 	loggerHandle int
+	pipe         *os.File
 	logger       log15.Logger
 	stasher      model.Stasher
 	registry     *consul.Registry
@@ -466,7 +467,7 @@ func (s *PluginController) Start() ([]model.ListenerInfo, error) {
 	}
 }
 
-func setupCmd(name string, binderHandle int, loggerHandle int, test bool) (*exec.Cmd, io.WriteCloser, io.ReadCloser, error) {
+func setupCmd(name string, binderHandle int, loggerHandle int, messagePipe *os.File, test bool) (*exec.Cmd, io.WriteCloser, io.ReadCloser, error) {
 	exe, err := osext.Executable()
 	if err != nil {
 		return nil, nil, nil, err
@@ -480,6 +481,10 @@ func setupCmd(name string, binderHandle int, loggerHandle int, test bool) (*exec
 	if loggerHandle != 0 {
 		files = append(files, os.NewFile(uintptr(loggerHandle), "logger"))
 		envs = append(envs, "SKEWER_HAS_LOGGER=TRUE")
+	}
+	if messagePipe != nil {
+		files = append(files, messagePipe)
+		envs = append(envs, "SKEWER_HAS_PIPE=TRUE")
 	}
 	if test {
 		envs = append(envs, "SKEWER_TEST=TRUE")
@@ -522,7 +527,7 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath string, co
 		// if creating the namespaces fails, fallback to classical start
 		// this way we can support environments where user namespaces are not
 		// available
-		s.cmd, s.stdin, s.stdout, err = setupCmd(fmt.Sprintf("confined-%s", name), s.binderHandle, s.loggerHandle, test)
+		s.cmd, s.stdin, s.stdout, err = setupCmd(fmt.Sprintf("confined-%s", name), s.binderHandle, s.loggerHandle, nil, test)
 		if err != nil {
 			close(s.ShutdownChan)
 			s.createdMu.Unlock()
@@ -533,7 +538,7 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath string, co
 
 		if err != nil {
 			s.logger.Warn("Starting plugin in user namespace failed", "error", err, "type", name)
-			s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.binderHandle, s.loggerHandle, test)
+			s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.binderHandle, s.loggerHandle, nil, test)
 			if err != nil {
 				close(s.ShutdownChan)
 				s.createdMu.Unlock()
@@ -543,8 +548,17 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath string, co
 		}
 
 	case Store:
-		s.cmd, s.stdin, s.stdout, err = setupCmd(fmt.Sprintf("confined-%s", name), s.binderHandle, s.loggerHandle, test)
+		piper, pipew, err := os.Pipe()
 		if err != nil {
+			close(s.ShutdownChan)
+			s.createdMu.Unlock()
+			return err
+		}
+		s.pipe = pipew
+		s.cmd, s.stdin, s.stdout, err = setupCmd(fmt.Sprintf("confined-%s", name), s.binderHandle, s.loggerHandle, piper, test)
+		if err != nil {
+			piper.Close()
+			pipew.Close()
 			close(s.ShutdownChan)
 			s.createdMu.Unlock()
 			return err
@@ -554,17 +568,23 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath string, co
 
 		if err != nil {
 			s.logger.Warn("Starting plugin in user namespace failed", "error", err, "type", name)
-			s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.binderHandle, s.loggerHandle, test)
+			s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.binderHandle, s.loggerHandle, piper, test)
 			if err != nil {
+				piper.Close()
+				pipew.Close()
 				close(s.ShutdownChan)
 				s.createdMu.Unlock()
 				return err
 			}
 			err = s.cmd.Start()
 		}
+		piper.Close()
+		if err != nil {
+			pipew.Close()
+		}
 
 	case Journal:
-		s.cmd, s.stdin, s.stdout, err = setupCmd(fmt.Sprintf("confined-%s", name), s.binderHandle, s.loggerHandle, test)
+		s.cmd, s.stdin, s.stdout, err = setupCmd(fmt.Sprintf("confined-%s", name), s.binderHandle, s.loggerHandle, nil, test)
 		//s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.binderHandle, s.loggerHandle, test)
 
 		if err != nil {
@@ -577,7 +597,7 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath string, co
 
 		if err != nil {
 			s.logger.Warn("Starting plugin in user namespace failed", "error", err, "type", name)
-			s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.binderHandle, s.loggerHandle, test)
+			s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.binderHandle, s.loggerHandle, nil, test)
 			if err != nil {
 				close(s.ShutdownChan)
 				s.createdMu.Unlock()
@@ -587,7 +607,7 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath string, co
 		}
 
 	default:
-		s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.binderHandle, s.loggerHandle, test)
+		s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.binderHandle, s.loggerHandle, nil, test)
 		if err != nil {
 			close(s.ShutdownChan)
 			s.createdMu.Unlock()
@@ -632,32 +652,64 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath string, co
 
 type StorePlugin struct {
 	*PluginController
+	*utils.MessageQueue
+	stopChan chan struct{}
+	pushwg   *sync.WaitGroup
+}
+
+func (s *StorePlugin) pushqueue() {
+	var messages []*model.TcpUdpParsedMessage
+	var message *model.TcpUdpParsedMessage
+	var messageb []byte
+	var err error
+	for {
+		messages = s.MessageQueue.GetMany(1000)
+		if len(messages) == 0 {
+			return
+		}
+		for _, message = range messages {
+			messageb, err = message.MarshalMsg(nil)
+			if err == nil {
+				_, err = s.pipe.Write(messageb)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, "BLLLALALA", err)
+				}
+			} else {
+				fmt.Fprintln(os.Stderr, "OHHHHENOCDE", err, message)
+			}
+		}
+	}
+}
+
+func (s *StorePlugin) push() {
+	for s.MessageQueue.Wait(s.stopChan) {
+		s.pushqueue()
+	}
+	s.pushwg.Done()
+}
+
+func (s *StorePlugin) Shutdown(killTimeOut time.Duration) {
+	close(s.stopChan)                        // will make push() return
+	s.pushwg.Wait()                          // wait that push() returns
+	s.pushqueue()                            // empty the queue, in case there are pending messages
+	s.pipe.Close()                           // signal the child that we are done sending messages
+	s.PluginController.Shutdown(killTimeOut) // shutdown the child
 }
 
 // Stash stores the given message into the Store
 func (s *StorePlugin) Stash(m *model.TcpUdpParsedMessage) (fatal error, nonfatal error) {
-	// this method is called very frequently, so we avoid to lock or receive from channel
-	if s.typ != Store {
-		return fmt.Errorf("Plugin was asked to store a message, but the plugin '%s' is not a Store", ReverseNetworkServiceMap[s.typ]), nil
-	}
-	mb, err := m.MarshalMsg(nil)
-	if err == nil {
-		// TODO: examinate contention on s.W because of mutex that protects stdin
-		err = s.W("storemessage", mb)
-		if err != nil {
-			// abort the store and yell
-			s.logger.Crit("Could not write to Store. There was message loss", "error", err)
-			s.Shutdown(2 * time.Second)
-			return err, nil
-		} else {
-			return nil, nil
-		}
-	} else {
-		s.logger.Error("Error marshalling message", "error", err)
-		return nil, err
-	}
+	// this method is called very frequently, so we avoid to lock anything
+	// the MessageQueue ensures that we write the messages sequentially to the store child
+	s.MessageQueue.Put(m)
+	return nil, nil
 }
 
 func NewStorePlugin(loggerHandle int, l log15.Logger) *StorePlugin {
-	return &StorePlugin{PluginController: NewPluginController(Store, nil, nil, 0, loggerHandle, l)}
+	s := &StorePlugin{PluginController: NewPluginController(Store, nil, nil, 0, loggerHandle, l)}
+	s.MessageQueue = utils.NewMessageQueue()
+	s.stopChan = make(chan struct{})
+	s.pushwg = &sync.WaitGroup{}
+	s.pushwg.Add(1)
+	go s.push()
+	return s
 }

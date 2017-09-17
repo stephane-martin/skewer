@@ -67,7 +67,7 @@ func ConfigureAndStartService(s NetworkService, c conf.BaseConfig, test bool) ([
 
 }
 
-func Factory(t NetworkServiceType, reporter model.Reporter, gen chan ulid.ULID, b *sys.BinderClient, l log15.Logger) NetworkService {
+func Factory(t NetworkServiceType, reporter model.Reporter, gen chan ulid.ULID, b *sys.BinderClient, l log15.Logger, pipe *os.File) NetworkService {
 	switch t {
 	case TCP:
 		return network.NewTcpService(reporter, gen, b, l)
@@ -86,7 +86,7 @@ func Factory(t NetworkServiceType, reporter model.Reporter, gen chan ulid.ULID, 
 	case Audit:
 		return linux.NewAuditService(reporter, gen, l)
 	case Store:
-		return NewStoreService(l)
+		return NewStoreService(l, pipe)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown service type: %d\n", t)
 		return nil

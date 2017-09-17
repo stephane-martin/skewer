@@ -46,18 +46,18 @@ func main() {
 		if err != nil {
 			msg := fmt.Sprintf("Could not create a logger for the configuration service: '%s'", err.Error())
 			utils.W(os.Stdout, "starterror", []byte(msg))
-			time.Sleep(100 * time.Millisecond) 
+			time.Sleep(100 * time.Millisecond)
 			cancelLogger()
 			os.Exit(-1)
 		}
 
 		err = services.LaunchConfProvider(logger)
 		if err == nil {
-			time.Sleep(100 * time.Millisecond) 
+			time.Sleep(100 * time.Millisecond)
 			cancelLogger()
 		} else {
 			logger.Crit("ConfigurationProvider encountered a fatal error", "error", err)
-			time.Sleep(100 * time.Millisecond) 
+			time.Sleep(100 * time.Millisecond)
 			cancelLogger()
 			os.Exit(-1)
 		}
@@ -147,6 +147,7 @@ func main() {
 		signal.Ignore(syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
 
 		var binderClient *sys.BinderClient
+		var pipe *os.File
 		var err error
 
 		loggerCtx, cancelLogger := context.WithCancel(context.Background())
@@ -155,29 +156,39 @@ func main() {
 		if os.Getenv("SKEWER_HAS_BINDER") == "TRUE" {
 			if os.Getenv("SKEWER_HAS_LOGGER") == "TRUE" {
 				logger, err = getLogger(loggerCtx, name, 4)
+				if os.Getenv("SKEWER_HAS_PIPE") == "TRUE" {
+					pipe = os.NewFile(5, "pipe")
+				}
+			} else if os.Getenv("SKEWER_HAS_PIPE") == "TRUE" {
+				pipe = os.NewFile(4, "pipe")
 			}
 			binderClient, _ = sys.NewBinderClient(os.NewFile(3, "binder"), logger)
 		} else if os.Getenv("SKEWER_HAS_LOGGER") == "TRUE" {
 			logger, err = getLogger(loggerCtx, name, 3)
+			if os.Getenv("SKEWER_HAS_PIPE") == "TRUE" {
+				pipe = os.NewFile(4, "pipe")
+			}
+		} else if os.Getenv("SKEWER_HAS_PIPE") == "TRUE" {
+			pipe = os.NewFile(3, "pipe")
 		}
 
 		if err != nil {
 			msg := fmt.Sprintf("Could not create logger for plugin (%s): '%s'", name, err.Error())
 			utils.W(os.Stdout, "starterror", []byte(msg))
-			time.Sleep(100 * time.Millisecond) 
+			time.Sleep(100 * time.Millisecond)
 			cancelLogger()
 			os.Exit(-1)
 		}
 
-		err = services.Launch(services.NetworkServiceMap[name], os.Getenv("SKEWER_TEST") == "TRUE", binderClient, logger)
+		err = services.Launch(services.NetworkServiceMap[name], os.Getenv("SKEWER_TEST") == "TRUE", binderClient, logger, pipe)
 
 		if err != nil {
 			logger.Crit("Plugin encountered a fatal error", "type", name, "error", err)
-			time.Sleep(100 * time.Millisecond) 
+			time.Sleep(100 * time.Millisecond)
 			cancelLogger()
 			os.Exit(-1)
 		} else {
-			time.Sleep(100 * time.Millisecond) 
+			time.Sleep(100 * time.Millisecond)
 			cancelLogger()
 		}
 

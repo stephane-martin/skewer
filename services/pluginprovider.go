@@ -59,7 +59,7 @@ func (s *Reporter) Report(infos []model.ListenerInfo) error {
 	return W("infos", b)
 }
 
-func Launch(typ NetworkServiceType, test bool, binderClient *sys.BinderClient, logger log15.Logger) error {
+func Launch(typ NetworkServiceType, test bool, binderClient *sys.BinderClient, logger log15.Logger, pipe *os.File) error {
 	generator := utils.Generator(context.Background(), logger)
 
 	var command string
@@ -68,7 +68,7 @@ func Launch(typ NetworkServiceType, test bool, binderClient *sys.BinderClient, l
 	hasConf := false
 
 	reporter := &Reporter{name: name, logger: logger}
-	svc := Factory(typ, reporter, generator, binderClient, logger)
+	svc := Factory(typ, reporter, generator, binderClient, logger, pipe)
 	if svc == nil {
 		err := fmt.Errorf("The Service Factory returned 'nil' for plugin '%s'", name)
 		W("starterror", []byte(err.Error()))

@@ -79,7 +79,7 @@ func (c *ConfigurationService) Chan() chan *conf.BaseConfig {
 
 func (c *ConfigurationService) Start() error {
 	c.output = make(chan *conf.BaseConfig)
-	cmd, stdin, stdout, err := setupCmd("confined-skewer-conf", 0, c.loggerHandle, false)
+	cmd, stdin, stdout, err := setupCmd("confined-skewer-conf", 0, c.loggerHandle, nil, false)
 
 	if err != nil {
 		close(c.output)
@@ -90,7 +90,7 @@ func (c *ConfigurationService) Start() error {
 	err = sys.StartInNamespaces(cmd, false, "", c.confdir)
 	if err != nil {
 		c.logger.Warn("Starting configuration service in user namespace has failed", "error", err)
-		cmd, stdin, stdout, err = setupCmd("skewer-conf", 0, c.loggerHandle, false)
+		cmd, stdin, stdout, err = setupCmd("skewer-conf", 0, c.loggerHandle, nil, false)
 		err = cmd.Start()
 	}
 	if err != nil {
