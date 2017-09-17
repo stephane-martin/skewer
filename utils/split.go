@@ -9,16 +9,17 @@ import (
 var NOW []byte = []byte("now")
 var SP []byte = []byte(" ")
 
+func ret(n int, e error) error {
+	return e
+}
+
 func W(dest io.Writer, header string, message []byte) (err error) {
-	fmt.Fprintf(dest, "%010d ", len(header)+len(message)+1)
-	_, err = io.WriteString(dest, header)
-	if err == nil {
-		_, err = dest.Write(SP)
-		if err == nil {
-			_, err = dest.Write(message)
-		}
-	}
-	return err
+	return Chain(
+		func() error { return ret(fmt.Fprintf(dest, "%010d ", len(header)+len(message)+1)) },
+		func() error { return ret(io.WriteString(dest, header)) },
+		func() error { return ret(dest.Write(SP)) },
+		func() error { return ret(dest.Write(message)) },
+	)
 }
 
 func PluginSplit(data []byte, atEOF bool) (int, []byte, error) {

@@ -180,30 +180,39 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+
 		e := NewParsersEnv(s.ParserConfigs, s.Logger)
-		for m := range raw_messages_chan {
-			parser := e.GetParser(config.Format)
-			if parser == nil {
-				logger.Error("Unknown parser")
-				continue
-			}
-			p, err := parser.Parse(m.Message, config.DontParseSD)
+		parser := e.GetParser(config.Format)
+		if parser == nil {
+			logger.Crit("Unknown parser")
+			return
+		}
+
+		var uid ulid.ULID
+		var syslogMsg *model.SyslogMessage
+		var err error
+		var fullMsg *model.TcpUdpParsedMessage
+		var raw *model.RawMessage
+
+		for raw = range raw_messages_chan {
+
+			syslogMsg, err = parser.Parse(raw.Message, config.DontParseSD)
 
 			if err == nil {
-				uid := <-s.generator
-				parsed_msg := model.TcpUdpParsedMessage{
+				uid = <-s.generator
+				fullMsg = &model.TcpUdpParsedMessage{
 					Parsed: &model.ParsedMessage{
-						Fields:         p,
-						Client:         m.Client,
-						LocalPort:      m.LocalPort,
-						UnixSocketPath: m.UnixSocketPath,
+						Fields:         syslogMsg,
+						Client:         raw.Client,
+						LocalPort:      raw.LocalPort,
+						UnixSocketPath: raw.UnixSocketPath,
 					},
 					Uid:    uid.String(),
 					ConfId: config.ConfID,
 				}
-				fatal, nonfatal := s.reporter.Stash(&parsed_msg)
+				fatal, nonfatal := s.reporter.Stash(fullMsg)
 				if fatal != nil {
-					// the Store is not working properly
+					// TODO: the Store is not working properly
 				} else if nonfatal != nil {
 					logger.Warn("Error stashing TCP message", "error", nonfatal)
 				}
@@ -211,7 +220,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) {
 				if s.metrics != nil {
 					s.metrics.ParsingErrorCounter.WithLabelValues(s.Protocol, client, config.Format).Inc()
 				}
-				logger.Info("Parsing error", "Message", m.Message, "error", err)
+				logger.Info("Parsing error", "Message", raw.Message, "error", err)
 			}
 		}
 	}()
@@ -229,11 +238,12 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) {
 	}
 
 	for {
+		var raw *model.RawMessage
 		if scanner.Scan() {
 			if timeout > 0 {
 				conn.SetReadDeadline(time.Now().Add(timeout))
 			}
-			raw := model.RawMessage{
+			raw = &model.RawMessage{
 				Client:    client,
 				LocalPort: local_port,
 				Message:   scanner.Text(),
@@ -241,7 +251,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) {
 			if s.metrics != nil {
 				s.metrics.IncomingMsgsCounter.WithLabelValues(s.Protocol, client, local_port_s, path).Inc()
 			}
-			raw_messages_chan <- &raw
+			raw_messages_chan <- raw
 		} else {
 			logger.Info("End of TCP client connection", "error", scanner.Err())
 			return

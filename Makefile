@@ -10,7 +10,7 @@ LDFLAGS=-ldflags '-X github.com/stephane-martin/skewer/cmd.Version=${VERSION} -X
 SOURCES = $(shell find . -type f -name '*.go' -not -path "./vendor/*")
 SUBDIRS = $(shell find . -type d -regex './[a-z].*' -not -path './vendor*' -not -path '*.shapesdoc' | xargs)
 
-$(BINARY): ${SOURCES} model/types_gen.go utils/logging/types_gen.go conf/derived.gen.go
+$(BINARY): ${SOURCES} model/types_gen.go utils/logging/types_gen.go conf/derived.gen.go utils/logging/derived.gen.go metrics/derived.gen.go consul/derived.gen.go sys/derived.gen.go auditlogs/derived.gen.go
 	test -n "${GOPATH}"  # test $$GOPATH
 	go build ${LDFLAGS} -o ${BINARY}
 
@@ -26,7 +26,27 @@ conf/derived.gen.go: conf/types.go conf/conf.go
 	test -n "${GOPATH}"  # test $$GOPATH
 	go generate github.com/stephane-martin/skewer/conf
 
-generate: model/types_gen.go utils/logging/types_gen.go conf/derived.gen.go
+utils/logging/derived.gen.go: utils/logging/receiver.go
+	test -n "${GOPATH}"  # test $$GOPATH
+	go generate github.com/stephane-martin/skewer/utils/logging
+
+metrics/derived.gen.go: metrics/metrics.go
+	test -n "${GOPATH}"  # test $$GOPATH
+	go generate github.com/stephane-martin/skewer/metrics
+
+consul/derived.gen.go: consul/dynamicconf.go
+	test -n "${GOPATH}"  # test $$GOPATH
+	go generate github.com/stephane-martin/skewer/consul
+
+sys/derived.gen.go: sys/process.go
+	test -n "${GOPATH}"  # test $$GOPATH
+	go generate github.com/stephane-martin/skewer/sys
+
+auditlogs/derived.gen.go: auditlogs/reader.go
+	test -n "${GOPATH}"  # test $$GOPATH
+	go generate github.com/stephane-martin/skewer/auditlogs
+
+generate: model/types_gen.go utils/logging/types_gen.go conf/derived.gen.go utils/logging/derived.gen.go metrics/derived.gen.go consul/derived.gen.go sys/derived.gen.go auditlogs/derived.gen.go
 
 clean:
 	rm -f ${BINARY} 

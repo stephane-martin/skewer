@@ -68,14 +68,6 @@ func NewClient(params ConnParams) (*api.Client, error) {
 	return client, nil
 }
 
-func copy_map(m map[string]string) map[string]string {
-	c := map[string]string{}
-	for k, v := range m {
-		c[k] = v
-	}
-	return c
-}
-
 func sclose(c chan map[string]string) {
 	if c != nil {
 		close(c)

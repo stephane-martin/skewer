@@ -1,9 +1,10 @@
 package logging
 
+//go:generate goderive .
+
 import (
 	"context"
 	"net"
-	"sort"
 	"time"
 
 	"github.com/inconshreveable/log15"
@@ -29,12 +30,7 @@ func receive(ctx context.Context, l log15.Logger, c net.Conn) {
 			if e == nil {
 				logr := log15.Record{Lvl: log15.Lvl(r.Lvl), Msg: r.Msg, Time: r.Time, KeyNames: keyNames}
 				logr.Ctx = make([]interface{}, 0, 2*len(r.Ctx))
-				sortedKeys := make([]string, 0, len(r.Ctx))
-				for k := range r.Ctx {
-					sortedKeys = append(sortedKeys, k)
-				}
-				sort.Strings(sortedKeys)
-				for _, k := range sortedKeys {
+				for _, k := range deriveSortRecord(deriveKeysRecord(r.Ctx)) {
 					logr.Ctx = append(logr.Ctx, k)
 					logr.Ctx = append(logr.Ctx, r.Ctx[k])
 				}

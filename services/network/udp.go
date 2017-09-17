@@ -154,6 +154,8 @@ func (s *UdpServiceImpl) ListenPacket() []model.ListenerInfo {
 						Protocol:       s.Protocol,
 					})
 					s.UnixSocketPaths = append(s.UnixSocketPaths, syslogConf.UnixSocketPath)
+					conn.(*sys.FilePacketConn).PacketConn.(*net.UnixConn).SetReadBuffer(65536)
+					conn.(*sys.FilePacketConn).PacketConn.(*net.UnixConn).SetWriteBuffer(65536)
 					s.wg.Add(1)
 					go s.handleConnection(conn, syslogConf)
 				}
@@ -169,6 +171,8 @@ func (s *UdpServiceImpl) ListenPacket() []model.ListenerInfo {
 						Port:     syslogConf.Port,
 						Protocol: syslogConf.Protocol,
 					})
+					conn.(*sys.FilePacketConn).PacketConn.(*net.UDPConn).SetReadBuffer(65536)
+					conn.(*sys.FilePacketConn).PacketConn.(*net.UDPConn).SetReadBuffer(65536)
 					s.wg.Add(1)
 					go s.handleConnection(conn, syslogConf)
 				}
@@ -212,41 +216,53 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+
 		e := NewParsersEnv(s.ParserConfigs, s.Logger)
-		for m := range raw_messages_chan {
-			parser := e.GetParser(config.Format)
-			if parser == nil {
-				logger.Error("Unknown parser", "client", m.Client)
-				continue
-			}
-			p, err := parser.Parse(m.Message, config.DontParseSD)
+		parser := e.GetParser(config.Format)
+		if parser == nil {
+			logger.Crit("Unknown parser")
+			return
+		}
+
+		var syslogMsg *model.SyslogMessage
+		var err error
+		var uid ulid.ULID
+		var fullMsg *model.TcpUdpParsedMessage
+		var raw *model.RawMessage
+
+		for raw = range raw_messages_chan {
+			syslogMsg, err = parser.Parse(raw.Message, config.DontParseSD)
 
 			if err == nil {
-				uid := <-s.generator
-				parsed_msg := model.TcpUdpParsedMessage{
+				uid = <-s.generator
+				fullMsg = &model.TcpUdpParsedMessage{
 					Parsed: &model.ParsedMessage{
-						Fields:         p,
-						Client:         m.Client,
-						LocalPort:      m.LocalPort,
-						UnixSocketPath: m.UnixSocketPath,
+						Fields:         syslogMsg,
+						Client:         raw.Client,
+						LocalPort:      raw.LocalPort,
+						UnixSocketPath: raw.UnixSocketPath,
 					},
 					Uid:    uid.String(),
 					ConfId: config.ConfID,
 				}
-				s.stasher.Stash(&parsed_msg)
+				s.stasher.Stash(fullMsg)
 			} else {
 				if s.metrics != nil {
-					s.metrics.ParsingErrorCounter.WithLabelValues(s.Protocol, m.Client, config.Format).Inc()
+					s.metrics.ParsingErrorCounter.WithLabelValues(s.Protocol, raw.Client, config.Format).Inc()
 				}
-				logger.Info("Parsing error", "client", m.Client, "message", m.Message, "error", err)
+				logger.Info("Parsing error", "client", raw.Client, "message", raw.Message, "error", err)
 			}
 		}
 	}()
 
 	// Syslog UDP server
+	var packet []byte
+	var remote net.Addr
+	var size int
+
 	for {
-		packet := make([]byte, 65536)
-		size, remote, err := conn.ReadFrom(packet)
+		packet = make([]byte, 65536)
+		size, remote, err = conn.ReadFrom(packet)
 		if err != nil {
 			logger.Debug("Error reading UDP", "error", err)
 			return

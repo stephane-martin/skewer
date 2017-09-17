@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/EricLagergren/go-gnulib/ttyname"
+	"github.com/stephane-martin/skewer/utils"
 )
 
 type mountPoint struct {
@@ -69,30 +70,22 @@ func StartInNamespaces(command *exec.Cmd, dumpable bool, storePath string, confD
 	return err
 }
 
-func PivotRoot(root string) error {
+func PivotRoot(root string) (err error) {
 	oldroot := filepath.Join(root, "oldroot")
-	if err := os.Mkdir(oldroot, 0777); err != nil {
-		return err
+	err = utils.Chain(
+		func() error { return os.Mkdir(oldroot, 0777) },
+		func() error { return syscall.PivotRoot(root, oldroot) },
+		func() error { return syscall.Chdir("/") },
+		func() error { return syscall.Unmount("/oldroot", syscall.MNT_DETACH) },
+		func() error { return os.Remove("/oldroot") },
+		func() error { return syscall.Chroot("/newroot") },
+		func() error { return os.Chdir("/") },
+		func() error { return os.Symlink(filepath.Join("/dev", "pts", "ptmx"), filepath.Join("/dev", "ptmx")) },
+	)
+	if err != nil {
+		err = fmt.Errorf("PivotRoot error: %s", err.Error())
 	}
-	if err := syscall.PivotRoot(root, oldroot); err != nil {
-		return fmt.Errorf("pivot_root %v", err)
-	}
-	if err := syscall.Chdir("/"); err != nil {
-		return fmt.Errorf("chdir / %v", err)
-	}
-	if err := syscall.Unmount("/oldroot", syscall.MNT_DETACH); err != nil {
-		return fmt.Errorf("unmount pivot_root dir %v", err)
-	}
-	if err := os.Remove("/oldroot"); err != nil {
-		return fmt.Errorf("remove oldroot error: %v", err)
-	}
-	if err := syscall.Chroot("/newroot"); err != nil {
-		return fmt.Errorf("chroot failed: %v", err)
-	}
-	if err := os.Chdir("/"); err != nil {
-		return fmt.Errorf("chdir failed: %v", err)
-	}
-	return os.Symlink(filepath.Join("/dev", "pts", "ptmx"), filepath.Join("/dev", "ptmx"))
+	return err
 }
 
 func SetJournalFs(targetExec string) error {
@@ -230,8 +223,7 @@ func MakeChroot(targetExec string) (string, error) {
 	systemMountsMap := map[string]bool{
 		//"/etc",
 		//"/var",
-		// TODO: remove (systemctl in path to detect if we should collect from journald...)
-		"/bin": true,
+		"/bin": true, // TODO: remove (systemctl in path to detect if we should collect from journald...)
 		//"/usr/bin":  true,
 		//"/sbin":     true,
 		//"/usr/sbin": true,

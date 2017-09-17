@@ -1,5 +1,7 @@
 package consul
 
+//go:generate goderive .
+
 import (
 	"context"
 	"strings"
@@ -19,8 +21,8 @@ func WatchTree(ctx context.Context, client *api.Client, prefix string, resultsCh
 	}
 	logger.Debug("Getting configuration from Consul", "prefix", prefix)
 
-	var first_index uint64
-	results, first_index, err = getTree(ctx, client, prefix, 0)
+	var firstIdx uint64
+	results, firstIdx, err = getTree(ctx, client, prefix, 0)
 
 	if err != nil {
 		sclose(resultsChan)
@@ -31,11 +33,11 @@ func WatchTree(ctx context.Context, client *api.Client, prefix string, resultsCh
 		return results, nil
 	}
 
-	previous_index := first_index
-	previous_keyvalues := copy_map(results)
+	prevIdx := firstIdx
+	prevResults := deriveCloneResults(results)
 
 	watch := func() {
-		results, index, err := getTree(ctx, client, prefix, previous_index)
+		nextResults, nextIdx, err := getTree(ctx, client, prefix, prevIdx)
 
 		select {
 		case <-ctx.Done():
@@ -49,35 +51,17 @@ func WatchTree(ctx context.Context, client *api.Client, prefix string, resultsCh
 			return
 		}
 
-		is_equal := true
-
-		if index == previous_index {
+		if nextIdx == prevIdx {
 			return
 		}
 
-		if is_equal && len(results) != len(previous_keyvalues) {
-			is_equal = false
+		if deriveEqualResults(nextResults, prevResults) {
+			return
 		}
 
-		if is_equal {
-			for k, v := range results {
-				last_v, present := previous_keyvalues[k]
-				if !present {
-					is_equal = false
-					break
-				}
-				if v != last_v {
-					is_equal = false
-					break
-				}
-			}
-		}
-
-		if !is_equal {
-			resultsChan <- results
-			previous_index = index
-			previous_keyvalues = results
-		}
+		resultsChan <- nextResults
+		prevIdx = nextIdx
+		prevResults = deriveCloneResults(nextResults)
 	}
 
 	go func() {

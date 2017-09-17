@@ -388,29 +388,35 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		e := NewParsersEnv(s.ParserConfigs, s.Logger)
-		for m := range raw_messages_chan {
 
-			parser := e.GetParser(config.Format)
-			if parser == nil {
-				logger.Error("Unknown parser")
-				continue
-			}
-			p, err := parser.Parse(m.Raw.Message, config.DontParseSD)
+		e := NewParsersEnv(s.ParserConfigs, s.Logger)
+		parser := e.GetParser(config.Format)
+		if parser == nil {
+			logger.Crit("Unknown parser")
+			return
+		}
+
+		var raw *model.RelpRawMessage
+		var syslogMsg *model.SyslogMessage
+		var err error
+		var parsedMsg *model.RelpParsedMessage
+
+		for raw = range raw_messages_chan {
+			syslogMsg, err = parser.Parse(raw.Raw.Message, config.DontParseSD)
 			if err == nil {
-				parsed_msg := model.RelpParsedMessage{
+				parsedMsg = &model.RelpParsedMessage{
 					Parsed: &model.ParsedMessage{
-						Fields:         p,
-						Client:         m.Raw.Client,
-						LocalPort:      m.Raw.LocalPort,
-						UnixSocketPath: m.Raw.UnixSocketPath,
+						Fields:         syslogMsg,
+						Client:         raw.Raw.Client,
+						LocalPort:      raw.Raw.LocalPort,
+						UnixSocketPath: raw.Raw.UnixSocketPath,
 					},
-					Txnr: m.Txnr,
+					Txnr: raw.Txnr,
 				}
-				parsed_messages_chan <- &parsed_msg
+				parsed_messages_chan <- parsedMsg
 			} else if s.metrics != nil {
 				s.metrics.ParsingErrorCounter.WithLabelValues(s.Protocol, client, config.Format).Inc()
-				logger.Warn("Parsing error", "message", m.Raw.Message, "error", err)
+				logger.Warn("Parsing error", "message", raw.Raw.Message, "error", err)
 			}
 		}
 		close(parsed_messages_chan)

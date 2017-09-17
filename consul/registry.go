@@ -135,8 +135,7 @@ func NewRegistry(ctx context.Context, params ConnParams, svcName string, logger 
 			case <-ctx.Done():
 				for svcID, registered := range r.registeredServicesIds {
 					if registered {
-						err := doUnregister(r.client, svcID)
-						if err == nil {
+						if doUnregister(r.client, svcID) == nil {
 							r.registeredServicesIds[svcID] = false
 						}
 					}
@@ -154,7 +153,7 @@ func NewRegistry(ctx context.Context, params ConnParams, svcName string, logger 
 								logger.Debug("Registered in consul", "ID", svc.ID, "IP", svc.IP, "port", svc.Port)
 								r.registeredServicesIds[svc.ID] = true
 							} else {
-								logger.Warn("Failed to register service in Consul", "ID", svc.ID, "IP", svc.IP, "port", svc.Port)
+								logger.Warn("Failed to register service in Consul", "ID", svc.ID, "IP", svc.IP, "port", svc.Port, "error", err)
 							}
 						}
 					} else {
@@ -164,7 +163,7 @@ func NewRegistry(ctx context.Context, params ConnParams, svcName string, logger 
 								r.registeredServicesIds[svc.ID] = false
 								logger.Debug("Unregistered from consul", "ID", svc.ID)
 							} else {
-								logger.Warn("Failed to unregister service from Consul", "ID", svc.ID)
+								logger.Warn("Failed to unregister service from Consul", "ID", svc.ID, "error", err)
 							}
 						} else {
 							logger.Info("Service is not registered in Consul, and can not be unregistered", "ID", svc.ID)
@@ -207,7 +206,6 @@ func doRegister(client *api.Client, svc *Service, svcName string) error {
 	}
 
 	return client.Agent().ServiceRegister(service)
-	//r.logger.Info("Registered service in Consul", "id", service.ID, "ip", service.Address, "port", service.Port,"tags", strings.Join(service.Tags, ","), "health_url", service.Check.HTTP)
 }
 
 func (r *Registry) Registered(serviceID string) (bool, error) {

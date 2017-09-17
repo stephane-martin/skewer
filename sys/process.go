@@ -1,31 +1,29 @@
 package sys
 
+//go:generate goderive .
+
 import (
 	"github.com/shirou/gopsutil/process"
 )
 
-func HasAnyProcess(names []string) bool {
+func HasAnyProcess(wanted []string) bool {
+	return len(deriveIntersectNames(deriveUniqueNames(wanted), ListProcessNames())) > 0
+}
+
+func ListProcessNames() (names []string) {
+	names = []string{}
 	pids, err := process.Pids()
 	if err != nil {
-		// well... can't do better in that case
-		return false
+		return nil
 	}
-
-	m := map[string]bool{}
-	for _, name := range names {
-		m[name] = true
-	}
-
 	for _, pid := range pids {
 		p, err := process.NewProcess(pid)
 		if err == nil {
 			name, err := p.Name()
 			if err == nil {
-				if m[name] {
-					return true
-				}
+				names = append(names, name)
 			}
 		}
 	}
-	return false
+	return deriveUniqueNames(names)
 }

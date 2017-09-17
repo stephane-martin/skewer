@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -49,6 +51,7 @@ var uidFlag string
 var gidFlag string
 var dumpableFlag bool
 var noMlockFlag bool
+var profile bool
 
 func init() {
 	RootCmd.AddCommand(serveCmd)
@@ -64,6 +67,7 @@ func init() {
 	serveCmd.Flags().StringVar(&gidFlag, "gid", "", "Switch to this group ID (when launched as root)")
 	serveCmd.Flags().BoolVar(&dumpableFlag, "dumpable", false, "if set, the skewer process will be traceable/dumpable")
 	serveCmd.Flags().BoolVar(&noMlockFlag, "no-mlock", false, "if set, skewer will not mlock() its memory")
+	serveCmd.Flags().BoolVar(&profile, "profile", false, "if set, profile memory")
 }
 
 func runserve() {
@@ -666,6 +670,19 @@ func Serve() error {
 		udpServicePlugin,
 		st,
 	)
+
+	if profile {
+		go func() {
+			mux := http.NewServeMux()
+			mux.Handle("/pprof/heap", pprof.Handler("heap"))
+			mux.Handle("/pprof/profile", http.HandlerFunc(pprof.Profile))
+			server := &http.Server{
+				Addr:    "127.0.0.1:6600",
+				Handler: mux,
+			}
+			server.ListenAndServe()
+		}()
+	}
 
 	logger.Debug("Main loop is starting")
 	for {

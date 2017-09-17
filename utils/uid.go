@@ -11,11 +11,14 @@ import (
 
 func Generator(ctx context.Context, logger log15.Logger) chan ulid.ULID {
 	out := make(chan ulid.ULID)
+
 	go func() {
+		done := ctx.Done()
 		entropy := rand.New(rand.NewSource(time.Now().UnixNano()))
+		var uid ulid.ULID
+		var err error
+
 		for {
-			var uid ulid.ULID
-			var err error
 			for {
 				uid, err = ulid.New(ulid.Timestamp(time.Now()), entropy)
 				if err != nil {
@@ -25,11 +28,12 @@ func Generator(ctx context.Context, logger log15.Logger) chan ulid.ULID {
 				}
 			}
 			select {
-			case <-ctx.Done():
+			case <-done:
 				return
 			case out <- uid:
 			}
 		}
 	}()
+
 	return out
 }

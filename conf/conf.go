@@ -710,7 +710,7 @@ func (c *BaseConfig) Complete() (err error) {
 		case "rfc5424", "rfc3164", "json", "auto":
 		default:
 			if _, ok := parsersNames[syslogConf.Format]; !ok {
-				return ConfigurationCheckError{ErrString: "Unknown syslog format"}
+				return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown parser: '%s'", syslogConf.Format)}
 			}
 		}
 	}

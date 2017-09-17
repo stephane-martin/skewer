@@ -573,23 +573,18 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath string, co
 			return err
 		}
 
-		//err = s.cmd.Start()
 		err = sys.StartInNamespaces(s.cmd, dumpable, "", "")
-		// TODO
-		/*
-			err = sys.StartInNamespaces(s.cmd, dumpable, storePath, "", true)
 
+		if err != nil {
+			s.logger.Warn("Starting plugin in user namespace failed", "error", err, "type", name)
+			s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.binderHandle, s.loggerHandle, test)
 			if err != nil {
-				s.logger.Warn("Starting plugin in user namespace failed", "error", err, "type", name)
-				s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.binderHandle, s.loggerHandle, test)
-				if err != nil {
-					close(s.ShutdownChan)
-					s.createdMu.Unlock()
-					return err
-				}
-				err = s.cmd.Start()
+				close(s.ShutdownChan)
+				s.createdMu.Unlock()
+				return err
 			}
-		*/
+			err = s.cmd.Start()
+		}
 
 	default:
 		s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.binderHandle, s.loggerHandle, test)

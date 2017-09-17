@@ -2,8 +2,6 @@ package linux
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"os"
 	"strconv"
 	"sync"
@@ -36,6 +34,39 @@ func (s *AuditService) Gather() ([]*dto.MetricFamily, error) {
 	return []*dto.MetricFamily{}, nil
 }
 
+func auditToSyslog(auditMsg *model.AuditMessageGroup, hostname string, aconf *conf.AuditConfig) *model.ParsedMessage {
+	tgenerated := time.Now()
+	treported := tgenerated
+	nbsecs, err := strconv.ParseFloat(auditMsg.AuditTime, 64)
+	if err == nil {
+		treported = time.Unix(0, int64(nbsecs*1000)*1000000)
+	}
+
+	m := &model.SyslogMessage{
+		Appname:          aconf.Appname,
+		Facility:         model.Facility(aconf.Facility),
+		Severity:         model.Severity(aconf.Severity),
+		Priority:         model.Priority(8*aconf.Facility + aconf.Severity),
+		Hostname:         hostname,
+		TimeReported:     treported,
+		TimeGenerated:    tgenerated,
+		Msgid:            strconv.FormatInt(int64(auditMsg.Seq), 10),
+		Procid:           "",
+		AuditSubMessages: auditMsg.Msgs,
+	}
+
+	if len(auditMsg.UidMap) > 0 {
+		m.Properties = map[string]map[string]string{}
+		m.Properties["uid_map"] = auditMsg.UidMap
+	}
+
+	return &model.ParsedMessage{
+		Client: "audit",
+		Fields: m,
+	}
+
+}
+
 func (s *AuditService) Start(test bool) ([]model.ListenerInfo, error) {
 	infos := []model.ListenerInfo{}
 	hostname, err := os.Hostname()
@@ -51,59 +82,26 @@ func (s *AuditService) Start(test bool) ([]model.ListenerInfo, error) {
 		return infos, err
 	}
 
-	auditToSyslog := func(auditMsg *model.AuditMessageGroup) *model.SyslogMessage {
-		tgenerated := time.Now()
-		treported := tgenerated
-		nbsecs, err := strconv.ParseFloat(auditMsg.AuditTime, 64)
-		if err == nil {
-			millisecs := int64(nbsecs * 1000)
-			treported = time.Unix(0, millisecs*1000000)
-		}
-
-		m := model.SyslogMessage{
-			Appname:          s.aconf.Appname,
-			Facility:         model.Facility(s.aconf.Facility),
-			Severity:         model.Severity(s.aconf.Severity),
-			Priority:         model.Priority(8*s.aconf.Facility + s.aconf.Severity),
-			Hostname:         hostname,
-			TimeReported:     treported,
-			TimeGenerated:    tgenerated,
-			Msgid:            strconv.FormatInt(int64(auditMsg.Seq), 10),
-			Procid:           "",
-			AuditSubMessages: auditMsg.Msgs,
-		}
-
-		if len(auditMsg.UidMap) > 0 {
-			m.Properties = map[string]map[string]string{}
-			m.Properties["uid_map"] = auditMsg.UidMap
-		}
-
-		return &m
-	}
-
 	s.wgroup = &sync.WaitGroup{}
 	s.wgroup.Add(1)
 	go func() {
+		defer s.wgroup.Done()
+
+		var uid ulid.ULID
+		var full *model.TcpUdpParsedMessage
+
 		for msg := range msgChan {
-			uid := <-s.generator
-			m := auditToSyslog(msg)
-			parsed := &model.ParsedMessage{
-				Client: "audit",
-				Fields: m,
-			}
-			full := &model.TcpUdpParsedMessage{
+			uid = <-s.generator
+
+			full = &model.TcpUdpParsedMessage{
 				ConfId: s.aconf.ConfID,
 				Uid:    uid.String(),
-				Parsed: parsed,
+				Parsed: auditToSyslog(msg, hostname, &s.aconf),
 			}
 			if s.stasher != nil {
 				s.stasher.Stash(full)
-			} else {
-				marsh, _ := json.Marshal(full)
-				fmt.Println(string(marsh))
 			}
 		}
-		s.wgroup.Done()
 	}()
 	return infos, nil
 }

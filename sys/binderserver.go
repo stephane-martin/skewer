@@ -81,6 +81,11 @@ func BinderPacket(addr string) (net.PacketConn, error) {
 
 	if lnet == "unixgram" {
 		os.Chmod(laddr, 0777)
+		conn.(*net.UnixConn).SetReadBuffer(65536)
+		conn.(*net.UnixConn).SetWriteBuffer(65536)
+	} else {
+		conn.(*net.UDPConn).SetReadBuffer(65535)
+		conn.(*net.UDPConn).SetWriteBuffer(65535)
 	}
 
 	return conn, nil

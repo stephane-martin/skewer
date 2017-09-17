@@ -25,13 +25,16 @@ func NewRemoteLogger(ctx context.Context, remote net.Conn) log15.Logger {
 
 	go func() {
 		defer h.Close()
+
 		var rbis Record
 		var r *log15.Record
 		var more bool
 		rem := msgp.NewWriter(h.remote)
+		done := ctx.Done()
+
 		for {
 			select {
-			case <-ctx.Done():
+			case <-done:
 				return
 			case r, more = <-h.msgChan:
 				if more {
@@ -59,6 +62,8 @@ func NewRemoteLogger(ctx context.Context, remote net.Conn) log15.Logger {
 					}
 					rbis.EncodeMsg(rem)
 					rem.Flush()
+				} else {
+					return
 				}
 			}
 		}
@@ -68,6 +73,12 @@ func NewRemoteLogger(ctx context.Context, remote net.Conn) log15.Logger {
 }
 
 func (h *RemoteLoggerHandler) Log(r *log15.Record) error {
+	select {
+	case <-h.ctx.Done():
+		return nil
+	default:
+	}
+
 	select {
 	case h.msgChan <- r:
 	case <-h.ctx.Done():

@@ -16,7 +16,7 @@ import (
 	"github.com/stephane-martin/skewer/sys"
 )
 
-func EntryToSyslog(entry map[string]string) *model.SyslogMessage {
+func EntryToSyslog(entry map[string]string) *model.ParsedMessage {
 	m := model.SyslogMessage{}
 	properties := map[string]string{}
 	for k, v := range entry {
@@ -67,7 +67,13 @@ func EntryToSyslog(entry map[string]string) *model.SyslogMessage {
 	m.Priority = model.Priority(int(m.Facility)*8 + int(m.Severity))
 	m.Properties = map[string]map[string]string{}
 	m.Properties["journald"] = properties
-	return &m
+
+	return &model.ParsedMessage{
+		Client:         "journald",
+		LocalPort:      0,
+		UnixSocketPath: "",
+		Fields:         &m,
+	}
 }
 
 type journalMetrics struct {
@@ -130,25 +136,25 @@ func (s *JournalService) Start(test bool) ([]model.ListenerInfo, error) {
 	go func() {
 		defer s.wgroup.Done()
 
+		var uid ulid.ULID
+		var parsedMessage *model.ParsedMessage
+		var fullParsedMessage *model.TcpUdpParsedMessage
+		var entry map[string]string
+		var more bool
+
 		for {
 			select {
-			case entry, more := <-s.reader.Entries():
+			case entry, more = <-s.reader.Entries():
 				if more {
-					message := EntryToSyslog(entry)
-					uid := <-s.generator
-					parsedMessage := model.ParsedMessage{
-						Client:         "journald",
-						LocalPort:      0,
-						UnixSocketPath: "",
-						Fields:         message,
-					}
-					fullParsedMessage := model.TcpUdpParsedMessage{
+					parsedMessage = EntryToSyslog(entry)
+					uid = <-s.generator
+					fullParsedMessage = &model.TcpUdpParsedMessage{
 						ConfId: s.Conf.ConfID,
 						Uid:    uid.String(),
-						Parsed: &parsedMessage,
+						Parsed: parsedMessage,
 					}
 					if s.stasher != nil {
-						s.stasher.Stash(&fullParsedMessage)
+						s.stasher.Stash(fullParsedMessage)
 					}
 					if s.metrics != nil {
 						s.metrics.IncomingMsgsCounter.WithLabelValues("journald", "journald", "", "").Inc()
