@@ -158,27 +158,6 @@ func Launch(typ NetworkServiceType, test bool, binderClient *sys.BinderClient, l
 				logger.Crit("Could not write metrics to upstream", "type", name, "error", err)
 				return err
 			}
-		case "storemessage":
-			// the service is asked to store a syslog message
-			if stasher, ok := svc.(model.Stasher); ok {
-				m := &model.TcpUdpParsedMessage{}
-				_, err := m.UnmarshalMsg([]byte(parts[1]))
-				if err == nil {
-					fatal, nonfatal := stasher.Stash(m)
-					if fatal != nil {
-						logger.Crit("storemessage fatal error", "error", fatal)
-						return fatal
-					} else if nonfatal != nil {
-						logger.Warn("storemessage error", "error", nonfatal)
-					}
-
-				} else {
-					logger.Error("Error unmarshaling message", "type", name, "error", err)
-				}
-			} else {
-				return fmt.Errorf("Plugin provider '%s' was asked to store a message but does not implement Stasher", name)
-			}
-
 		default:
 			logger.Crit("Unknown command", "type", name, "command", command)
 			return fmt.Errorf("Unknown command '%s' in plugin '%s'", command, name)
