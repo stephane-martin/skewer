@@ -10,6 +10,15 @@ import (
 	"unicode/utf8"
 )
 
+func isASCII(s []byte) bool {
+	for _, c := range s {
+		if c > 127 {
+			return false
+		}
+	}
+	return true
+}
+
 func ParseRfc5424FormatSD(m []byte) (*SyslogMessage, error) {
 	return ParseRfc5424Format(m, false)
 }
@@ -108,7 +117,6 @@ func ParseRfc5424Format(m []byte, dont_parse_sd bool) (*SyslogMessage, error) {
 			return nil, err
 		}
 		smsg.Message = string(s2)
-		smsg.Properties = map[string]map[string]string{}
 		if dont_parse_sd {
 			smsg.Structured = string(s1)
 		} else {
@@ -117,7 +125,7 @@ func ParseRfc5424Format(m []byte, dont_parse_sd bool) (*SyslogMessage, error) {
 			if err != nil {
 				return nil, err
 			}
-			if props != nil {
+			if len(props) > 0 {
 				smsg.Properties = props
 			}
 		}
@@ -191,22 +199,22 @@ func parseStructData(sd []byte) (m map[string]map[string]string, err error) {
 		if position == l {
 			return &InvalidStructuredDataError{"Expected SD-VALUE, got nothing"}
 		}
-		if sd[position] != byte('"') {
+		if sd[position] != '"' {
 			return &InvalidStructuredDataError{"SD-VALUE should start with a quote"}
 		}
 		position++
 		p := position
 		found := false
 		for p < l && !found {
-			if sd[p] == byte('\\') {
+			if sd[p] == '\\' {
 				p++
 				if p >= l {
 					return &InvalidStructuredDataError{"Unexpected end after a \\"}
 				}
-				if sd[p] == byte('"') || sd[p] == byte('\\') || sd[p] == byte(']') {
+				if sd[p] == '"' || sd[p] == '\\' || sd[p] == ']' {
 					p++
 				}
-			} else if sd[p] == byte('"') {
+			} else if sd[p] == '"' {
 				found = true
 			} else {
 				p++
@@ -220,10 +228,10 @@ func parseStructData(sd []byte) (m map[string]map[string]string, err error) {
 			if position >= l {
 				return &InvalidStructuredDataError{"Abrupt end of SD-ELEMENT"}
 			}
-			if sd[position] == byte(' ') {
+			if sd[position] == ' ' {
 				position++
 				return param()
-			} else if sd[position] == byte(']') {
+			} else if sd[position] == ']' {
 				position++
 				return openBracket()
 			} else {
@@ -241,8 +249,11 @@ func parseStructData(sd []byte) (m map[string]map[string]string, err error) {
 			return &InvalidStructuredDataError{"Invalid SD-NAME"}
 		}
 		current_name = sd[position : position+name_end]
+		if !isASCII(current_name) {
+			return &InvalidStructuredDataError{"Invalid SD-NAME"}
+		}
 		position += name_end
-		position++ // count the =
+		position++ // count the '='
 		return value()
 	}
 
@@ -252,6 +263,9 @@ func parseStructData(sd []byte) (m map[string]map[string]string, err error) {
 			return &InvalidStructuredDataError{"Invalid SDID"}
 		}
 		current_sdid = sd[position : position+end]
+		if !isASCII(current_sdid) {
+			return &InvalidStructuredDataError{"Invalid SDID"}
+		}
 		position += end
 		m[string(current_sdid)] = map[string]string{}
 		if sd[position] == byte(' ') {
@@ -270,7 +284,7 @@ func parseStructData(sd []byte) (m map[string]map[string]string, err error) {
 		if position == l {
 			return nil
 		}
-		if sd[position] == byte('[') {
+		if sd[position] == '[' {
 			position++
 			return sdid()
 		} else {
@@ -281,6 +295,20 @@ func parseStructData(sd []byte) (m map[string]map[string]string, err error) {
 	err = openBracket()
 	if err != nil {
 		return nil, err
+	}
+
+	// remove empty SDID sections
+	emptySDIDs := []string{}
+	for id, paramvalues := range m {
+		if len(paramvalues) == 0 {
+			emptySDIDs = append(emptySDIDs, id)
+		}
+	}
+	for _, id := range emptySDIDs {
+		delete(m, id)
+	}
+	if len(m) == 0 {
+		return nil, nil
 	}
 
 	return m, nil

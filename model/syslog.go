@@ -91,13 +91,8 @@ func Parse(m []byte, format string, dont_parse_sd bool) (sm *SyslogMessage, err 
 		}
 		sm.AuditSubMessages = auditMsg.Msgs
 		if len(auditMsg.UidMap) > 0 {
-			if sm.Properties == nil {
-				sm.Properties = map[string]map[string]string{}
-
-			}
-			props := map[string]map[string]string{}
-			props["uid_map"] = auditMsg.UidMap
-			sm.Properties = props
+			sm.Properties = map[string]map[string]string{}
+			sm.Properties["uid_map"] = auditMsg.UidMap
 		}
 		sm.Message = ""
 	}

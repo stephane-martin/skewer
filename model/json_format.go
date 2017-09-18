@@ -21,9 +21,9 @@ type jsonRsyslogMessage struct {
 	Properties    map[string]map[string]string `json:"$!"`
 }
 
-func ParseJsonFormat(m []byte) (*SyslogMessage, error) {
+func ParseJsonFormat(m []byte) (msg *SyslogMessage, err error) {
 	sourceMsg := jsonRsyslogMessage{}
-	err := json.Unmarshal(m, &sourceMsg)
+	err = json.Unmarshal(m, &sourceMsg)
 	if err != nil {
 		return nil, &UnmarshalingJsonError{err}
 	}
@@ -78,7 +78,7 @@ func ParseJsonFormat(m []byte) (*SyslogMessage, error) {
 		structured = strings.TrimSpace(sourceMsg.Structured)
 	}
 
-	msg := SyslogMessage{
+	msg = &SyslogMessage{
 		Priority:      Priority(pri),
 		Facility:      Facility(pri / 8),
 		Severity:      Severity(pri % 8),
@@ -93,13 +93,11 @@ func ParseJsonFormat(m []byte) (*SyslogMessage, error) {
 		Message:       strings.TrimSpace(sourceMsg.Message),
 	}
 
-	if sourceMsg.Properties == nil {
-		msg.Properties = map[string]map[string]string{}
-	} else {
+	if len(sourceMsg.Properties) > 0 {
 		msg.Properties = sourceMsg.Properties
 	}
 
-	return &msg, nil
+	return msg, nil
 }
 
 /*
