@@ -1,5 +1,7 @@
 package model
 
+//go:generate goderive .
+
 import (
 	"bytes"
 	"fmt"
@@ -12,6 +14,32 @@ func ParseRfc5424FormatSD(m []byte) (*SyslogMessage, error) {
 	return ParseRfc5424Format(m, false)
 }
 
+func Fuzz(m []byte) int {
+	msg, err := ParseRfc5424FormatSD(m)
+	if err != nil {
+		if msg != nil {
+			panic("msg != nil on error")
+		}
+		return 0
+	}
+	b, err := msg.MarshalMsg(nil)
+	if err != nil {
+		panic(err)
+	}
+	msg2 := &SyslogMessage{}
+	rest, err := msg2.UnmarshalMsg(b)
+	if err != nil {
+		panic("Unmarshaling failed")
+	}
+	if len(rest) > 0 {
+		panic("after marshalling there is more bytes remaining")
+	}
+	if !deriveEqualSyslogMessage(msg, msg2) {
+		panic("msg and msg2 are not equal")
+	}
+	return 1
+}
+
 var SP []byte = []byte(" ")
 var DASH []byte = []byte("-")
 
@@ -21,6 +49,7 @@ func ParseRfc5424Format(m []byte, dont_parse_sd bool) (*SyslogMessage, error) {
 	// SYSLOG-MSG = HEADER SP STRUCTURED-DATA [SP MSG]
 
 	smsg := SyslogMessage{}
+	m = bytes.TrimSpace(m)
 	splits := bytes.SplitN(m, SP, 7)
 
 	if len(splits) < 7 {

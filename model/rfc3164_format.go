@@ -23,8 +23,7 @@ func pair2str(s1 []byte, s2 []byte) (string, string) {
 
 func ParseRfc3164Format(m []byte) (*SyslogMessage, error) {
 	smsg := SyslogMessage{}
-	def_smsg := SyslogMessage{}
-	def_smsg.Message = string(m)
+	def_smsg := SyslogMessage{Message: string(m)}
 	n := time.Now()
 	def_smsg.TimeGenerated = n
 	def_smsg.TimeReported = n
