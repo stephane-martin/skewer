@@ -24,3 +24,7 @@ _testmain.go
 *.prof
 
 *.sublime-workspace
+
+model-fuzz.zip
+workdir
+
