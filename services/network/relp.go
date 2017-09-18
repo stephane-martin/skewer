@@ -22,6 +22,7 @@ import (
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/errors"
 	"github.com/stephane-martin/skewer/sys"
+	"github.com/stephane-martin/skewer/utils"
 )
 
 type RelpServerStatus int
@@ -400,9 +401,10 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 		var syslogMsg *model.SyslogMessage
 		var err error
 		var parsedMsg *model.RelpParsedMessage
+		decoder := utils.SelectDecoder(config.Encoding)
 
 		for raw = range raw_messages_chan {
-			syslogMsg, err = parser.Parse(raw.Raw.Message, config.DontParseSD)
+			syslogMsg, err = parser.Parse(raw.Raw.Message, decoder, config.DontParseSD)
 			if err == nil {
 				parsedMsg = &model.RelpParsedMessage{
 					Parsed: &model.ParsedMessage{

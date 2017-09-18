@@ -105,7 +105,6 @@ type JournalService struct {
 }
 
 func NewJournalService(stasher model.Stasher, gen chan ulid.ULID, l log15.Logger) (*JournalService, error) {
-	var err error
 	s := JournalService{
 		stasher:   stasher,
 		generator: gen,
@@ -115,11 +114,6 @@ func NewJournalService(stasher model.Stasher, gen chan ulid.ULID, l log15.Logger
 		wgroup:    &sync.WaitGroup{},
 	}
 	s.registry.MustRegister(s.metrics.IncomingMsgsCounter)
-	s.reader, err = journald.NewReader(s.logger)
-	if err != nil {
-		return nil, err
-	}
-	s.reader.Start()
 	if sys.CapabilitiesSupported {
 		l.Debug("Capabilities", "caps", sys.GetCaps())
 	}
@@ -130,9 +124,19 @@ func (s *JournalService) Gather() ([]*dto.MetricFamily, error) {
 	return s.registry.Gather()
 }
 
-func (s *JournalService) Start(test bool) ([]model.ListenerInfo, error) {
+func (s *JournalService) Start(test bool) (infos []model.ListenerInfo, err error) {
+	infos = []model.ListenerInfo{}
+	if s.reader == nil {
+		// start the journald reader if needed
+		s.reader, err = journald.NewReader(s.logger)
+		if err != nil {
+			return infos, err
+		}
+		s.reader.Start(s.Conf.Encoding)
+	}
 	s.wgroup.Add(1)
 	s.stopchan = make(chan struct{})
+
 	go func() {
 		defer s.wgroup.Done()
 
@@ -168,7 +172,7 @@ func (s *JournalService) Start(test bool) ([]model.ListenerInfo, error) {
 		}
 	}()
 	s.logger.Debug("Journald service has started")
-	return []model.ListenerInfo{}, nil
+	return infos, nil
 }
 
 func (s *JournalService) Stop() {

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"unicode/utf8"
+
+	"golang.org/x/text/encoding"
 )
 
 type Stasher interface {
@@ -38,8 +40,8 @@ type Parser struct {
 	format string
 }
 
-func (p *Parser) Parse(m []byte, dont_parse_sd bool) (*SyslogMessage, error) {
-	return Parse(m, p.format, dont_parse_sd)
+func (p *Parser) Parse(m []byte, decoder *encoding.Decoder, dont_parse_sd bool) (*SyslogMessage, error) {
+	return Parse(m, p.format, decoder, dont_parse_sd)
 }
 
 func GetParser(format string) *Parser {
@@ -49,30 +51,30 @@ func GetParser(format string) *Parser {
 	return nil
 }
 
-func Parse(m []byte, format string, dont_parse_sd bool) (sm *SyslogMessage, err error) {
+func Parse(m []byte, format string, decoder *encoding.Decoder, dont_parse_sd bool) (sm *SyslogMessage, err error) {
 
 	switch format {
 	case "rfc5424":
-		sm, err = ParseRfc5424Format(m, dont_parse_sd)
+		sm, err = ParseRfc5424Format(m, decoder, dont_parse_sd)
 	case "rfc3164":
-		sm, err = ParseRfc3164Format(m)
+		sm, err = ParseRfc3164Format(m, decoder)
 	case "json":
-		sm, err = ParseJsonFormat(m)
+		sm, err = ParseJsonFormat(m, decoder)
 	case "auto":
 		if m[0] == byte('{') {
-			sm, err = ParseJsonFormat(m)
+			sm, err = ParseJsonFormat(m, decoder)
 		} else if m[0] != byte('<') {
-			sm, err = ParseRfc3164Format(m)
+			sm, err = ParseRfc3164Format(m, decoder)
 		} else {
 			i := bytes.Index(m, []byte(">"))
 			if i < 2 {
-				sm, err = ParseRfc3164Format(m)
+				sm, err = ParseRfc3164Format(m, decoder)
 			} else if len(m) == (i + 1) {
-				sm, err = ParseRfc3164Format(m)
+				sm, err = ParseRfc3164Format(m, decoder)
 			} else if m[i+1] == byte('1') {
-				sm, err = ParseRfc5424Format(m, dont_parse_sd)
+				sm, err = ParseRfc5424Format(m, decoder, dont_parse_sd)
 			} else {
-				sm, err = ParseRfc3164Format(m)
+				sm, err = ParseRfc3164Format(m, decoder)
 			}
 		}
 

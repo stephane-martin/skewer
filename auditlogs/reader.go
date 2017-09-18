@@ -11,6 +11,7 @@ import (
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/utils"
 )
 
 var Supported bool = true
@@ -24,29 +25,35 @@ func WriteAuditLogs(ctx context.Context, c conf.AuditConfig, logger log15.Logger
 	}
 
 	logger = logger.New("class", "audit")
+	decoder := utils.SelectDecoder(c.Encoding)
+
+	convert := func(src *AuditMessageGroup) (cop *model.AuditMessageGroup) {
+		var data string
+		var err error
+		cop = &model.AuditMessageGroup{AuditTime: src.AuditTime, Seq: src.Seq, UidMap: src.UidMap}
+		if len(src.Msgs) > 0 {
+			cop.Msgs = make([]*model.AuditSubMessage, 0, len(src.Msgs))
+			for _, subMsg := range src.Msgs {
+				data, err = decoder.String(subMsg.Data)
+				if err == nil {
+					cop.Msgs = append(cop.Msgs, &model.AuditSubMessage{Data: data, Type: subMsg.Type})
+				}
+			}
+		}
+		return cop
+	}
 
 	// buffered chan, in case of audit messages bursts
 	netlinkMsgChan := make(chan *syscall.NetlinkMessage, 1000)
 	interChan := make(chan *AuditMessageGroup, 1000)
 
-	resultsChan := deriveFmapResults(copyMsg, interChan) // deep-copy messages from interChan to resultsChan
+	resultsChan := deriveFmapResults(convert, interChan) // deep-copy messages from interChan to resultsChan
 
 	go receive(client, netlinkMsgChan, logger)
 
 	go consume(netlinkMsgChan, interChan, c, logger)
 
 	return resultsChan, nil
-}
-
-func copyMsg(src *AuditMessageGroup) (cop *model.AuditMessageGroup) {
-	cop = &model.AuditMessageGroup{AuditTime: src.AuditTime, Seq: src.Seq, UidMap: src.UidMap}
-	if len(src.Msgs) > 0 {
-		cop.Msgs = make([]*model.AuditSubMessage, 0, len(src.Msgs))
-		for _, subMsg := range src.Msgs {
-			cop.Msgs = append(cop.Msgs, &model.AuditSubMessage{Data: subMsg.Data, Type: subMsg.Type})
-		}
-	}
-	return cop
 }
 
 func consume(source chan *syscall.NetlinkMessage, dest chan *AuditMessageGroup, c conf.AuditConfig, logger log15.Logger) {

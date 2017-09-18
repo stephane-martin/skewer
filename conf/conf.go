@@ -685,6 +685,9 @@ func (c *BaseConfig) Complete() (err error) {
 		if syslogConf.Timeout == 0 {
 			c.Syslog[i].Timeout = time.Minute
 		}
+		if syslogConf.Encoding == "" {
+			c.Syslog[i].Encoding = "utf8"
+		}
 
 		if len(c.Syslog[i].TopicTmpl) > 0 {
 			_, err = template.New("topic").Parse(c.Syslog[i].TopicTmpl)

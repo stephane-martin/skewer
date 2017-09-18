@@ -5,10 +5,11 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/javascript"
 	"github.com/stephane-martin/skewer/model"
+	"golang.org/x/text/encoding"
 )
 
 type Parser interface {
-	Parse(m []byte, dont_parse_sd bool) (*model.SyslogMessage, error)
+	Parse(m []byte, decoder *encoding.Decoder, dont_parse_sd bool) (*model.SyslogMessage, error)
 }
 
 type ParsersEnv struct {

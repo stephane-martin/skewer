@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"strconv"
 	"time"
-	"unicode"
+	uni "unicode"
+
+	"golang.org/x/text/encoding"
+	"golang.org/x/text/encoding/unicode"
 )
 
 // <PRI>Mmm dd hh:mm:ss HOSTNAME TAG MSG
@@ -21,32 +24,40 @@ func pair2str(s1 []byte, s2 []byte) (string, string) {
 	return string(s1), string(s2)
 }
 
-func ParseRfc3164Format(m []byte) (*SyslogMessage, error) {
-	smsg := SyslogMessage{}
-	def_smsg := SyslogMessage{Message: string(m)}
+func ParseRfc3164Format(m []byte, decoder *encoding.Decoder) (smsg *SyslogMessage, err error) {
+	if decoder == nil {
+		decoder = unicode.UTF8.NewDecoder()
+	}
+	m, err = decoder.Bytes(m)
+	if err != nil {
+		return nil, &InvalidEncodingError{Err: err}
+	}
+
+	smsg = &SyslogMessage{}
+	def_smsg := &SyslogMessage{Message: string(m)}
 	n := time.Now()
 	def_smsg.TimeGenerated = n
 	def_smsg.TimeReported = n
 
 	smsg.Properties = map[string]map[string]string{}
 	if !bytes.HasPrefix(m, []byte("<")) {
-		return &def_smsg, nil
+		return def_smsg, nil
 	}
 	end_pri := bytes.Index(m, []byte(">"))
 	if end_pri <= 1 {
-		return &def_smsg, nil
+		return def_smsg, nil
 	}
 	pri_s := m[1:end_pri]
 	pri_num, err := strconv.Atoi(string(pri_s))
 	if err != nil {
-		return &def_smsg, nil
+		return def_smsg, nil
 	}
 	smsg.Priority = Priority(pri_num)
 	smsg.Facility = Facility(pri_num / 8)
 	smsg.Severity = Severity(pri_num % 8)
 
 	if len(m) <= (end_pri + 1) {
-		return &smsg, nil
+		return smsg, nil
 	}
 	m = bytes.TrimSpace(m[end_pri+1:])
 	s := bytes.Split(m, SP)
@@ -60,7 +71,7 @@ func ParseRfc3164Format(m []byte) (*SyslogMessage, error) {
 				smsg.Message = string(m)
 				smsg.TimeGenerated = def_smsg.TimeGenerated
 				smsg.TimeReported = def_smsg.TimeReported
-				return &smsg, nil
+				return smsg, nil
 			}
 			smsg.TimeGenerated = t2
 			smsg.TimeReported = t2
@@ -69,7 +80,7 @@ func ParseRfc3164Format(m []byte) (*SyslogMessage, error) {
 			smsg.TimeReported = t1
 		}
 		if len(s) == 1 {
-			return &smsg, nil
+			return smsg, nil
 		}
 		s = s[1:]
 	} else {
@@ -78,7 +89,7 @@ func ParseRfc3164Format(m []byte) (*SyslogMessage, error) {
 			smsg.Message = string(m)
 			smsg.TimeGenerated = def_smsg.TimeGenerated
 			smsg.TimeReported = def_smsg.TimeReported
-			return &smsg, nil
+			return smsg, nil
 		}
 		timestamp_b := bytes.Join(s[0:3], SP)
 		t, e := time.Parse(time.Stamp, string(timestamp_b))
@@ -86,20 +97,20 @@ func ParseRfc3164Format(m []byte) (*SyslogMessage, error) {
 			smsg.Message = string(m)
 			smsg.TimeGenerated = def_smsg.TimeGenerated
 			smsg.TimeReported = def_smsg.TimeReported
-			return &smsg, nil
+			return smsg, nil
 		}
 		t = t.AddDate(time.Now().Year(), 0, 0)
 		smsg.TimeGenerated = t
 		smsg.TimeReported = t
 		if len(s) == 3 {
-			return &smsg, nil
+			return smsg, nil
 		}
 		s = s[3:]
 	}
 
 	if len(s) == 1 {
 		smsg.Message = string(s[0])
-		return &smsg, nil
+		return smsg, nil
 	}
 
 	if len(s) == 2 {
@@ -113,33 +124,33 @@ func ParseRfc3164Format(m []byte) (*SyslogMessage, error) {
 			} else {
 				smsg.Message = string(s[1])
 			}
-			return &smsg, nil
+			return smsg, nil
 		}
 		if bytes.ContainsAny(s[0], "[]:") {
 			smsg.Appname, smsg.Procid = pair2str(parseTag(s[0]))
 			smsg.Message = string(s[1])
-			return &smsg, nil
+			return smsg, nil
 		}
 		if bytes.ContainsAny(s[1], "[]:") {
 			smsg.Hostname = string(s[0])
 			smsg.Appname, smsg.Procid = pair2str(parseTag(s[0]))
-			return &smsg, nil
+			return smsg, nil
 		}
 		smsg.Appname = string(s[0])
 		smsg.Message = string(s[1])
-		return &smsg, nil
+		return smsg, nil
 	}
 
 	if bytes.ContainsAny(s[0], "[]:") || !isHostname(s[0]) {
 		// hostname is omitted
 		smsg.Appname, smsg.Procid = pair2str(parseTag(s[0]))
 		smsg.Message = string(bytes.Join(s[1:], SP))
-		return &smsg, nil
+		return smsg, nil
 	}
 	smsg.Hostname = string(s[0])
 	smsg.Appname, smsg.Procid = pair2str(parseTag(s[1]))
 	smsg.Message = string(bytes.Join(s[2:], SP))
-	return &smsg, nil
+	return smsg, nil
 }
 
 func parseTag(tag []byte) (appname []byte, procid []byte) {
@@ -163,7 +174,7 @@ func parseTag(tag []byte) (appname []byte, procid []byte) {
 
 func isHostname(s []byte) bool {
 	for _, r := range string(s) {
-		if (!unicode.IsLetter(r)) && (!unicode.IsNumber(r)) && r != '.' && r != ':' {
+		if (!uni.IsLetter(r)) && (!uni.IsNumber(r)) && r != '.' && r != ':' {
 			return false
 		}
 	}

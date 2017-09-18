@@ -5,6 +5,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/text/encoding"
+	"golang.org/x/text/encoding/unicode"
 )
 
 type jsonRsyslogMessage struct {
@@ -21,9 +24,11 @@ type jsonRsyslogMessage struct {
 	Properties    map[string]map[string]string `json:"$!"`
 }
 
-func ParseJsonFormat(m []byte) (msg *SyslogMessage, err error) {
+func ParseJsonFormat(m []byte, decoder *encoding.Decoder) (msg *SyslogMessage, rerr error) {
+	// we ignore decoder, JSON is always UTF-8
+	decoder = unicode.UTF8.NewDecoder()
 	sourceMsg := jsonRsyslogMessage{}
-	err = json.Unmarshal(m, &sourceMsg)
+	err := json.Unmarshal(m, &sourceMsg)
 	if err != nil {
 		return nil, &UnmarshalingJsonError{err}
 	}

@@ -11,6 +11,8 @@ import (
 	"github.com/dop251/goja"
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/model"
+	"golang.org/x/text/encoding"
+	"golang.org/x/text/encoding/unicode"
 )
 
 var jsSyslogMessage string = `function SyslogMessage(p, f, s, v, timer, timeg, host, app, proc, msgid, structured, msg, subs, props) {
@@ -78,7 +80,7 @@ type iSyslogMessage struct {
 }
 
 type Parser interface {
-	Parse(rawMessage []byte, dont_parse_sd bool) (*model.SyslogMessage, error)
+	Parse(rawMessage []byte, decoder *encoding.Decoder, dont_parse_sd bool) (*model.SyslogMessage, error)
 }
 
 type ParsersEnvironment interface {
@@ -118,11 +120,20 @@ type ConcreteParser struct {
 	name string
 }
 
-func (p *ConcreteParser) Parse(rawMessage []byte, dont_parse_sd bool) (*model.SyslogMessage, error) {
+func (p *ConcreteParser) Parse(rawMessage []byte, decoder *encoding.Decoder, dont_parse_sd bool) (parsedMessage *model.SyslogMessage, err error) {
 	jsParser, ok := p.env.jsParsers[p.name]
 	if !ok {
 		return nil, &model.UnknownFormatError{Format: p.name}
 	}
+
+	if decoder == nil {
+		decoder = unicode.UTF8.NewDecoder()
+	}
+	rawMessage, err = decoder.Bytes(rawMessage)
+	if err != nil {
+		return nil, &model.InvalidEncodingError{Err: err}
+	}
+
 	rawMessage = bytes.Trim(rawMessage, "\r\n ")
 	if len(rawMessage) == 0 {
 		return nil, nil
@@ -141,7 +152,7 @@ func (p *ConcreteParser) Parse(rawMessage []byte, dont_parse_sd bool) (*model.Sy
 			return nil, err
 		}
 	}
-	parsedMessage, err := p.env.fromJsMessage(jsParsedMessage)
+	parsedMessage, err = p.env.fromJsMessage(jsParsedMessage)
 	if err != nil {
 		return nil, err
 	}

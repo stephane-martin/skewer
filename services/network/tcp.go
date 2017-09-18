@@ -16,6 +16,7 @@ import (
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/errors"
 	"github.com/stephane-martin/skewer/sys"
+	"github.com/stephane-martin/skewer/utils"
 )
 
 type TcpServerStatus int
@@ -193,10 +194,11 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) {
 		var err error
 		var fullMsg *model.TcpUdpParsedMessage
 		var raw *model.RawMessage
+		decoder := utils.SelectDecoder(config.Encoding)
 
 		for raw = range raw_messages_chan {
 
-			syslogMsg, err = parser.Parse(raw.Message, config.DontParseSD)
+			syslogMsg, err = parser.Parse(raw.Message, decoder, config.DontParseSD)
 
 			if err == nil {
 				uid = <-s.generator

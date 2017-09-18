@@ -8,6 +8,9 @@ import (
 	"strconv"
 	"time"
 	"unicode/utf8"
+
+	"golang.org/x/text/encoding"
+	"golang.org/x/text/encoding/unicode"
 )
 
 func isASCII(s []byte) bool {
@@ -20,7 +23,7 @@ func isASCII(s []byte) bool {
 }
 
 func ParseRfc5424FormatSD(m []byte) (*SyslogMessage, error) {
-	return ParseRfc5424Format(m, false)
+	return ParseRfc5424Format(m, nil, false)
 }
 
 func Fuzz(m []byte) int {
@@ -52,12 +55,19 @@ func Fuzz(m []byte) int {
 var SP []byte = []byte(" ")
 var DASH []byte = []byte("-")
 
-func ParseRfc5424Format(m []byte, dont_parse_sd bool) (*SyslogMessage, error) {
+func ParseRfc5424Format(m []byte, decoder *encoding.Decoder, dont_parse_sd bool) (smsg *SyslogMessage, err error) {
 	// HEADER = PRI VERSION SP TIMESTAMP SP HOSTNAME SP APP-NAME SP PROCID SP MSGID
 	// PRI = "<" PRIVAL ">"
 	// SYSLOG-MSG = HEADER SP STRUCTURED-DATA [SP MSG]
 
-	smsg := SyslogMessage{}
+	if decoder == nil {
+		decoder = unicode.UTF8.NewDecoder()
+	}
+	m, err = decoder.Bytes(m)
+	if err != nil {
+		return nil, &InvalidEncodingError{Err: err}
+	}
+
 	m = bytes.TrimSpace(m)
 	splits := bytes.SplitN(m, SP, 7)
 
@@ -65,7 +75,7 @@ func ParseRfc5424Format(m []byte, dont_parse_sd bool) (*SyslogMessage, error) {
 		return nil, &NotEnoughPartsError{len(splits)}
 	}
 
-	var err error
+	smsg = &SyslogMessage{}
 	smsg.Priority, smsg.Facility, smsg.Severity, smsg.Version, err = parsePriority(splits[0])
 	if err != nil {
 		return nil, err
@@ -133,7 +143,7 @@ func ParseRfc5424Format(m []byte, dont_parse_sd bool) (*SyslogMessage, error) {
 		return nil, &InvalidStructuredDataError{"Structured data is not nil but does not start with '['"}
 	}
 
-	return &smsg, nil
+	return smsg, nil
 }
 
 func splitStructuredData(structured_and_msg []byte) ([]byte, []byte, error) {

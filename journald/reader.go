@@ -8,12 +8,13 @@ import (
 
 	"github.com/coreos/go-systemd/sdjournal"
 	"github.com/inconshreveable/log15"
+	"github.com/stephane-martin/skewer/utils"
 )
 
 var Supported bool = true
 
 type JournaldReader interface {
-	Start()
+	Start(coding string)
 	Stop()
 	Shutdown()
 	Entries() chan map[string]string
@@ -25,6 +26,27 @@ type reader struct {
 	stopchan chan bool
 	wgroup   *sync.WaitGroup
 	logger   log15.Logger
+}
+
+type Converter func(map[string]string) map[string]string
+
+func makeMapConverter(coding string) Converter {
+	decoder := utils.SelectDecoder(coding)
+	return func(m map[string]string) map[string]string {
+		dest := make(map[string]string)
+		var k, k2, v, v2 string
+		var err error
+		for k, v = range m {
+			k2, err = decoder.String(k)
+			if err == nil {
+				v2, err = decoder.String(v)
+				if err == nil {
+					dest[k2] = v2
+				}
+			}
+		}
+		return dest
+	}
 }
 
 func NewReader(logger log15.Logger) (JournaldReader, error) {
@@ -80,15 +102,18 @@ func (r *reader) wait() chan int {
 	return events
 }
 
-func (r *reader) Start() {
+func (r *reader) Start(coding string) {
 	r.stopchan = make(chan bool)
 	r.wgroup.Add(1)
 
 	go func() {
 		defer r.wgroup.Done()
+
 		var err error
 		var nb uint64
 		var entry *sdjournal.JournalEntry
+		converter := makeMapConverter(coding)
+
 		for {
 			// get entries from journald
 		LoopGetEntries:
@@ -107,7 +132,7 @@ func (r *reader) Start() {
 						if err != nil {
 							r.logger.Warn("journal.GetEntry() error", "error", err)
 						} else {
-							r.entries <- entry.Fields
+							r.entries <- converter(entry.Fields)
 						}
 					}
 				}

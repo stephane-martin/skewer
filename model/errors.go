@@ -49,6 +49,16 @@ func (e *TimeError) Error() string {
 func (e *TimeError) Json()    {}
 func (e *TimeError) Parsing() {}
 
+type InvalidEncodingError struct {
+	Err error
+}
+
+func (e *InvalidEncodingError) Error() string {
+	return fmt.Sprintf("The input message was not properly encoded: %s", e.Err.Error())
+}
+
+func (e *InvalidEncodingError) Parsing() {}
+
 type InvalidStructuredDataError struct {
 	Message string
 }

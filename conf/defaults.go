@@ -41,6 +41,7 @@ func SetAuditDefaults(v *viper.Viper, prefixed bool) {
 	v.SetDefault(prefix+"facility", 0)
 	v.SetDefault(prefix+"topic_tmpl", "linux-audit-topic")
 	v.SetDefault(prefix+"partition_key_tmpl", "pk-{{.Hostname}}")
+	v.SetDefault(prefix+"encoding", "utf8")
 
 }
 
@@ -57,6 +58,7 @@ func SetJournaldDefaults(v *viper.Viper, prefixed bool) {
 	}
 	v.SetDefault(prefix+"topic_tmpl", "journald-{{.Appname}}")
 	v.SetDefault(prefix+"partition_key_tmpl", "pk-{{.Hostname}}")
+	v.SetDefault(prefix+"encoding", "utf8")
 }
 
 func SetKafkaDefaults(v *viper.Viper, prefixed bool) {
