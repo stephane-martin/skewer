@@ -246,7 +246,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) {
 			raw = &model.RawMessage{
 				Client:    client,
 				LocalPort: local_port,
-				Message:   scanner.Text(),
+				Message:   scanner.Bytes(),
 			}
 			if s.metrics != nil {
 				s.metrics.IncomingMsgsCounter.WithLabelValues(s.Protocol, client, local_port_s, path).Inc()

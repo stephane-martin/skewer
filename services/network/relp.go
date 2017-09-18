@@ -707,7 +707,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 				raw := model.RelpRawMessage{
 					Txnr: txnr,
 					Raw: &model.RawMessage{
-						Message:   data,
+						Message:   []byte(data),
 						Client:    client,
 						LocalPort: local_port,
 					},

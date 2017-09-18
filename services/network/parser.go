@@ -8,7 +8,7 @@ import (
 )
 
 type Parser interface {
-	Parse(m string, dont_parse_sd bool) (*model.SyslogMessage, error)
+	Parse(m []byte, dont_parse_sd bool) (*model.SyslogMessage, error)
 }
 
 type ParsersEnv struct {

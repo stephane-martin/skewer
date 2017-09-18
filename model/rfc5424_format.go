@@ -1,20 +1,27 @@
 package model
 
 import (
+	"bytes"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 	"unicode/utf8"
 )
 
-func ParseRfc5424Format(m string, dont_parse_sd bool) (*SyslogMessage, error) {
+func ParseRfc5424FormatSD(m []byte) (*SyslogMessage, error) {
+	return ParseRfc5424Format(m, false)
+}
+
+var SP []byte = []byte(" ")
+var DASH []byte = []byte("-")
+
+func ParseRfc5424Format(m []byte, dont_parse_sd bool) (*SyslogMessage, error) {
 	// HEADER = PRI VERSION SP TIMESTAMP SP HOSTNAME SP APP-NAME SP PROCID SP MSGID
 	// PRI = "<" PRIVAL ">"
 	// SYSLOG-MSG = HEADER SP STRUCTURED-DATA [SP MSG]
 
 	smsg := SyslogMessage{}
-	splits := strings.SplitN(m, " ", 7)
+	splits := bytes.SplitN(m, SP, 7)
 
 	if len(splits) < 7 {
 		return nil, &NotEnoughPartsError{len(splits)}
@@ -27,12 +34,14 @@ func ParseRfc5424Format(m string, dont_parse_sd bool) (*SyslogMessage, error) {
 	}
 
 	n := time.Now()
-	if splits[1] == "-" {
+	s := string(splits[1])
+	if s == "-" {
 		smsg.TimeReported = time.Now()
-	} else {
-		t1, err := time.Parse(time.RFC3339Nano, splits[1])
+	}
+	if smsg.TimeReported.IsZero() {
+		t1, err := time.Parse(time.RFC3339Nano, s)
 		if err != nil {
-			t2, err := time.Parse(time.RFC3339, splits[1])
+			t2, err := time.Parse(time.RFC3339, s)
 			if err != nil {
 				smsg.TimeReported = n
 			} else {
@@ -44,31 +53,35 @@ func ParseRfc5424Format(m string, dont_parse_sd bool) (*SyslogMessage, error) {
 	}
 	smsg.TimeGenerated = n
 
-	if splits[2] != "-" {
-		smsg.Hostname = splits[2]
+	s = string(splits[2])
+	if s != "-" {
+		smsg.Hostname = s
 	}
-	if splits[3] != "-" {
-		smsg.Appname = splits[3]
+	s = string(splits[3])
+	if s != "-" {
+		smsg.Appname = s
 	}
-	if splits[4] != "-" {
-		smsg.Procid = splits[4]
+	s = string(splits[4])
+	if s != "-" {
+		smsg.Procid = s
 	}
-	if splits[5] != "-" {
-		smsg.Msgid = splits[5]
+	s = string(splits[5])
+	if s != "-" {
+		smsg.Msgid = s
 	}
-	structured_and_msg := strings.TrimSpace(splits[6])
-	if strings.HasPrefix(structured_and_msg, "-") {
+	structured_and_msg := bytes.TrimSpace(splits[6])
+	if bytes.HasPrefix(structured_and_msg, DASH) {
 		// structured data is empty
-		smsg.Message = strings.TrimSpace(structured_and_msg[1:])
-	} else if strings.HasPrefix(structured_and_msg, "[") {
+		smsg.Message = string(bytes.TrimSpace(structured_and_msg[1:]))
+	} else if bytes.HasPrefix(structured_and_msg, []byte("[")) {
 		s1, s2, err := splitStructuredData(structured_and_msg)
 		if err != nil {
 			return nil, err
 		}
-		smsg.Message = s2
+		smsg.Message = string(s2)
 		smsg.Properties = map[string]map[string]string{}
 		if dont_parse_sd {
-			smsg.Structured = s1
+			smsg.Structured = string(s1)
 		} else {
 			smsg.Structured = ""
 			props, err := parseStructData(s1)
@@ -86,26 +99,26 @@ func ParseRfc5424Format(m string, dont_parse_sd bool) (*SyslogMessage, error) {
 	return &smsg, nil
 }
 
-func splitStructuredData(structured_and_msg string) (string, string, error) {
+func splitStructuredData(structured_and_msg []byte) ([]byte, []byte, error) {
 	length := len(structured_and_msg)
 	for i := 0; i < length; i++ {
 		if structured_and_msg[i] == ']' {
 			if i == (length - 1) {
-				return structured_and_msg, "", nil
+				return structured_and_msg, []byte{}, nil
 			}
 			if structured_and_msg[i+1] == ' ' {
-				return structured_and_msg[:i+1], strings.TrimSpace(structured_and_msg[i+1:]), nil
+				return structured_and_msg[:i+1], bytes.TrimSpace(structured_and_msg[i+1:]), nil
 			}
 		}
 	}
-	return "", "", &InvalidStructuredDataError{"Can not find the last ']' that marks the end of structured data"}
+	return []byte{}, []byte{}, &InvalidStructuredDataError{"Can not find the last ']' that marks the end of structured data"}
 }
 
-func parsePriority(pv string) (Priority, Facility, Severity, Version, error) {
+func parsePriority(pv []byte) (Priority, Facility, Severity, Version, error) {
 	if pv[0] != byte('<') {
 		return 0, 0, 0, 0, &InvalidPriorityError{}
 	}
-	i := strings.Index(pv, ">")
+	i := bytes.Index(pv, []byte(">"))
 	if i < 2 {
 		return 0, 0, 0, 0, &InvalidPriorityError{}
 	}
@@ -113,14 +126,14 @@ func parsePriority(pv string) (Priority, Facility, Severity, Version, error) {
 		return 0, 0, 0, 0, &InvalidPriorityError{}
 	}
 
-	p, err := strconv.Atoi(pv[1:i])
+	p, err := strconv.Atoi(string(pv[1:i]))
 	if err != nil {
 		return 0, 0, 0, 0, &InvalidPriorityError{}
 	}
 
 	f := Facility(p / 8)
 	s := Severity(p % 8)
-	v, err := strconv.Atoi(pv[i+1:])
+	v, err := strconv.Atoi(string(pv[i+1:]))
 	if err != nil {
 		return 0, 0, 0, 0, &InvalidPriorityError{}
 	}
@@ -128,16 +141,16 @@ func parsePriority(pv string) (Priority, Facility, Severity, Version, error) {
 	return Priority(p), f, s, Version(v), nil
 }
 
-func parseStructData(sd string) (m map[string]map[string]string, err error) {
+func parseStructData(sd []byte) (m map[string]map[string]string, err error) {
 	// see https://tools.ietf.org/html/rfc5424#section-6.3
-	if !utf8.ValidString(sd) {
+	if !utf8.Valid(sd) {
 		return nil, &InvalidStructuredDataError{}
 	}
 	m = map[string]map[string]string{}
 	l := len(sd)
 	position := 0
-	current_sdid := ""
-	current_name := ""
+	current_sdid := []byte{}
+	current_name := []byte{}
 
 	var openBracket func() error
 	var sdid func() error
@@ -172,7 +185,7 @@ func parseStructData(sd string) (m map[string]map[string]string, err error) {
 		}
 		if found {
 			val := sd[position:p]
-			m[current_sdid][current_name] = val
+			m[string(current_sdid)][string(current_name)] = string(val)
 			position += len(val)
 			position++ // count for the closing quote
 			if position >= l {
@@ -194,7 +207,7 @@ func parseStructData(sd string) (m map[string]map[string]string, err error) {
 	}
 
 	param = func() error {
-		name_end := strings.Index(sd[position:], "=")
+		name_end := bytes.Index(sd[position:], []byte("="))
 		if name_end < 1 {
 			return &InvalidStructuredDataError{"Invalid SD-NAME"}
 		}
@@ -205,13 +218,13 @@ func parseStructData(sd string) (m map[string]map[string]string, err error) {
 	}
 
 	sdid = func() error {
-		end := strings.IndexAny(sd[position:], " ]")
+		end := bytes.IndexAny(sd[position:], " ]")
 		if end < 1 {
 			return &InvalidStructuredDataError{"Invalid SDID"}
 		}
 		current_sdid = sd[position : position+end]
 		position += end
-		m[current_sdid] = map[string]string{}
+		m[string(current_sdid)] = map[string]string{}
 		if sd[position] == byte(' ') {
 			// now read the params
 			position++

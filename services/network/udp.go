@@ -279,7 +279,7 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 			Client:         client,
 			LocalPort:      local_port,
 			UnixSocketPath: path,
-			Message:        string(packet[:size]),
+			Message:        packet[:size],
 		}
 		if s.metrics != nil {
 			s.metrics.IncomingMsgsCounter.WithLabelValues(s.Protocol, client, local_port_s, path).Inc()

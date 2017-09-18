@@ -1,8 +1,8 @@
 package model
 
 import (
+	"bytes"
 	"strconv"
-	"strings"
 	"time"
 	"unicode"
 )
@@ -17,24 +17,28 @@ import (
 
 // if <PRI> is not present, we assume it is just MSG
 
-func ParseRfc3164Format(m string) (*SyslogMessage, error) {
+func pair2str(s1 []byte, s2 []byte) (string, string) {
+	return string(s1), string(s2)
+}
+
+func ParseRfc3164Format(m []byte) (*SyslogMessage, error) {
 	smsg := SyslogMessage{}
 	def_smsg := SyslogMessage{}
-	def_smsg.Message = m
+	def_smsg.Message = string(m)
 	n := time.Now()
 	def_smsg.TimeGenerated = n
 	def_smsg.TimeReported = n
 
 	smsg.Properties = map[string]map[string]string{}
-	if !strings.HasPrefix(m, "<") {
+	if !bytes.HasPrefix(m, []byte("<")) {
 		return &def_smsg, nil
 	}
-	end_pri := strings.Index(m, ">")
+	end_pri := bytes.Index(m, []byte(">"))
 	if end_pri <= 1 {
 		return &def_smsg, nil
 	}
 	pri_s := m[1:end_pri]
-	pri_num, err := strconv.Atoi(pri_s)
+	pri_num, err := strconv.Atoi(string(pri_s))
 	if err != nil {
 		return &def_smsg, nil
 	}
@@ -45,15 +49,16 @@ func ParseRfc3164Format(m string) (*SyslogMessage, error) {
 	if len(m) <= (end_pri + 1) {
 		return &smsg, nil
 	}
-	m = strings.TrimSpace(m[end_pri+1:])
-	s := strings.Split(m, " ")
+	m = bytes.TrimSpace(m[end_pri+1:])
+	s := bytes.Split(m, SP)
 	if m[0] >= byte('0') && m[0] <= byte('9') {
 		// RFC3339
-		t1, e := time.Parse(time.RFC3339Nano, s[0])
+		s0 := string(s[0])
+		t1, e := time.Parse(time.RFC3339Nano, s0)
 		if e != nil {
-			t2, e := time.Parse(time.RFC3339, s[0])
+			t2, e := time.Parse(time.RFC3339, s0)
 			if e != nil {
-				smsg.Message = m
+				smsg.Message = string(m)
 				smsg.TimeGenerated = def_smsg.TimeGenerated
 				smsg.TimeReported = def_smsg.TimeReported
 				return &smsg, nil
@@ -71,15 +76,15 @@ func ParseRfc3164Format(m string) (*SyslogMessage, error) {
 	} else {
 		// old unix timestamp
 		if len(s) < 3 {
-			smsg.Message = m
+			smsg.Message = string(m)
 			smsg.TimeGenerated = def_smsg.TimeGenerated
 			smsg.TimeReported = def_smsg.TimeReported
 			return &smsg, nil
 		}
-		timestamp_s := strings.Join(s[0:3], " ")
-		t, e := time.Parse(time.Stamp, timestamp_s)
+		timestamp_b := bytes.Join(s[0:3], SP)
+		t, e := time.Parse(time.Stamp, string(timestamp_b))
 		if e != nil {
-			smsg.Message = m
+			smsg.Message = string(m)
 			smsg.TimeGenerated = def_smsg.TimeGenerated
 			smsg.TimeReported = def_smsg.TimeReported
 			return &smsg, nil
@@ -94,54 +99,55 @@ func ParseRfc3164Format(m string) (*SyslogMessage, error) {
 	}
 
 	if len(s) == 1 {
-		smsg.Message = s[0]
+		smsg.Message = string(s[0])
 		return &smsg, nil
 	}
 
 	if len(s) == 2 {
 		// we either have HOSTNAME/MESSAGE or TAG/MESSAGE or HOSTNAME/TAG
-		if strings.Count(s[0], ":") == 7 || strings.Count(s[0], ".") == 3 {
+		if bytes.Count(s[0], []byte(":")) == 7 || bytes.Count(s[0], []byte(".")) == 3 {
 			// looks like an IPv6/IPv4 address
-			smsg.Hostname = s[0]
-			if strings.ContainsAny(s[1], "[]:") {
-				smsg.Appname, smsg.Procid = parseTag(s[1])
+			smsg.Hostname = string(s[0])
+			if bytes.ContainsAny(s[1], "[]:") {
+
+				smsg.Appname, smsg.Procid = pair2str(parseTag(s[1]))
 			} else {
-				smsg.Message = s[1]
+				smsg.Message = string(s[1])
 			}
 			return &smsg, nil
 		}
-		if strings.ContainsAny(s[0], "[]:") {
-			smsg.Appname, smsg.Procid = parseTag(s[0])
-			smsg.Message = s[1]
+		if bytes.ContainsAny(s[0], "[]:") {
+			smsg.Appname, smsg.Procid = pair2str(parseTag(s[0]))
+			smsg.Message = string(s[1])
 			return &smsg, nil
 		}
-		if strings.ContainsAny(s[1], "[]:") {
-			smsg.Hostname = s[0]
-			smsg.Appname, smsg.Procid = parseTag(s[0])
+		if bytes.ContainsAny(s[1], "[]:") {
+			smsg.Hostname = string(s[0])
+			smsg.Appname, smsg.Procid = pair2str(parseTag(s[0]))
 			return &smsg, nil
 		}
-		smsg.Appname = s[0]
-		smsg.Message = s[1]
+		smsg.Appname = string(s[0])
+		smsg.Message = string(s[1])
 		return &smsg, nil
 	}
 
-	if strings.ContainsAny(s[0], "[]:") || !isHostname(s[0]) {
+	if bytes.ContainsAny(s[0], "[]:") || !isHostname(s[0]) {
 		// hostname is omitted
-		smsg.Appname, smsg.Procid = parseTag(s[0])
-		smsg.Message = strings.Join(s[1:], " ")
+		smsg.Appname, smsg.Procid = pair2str(parseTag(s[0]))
+		smsg.Message = string(bytes.Join(s[1:], SP))
 		return &smsg, nil
 	}
-	smsg.Hostname = s[0]
-	smsg.Appname, smsg.Procid = parseTag(s[1])
-	smsg.Message = strings.Join(s[2:], " ")
+	smsg.Hostname = string(s[0])
+	smsg.Appname, smsg.Procid = pair2str(parseTag(s[1]))
+	smsg.Message = string(bytes.Join(s[2:], SP))
 	return &smsg, nil
 }
 
-func parseTag(tag string) (appname string, procid string) {
-	tag = strings.Trim(tag, ":")
-	i := strings.Index(tag, "[")
+func parseTag(tag []byte) (appname []byte, procid []byte) {
+	tag = bytes.Trim(tag, ":")
+	i := bytes.Index(tag, []byte("["))
 	if i >= 0 && len(tag) > (i+1) {
-		j := strings.Index(tag, "]")
+		j := bytes.Index(tag, []byte("]"))
 		if j > i {
 			procid = tag[i+1 : j]
 		} else {
@@ -156,8 +162,8 @@ func parseTag(tag string) (appname string, procid string) {
 	return
 }
 
-func isHostname(s string) bool {
-	for _, r := range s {
+func isHostname(s []byte) bool {
+	for _, r := range string(s) {
 		if (!unicode.IsLetter(r)) && (!unicode.IsNumber(r)) && r != '.' && r != ':' {
 			return false
 		}

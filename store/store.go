@@ -470,7 +470,7 @@ func (s *MessageStore) ingest(queue []*model.TcpUdpParsedMessage) (int, error) {
 		if err == nil {
 			marshalledQueue[m.Uid] = b
 		} else {
-			s.logger.Warn("The store discarded a message that could not be JSON-marshalled", "error", err)
+			s.logger.Warn("The store discarded a message that could not be marshaled", "error", err)
 		}
 	}
 
@@ -534,15 +534,16 @@ func (s *MessageStore) retrieve(n int) (messages map[string]*model.TcpUdpParsedM
 	iter := s.readyDB.KeyIterator(n)
 	var fetched int = 0
 	invalidEntries := []string{}
+	var message *model.TcpUdpParsedMessage
 	for iter.Rewind(); iter.Valid() && fetched < n; iter.Next() {
 		uid := iter.Key()
 		message_b, err := s.messagesDB.Get(uid)
 		if err == nil {
 			if message_b != nil {
-				message := model.TcpUdpParsedMessage{}
+				message = &model.TcpUdpParsedMessage{}
 				_, err := message.UnmarshalMsg(message_b)
 				if err == nil {
-					messages[uid] = &message
+					messages[uid] = message
 					fetched++
 				} else {
 					invalidEntries = append(invalidEntries, uid)

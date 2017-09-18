@@ -78,7 +78,7 @@ type iSyslogMessage struct {
 }
 
 type Parser interface {
-	Parse(rawMessage string, dont_parse_sd bool) (*model.SyslogMessage, error)
+	Parse(rawMessage []byte, dont_parse_sd bool) (*model.SyslogMessage, error)
 }
 
 type ParsersEnvironment interface {
@@ -118,16 +118,16 @@ type ConcreteParser struct {
 	name string
 }
 
-func (p *ConcreteParser) Parse(rawMessage string, dont_parse_sd bool) (*model.SyslogMessage, error) {
+func (p *ConcreteParser) Parse(rawMessage []byte, dont_parse_sd bool) (*model.SyslogMessage, error) {
 	jsParser, ok := p.env.jsParsers[p.name]
 	if !ok {
 		return nil, &model.UnknownFormatError{Format: p.name}
 	}
-	rawMessage = strings.Trim(rawMessage, "\r\n ")
+	rawMessage = bytes.Trim(rawMessage, "\r\n ")
 	if len(rawMessage) == 0 {
 		return nil, nil
 	}
-	jsRawMessage := p.env.runtime.ToValue(rawMessage)
+	jsRawMessage := p.env.runtime.ToValue(string(rawMessage))
 	jsParsedMessage, err := jsParser(nil, jsRawMessage)
 	if err != nil {
 		if jserr, ok := err.(*goja.Exception); ok {

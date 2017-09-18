@@ -21,9 +21,9 @@ type jsonRsyslogMessage struct {
 	Properties    map[string]map[string]string `json:"$!"`
 }
 
-func ParseJsonFormat(m string) (*SyslogMessage, error) {
+func ParseJsonFormat(m []byte) (*SyslogMessage, error) {
 	sourceMsg := jsonRsyslogMessage{}
-	err := json.Unmarshal([]byte(m), &sourceMsg)
+	err := json.Unmarshal(m, &sourceMsg)
 	if err != nil {
 		return nil, &UnmarshalingJsonError{err}
 	}

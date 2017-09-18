@@ -1,8 +1,8 @@
 package model
 
 import (
+	"bytes"
 	"encoding/json"
-	"strings"
 	"unicode/utf8"
 )
 
@@ -23,7 +23,7 @@ type ListenerInfo struct {
 }
 
 type RawMessage struct {
-	Message        string
+	Message        []byte
 	Client         string
 	LocalPort      int
 	UnixSocketPath string
@@ -38,7 +38,7 @@ type Parser struct {
 	format string
 }
 
-func (p *Parser) Parse(m string, dont_parse_sd bool) (*SyslogMessage, error) {
+func (p *Parser) Parse(m []byte, dont_parse_sd bool) (*SyslogMessage, error) {
 	return Parse(m, p.format, dont_parse_sd)
 }
 
@@ -49,7 +49,7 @@ func GetParser(format string) *Parser {
 	return nil
 }
 
-func Parse(m string, format string, dont_parse_sd bool) (sm *SyslogMessage, err error) {
+func Parse(m []byte, format string, dont_parse_sd bool) (sm *SyslogMessage, err error) {
 
 	switch format {
 	case "rfc5424":
@@ -64,7 +64,7 @@ func Parse(m string, format string, dont_parse_sd bool) (sm *SyslogMessage, err 
 		} else if m[0] != byte('<') {
 			sm, err = ParseRfc3164Format(m)
 		} else {
-			i := strings.Index(m, ">")
+			i := bytes.Index(m, []byte(">"))
 			if i < 2 {
 				sm, err = ParseRfc3164Format(m)
 			} else if len(m) == (i + 1) {
