@@ -6,6 +6,7 @@ import "encoding/json"
 import sarama "gopkg.in/Shopify/sarama.v1"
 
 //go:generate msgp
+//go:generate ffjson $GOFILE
 
 type Priority int
 type Facility int
@@ -41,6 +42,7 @@ type SyslogMessage struct {
 	Properties       map[string]map[string]string `json:"properties,omitempty" msg:"properties"`
 }
 
+// ffjson: nodecoder
 type ParsedMessage struct {
 	Fields         *SyslogMessage `json:"fields" msg:"fields"`
 	Client         string         `json:"client,omitempty" msg:"client"`
@@ -48,19 +50,21 @@ type ParsedMessage struct {
 	UnixSocketPath string         `json:"unix_socket_path,omitempty" msg:"unix_socket_path"`
 }
 
+// ffjson: skip
 type TcpUdpParsedMessage struct {
 	Parsed *ParsedMessage `json:"parsed" msg:"parsed"`
 	Uid    string         `json:"uid" msg:"uid"`
 	ConfId string         `json:"conf_id" msg:"conf_id"`
 }
 
+// ffjson: skip
 type RelpParsedMessage struct {
 	Parsed *ParsedMessage `json:"parsed" msg:"parsed"`
 	Txnr   int            `json:"txnr" msg:"txnr"`
 }
 
 func (m *ParsedMessage) ToKafkaMessage(partitionKey string, topic string) (km *sarama.ProducerMessage, err error) {
-	value, err := json.Marshal(m)
+	value, err := m.MarshalJSON()
 	if err != nil {
 		return nil, err
 	}

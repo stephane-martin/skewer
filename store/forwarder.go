@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/inconshreveable/log15"
+	"github.com/pquerna/ffjson/ffjson"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
@@ -126,13 +127,25 @@ func (fwder *kafkaForwarder) getAndSendMessages(ctx context.Context, from Store,
 	}()
 
 	jsenvs := map[string]javascript.FilterEnvironment{}
+	done := ctx.Done()
+	var more bool
+	var message *model.TcpUdpParsedMessage
+	var topic string
+	var partitionKey string
+	var errs []error
+	var err error
+	var filterResult javascript.FilterResult
+	var transformedMsg *model.SyslogMessage
+	var serialized []byte
+	var fullMsg *model.ParsedMessage
+	var kafkaMsg *sarama.ProducerMessage
 
 ForOutputs:
 	for {
 		select {
-		case <-ctx.Done():
+		case <-done:
 			return
-		case message, more := <-from.Outputs():
+		case message, more = <-from.Outputs():
 			if !more {
 				return
 			}
@@ -155,11 +168,11 @@ ForOutputs:
 				env = jsenvs[message.ConfId]
 			}
 
-			topic, errs := env.Topic(message.Parsed.Fields)
-			for _, err := range errs {
+			topic, errs = env.Topic(message.Parsed.Fields)
+			for _, err = range errs {
 				fwder.logger.Info("Error calculating topic", "error", err, "uid", message.Uid)
 			}
-			partitionKey, errs := env.PartitionKey(message.Parsed.Fields)
+			partitionKey, errs = env.PartitionKey(message.Parsed.Fields)
 			for _, err := range errs {
 				fwder.logger.Info("Error calculating the partition key", "error", err, "uid", message.Uid)
 			}
@@ -170,7 +183,7 @@ ForOutputs:
 				continue ForOutputs
 			}
 
-			tmsg, filterResult, err := env.FilterMessage(message.Parsed.Fields)
+			transformedMsg, filterResult, err = env.FilterMessage(message.Parsed.Fields)
 
 			switch filterResult {
 			case javascript.DROPPED:
@@ -189,7 +202,7 @@ ForOutputs:
 				if fwder.metrics != nil {
 					fwder.metrics.MessageFilteringCounter.WithLabelValues("passing", message.Parsed.Client).Inc()
 				}
-				if tmsg == nil {
+				if transformedMsg == nil {
 					from.ACK(message.Uid)
 					continue ForOutputs
 				}
@@ -202,21 +215,28 @@ ForOutputs:
 				continue ForOutputs
 			}
 
-			nmsg := model.ParsedMessage{
-				Fields:         tmsg,
+			fullMsg = &model.ParsedMessage{
+				Fields:         transformedMsg,
 				Client:         message.Parsed.Client,
 				LocalPort:      message.Parsed.LocalPort,
 				UnixSocketPath: message.Parsed.UnixSocketPath,
 			}
+			serialized, err = ffjson.Marshal(&fullMsg)
 
-			kafkaMsg, err := nmsg.ToKafkaMessage(partitionKey, topic)
 			if err != nil {
-				fwder.logger.Warn("Error generating Kafka message", "error", err, "uid", message.Uid)
+				fwder.logger.Warn("Error serializing message", "error", err, "uid", message.Uid)
 				from.PermError(message.Uid)
 				continue ForOutputs
 			}
 
-			kafkaMsg.Metadata = message.Uid
+			kafkaMsg = &sarama.ProducerMessage{
+				Key:       sarama.StringEncoder(partitionKey),
+				Value:     sarama.ByteEncoder(serialized),
+				Topic:     topic,
+				Timestamp: transformedMsg.TimeReported,
+				Metadata:  message.Uid,
+			}
+
 			if producer == nil {
 				v, _ := kafkaMsg.Value.Encode()
 				pkey, _ := kafkaMsg.Key.Encode()
@@ -226,6 +246,7 @@ ForOutputs:
 			} else {
 				producer.Input() <- kafkaMsg
 			}
+			ffjson.Pool(serialized)
 		}
 	}
 }

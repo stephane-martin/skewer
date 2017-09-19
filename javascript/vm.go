@@ -296,12 +296,12 @@ func (e *Environment) setFilterMessagesFunc(f string) error {
 }
 
 func (e *Environment) Topic(m *model.SyslogMessage) (topic string, errs []error) {
-	var jsMessage goja.Value
-	var jsTopic goja.Value
 	var err error
 	errs = []error{}
 
 	if e.jsTopic != nil && m != nil {
+		var jsMessage goja.Value
+		var jsTopic goja.Value
 		jsMessage, err = e.toJsMessage(m)
 		if err == nil {
 			jsTopic, err = e.jsTopic(nil, jsMessage)

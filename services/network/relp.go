@@ -3,7 +3,6 @@ package network
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -12,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pquerna/ffjson/ffjson"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	sarama "gopkg.in/Shopify/sarama.v1"
@@ -486,18 +486,22 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 			defer s.wg.Done()
 
 			fatal := false
+			more := false
 			successes := map[int]bool{}
 			failures := map[int]bool{}
 			successChan := producer.Successes()
 			failureChan := producer.Errors()
-			last_committed_txnr := 0
+			var last_committed_txnr int
+			var other_txnr int
+			var succ *sarama.ProducerMessage
+			var fail *sarama.ProducerError
 
 			for {
 				if successChan == nil && failureChan == nil && other_successes_chan == nil && other_fails_chan == nil {
 					return
 				}
 				select {
-				case succ, more := <-successChan:
+				case succ, more = <-successChan:
 					if more {
 						// forward the ACK to rsyslog
 						txnr := succ.Metadata.(int)
@@ -508,7 +512,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 					} else {
 						successChan = nil
 					}
-				case fail, more := <-failureChan:
+				case fail, more = <-failureChan:
 					if more {
 						txnr := fail.Msg.Metadata.(int)
 						failures[txnr] = true
@@ -520,13 +524,13 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 					} else {
 						failureChan = nil
 					}
-				case other_txnr, more := <-other_successes_chan:
+				case other_txnr, more = <-other_successes_chan:
 					if more {
 						successes[other_txnr] = true
 					} else {
 						other_successes_chan = nil
 					}
-				case other_txnr, more := <-other_fails_chan:
+				case other_txnr, more = <-other_fails_chan:
 					if more {
 						failures[other_txnr] = true
 					} else {
@@ -574,16 +578,27 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 			close(other_fails_chan)
 			s.wg.Done()
 		}()
+
 		e := javascript.NewFilterEnvironment(config.FilterFunc, config.TopicFunc, config.TopicTmpl, config.PartitionFunc, config.PartitionTmpl, s.Logger)
+		var m *model.RelpParsedMessage
+		var topic string
+		var partitionKey string
+		var errs []error
+		var err error
+		var filterResult javascript.FilterResult
+		var transformedMsg *model.SyslogMessage
+		var fullMsg *model.ParsedMessage
+		var kafkaMsg *sarama.ProducerMessage
+		var serialized []byte
 
 	ForParsedChan:
-		for m := range parsed_messages_chan {
-			topic, errs := e.Topic(m.Parsed.Fields)
-			for _, err := range errs {
+		for m = range parsed_messages_chan {
+			topic, errs = e.Topic(m.Parsed.Fields)
+			for _, err = range errs {
 				logger.Info("Error calculating topic", "error", err, "txnr", m.Txnr)
 			}
-			partitionKey, errs := e.PartitionKey(m.Parsed.Fields)
-			for _, err := range errs {
+			partitionKey, errs = e.PartitionKey(m.Parsed.Fields)
+			for _, err = range errs {
 				logger.Info("Error calculating the partition key", "error", err, "txnr", m.Txnr)
 			}
 
@@ -593,7 +608,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 				continue ForParsedChan
 			}
 
-			tmsg, filterResult, err := e.FilterMessage(m.Parsed.Fields)
+			transformedMsg, filterResult, err = e.FilterMessage(m.Parsed.Fields)
 
 			switch filterResult {
 			case javascript.DROPPED:
@@ -612,33 +627,40 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 				if s.metrics != nil {
 					s.metrics.MessageFilteringCounter.WithLabelValues("passing", client).Inc()
 				}
-				if tmsg == nil {
+				if transformedMsg == nil {
 					other_successes_chan <- m.Txnr
 					continue ForParsedChan
 				}
 			default:
 				other_fails_chan <- m.Txnr
-				content, _ := json.Marshal(m.Parsed.Fields)
-				logger.Warn("Error happened processing message", "txnr", m.Txnr, "message", content, "error", err)
+				logger.Warn("Error happened processing message", "txnr", m.Txnr, "error", err)
 				if s.metrics != nil {
 					s.metrics.MessageFilteringCounter.WithLabelValues("unknown", client).Inc()
 				}
 				continue ForParsedChan
 			}
 
-			nmsg := model.ParsedMessage{
-				Fields:    tmsg,
-				Client:    m.Parsed.Client,
-				LocalPort: m.Parsed.LocalPort,
+			fullMsg = &model.ParsedMessage{
+				Fields:         transformedMsg,
+				Client:         m.Parsed.Client,
+				LocalPort:      m.Parsed.LocalPort,
+				UnixSocketPath: m.Parsed.UnixSocketPath,
 			}
+			serialized, err = ffjson.Marshal(&fullMsg)
 
-			kafkaMsg, err := nmsg.ToKafkaMessage(partitionKey, topic)
 			if err != nil {
 				logger.Warn("Error generating Kafka message", "error", err, "txnr", m.Txnr)
 				other_fails_chan <- m.Txnr
 				continue ForParsedChan
 			}
-			kafkaMsg.Metadata = m.Txnr
+
+			kafkaMsg = &sarama.ProducerMessage{
+				Key:       sarama.StringEncoder(partitionKey),
+				Value:     sarama.ByteEncoder(serialized),
+				Topic:     topic,
+				Timestamp: transformedMsg.TimeReported,
+				Metadata:  m.Txnr,
+			}
 
 			if s.test {
 				v, _ := kafkaMsg.Value.Encode()
@@ -650,6 +672,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 			} else {
 				producer.Input() <- kafkaMsg
 			}
+			ffjson.Pool(serialized)
 		}
 	}()
 
