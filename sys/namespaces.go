@@ -141,13 +141,6 @@ func SetJournalFs(targetExec string) error {
 			Data:   "mode=755",
 		},
 		{
-			Source: "devpts",
-			Target: "/dev/pts",
-			Fs:     "devpts",
-			Flags:  syscall.MS_NOSUID | syscall.MS_NOEXEC,
-			Data:   "newinstance,ptmxmode=0666,mode=620",
-		},
-		{
 			Source: "tmpfs",
 			Target: "/boot",
 			Fs:     "tmpfs",
@@ -182,11 +175,11 @@ func SetJournalFs(targetExec string) error {
 
 	for _, m := range roRemounts {
 		if _, err = os.Stat(m.Target); err == nil {
-			err := syscall.Mount(m.Target, m.Target, "bind", syscall.MS_BIND, "")
+			err := syscall.Mount(m.Target, m.Target, "bind", syscall.MS_BIND|syscall.MS_REC, "")
 			if err != nil {
 				return fmt.Errorf("failed to bind-mount %s: %s", m.Target, err.Error())
 			}
-			err = syscall.Mount(m.Target, m.Target, "bind", uintptr(syscall.MS_BIND|syscall.MS_REMOUNT|syscall.MS_RDONLY|m.Flags), "")
+			err = syscall.Mount(m.Target, m.Target, "bind", uintptr(syscall.MS_BIND|syscall.MS_REC|syscall.MS_REMOUNT|syscall.MS_RDONLY|m.Flags), "")
 			if err != nil {
 				return fmt.Errorf("failed to remount %s: %s", m.Target, err.Error())
 			}
