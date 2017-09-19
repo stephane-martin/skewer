@@ -60,6 +60,10 @@ func ParseRfc3164Format(m []byte, decoder *encoding.Decoder) (smsg *SyslogMessag
 		return smsg, nil
 	}
 	m = bytes.TrimSpace(m[end_pri+1:])
+	if len(m) == 0 {
+		return smsg, nil
+	}
+
 	s := bytes.Split(m, SP)
 	if m[0] >= byte('0') && m[0] <= byte('9') {
 		// RFC3339

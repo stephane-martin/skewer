@@ -88,12 +88,16 @@ func parseAuditHeader(msg *syscall.NetlinkMessage) (time string, seq int) {
 				return
 			}
 		}
-
+		if len(msg.Data) < (headerStop + 3) {
+			time = ""
+			seq = 0
+			return
+		}
 		// Remove the header from data
 		msg.Data = msg.Data[headerStop+3:]
 	}
 
-	return time, seq
+	return
 }
 
 // Add a new message to the current message group

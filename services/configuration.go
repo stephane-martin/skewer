@@ -94,9 +94,12 @@ func (c *ConfigurationService) Start() error {
 		err = cmd.Start()
 	}
 	if err != nil {
+		stdin.Close()
+		stdout.Close()
 		close(c.output)
 		return err
 	}
+	c.stdin = stdin
 
 	startedChan := make(chan error)
 

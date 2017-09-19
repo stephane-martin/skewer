@@ -44,6 +44,32 @@ func (p *Parser) Parse(m []byte, decoder *encoding.Decoder, dont_parse_sd bool) 
 	return Parse(m, p.format, decoder, dont_parse_sd)
 }
 
+func Fuzz(m []byte) int {
+	msg, err := Parse(m, "auto", nil, false)
+	if err != nil {
+		if msg != nil {
+			panic("msg != nil on error")
+		}
+		return 0
+	}
+	b, err := msg.MarshalMsg(nil)
+	if err != nil {
+		panic(err)
+	}
+	msg2 := &SyslogMessage{}
+	rest, err := msg2.UnmarshalMsg(b)
+	if err != nil {
+		panic("Unmarshaling failed")
+	}
+	if len(rest) > 0 {
+		panic("after marshalling there is more bytes remaining")
+	}
+	if !deriveEqualSyslogMessage(msg, msg2) {
+		panic("msg and msg2 are not equal")
+	}
+	return 1
+}
+
 func GetParser(format string) *Parser {
 	if format == "rfc5424" || format == "rfc3164" || format == "json" || format == "auto" {
 		return &Parser{format: format}
@@ -61,6 +87,9 @@ func Parse(m []byte, format string, decoder *encoding.Decoder, dont_parse_sd boo
 	case "json":
 		sm, err = ParseJsonFormat(m, decoder)
 	case "auto":
+		if len(m) == 0 {
+			return nil, &EmptyMessageError{}
+		}
 		if m[0] == byte('{') {
 			sm, err = ParseJsonFormat(m, decoder)
 		} else if m[0] != byte('<') {

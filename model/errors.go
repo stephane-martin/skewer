@@ -17,6 +17,13 @@ func (e *UnknownFormatError) Error() string {
 
 func (e *UnknownFormatError) Parsing() {}
 
+type EmptyMessageError struct{}
+
+func (e *EmptyMessageError) Error() string {
+	return "Empty message"
+}
+func (e *EmptyMessageError) Parsing() {}
+
 type ParsingErrorRfc5424 interface {
 	Error() string
 	Parsing()
