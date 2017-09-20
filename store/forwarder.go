@@ -126,7 +126,7 @@ func (fwder *kafkaForwarder) getAndSendMessages(ctx context.Context, from Store,
 		fwder.wg.Done()
 	}()
 
-	jsenvs := map[string]javascript.FilterEnvironment{}
+	jsenvs := map[string]*javascript.Environment{}
 	done := ctx.Done()
 	var more bool
 	var message *model.TcpUdpParsedMessage
@@ -135,10 +135,9 @@ func (fwder *kafkaForwarder) getAndSendMessages(ctx context.Context, from Store,
 	var errs []error
 	var err error
 	var filterResult javascript.FilterResult
-	var transformedMsg *model.SyslogMessage
 	var serialized []byte
-	var fullMsg model.ParsedMessage
-	var kafkaMsg sarama.ProducerMessage
+	var fullMsg model.ExportedMessage
+	var kafkaMsg *sarama.ProducerMessage
 
 ForOutputs:
 	for {
@@ -168,11 +167,11 @@ ForOutputs:
 				env = jsenvs[message.ConfId]
 			}
 
-			topic, errs = env.Topic(&message.Parsed.Fields)
+			topic, errs = env.Topic(message.Parsed.Fields)
 			for _, err = range errs {
 				fwder.logger.Info("Error calculating topic", "error", err, "uid", message.Uid)
 			}
-			partitionKey, errs = env.PartitionKey(&message.Parsed.Fields)
+			partitionKey, errs = env.PartitionKey(message.Parsed.Fields)
 			for _, err := range errs {
 				fwder.logger.Info("Error calculating the partition key", "error", err, "uid", message.Uid)
 			}
@@ -183,43 +182,35 @@ ForOutputs:
 				continue ForOutputs
 			}
 
-			transformedMsg, filterResult, err = env.FilterMessage(&message.Parsed.Fields)
+			filterResult, err = env.FilterMessage(&message.Parsed.Fields)
 
 			switch filterResult {
 			case javascript.DROPPED:
 				from.ACK(message.Uid)
-				if fwder.metrics != nil {
-					fwder.metrics.MessageFilteringCounter.WithLabelValues("dropped", message.Parsed.Client).Inc()
-				}
+				fwder.metrics.MessageFilteringCounter.WithLabelValues("dropped", message.Parsed.Client).Inc()
 				continue ForOutputs
 			case javascript.REJECTED:
-				if fwder.metrics != nil {
-					fwder.metrics.MessageFilteringCounter.WithLabelValues("rejected", message.Parsed.Client).Inc()
-				}
+				fwder.metrics.MessageFilteringCounter.WithLabelValues("rejected", message.Parsed.Client).Inc()
 				from.NACK(message.Uid)
 				continue ForOutputs
 			case javascript.PASS:
-				if fwder.metrics != nil {
-					fwder.metrics.MessageFilteringCounter.WithLabelValues("passing", message.Parsed.Client).Inc()
-				}
-				if transformedMsg == nil {
-					from.ACK(message.Uid)
-					continue ForOutputs
-				}
+				fwder.metrics.MessageFilteringCounter.WithLabelValues("passing", message.Parsed.Client).Inc()
 			default:
 				from.PermError(message.Uid)
 				fwder.logger.Warn("Error happened processing message", "uid", message.Uid, "error", err)
-				if fwder.metrics != nil {
-					fwder.metrics.MessageFilteringCounter.WithLabelValues("unknown", message.Parsed.Client).Inc()
-				}
+				fwder.metrics.MessageFilteringCounter.WithLabelValues("unknown", message.Parsed.Client).Inc()
 				continue ForOutputs
 			}
 
-			fullMsg = model.ParsedMessage{
-				Fields:         *transformedMsg,
-				Client:         message.Parsed.Client,
-				LocalPort:      message.Parsed.LocalPort,
-				UnixSocketPath: message.Parsed.UnixSocketPath,
+			fullMsg = model.ExportedMessage{
+				ParsedMessage: model.ParsedMessage{
+					Fields:         message.Parsed.Fields,
+					Client:         message.Parsed.Client,
+					LocalPort:      message.Parsed.LocalPort,
+					UnixSocketPath: message.Parsed.UnixSocketPath,
+				},
+				TimeGenerated: time.Unix(0, message.Parsed.Fields.TimeGenerated).UTC(),
+				TimeReported:  time.Unix(0, message.Parsed.Fields.TimeReported).UTC(),
 			}
 			serialized, err = ffjson.Marshal(&fullMsg)
 
@@ -229,11 +220,11 @@ ForOutputs:
 				continue ForOutputs
 			}
 
-			kafkaMsg = sarama.ProducerMessage{
+			kafkaMsg = &sarama.ProducerMessage{
 				Key:       sarama.StringEncoder(partitionKey),
 				Value:     sarama.ByteEncoder(serialized),
 				Topic:     topic,
-				Timestamp: transformedMsg.TimeReported,
+				Timestamp: fullMsg.TimeReported,
 				Metadata:  message.Uid,
 			}
 
@@ -244,7 +235,7 @@ ForOutputs:
 				fmt.Fprintln(os.Stderr, string(v))
 				from.ACK(message.Uid)
 			} else {
-				producer.Input() <- &kafkaMsg
+				producer.Input() <- kafkaMsg
 			}
 			ffjson.Pool(serialized)
 		}

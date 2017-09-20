@@ -1,7 +1,5 @@
 package model
 
-//go:generate goderive .
-
 import (
 	"bytes"
 	"fmt"
@@ -22,14 +20,10 @@ func isASCII(s []byte) bool {
 	return true
 }
 
-func ParseRfc5424FormatSD(m []byte) (*SyslogMessage, error) {
-	return ParseRfc5424Format(m, nil, false)
-}
-
 var SP []byte = []byte(" ")
 var DASH []byte = []byte("-")
 
-func ParseRfc5424Format(m []byte, decoder *encoding.Decoder, dont_parse_sd bool) (smsg *SyslogMessage, err error) {
+func ParseRfc5424Format(m []byte, decoder *encoding.Decoder, dont_parse_sd bool) (smsg SyslogMessage, err error) {
 	// HEADER = PRI VERSION SP TIMESTAMP SP HOSTNAME SP APP-NAME SP PROCID SP MSGID
 	// PRI = "<" PRIVAL ">"
 	// SYSLOG-MSG = HEADER SP STRUCTURED-DATA [SP MSG]
@@ -39,38 +33,37 @@ func ParseRfc5424Format(m []byte, decoder *encoding.Decoder, dont_parse_sd bool)
 	}
 	m, err = decoder.Bytes(m)
 	if err != nil {
-		return nil, &InvalidEncodingError{Err: err}
+		return smsg, &InvalidEncodingError{Err: err}
 	}
 
 	m = bytes.TrimSpace(m)
 	splits := bytes.SplitN(m, SP, 7)
 
 	if len(splits) < 7 {
-		return nil, &NotEnoughPartsError{len(splits)}
+		return smsg, &NotEnoughPartsError{len(splits)}
 	}
 
-	smsg = &SyslogMessage{}
 	smsg.Priority, smsg.Facility, smsg.Severity, smsg.Version, err = parsePriority(splits[0])
 	if err != nil {
-		return nil, err
+		return smsg, err
 	}
 
-	n := time.Now()
+	n := time.Now().UnixNano()
 	s := string(splits[1])
 	if s == "-" {
-		smsg.TimeReported = time.Now()
+		smsg.TimeReported = time.Now().UnixNano()
 	}
-	if smsg.TimeReported.IsZero() {
+	if smsg.TimeReported == 0 {
 		t1, err := time.Parse(time.RFC3339Nano, s)
 		if err != nil {
 			t2, err := time.Parse(time.RFC3339, s)
 			if err != nil {
 				smsg.TimeReported = n
 			} else {
-				smsg.TimeReported = t2
+				smsg.TimeReported = t2.UnixNano()
 			}
 		} else {
-			smsg.TimeReported = t1
+			smsg.TimeReported = t1.UnixNano()
 		}
 	}
 	smsg.TimeGenerated = n
@@ -98,7 +91,7 @@ func ParseRfc5424Format(m []byte, decoder *encoding.Decoder, dont_parse_sd bool)
 	} else if bytes.HasPrefix(structured_and_msg, []byte("[")) {
 		s1, s2, err := splitStructuredData(structured_and_msg)
 		if err != nil {
-			return nil, err
+			return smsg, err
 		}
 		smsg.Message = string(s2)
 		if dont_parse_sd {
@@ -107,14 +100,14 @@ func ParseRfc5424Format(m []byte, decoder *encoding.Decoder, dont_parse_sd bool)
 			smsg.Structured = ""
 			props, err := parseStructData(s1)
 			if err != nil {
-				return nil, err
+				return smsg, err
 			}
 			if len(props) > 0 {
 				smsg.Properties = props
 			}
 		}
 	} else {
-		return nil, &InvalidStructuredDataError{"Structured data is not nil but does not start with '['"}
+		return smsg, &InvalidStructuredDataError{"Structured data is not nil but does not start with '['"}
 	}
 
 	return smsg, nil

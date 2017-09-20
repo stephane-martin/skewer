@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 	"text/template"
-	"time"
 
 	"github.com/dop251/goja"
 	"github.com/inconshreveable/log15"
@@ -80,11 +79,11 @@ type iSyslogMessage struct {
 }
 
 type Parser interface {
-	Parse(rawMessage []byte, decoder *encoding.Decoder, dont_parse_sd bool) (*model.SyslogMessage, error)
+	Parse(rawMessage []byte, decoder *encoding.Decoder, dont_parse_sd bool) (model.SyslogMessage, error)
 }
 
 type ParsersEnvironment interface {
-	GetParser(name string) Parser
+	GetParser(name string) *ConcreteParser
 	AddParser(name string, parserFunc string) error
 }
 
@@ -98,7 +97,7 @@ type FilterEnvironment interface {
 	Topic(m *model.SyslogMessage) (topic string, errs []error)
 }
 
-func NewFilterEnvironment(filterFunc, topicFunc, topicTmpl, partitionKeyFunc, partitionKeyTmpl string, logger log15.Logger) FilterEnvironment {
+func NewFilterEnvironment(filterFunc, topicFunc, topicTmpl, partitionKeyFunc, partitionKeyTmpl string, logger log15.Logger) *Environment {
 	return newEnv(filterFunc, topicFunc, topicTmpl, partitionKeyFunc, partitionKeyTmpl, logger)
 }
 
@@ -120,10 +119,10 @@ type ConcreteParser struct {
 	name string
 }
 
-func (p *ConcreteParser) Parse(rawMessage []byte, decoder *encoding.Decoder, dont_parse_sd bool) (parsedMessage *model.SyslogMessage, err error) {
+func (p *ConcreteParser) Parse(rawMessage []byte, decoder *encoding.Decoder, dont_parse_sd bool) (parsedMessage model.SyslogMessage, err error) {
 	jsParser, ok := p.env.jsParsers[p.name]
 	if !ok {
-		return nil, &model.UnknownFormatError{Format: p.name}
+		return parsedMessage, &model.UnknownFormatError{Format: p.name}
 	}
 
 	if decoder == nil {
@@ -131,12 +130,12 @@ func (p *ConcreteParser) Parse(rawMessage []byte, decoder *encoding.Decoder, don
 	}
 	rawMessage, err = decoder.Bytes(rawMessage)
 	if err != nil {
-		return nil, &model.InvalidEncodingError{Err: err}
+		return parsedMessage, &model.InvalidEncodingError{Err: err}
 	}
 
 	rawMessage = bytes.Trim(rawMessage, "\r\n ")
 	if len(rawMessage) == 0 {
-		return nil, nil
+		return parsedMessage, nil
 	}
 	jsRawMessage := p.env.runtime.ToValue(string(rawMessage))
 	jsParsedMessage, err := jsParser(nil, jsRawMessage)
@@ -144,17 +143,17 @@ func (p *ConcreteParser) Parse(rawMessage []byte, decoder *encoding.Decoder, don
 		if jserr, ok := err.(*goja.Exception); ok {
 			message, ok := jserr.Value().Export().(string)
 			if ok {
-				return nil, &model.JSParsingError{ParserName: p.name, Message: message}
+				return parsedMessage, &model.JSParsingError{ParserName: p.name, Message: message}
 			} else {
-				return nil, err
+				return parsedMessage, err
 			}
 		} else {
-			return nil, err
+			return parsedMessage, err
 		}
 	}
 	parsedMessage, err = p.env.fromJsMessage(jsParsedMessage)
 	if err != nil {
-		return nil, err
+		return parsedMessage, err
 	}
 	return parsedMessage, nil
 }
@@ -211,7 +210,7 @@ func newEnv(filterFunc, topicFunc, topicTmpl, partitionKeyFunc, partitionKeyTmpl
 	return &e
 }
 
-func (e *Environment) GetParser(name string) Parser {
+func (e *Environment) GetParser(name string) *ConcreteParser {
 	_, ok := e.jsParsers[name]
 	if !ok {
 		return nil
@@ -295,11 +294,11 @@ func (e *Environment) setFilterMessagesFunc(f string) error {
 	return nil
 }
 
-func (e *Environment) Topic(m *model.SyslogMessage) (topic string, errs []error) {
+func (e *Environment) Topic(m model.SyslogMessage) (topic string, errs []error) {
 	var err error
 	errs = []error{}
 
-	if e.jsTopic != nil && m != nil {
+	if e.jsTopic != nil {
 		var jsMessage goja.Value
 		var jsTopic goja.Value
 		jsMessage, err = e.toJsMessage(m)
@@ -332,13 +331,13 @@ func (e *Environment) Topic(m *model.SyslogMessage) (topic string, errs []error)
 	return topic, errs
 }
 
-func (e *Environment) PartitionKey(m *model.SyslogMessage) (partitionKey string, errs []error) {
+func (e *Environment) PartitionKey(m model.SyslogMessage) (partitionKey string, errs []error) {
 	errs = []error{}
 	var err error
 	var jsMessage goja.Value
 	var jsPartitionKey goja.Value
 
-	if e.jsPartitionKey != nil && m != nil {
+	if e.jsPartitionKey != nil {
 		jsMessage, err = e.toJsMessage(m)
 		if err == nil {
 			jsPartitionKey, err = e.jsPartitionKey(nil, jsMessage)
@@ -363,53 +362,55 @@ func (e *Environment) PartitionKey(m *model.SyslogMessage) (partitionKey string,
 	return partitionKey, errs
 }
 
-func (e *Environment) FilterMessage(m *model.SyslogMessage) (result *model.SyslogMessage, filterResult FilterResult, err error) {
+func (e *Environment) FilterMessage(m *model.SyslogMessage) (filterResult FilterResult, err error) {
 	var jsMessage goja.Value
 	var resJsMessage goja.Value
+	var result model.SyslogMessage
 
 	if e.jsFilterMessages == nil {
-		return m, PASS, nil
+		return PASS, nil
 	}
 	if m == nil {
-		return nil, DROPPED, nil
+		return DROPPED, nil
 	}
-	jsMessage, err = e.toJsMessage(m)
+	jsMessage, err = e.toJsMessage(*m)
 	if err != nil {
-		return nil, FILTER_ERROR, &ConversionGoJsError{ExecutingJSErrorFactory(err, "NewSyslogMessage")}
+		return FILTER_ERROR, &ConversionGoJsError{ExecutingJSErrorFactory(err, "NewSyslogMessage")}
 	}
 	resJsMessage, err = e.jsFilterMessages(nil, jsMessage)
 	if err != nil {
-		return nil, FILTER_ERROR, ExecutingJSErrorFactory(err, "FilterMessages")
+		return FILTER_ERROR, ExecutingJSErrorFactory(err, "FilterMessages")
 	}
 
 	filterResult = FilterResult(resJsMessage.ToInteger())
 	switch filterResult {
 	case DROPPED:
-		return nil, DROPPED, nil
+		return DROPPED, nil
 	case REJECTED:
-		return nil, REJECTED, nil
+		return REJECTED, nil
 	case FILTER_ERROR:
-		return nil, FILTER_ERROR, nil
+		return FILTER_ERROR, nil
 	case PASS:
 		result, err = e.fromJsMessage(jsMessage)
 		if err != nil {
-			return nil, FILTER_ERROR, &ConversionJsGoError{Err: err}
+			return FILTER_ERROR, &ConversionJsGoError{Err: err}
 		}
-		return result, PASS, nil
+		*m = result
+		return PASS, nil
 
 	default:
-		return nil, FILTER_ERROR, fmt.Errorf("JS filter function returned an invalid result: %d", int64(filterResult))
+		return FILTER_ERROR, fmt.Errorf("JS filter function returned an invalid result: %d", int64(filterResult))
 	}
 
 }
 
-func (e *Environment) toJsMessage(m *model.SyslogMessage) (sm goja.Value, err error) {
+func (e *Environment) toJsMessage(m model.SyslogMessage) (sm goja.Value, err error) {
 	p := e.runtime.ToValue(int(m.Priority))
 	f := e.runtime.ToValue(int(m.Facility))
 	s := e.runtime.ToValue(int(m.Severity))
 	v := e.runtime.ToValue(int(m.Version))
-	timeg := e.runtime.ToValue(m.TimeGenerated.UnixNano() / 1000000)
-	timer := e.runtime.ToValue(m.TimeReported.UnixNano() / 1000000)
+	timeg := e.runtime.ToValue(m.TimeGenerated / 1000000)
+	timer := e.runtime.ToValue(m.TimeReported / 1000000)
 	host := e.runtime.ToValue(m.Hostname)
 	app := e.runtime.ToValue(m.Appname)
 	proc := e.runtime.ToValue(m.Procid)
@@ -431,19 +432,19 @@ func (e *Environment) toJsMessage(m *model.SyslogMessage) (sm goja.Value, err er
 	return sm, nil
 }
 
-func (e *Environment) fromJsMessage(sm goja.Value) (m *model.SyslogMessage, err error) {
+func (e *Environment) fromJsMessage(sm goja.Value) (m model.SyslogMessage, err error) {
 	if goja.IsUndefined(sm) {
-		return nil, fmt.Errorf("The JS syslog message is 'undefined'")
+		return m, fmt.Errorf("The JS syslog message is 'undefined'")
 	}
 	var smToGo goja.Value
 	smToGo, err = e.jsSyslogMessageToGo(nil, sm)
 	if err != nil {
-		return nil, ExecutingJSErrorFactory(err, "SyslogMessageToGo")
+		return m, ExecutingJSErrorFactory(err, "SyslogMessageToGo")
 	}
 	imsg := iSyslogMessage{}
 	err = e.runtime.ExportTo(smToGo, &imsg)
 	if err != nil {
-		return nil, err
+		return m, err
 	}
 
 	var parts []string
@@ -461,13 +462,13 @@ func (e *Environment) fromJsMessage(sm goja.Value) (m *model.SyslogMessage, err 
 		}
 	}
 
-	msg := model.SyslogMessage{
+	return model.SyslogMessage{
 		Priority:         model.Priority(imsg.Priority),
 		Facility:         model.Facility(imsg.Facility),
 		Severity:         model.Severity(imsg.Severity),
 		Version:          model.Version(imsg.Version),
-		TimeGenerated:    time.Unix(0, imsg.TimeGenerated*1000000),
-		TimeReported:     time.Unix(0, imsg.TimeReported*1000000),
+		TimeGenerated:    imsg.TimeGenerated * 1000000,
+		TimeReported:     imsg.TimeReported * 1000000,
 		Hostname:         imsg.Hostname,
 		Appname:          imsg.Appname,
 		Procid:           imsg.Procid,
@@ -476,6 +477,5 @@ func (e *Environment) fromJsMessage(sm goja.Value) (m *model.SyslogMessage, err 
 		Message:          imsg.Message,
 		AuditSubMessages: subMessages,
 		Properties:       imsg.Properties,
-	}
-	return &msg, nil
+	}, nil
 }

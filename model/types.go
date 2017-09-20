@@ -26,14 +26,14 @@ type AuditMessageGroup struct {
 	UidMap    map[string]string `json:"uid_map" msg:"uid_map"`
 }
 
+// ffjson: nodecoder
 type SyslogMessage struct {
-	Priority Priority `json:"priority,string" msg:"priority"`
-	Facility Facility `json:"facility,string" msg:"facility"`
-	Severity Severity `json:"severity,string" msg:"severity"`
-	Version  Version  `json:"version,string" msg:"version"`
-	// todo: eliminate time.Time (it contains a pointer)
-	TimeReported     time.Time                    `json:"timereported,omitempty" msg:"timereported"`
-	TimeGenerated    time.Time                    `json:"timegenerated,omitempty" msg:"timegenerated"`
+	Priority         Priority                     `json:"priority,string" msg:"priority"`
+	Facility         Facility                     `json:"facility,string" msg:"facility"`
+	Severity         Severity                     `json:"severity,string" msg:"severity"`
+	Version          Version                      `json:"version,string" msg:"version"`
+	TimeReported     int64                        `json:"-" msg:"timereported"`
+	TimeGenerated    int64                        `json:"-" msg:"timegenerated"`
 	Hostname         string                       `json:"hostname" msg:"hostname"`
 	Appname          string                       `json:"appname" msg:"appname"`
 	Procid           string                       `json:"procid,omitempty" msg:"procid"`
@@ -50,6 +50,13 @@ type ParsedMessage struct {
 	Client         string        `json:"client,omitempty" msg:"client"`
 	LocalPort      int           `json:"local_port,string" msg:"local_port"`
 	UnixSocketPath string        `json:"unix_socket_path,omitempty" msg:"unix_socket_path"`
+}
+
+// ffjson: nodecoder
+type ExportedMessage struct {
+	ParsedMessage
+	TimeReported  time.Time `json:"timereported"`
+	TimeGenerated time.Time `json:"timegenerated"`
 }
 
 // ffjson: skip
@@ -96,8 +103,8 @@ func (m *SyslogMessage) String() string {
 		m.Facility,
 		m.Severity,
 		m.Version,
-		m.TimeReported.Format(time.RFC3339),
-		m.TimeGenerated.Format(time.RFC3339),
+		time.Unix(0, m.TimeReported).UTC().Format(time.RFC3339),
+		time.Unix(0, m.TimeGenerated).UTC().Format(time.RFC3339),
 		m.Hostname,
 		m.Appname,
 		m.Procid,

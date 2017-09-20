@@ -36,11 +36,11 @@ func (s *AuditService) Gather() ([]*dto.MetricFamily, error) {
 }
 
 func auditToSyslog(auditMsg *model.AuditMessageGroup, hostname string, aconf *conf.AuditConfig) model.ParsedMessage {
-	tgenerated := time.Now()
+	tgenerated := time.Now().UnixNano()
 	treported := tgenerated
 	nbsecs, err := strconv.ParseFloat(auditMsg.AuditTime, 64)
 	if err == nil {
-		treported = time.Unix(0, int64(nbsecs*1000)*1000000)
+		treported = int64(nbsecs*1000) * 1000000
 	}
 
 	m := model.SyslogMessage{

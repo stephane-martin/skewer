@@ -399,7 +399,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 		}
 
 		var raw model.RelpRawMessage
-		var syslogMsg *model.SyslogMessage
+		var syslogMsg model.SyslogMessage
 		var err error
 		var parsedMsg model.RelpParsedMessage
 		decoder := utils.SelectDecoder(config.Encoding)
@@ -409,7 +409,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 			if err == nil {
 				parsedMsg = model.RelpParsedMessage{
 					Parsed: model.ParsedMessage{
-						Fields:         *syslogMsg,
+						Fields:         syslogMsg,
 						Client:         raw.Raw.Client,
 						LocalPort:      raw.Raw.LocalPort,
 						UnixSocketPath: raw.Raw.UnixSocketPath,
@@ -587,18 +587,17 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 		var errs []error
 		var err error
 		var filterResult javascript.FilterResult
-		var transformedMsg *model.SyslogMessage
-		var fullMsg model.ParsedMessage
+		var fullMsg model.ExportedMessage
 		var kafkaMsg *sarama.ProducerMessage
 		var serialized []byte
 
 	ForParsedChan:
 		for m = range parsed_messages_chan {
-			topic, errs = e.Topic(&m.Parsed.Fields)
+			topic, errs = e.Topic(m.Parsed.Fields)
 			for _, err = range errs {
 				logger.Info("Error calculating topic", "error", err, "txnr", m.Txnr)
 			}
-			partitionKey, errs = e.PartitionKey(&m.Parsed.Fields)
+			partitionKey, errs = e.PartitionKey(m.Parsed.Fields)
 			for _, err = range errs {
 				logger.Info("Error calculating the partition key", "error", err, "txnr", m.Txnr)
 			}
@@ -608,44 +607,37 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 				other_fails_chan <- m.Txnr
 				continue ForParsedChan
 			}
-
-			transformedMsg, filterResult, err = e.FilterMessage(&m.Parsed.Fields)
+			// TODO: check
+			//originalMsg = &m.Parsed.Fields
+			filterResult, err = e.FilterMessage(&m.Parsed.Fields)
 
 			switch filterResult {
 			case javascript.DROPPED:
 				other_successes_chan <- m.Txnr
-				if s.metrics != nil {
-					s.metrics.MessageFilteringCounter.WithLabelValues("dropped", client).Inc()
-				}
+				s.metrics.MessageFilteringCounter.WithLabelValues("dropped", client).Inc()
 				continue ForParsedChan
 			case javascript.REJECTED:
 				other_fails_chan <- m.Txnr
-				if s.metrics != nil {
-					s.metrics.MessageFilteringCounter.WithLabelValues("rejected", client).Inc()
-				}
+				s.metrics.MessageFilteringCounter.WithLabelValues("rejected", client).Inc()
 				continue ForParsedChan
 			case javascript.PASS:
-				if s.metrics != nil {
-					s.metrics.MessageFilteringCounter.WithLabelValues("passing", client).Inc()
-				}
-				if transformedMsg == nil {
-					other_successes_chan <- m.Txnr
-					continue ForParsedChan
-				}
+				s.metrics.MessageFilteringCounter.WithLabelValues("passing", client).Inc()
 			default:
 				other_fails_chan <- m.Txnr
 				logger.Warn("Error happened processing message", "txnr", m.Txnr, "error", err)
-				if s.metrics != nil {
-					s.metrics.MessageFilteringCounter.WithLabelValues("unknown", client).Inc()
-				}
+				s.metrics.MessageFilteringCounter.WithLabelValues("unknown", client).Inc()
 				continue ForParsedChan
 			}
 
-			fullMsg = model.ParsedMessage{
-				Fields:         *transformedMsg,
-				Client:         m.Parsed.Client,
-				LocalPort:      m.Parsed.LocalPort,
-				UnixSocketPath: m.Parsed.UnixSocketPath,
+			fullMsg = model.ExportedMessage{
+				ParsedMessage: model.ParsedMessage{
+					Fields:         m.Parsed.Fields,
+					Client:         m.Parsed.Client,
+					LocalPort:      m.Parsed.LocalPort,
+					UnixSocketPath: m.Parsed.UnixSocketPath,
+				},
+				TimeGenerated: time.Unix(0, m.Parsed.Fields.TimeGenerated).UTC(),
+				TimeReported:  time.Unix(0, m.Parsed.Fields.TimeReported).UTC(),
 			}
 			serialized, err = ffjson.Marshal(&fullMsg)
 
@@ -659,7 +651,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 				Key:       sarama.StringEncoder(partitionKey),
 				Value:     sarama.ByteEncoder(serialized),
 				Topic:     topic,
-				Timestamp: transformedMsg.TimeReported,
+				Timestamp: fullMsg.TimeReported,
 				Metadata:  m.Txnr,
 			}
 

@@ -193,7 +193,6 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 	raw_messages_chan := make(chan model.RawMessage)
 
 	defer func() {
-		close(raw_messages_chan)
 		s.RemoveConnection(conn)
 		s.wg.Done()
 	}()
@@ -225,7 +224,7 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 			return
 		}
 
-		var syslogMsg *model.SyslogMessage
+		var syslogMsg model.SyslogMessage
 		var err error
 		var uid ulid.ULID
 		var fullMsg model.TcpUdpParsedMessage
@@ -239,7 +238,7 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 				uid = <-s.generator
 				fullMsg = model.TcpUdpParsedMessage{
 					Parsed: model.ParsedMessage{
-						Fields:         *syslogMsg,
+						Fields:         syslogMsg,
 						Client:         raw.Client,
 						LocalPort:      raw.LocalPort,
 						UnixSocketPath: raw.UnixSocketPath,
@@ -261,13 +260,13 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 	var packet []byte
 	var remote net.Addr
 	var size int
-	var raw model.RawMessage
 
 	for {
 		packet = make([]byte, 65536)
 		size, remote, err = conn.ReadFrom(packet)
 		if err != nil {
 			logger.Debug("Error reading UDP", "error", err)
+			close(raw_messages_chan)
 			return
 		}
 		client := ""
@@ -278,16 +277,14 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 			client = strings.Split(remote.String(), ":")[0]
 		}
 
-		raw = model.RawMessage{
+		s.metrics.IncomingMsgsCounter.WithLabelValues(s.Protocol, client, local_port_s, path).Inc()
+		raw_messages_chan <- model.RawMessage{
 			Client:         client,
 			LocalPort:      local_port,
 			UnixSocketPath: path,
 			Message:        packet[:size],
 		}
-		if s.metrics != nil {
-			s.metrics.IncomingMsgsCounter.WithLabelValues(s.Protocol, client, local_port_s, path).Inc()
-		}
-		raw_messages_chan <- raw
+
 	}
 
 }

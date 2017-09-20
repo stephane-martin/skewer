@@ -1,5 +1,7 @@
 package model
 
+//go:generate goderive .
+
 import (
 	"bytes"
 	"encoding/json"
@@ -7,6 +9,10 @@ import (
 
 	"golang.org/x/text/encoding"
 )
+
+func (m *SyslogMessage) Equals(other *SyslogMessage) bool {
+	return deriveEqualSyslogMsg(m, other)
+}
 
 type Stasher interface {
 	Stash(m *TcpUdpParsedMessage) (error, error)
@@ -40,23 +46,20 @@ type Parser struct {
 	format string
 }
 
-func (p *Parser) Parse(m []byte, decoder *encoding.Decoder, dont_parse_sd bool) (*SyslogMessage, error) {
+func (p *Parser) Parse(m []byte, decoder *encoding.Decoder, dont_parse_sd bool) (SyslogMessage, error) {
 	return Parse(m, p.format, decoder, dont_parse_sd)
 }
 
 func Fuzz(m []byte) int {
 	msg, err := Parse(m, "auto", nil, false)
 	if err != nil {
-		if msg != nil {
-			panic("msg != nil on error")
-		}
 		return 0
 	}
 	b, err := msg.MarshalMsg(nil)
 	if err != nil {
 		panic(err)
 	}
-	msg2 := &SyslogMessage{}
+	msg2 := SyslogMessage{}
 	rest, err := msg2.UnmarshalMsg(b)
 	if err != nil {
 		panic("Unmarshaling failed")
@@ -64,7 +67,7 @@ func Fuzz(m []byte) int {
 	if len(rest) > 0 {
 		panic("after marshalling there is more bytes remaining")
 	}
-	if !deriveEqualSyslogMessage(msg, msg2) {
+	if !msg.Equals(&msg2) {
 		panic("msg and msg2 are not equal")
 	}
 	return 1
@@ -77,7 +80,7 @@ func GetParser(format string) *Parser {
 	return nil
 }
 
-func Parse(m []byte, format string, decoder *encoding.Decoder, dont_parse_sd bool) (sm *SyslogMessage, err error) {
+func Parse(m []byte, format string, decoder *encoding.Decoder, dont_parse_sd bool) (sm SyslogMessage, err error) {
 
 	switch format {
 	case "rfc5424":
@@ -88,7 +91,7 @@ func Parse(m []byte, format string, decoder *encoding.Decoder, dont_parse_sd boo
 		sm, err = ParseJsonFormat(m, decoder)
 	case "auto":
 		if len(m) == 0 {
-			return nil, &EmptyMessageError{}
+			return sm, &EmptyMessageError{}
 		}
 		if m[0] == byte('{') {
 			sm, err = ParseJsonFormat(m, decoder)
@@ -108,10 +111,10 @@ func Parse(m []byte, format string, decoder *encoding.Decoder, dont_parse_sd boo
 		}
 
 	default:
-		return nil, &UnknownFormatError{format}
+		return sm, &UnknownFormatError{format}
 	}
 	if err != nil {
-		return nil, err
+		return sm, err
 	}
 	// special handling of JSON messages produced by go-audit
 	if sm.Appname == "go-audit" {

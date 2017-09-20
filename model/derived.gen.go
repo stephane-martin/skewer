@@ -2,16 +2,16 @@
 
 package model
 
-// deriveEqualSyslogMessage returns whether this and that are equal.
-func deriveEqualSyslogMessage(this, that *SyslogMessage) bool {
+// deriveEqualSyslogMsg returns whether this and that are equal.
+func deriveEqualSyslogMsg(this, that *SyslogMessage) bool {
 	return (this == nil && that == nil) ||
 		this != nil && that != nil &&
 			this.Priority == that.Priority &&
 			this.Facility == that.Facility &&
 			this.Severity == that.Severity &&
 			this.Version == that.Version &&
-			this.TimeReported.Equal(that.TimeReported) &&
-			this.TimeGenerated.Equal(that.TimeGenerated) &&
+			this.TimeReported == that.TimeReported &&
+			this.TimeGenerated == that.TimeGenerated &&
 			this.Hostname == that.Hostname &&
 			this.Appname == that.Appname &&
 			this.Procid == that.Procid &&

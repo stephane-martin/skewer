@@ -144,10 +144,9 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) {
 	s := h.Server
 	s.AddConnection(conn)
 
-	raw_messages_chan := make(chan model.RawMessage)
+	rawMessagesChan := make(chan model.RawMessage)
 
 	defer func() {
-		close(raw_messages_chan)
 		s.RemoveConnection(conn)
 		s.wg.Done()
 	}()
@@ -191,21 +190,21 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) {
 		}
 
 		var uid ulid.ULID
-		var syslogMsg *model.SyslogMessage
+		var syslogMsg model.SyslogMessage
 		var err error
 		var fullMsg model.TcpUdpParsedMessage
 		var raw model.RawMessage
 		decoder := utils.SelectDecoder(config.Encoding)
 
-		for raw = range raw_messages_chan {
+		for raw = range rawMessagesChan {
 
 			syslogMsg, err = parser.Parse(raw.Message, decoder, config.DontParseSD)
 
-			if err == nil && syslogMsg != nil {
+			if err == nil {
 				uid = <-s.generator
 				fullMsg = model.TcpUdpParsedMessage{
 					Parsed: model.ParsedMessage{
-						Fields:         *syslogMsg,
+						Fields:         syslogMsg,
 						Client:         raw.Client,
 						LocalPort:      raw.LocalPort,
 						UnixSocketPath: raw.UnixSocketPath,
@@ -240,23 +239,23 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) {
 		scanner.Split(LFTcpSplit)
 	}
 
-	var raw model.RawMessage
 	for {
 		if scanner.Scan() {
 			if timeout > 0 {
 				conn.SetReadDeadline(time.Now().Add(timeout))
 			}
-			raw = model.RawMessage{
+			if s.metrics != nil {
+				s.metrics.IncomingMsgsCounter.WithLabelValues(s.Protocol, client, local_port_s, path).Inc()
+			}
+			rawMessagesChan <- model.RawMessage{
 				Client:    client,
 				LocalPort: local_port,
 				Message:   scanner.Bytes(),
 			}
-			if s.metrics != nil {
-				s.metrics.IncomingMsgsCounter.WithLabelValues(s.Protocol, client, local_port_s, path).Inc()
-			}
-			raw_messages_chan <- raw
+
 		} else {
 			logger.Info("End of TCP client connection", "error", scanner.Err())
+			close(rawMessagesChan)
 			return
 		}
 	}

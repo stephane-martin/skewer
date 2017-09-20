@@ -24,18 +24,17 @@ func pair2str(s1 []byte, s2 []byte) (string, string) {
 	return string(s1), string(s2)
 }
 
-func ParseRfc3164Format(m []byte, decoder *encoding.Decoder) (smsg *SyslogMessage, err error) {
+func ParseRfc3164Format(m []byte, decoder *encoding.Decoder) (smsg SyslogMessage, err error) {
 	if decoder == nil {
 		decoder = unicode.UTF8.NewDecoder()
 	}
 	m, err = decoder.Bytes(m)
 	if err != nil {
-		return nil, &InvalidEncodingError{Err: err}
+		return smsg, &InvalidEncodingError{Err: err}
 	}
 
-	smsg = &SyslogMessage{}
-	def_smsg := &SyslogMessage{Message: string(m)}
-	n := time.Now()
+	def_smsg := SyslogMessage{Message: string(m)}
+	n := time.Now().UnixNano()
 	def_smsg.TimeGenerated = n
 	def_smsg.TimeReported = n
 
@@ -77,11 +76,11 @@ func ParseRfc3164Format(m []byte, decoder *encoding.Decoder) (smsg *SyslogMessag
 				smsg.TimeReported = def_smsg.TimeReported
 				return smsg, nil
 			}
-			smsg.TimeGenerated = t2
-			smsg.TimeReported = t2
+			smsg.TimeGenerated = t2.UnixNano()
+			smsg.TimeReported = t2.UnixNano()
 		} else {
-			smsg.TimeGenerated = t1
-			smsg.TimeReported = t1
+			smsg.TimeGenerated = t1.UnixNano()
+			smsg.TimeReported = t1.UnixNano()
 		}
 		if len(s) == 1 {
 			return smsg, nil
@@ -104,8 +103,8 @@ func ParseRfc3164Format(m []byte, decoder *encoding.Decoder) (smsg *SyslogMessag
 			return smsg, nil
 		}
 		t = t.AddDate(time.Now().Year(), 0, 0)
-		smsg.TimeGenerated = t
-		smsg.TimeReported = t
+		smsg.TimeGenerated = t.UnixNano()
+		smsg.TimeReported = t.UnixNano()
 		if len(s) == 3 {
 			return smsg, nil
 		}

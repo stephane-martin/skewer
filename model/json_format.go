@@ -24,18 +24,18 @@ type jsonRsyslogMessage struct {
 	Properties    map[string]map[string]string `json:"$!"`
 }
 
-func ParseJsonFormat(m []byte, decoder *encoding.Decoder) (msg *SyslogMessage, rerr error) {
+func ParseJsonFormat(m []byte, decoder *encoding.Decoder) (msg SyslogMessage, rerr error) {
 	// we ignore decoder, JSON is always UTF-8
 	decoder = unicode.UTF8.NewDecoder()
 	sourceMsg := jsonRsyslogMessage{}
 	err := json.Unmarshal(m, &sourceMsg)
 	if err != nil {
-		return nil, &UnmarshalingJsonError{err}
+		return msg, &UnmarshalingJsonError{err}
 	}
 
 	pri, err := strconv.Atoi(sourceMsg.Priority)
 	if err != nil {
-		return nil, &InvalidPriorityError{}
+		return msg, &InvalidPriorityError{}
 	}
 
 	n := time.Now()
@@ -45,7 +45,7 @@ func ParseJsonFormat(m []byte, decoder *encoding.Decoder) (msg *SyslogMessage, r
 	if sourceMsg.TimeReported != "-" && len(sourceMsg.TimeReported) > 0 {
 		r, err := time.Parse(time.RFC3339Nano, sourceMsg.TimeReported)
 		if err != nil {
-			return nil, &TimeError{}
+			return msg, &TimeError{}
 		}
 		reported = r
 	}
@@ -53,7 +53,7 @@ func ParseJsonFormat(m []byte, decoder *encoding.Decoder) (msg *SyslogMessage, r
 	if sourceMsg.TimeGenerated != "-" && len(sourceMsg.TimeGenerated) > 0 {
 		g, err := time.Parse(time.RFC3339Nano, sourceMsg.TimeGenerated)
 		if err != nil {
-			return nil, &TimeError{}
+			return msg, &TimeError{}
 		}
 		generated = g
 	}
@@ -83,13 +83,13 @@ func ParseJsonFormat(m []byte, decoder *encoding.Decoder) (msg *SyslogMessage, r
 		structured = strings.TrimSpace(sourceMsg.Structured)
 	}
 
-	msg = &SyslogMessage{
+	msg = SyslogMessage{
 		Priority:      Priority(pri),
 		Facility:      Facility(pri / 8),
 		Severity:      Severity(pri % 8),
 		Version:       1,
-		TimeReported:  reported,
-		TimeGenerated: generated,
+		TimeReported:  reported.UnixNano(),
+		TimeGenerated: generated.UnixNano(),
 		Hostname:      hostname,
 		Appname:       appname,
 		Procid:        procid,

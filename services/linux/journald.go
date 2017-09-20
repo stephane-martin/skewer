@@ -46,7 +46,7 @@ func EntryToSyslog(entry map[string]string) model.ParsedMessage {
 		case "_source_realtime_timestamp": // microseconds
 			t, err := strconv.ParseInt(v, 10, 64)
 			if err == nil {
-				m.TimeReported = time.Unix(0, t*1000)
+				m.TimeReported = t * 1000
 			}
 		default:
 			if strings.HasPrefix(k, "_") {
@@ -61,8 +61,8 @@ func EntryToSyslog(entry map[string]string) model.ParsedMessage {
 	if len(m.Procid) == 0 {
 		m.Procid = entry["SYSLOG_PID"]
 	}
-	m.TimeGenerated = time.Now()
-	if m.TimeReported.IsZero() {
+	m.TimeGenerated = time.Now().UnixNano()
+	if m.TimeReported == 0 {
 		m.TimeReported = m.TimeGenerated
 	}
 	m.Priority = model.Priority(int(m.Facility)*8 + int(m.Severity))
@@ -142,7 +142,6 @@ func (s *JournalService) Start(test bool) (infos []model.ListenerInfo, err error
 		defer s.wgroup.Done()
 
 		var uid ulid.ULID
-		var fullParsedMessage model.TcpUdpParsedMessage
 		var entry map[string]string
 		var more bool
 
@@ -151,17 +150,12 @@ func (s *JournalService) Start(test bool) (infos []model.ListenerInfo, err error
 			case entry, more = <-s.reader.Entries():
 				if more {
 					uid = <-s.generator
-					fullParsedMessage = model.TcpUdpParsedMessage{
+					s.stasher.Stash(model.TcpUdpParsedMessage{
 						ConfId: s.Conf.ConfID,
 						Uid:    uid.String(),
 						Parsed: EntryToSyslog(entry),
-					}
-					if s.stasher != nil {
-						s.stasher.Stash(fullParsedMessage)
-					}
-					if s.metrics != nil {
-						s.metrics.IncomingMsgsCounter.WithLabelValues("journald", "journald", "", "").Inc()
-					}
+					})
+					s.metrics.IncomingMsgsCounter.WithLabelValues("journald", "journald", "", "").Inc()
 				} else {
 					return
 				}
