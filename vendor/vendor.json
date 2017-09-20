@@ -391,6 +391,13 @@
 			"revisionTime": "2017-08-12T16:10:14Z"
 		},
 		{
+			"checksumSHA1": "sLu2d9DEcqaat6Oqnx1xR8ow2vI=",
+			"path": "github.com/pquerna/ffjson/ffjson",
+			"revision": "9a5203b7a07166f217f5f8177d5b16177acad3b2",
+			"revisionTime": "2017-08-12T16:10:14Z",
+			"tree": true
+		},
+		{
 			"checksumSHA1": "ybqwzlkvdLn7908OGAsa/H6d3CE=",
 			"path": "github.com/pquerna/ffjson/fflib/v1",
 			"revision": "9a5203b7a07166f217f5f8177d5b16177acad3b2",
