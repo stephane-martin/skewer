@@ -32,7 +32,7 @@ type RawMessage struct {
 }
 
 type RelpRawMessage struct {
-	Raw  *RawMessage
+	Raw  RawMessage
 	Txnr int
 }
 

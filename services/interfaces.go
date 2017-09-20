@@ -12,6 +12,5 @@ type NetworkService interface {
 
 type StoreService interface {
 	NetworkService
-	model.Stasher
 	Errors() chan struct{}
 }

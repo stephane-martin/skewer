@@ -14,6 +14,7 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/services/errors"
 	"github.com/stephane-martin/skewer/sys"
 	"github.com/stephane-martin/skewer/utils"
@@ -62,13 +63,13 @@ type TcpServiceImpl struct {
 	StreamingService
 	status     TcpServerStatus
 	statusChan chan TcpServerStatus
-	reporter   model.Reporter
+	reporter   *base.Reporter
 	generator  chan ulid.ULID
 	metrics    *tcpMetrics
 	registry   *prometheus.Registry
 }
 
-func NewTcpService(reporter model.Reporter, gen chan ulid.ULID, b *sys.BinderClient, l log15.Logger) *TcpServiceImpl {
+func NewTcpService(reporter *base.Reporter, gen chan ulid.ULID, b *sys.BinderClient, l log15.Logger) *TcpServiceImpl {
 	s := TcpServiceImpl{
 		status:    TcpStopped,
 		reporter:  reporter,
@@ -143,7 +144,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) {
 	s := h.Server
 	s.AddConnection(conn)
 
-	raw_messages_chan := make(chan *model.RawMessage)
+	raw_messages_chan := make(chan model.RawMessage)
 
 	defer func() {
 		close(raw_messages_chan)
@@ -192,19 +193,19 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) {
 		var uid ulid.ULID
 		var syslogMsg *model.SyslogMessage
 		var err error
-		var fullMsg *model.TcpUdpParsedMessage
-		var raw *model.RawMessage
+		var fullMsg model.TcpUdpParsedMessage
+		var raw model.RawMessage
 		decoder := utils.SelectDecoder(config.Encoding)
 
 		for raw = range raw_messages_chan {
 
 			syslogMsg, err = parser.Parse(raw.Message, decoder, config.DontParseSD)
 
-			if err == nil {
+			if err == nil && syslogMsg != nil {
 				uid = <-s.generator
-				fullMsg = &model.TcpUdpParsedMessage{
-					Parsed: &model.ParsedMessage{
-						Fields:         syslogMsg,
+				fullMsg = model.TcpUdpParsedMessage{
+					Parsed: model.ParsedMessage{
+						Fields:         *syslogMsg,
 						Client:         raw.Client,
 						LocalPort:      raw.LocalPort,
 						UnixSocketPath: raw.UnixSocketPath,
@@ -239,13 +240,13 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) {
 		scanner.Split(LFTcpSplit)
 	}
 
+	var raw model.RawMessage
 	for {
-		var raw *model.RawMessage
 		if scanner.Scan() {
 			if timeout > 0 {
 				conn.SetReadDeadline(time.Now().Add(timeout))
 			}
-			raw = &model.RawMessage{
+			raw = model.RawMessage{
 				Client:    client,
 				LocalPort: local_port,
 				Message:   scanner.Bytes(),

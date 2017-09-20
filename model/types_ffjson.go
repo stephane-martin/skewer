@@ -47,11 +47,6 @@ func (j *AuditMessageGroup) MarshalJSONBuf(buf fflib.EncodingBuffer) error {
 
 			{
 
-				if v == nil {
-					buf.WriteString("null")
-					return nil
-				}
-
 				err = v.MarshalJSONBuf(buf)
 				if err != nil {
 					return err
@@ -321,7 +316,7 @@ handle_AuditTime:
 
 handle_Msgs:
 
-	/* handler: j.Msgs type=[]*model.AuditSubMessage kind=slice quoted=false*/
+	/* handler: j.Msgs type=[]model.AuditSubMessage kind=slice quoted=false*/
 
 	{
 
@@ -335,13 +330,13 @@ handle_Msgs:
 			j.Msgs = nil
 		} else {
 
-			j.Msgs = []*AuditSubMessage{}
+			j.Msgs = []AuditSubMessage{}
 
 			wantVal := true
 
 			for {
 
-				var tmpJMsgs *AuditSubMessage
+				var tmpJMsgs AuditSubMessage
 
 				tok = fs.Scan()
 				if tok == fflib.FFTok_error {
@@ -362,19 +357,13 @@ handle_Msgs:
 					wantVal = true
 				}
 
-				/* handler: tmpJMsgs type=*model.AuditSubMessage kind=ptr quoted=false*/
+				/* handler: tmpJMsgs type=model.AuditSubMessage kind=struct quoted=false*/
 
 				{
 					if tok == fflib.FFTok_null {
 
-						tmpJMsgs = nil
-
 						state = fflib.FFParse_after_value
 						goto mainparse
-					}
-
-					if tmpJMsgs == nil {
-						tmpJMsgs = new(AuditSubMessage)
 					}
 
 					err = tmpJMsgs.UnmarshalJSONFFLexer(fs, fflib.FFParse_want_key)
@@ -788,19 +777,15 @@ func (j *ParsedMessage) MarshalJSONBuf(buf fflib.EncodingBuffer) error {
 	var obj []byte
 	_ = obj
 	_ = err
-	if j.Fields != nil {
-		buf.WriteString(`{ "fields":`)
+	buf.WriteString(`{ "fields":`)
 
-		{
+	{
 
-			err = j.Fields.MarshalJSONBuf(buf)
-			if err != nil {
-				return err
-			}
-
+		err = j.Fields.MarshalJSONBuf(buf)
+		if err != nil {
+			return err
 		}
-	} else {
-		buf.WriteString(`{ "fields":null`)
+
 	}
 	buf.WriteByte(',')
 	if len(j.Client) != 0 {
@@ -915,11 +900,6 @@ func (j *SyslogMessage) MarshalJSONBuf(buf fflib.EncodingBuffer) error {
 				}
 
 				{
-
-					if v == nil {
-						buf.WriteString("null")
-						return nil
-					}
 
 					err = v.MarshalJSONBuf(buf)
 					if err != nil {
@@ -1653,7 +1633,7 @@ handle_Message:
 
 handle_AuditSubMessages:
 
-	/* handler: j.AuditSubMessages type=[]*model.AuditSubMessage kind=slice quoted=false*/
+	/* handler: j.AuditSubMessages type=[]model.AuditSubMessage kind=slice quoted=false*/
 
 	{
 
@@ -1667,13 +1647,13 @@ handle_AuditSubMessages:
 			j.AuditSubMessages = nil
 		} else {
 
-			j.AuditSubMessages = []*AuditSubMessage{}
+			j.AuditSubMessages = []AuditSubMessage{}
 
 			wantVal := true
 
 			for {
 
-				var tmpJAuditSubMessages *AuditSubMessage
+				var tmpJAuditSubMessages AuditSubMessage
 
 				tok = fs.Scan()
 				if tok == fflib.FFTok_error {
@@ -1694,19 +1674,13 @@ handle_AuditSubMessages:
 					wantVal = true
 				}
 
-				/* handler: tmpJAuditSubMessages type=*model.AuditSubMessage kind=ptr quoted=false*/
+				/* handler: tmpJAuditSubMessages type=model.AuditSubMessage kind=struct quoted=false*/
 
 				{
 					if tok == fflib.FFTok_null {
 
-						tmpJAuditSubMessages = nil
-
 						state = fflib.FFParse_after_value
 						goto mainparse
-					}
-
-					if tmpJAuditSubMessages == nil {
-						tmpJAuditSubMessages = new(AuditSubMessage)
 					}
 
 					err = tmpJAuditSubMessages.UnmarshalJSONFFLexer(fs, fflib.FFParse_want_key)

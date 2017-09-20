@@ -449,14 +449,14 @@ func (e *Environment) fromJsMessage(sm goja.Value) (m *model.SyslogMessage, err 
 	var parts []string
 	var t int
 	var sub string
-	subMessages := make([]*model.AuditSubMessage, 0, len(imsg.SubMessages))
+	subMessages := make([]model.AuditSubMessage, 0, len(imsg.SubMessages))
 
 	for _, sub = range imsg.SubMessages {
 		parts = strings.SplitN(sub, ":", 2)
 		if len(parts) == 2 {
 			t, err = strconv.Atoi(parts[0])
 			if err == nil {
-				subMessages = append(subMessages, &model.AuditSubMessage{Data: parts[1], Type: uint16(t)})
+				subMessages = append(subMessages, model.AuditSubMessage{Data: parts[1], Type: uint16(t)})
 			}
 		}
 	}

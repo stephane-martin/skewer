@@ -32,11 +32,11 @@ func WriteAuditLogs(ctx context.Context, c conf.AuditConfig, logger log15.Logger
 		var err error
 		cop = &model.AuditMessageGroup{AuditTime: src.AuditTime, Seq: src.Seq, UidMap: src.UidMap}
 		if len(src.Msgs) > 0 {
-			cop.Msgs = make([]*model.AuditSubMessage, 0, len(src.Msgs))
+			cop.Msgs = make([]model.AuditSubMessage, 0, len(src.Msgs))
 			for _, subMsg := range src.Msgs {
 				data, err = decoder.String(subMsg.Data)
 				if err == nil {
-					cop.Msgs = append(cop.Msgs, &model.AuditSubMessage{Data: data, Type: subMsg.Type})
+					cop.Msgs = append(cop.Msgs, model.AuditSubMessage{Data: data, Type: subMsg.Type})
 				}
 			}
 		}

@@ -7,57 +7,14 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"sync"
 
 	"github.com/inconshreveable/log15"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
-	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/sys"
 	"github.com/stephane-martin/skewer/utils"
 )
-
-var stdoutLock sync.Mutex
-
-var SUCC []byte = []byte("SUCCESS")
-
-func W(header string, message []byte) (err error) {
-	stdoutLock.Lock()
-	err = utils.W(os.Stdout, header, message)
-	stdoutLock.Unlock()
-	return err
-}
-
-type Reporter struct {
-	name   string
-	logger log15.Logger
-}
-
-func (s *Reporter) Stash(m *model.TcpUdpParsedMessage) (fatal error, nonfatal error) {
-	// when the plugin *produces* a syslog message, write it to stdout
-	b, err := m.MarshalMsg(nil)
-	if err == nil {
-		err = W("syslog", b)
-		if err != nil {
-			s.logger.Crit("Could not write message to upstream. There was message loss", "error", err)
-			return err, nil
-		} else {
-			return nil, nil
-		}
-	} else {
-		// should not happen
-		s.logger.Warn("A syslog message could not be serialized", "type", s.name, "error", err)
-		return nil, err
-	}
-}
-
-func (s *Reporter) Report(infos []model.ListenerInfo) error {
-	b, err := json.Marshal(infos)
-	if err != nil {
-		return err
-	}
-	return W("infos", b)
-}
 
 func Launch(typ NetworkServiceType, test bool, binderClient *sys.BinderClient, logger log15.Logger, pipe *os.File) error {
 	generator := utils.Generator(context.Background(), logger)
@@ -67,11 +24,11 @@ func Launch(typ NetworkServiceType, test bool, binderClient *sys.BinderClient, l
 	name := ReverseNetworkServiceMap[typ]
 	hasConf := false
 
-	reporter := &Reporter{name: name, logger: logger}
+	reporter := &base.Reporter{Name: name, Logger: logger}
 	svc := Factory(typ, reporter, generator, binderClient, logger, pipe)
 	if svc == nil {
 		err := fmt.Errorf("The Service Factory returned 'nil' for plugin '%s'", name)
-		W("starterror", []byte(err.Error()))
+		base.W("starterror", []byte(err.Error()))
 		return err
 	}
 
@@ -85,7 +42,7 @@ func Launch(typ NetworkServiceType, test bool, binderClient *sys.BinderClient, l
 		select {
 		case <-fatalChan:
 			svc.Shutdown()
-			W("shutdown", []byte("fatal"))
+			base.W("shutdown", []byte("fatal"))
 			return fmt.Errorf("Store fatal error in plugin '%s'", name)
 		default:
 		}
@@ -96,24 +53,24 @@ func Launch(typ NetworkServiceType, test bool, binderClient *sys.BinderClient, l
 		case "start":
 			if !hasConf {
 				err := fmt.Errorf("Configuration was not provided to plugin '%s' before start", name)
-				W("syslogconferror", []byte(err.Error()))
+				base.W("syslogconferror", []byte(err.Error()))
 				return err
 			}
 			infos, err := ConfigureAndStartService(svc, globalConf, test)
 			if err != nil {
-				W("starterror", []byte(err.Error()))
+				base.W("starterror", []byte(err.Error()))
 				return err
 			} else if len(infos) == 0 && (typ == TCP || typ == UDP) {
 				// only TCP and UDP directly report info about their effective listening ports
 				svc.Stop()
-				W("nolistenererror", []byte("plugin is inactive"))
+				base.W("nolistenererror", []byte("plugin is inactive"))
 			} else if typ == TCP {
 				infosb, _ := json.Marshal(infos)
-				W("started", infosb)
+				base.W("started", infosb)
 				reporter.Report(infos)
 			} else {
 				infosb, _ := json.Marshal(infos)
-				W("started", infosb)
+				base.W("started", infosb)
 			}
 			if typ == Store {
 				// monitor the Store fatal errors
@@ -121,12 +78,12 @@ func Launch(typ NetworkServiceType, test bool, binderClient *sys.BinderClient, l
 			}
 		case "stop":
 			svc.Stop()
-			W("stopped", SUCC)
+			base.W("stopped", base.SUCC)
 			// here we *do not return*. So the plugin process continues to live
 			// and to listen for subsequent control commands
 		case "shutdown":
 			svc.Shutdown()
-			W("shutdown", SUCC)
+			base.W("shutdown", base.SUCC)
 			// at the end of shutdown command, we *return*. So the plugin
 			// process stops right now.
 			return nil
@@ -138,7 +95,7 @@ func Launch(typ NetworkServiceType, test bool, binderClient *sys.BinderClient, l
 				globalConf = c
 				hasConf = true
 			} else {
-				W("conferror", []byte(err.Error()))
+				base.W("conferror", []byte(err.Error()))
 				return err
 			}
 		case "gathermetrics":
@@ -153,7 +110,7 @@ func Launch(typ NetworkServiceType, test bool, binderClient *sys.BinderClient, l
 				logger.Warn("Error marshaling metrics", "type", name, "error", err)
 				familiesb, _ = json.Marshal(empty)
 			}
-			err = W("metrics", familiesb)
+			err = base.W("metrics", familiesb)
 			if err != nil {
 				logger.Crit("Could not write metrics to upstream", "type", name, "error", err)
 				return err

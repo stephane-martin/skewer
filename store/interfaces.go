@@ -9,7 +9,7 @@ import (
 )
 
 type Store interface {
-	model.Stasher
+	Stash(m model.TcpUdpParsedMessage) (error, error)
 	Outputs() chan *model.TcpUdpParsedMessage
 	ACK(uid string)
 	NACK(uid string)

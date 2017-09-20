@@ -8,6 +8,7 @@ import (
 	"github.com/oklog/ulid"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/services/linux"
 	"github.com/stephane-martin/skewer/services/network"
 	"github.com/stephane-martin/skewer/sys"
@@ -67,7 +68,7 @@ func ConfigureAndStartService(s NetworkService, c conf.BaseConfig, test bool) ([
 
 }
 
-func Factory(t NetworkServiceType, reporter model.Reporter, gen chan ulid.ULID, b *sys.BinderClient, l log15.Logger, pipe *os.File) NetworkService {
+func Factory(t NetworkServiceType, reporter *base.Reporter, gen chan ulid.ULID, b *sys.BinderClient, l log15.Logger, pipe *os.File) NetworkService {
 	switch t {
 	case TCP:
 		return network.NewTcpService(reporter, gen, b, l)

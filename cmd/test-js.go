@@ -47,7 +47,7 @@ var testjsCmd = &cobra.Command{
 		m.Message = "orig message"
 		ma := map[string]string{"zog": "zogzog"}
 		m.Properties = map[string]map[string]string{"foo": ma, "ma": ma}
-		m.AuditSubMessages = []*model.AuditSubMessage{&model.AuditSubMessage{Type: 12, Data: "zob"}}
+		m.AuditSubMessages = []model.AuditSubMessage{model.AuditSubMessage{Type: 12, Data: "zob"}}
 		m2, result, err := env.FilterMessage(&m)
 		fmt.Println(err)
 		fmt.Println(result)

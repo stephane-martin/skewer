@@ -1,9 +1,10 @@
 package model
 
-import "time"
-import "fmt"
-import "encoding/json"
-import sarama "gopkg.in/Shopify/sarama.v1"
+import (
+	"encoding/json"
+	"fmt"
+	"time"
+)
 
 //go:generate msgp
 //go:generate ffjson $GOFILE
@@ -19,17 +20,18 @@ type AuditSubMessage struct {
 }
 
 type AuditMessageGroup struct {
-	Seq       int                `json:"sequence" msg:"sequence"`
-	AuditTime string             `json:"timestamp" msg:"timestamp"`
-	Msgs      []*AuditSubMessage `json:"messages" msg:"messages"`
-	UidMap    map[string]string  `json:"uid_map" msg:"uid_map"`
+	Seq       int               `json:"sequence" msg:"sequence"`
+	AuditTime string            `json:"timestamp" msg:"timestamp"`
+	Msgs      []AuditSubMessage `json:"messages" msg:"messages"`
+	UidMap    map[string]string `json:"uid_map" msg:"uid_map"`
 }
 
 type SyslogMessage struct {
-	Priority         Priority                     `json:"priority,string" msg:"priority"`
-	Facility         Facility                     `json:"facility,string" msg:"facility"`
-	Severity         Severity                     `json:"severity,string" msg:"severity"`
-	Version          Version                      `json:"version,string" msg:"version"`
+	Priority Priority `json:"priority,string" msg:"priority"`
+	Facility Facility `json:"facility,string" msg:"facility"`
+	Severity Severity `json:"severity,string" msg:"severity"`
+	Version  Version  `json:"version,string" msg:"version"`
+	// todo: eliminate time.Time (it contains a pointer)
 	TimeReported     time.Time                    `json:"timereported,omitempty" msg:"timereported"`
 	TimeGenerated    time.Time                    `json:"timegenerated,omitempty" msg:"timegenerated"`
 	Hostname         string                       `json:"hostname" msg:"hostname"`
@@ -38,44 +40,29 @@ type SyslogMessage struct {
 	Msgid            string                       `json:"msgid,omitempty" msg:"msgid"`
 	Structured       string                       `json:"structured,omitempty" msg:"structured"`
 	Message          string                       `json:"message" msg:"message"`
-	AuditSubMessages []*AuditSubMessage           `json:"audit,omitempty" msg:"audit"`
+	AuditSubMessages []AuditSubMessage            `json:"audit,omitempty" msg:"audit"`
 	Properties       map[string]map[string]string `json:"properties,omitempty" msg:"properties"`
 }
 
 // ffjson: nodecoder
 type ParsedMessage struct {
-	Fields         *SyslogMessage `json:"fields" msg:"fields"`
-	Client         string         `json:"client,omitempty" msg:"client"`
-	LocalPort      int            `json:"local_port,string" msg:"local_port"`
-	UnixSocketPath string         `json:"unix_socket_path,omitempty" msg:"unix_socket_path"`
+	Fields         SyslogMessage `json:"fields" msg:"fields"`
+	Client         string        `json:"client,omitempty" msg:"client"`
+	LocalPort      int           `json:"local_port,string" msg:"local_port"`
+	UnixSocketPath string        `json:"unix_socket_path,omitempty" msg:"unix_socket_path"`
 }
 
 // ffjson: skip
 type TcpUdpParsedMessage struct {
-	Parsed *ParsedMessage `json:"parsed" msg:"parsed"`
-	Uid    string         `json:"uid" msg:"uid"`
-	ConfId string         `json:"conf_id" msg:"conf_id"`
+	Parsed ParsedMessage `json:"parsed" msg:"parsed"`
+	Uid    string        `json:"uid" msg:"uid"`
+	ConfId string        `json:"conf_id" msg:"conf_id"`
 }
 
 // ffjson: skip
 type RelpParsedMessage struct {
-	Parsed *ParsedMessage `json:"parsed" msg:"parsed"`
-	Txnr   int            `json:"txnr" msg:"txnr"`
-}
-
-func (m *ParsedMessage) ToKafkaMessage(partitionKey string, topic string) (km *sarama.ProducerMessage, err error) {
-	value, err := m.MarshalJSON()
-	if err != nil {
-		return nil, err
-	}
-
-	kafka_msg := sarama.ProducerMessage{
-		Key:       sarama.StringEncoder(partitionKey),
-		Value:     sarama.ByteEncoder(value),
-		Topic:     topic,
-		Timestamp: m.Fields.TimeReported,
-	}
-	return &kafka_msg, nil
+	Parsed ParsedMessage `json:"parsed" msg:"parsed"`
+	Txnr   int           `json:"txnr" msg:"txnr"`
 }
 
 var SyslogMessageFmt string = `Facility: %d
@@ -94,6 +81,7 @@ Properties: %s`
 
 func (m *SyslogMessage) String() string {
 	props := ""
+	// todo: remove json
 	b, err := json.Marshal(m.Properties)
 	if err == nil {
 		props = string(b)

@@ -538,7 +538,7 @@ func Serve() error {
 	stopJournal := func(shutdown bool) {
 		if journald.Supported && c.Journald.Enabled {
 			if shutdown {
-				journalServicePlugin.Shutdown(3 * time.Second)
+				journalServicePlugin.Shutdown(5 * time.Second)
 			} else {
 				// we keep the same instance of the journald plugin, so
 				// that we can continue to fetch messages from a

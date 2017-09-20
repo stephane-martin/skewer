@@ -32,7 +32,7 @@ type PluginController struct {
 	loggerHandle int
 	pipe         *os.File
 	logger       log15.Logger
-	stasher      model.Stasher
+	stasher      *StorePlugin
 	registry     *consul.Registry
 
 	metricsChan chan []*dto.MetricFamily
@@ -51,7 +51,7 @@ type PluginController struct {
 	created   bool
 }
 
-func NewPluginController(typ NetworkServiceType, stasher model.Stasher, r *consul.Registry, binderHandle int, loggerHandle int, l log15.Logger) *PluginController {
+func NewPluginController(typ NetworkServiceType, stasher *StorePlugin, r *consul.Registry, binderHandle int, loggerHandle int, l log15.Logger) *PluginController {
 	s := &PluginController{
 		typ:          typ,
 		stasher:      stasher,
@@ -247,6 +247,7 @@ func (s *PluginController) listen() chan InfosAndError {
 		scanner.Split(utils.PluginSplit)
 		command := ""
 		infos := []model.ListenerInfo{}
+		var m model.TcpUdpParsedMessage
 
 		for scanner.Scan() {
 			parts := strings.SplitN(scanner.Text(), " ", 2)
@@ -268,7 +269,7 @@ func (s *PluginController) listen() chan InfosAndError {
 						kill = true
 						return
 					} else {
-						m := &model.TcpUdpParsedMessage{}
+						m = model.TcpUdpParsedMessage{}
 						_, err := m.UnmarshalMsg([]byte(parts[1]))
 						if err == nil {
 							s.stasher.Stash(m)
@@ -697,7 +698,7 @@ func (s *StorePlugin) Shutdown(killTimeOut time.Duration) {
 }
 
 // Stash stores the given message into the Store
-func (s *StorePlugin) Stash(m *model.TcpUdpParsedMessage) (fatal error, nonfatal error) {
+func (s *StorePlugin) Stash(m model.TcpUdpParsedMessage) (fatal error, nonfatal error) {
 	// this method is called very frequently, so we avoid to lock anything
 	// the MessageQueue ensures that we write the messages sequentially to the store child
 	s.MessageQueue.Put(m)

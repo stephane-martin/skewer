@@ -13,10 +13,11 @@ import (
 	"github.com/stephane-martin/skewer/auditlogs"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/services/base"
 )
 
 type AuditService struct {
-	stasher   model.Stasher
+	stasher   *base.Reporter
 	logger    log15.Logger
 	wgroup    *sync.WaitGroup
 	generator chan ulid.ULID
@@ -24,7 +25,7 @@ type AuditService struct {
 	aconf     conf.AuditConfig
 }
 
-func NewAuditService(stasher model.Stasher, generator chan ulid.ULID, logger log15.Logger) *AuditService {
+func NewAuditService(stasher *base.Reporter, generator chan ulid.ULID, logger log15.Logger) *AuditService {
 	s := AuditService{stasher: stasher, generator: generator}
 	s.logger = logger.New("class", "audit")
 	return &s
@@ -34,7 +35,7 @@ func (s *AuditService) Gather() ([]*dto.MetricFamily, error) {
 	return []*dto.MetricFamily{}, nil
 }
 
-func auditToSyslog(auditMsg *model.AuditMessageGroup, hostname string, aconf *conf.AuditConfig) *model.ParsedMessage {
+func auditToSyslog(auditMsg *model.AuditMessageGroup, hostname string, aconf *conf.AuditConfig) model.ParsedMessage {
 	tgenerated := time.Now()
 	treported := tgenerated
 	nbsecs, err := strconv.ParseFloat(auditMsg.AuditTime, 64)
@@ -42,7 +43,7 @@ func auditToSyslog(auditMsg *model.AuditMessageGroup, hostname string, aconf *co
 		treported = time.Unix(0, int64(nbsecs*1000)*1000000)
 	}
 
-	m := &model.SyslogMessage{
+	m := model.SyslogMessage{
 		Appname:          aconf.Appname,
 		Facility:         model.Facility(aconf.Facility),
 		Severity:         model.Severity(aconf.Severity),
@@ -60,7 +61,7 @@ func auditToSyslog(auditMsg *model.AuditMessageGroup, hostname string, aconf *co
 		m.Properties["uid_map"] = auditMsg.UidMap
 	}
 
-	return &model.ParsedMessage{
+	return model.ParsedMessage{
 		Client: "audit",
 		Fields: m,
 	}
@@ -88,12 +89,12 @@ func (s *AuditService) Start(test bool) ([]model.ListenerInfo, error) {
 		defer s.wgroup.Done()
 
 		var uid ulid.ULID
-		var full *model.TcpUdpParsedMessage
+		var full model.TcpUdpParsedMessage
 
 		for msg := range msgChan {
 			uid = <-s.generator
 
-			full = &model.TcpUdpParsedMessage{
+			full = model.TcpUdpParsedMessage{
 				ConfId: s.aconf.ConfID,
 				Uid:    uid.String(),
 				Parsed: auditToSyslog(msg, hostname, &s.aconf),

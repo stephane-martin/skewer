@@ -20,6 +20,7 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/javascript"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/services/errors"
 	"github.com/stephane-martin/skewer/sys"
 	"github.com/stephane-martin/skewer/utils"
@@ -115,7 +116,7 @@ func NewRelpMetrics() *relpMetrics {
 type RelpService struct {
 	impl     *RelpServiceImpl
 	logger   log15.Logger
-	reporter model.Reporter
+	reporter *base.Reporter
 	b        *sys.BinderClient
 	sc       []conf.SyslogConfig
 	pc       []conf.ParserConfig
@@ -123,7 +124,7 @@ type RelpService struct {
 	wg       *sync.WaitGroup
 }
 
-func NewRelpService(r model.Reporter, b *sys.BinderClient, l log15.Logger) *RelpService {
+func NewRelpService(r *base.Reporter, b *sys.BinderClient, l log15.Logger) *RelpService {
 	s := &RelpService{b: b, logger: l, reporter: r, wg: &sync.WaitGroup{}}
 	s.impl = NewRelpServiceImpl(s.b, s.logger)
 	return s
@@ -352,8 +353,8 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 	s := h.Server
 	s.AddConnection(conn)
 
-	raw_messages_chan := make(chan *model.RelpRawMessage)
-	parsed_messages_chan := make(chan *model.RelpParsedMessage)
+	raw_messages_chan := make(chan model.RelpRawMessage)
+	parsed_messages_chan := make(chan model.RelpParsedMessage)
 	other_successes_chan := make(chan int)
 	other_fails_chan := make(chan int)
 
@@ -397,18 +398,18 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 			return
 		}
 
-		var raw *model.RelpRawMessage
+		var raw model.RelpRawMessage
 		var syslogMsg *model.SyslogMessage
 		var err error
-		var parsedMsg *model.RelpParsedMessage
+		var parsedMsg model.RelpParsedMessage
 		decoder := utils.SelectDecoder(config.Encoding)
 
 		for raw = range raw_messages_chan {
 			syslogMsg, err = parser.Parse(raw.Raw.Message, decoder, config.DontParseSD)
 			if err == nil {
-				parsedMsg = &model.RelpParsedMessage{
-					Parsed: &model.ParsedMessage{
-						Fields:         syslogMsg,
+				parsedMsg = model.RelpParsedMessage{
+					Parsed: model.ParsedMessage{
+						Fields:         *syslogMsg,
 						Client:         raw.Raw.Client,
 						LocalPort:      raw.Raw.LocalPort,
 						UnixSocketPath: raw.Raw.UnixSocketPath,
@@ -580,24 +581,24 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 		}()
 
 		e := javascript.NewFilterEnvironment(config.FilterFunc, config.TopicFunc, config.TopicTmpl, config.PartitionFunc, config.PartitionTmpl, s.Logger)
-		var m *model.RelpParsedMessage
+		var m model.RelpParsedMessage
 		var topic string
 		var partitionKey string
 		var errs []error
 		var err error
 		var filterResult javascript.FilterResult
 		var transformedMsg *model.SyslogMessage
-		var fullMsg *model.ParsedMessage
+		var fullMsg model.ParsedMessage
 		var kafkaMsg *sarama.ProducerMessage
 		var serialized []byte
 
 	ForParsedChan:
 		for m = range parsed_messages_chan {
-			topic, errs = e.Topic(m.Parsed.Fields)
+			topic, errs = e.Topic(&m.Parsed.Fields)
 			for _, err = range errs {
 				logger.Info("Error calculating topic", "error", err, "txnr", m.Txnr)
 			}
-			partitionKey, errs = e.PartitionKey(m.Parsed.Fields)
+			partitionKey, errs = e.PartitionKey(&m.Parsed.Fields)
 			for _, err = range errs {
 				logger.Info("Error calculating the partition key", "error", err, "txnr", m.Txnr)
 			}
@@ -608,7 +609,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 				continue ForParsedChan
 			}
 
-			transformedMsg, filterResult, err = e.FilterMessage(m.Parsed.Fields)
+			transformedMsg, filterResult, err = e.FilterMessage(&m.Parsed.Fields)
 
 			switch filterResult {
 			case javascript.DROPPED:
@@ -640,8 +641,8 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 				continue ForParsedChan
 			}
 
-			fullMsg = &model.ParsedMessage{
-				Fields:         transformedMsg,
+			fullMsg = model.ParsedMessage{
+				Fields:         *transformedMsg,
 				Client:         m.Parsed.Client,
 				LocalPort:      m.Parsed.LocalPort,
 				UnixSocketPath: m.Parsed.UnixSocketPath,
@@ -682,6 +683,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 	}
 	scanner := bufio.NewScanner(conn)
 	scanner.Split(RelpSplit)
+	var raw model.RelpRawMessage
 	for {
 		if scanner.Scan() {
 			if timeout > 0 {
@@ -729,9 +731,9 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 					}
 					return
 				}
-				raw := model.RelpRawMessage{
+				raw = model.RelpRawMessage{
 					Txnr: txnr,
-					Raw: &model.RawMessage{
+					Raw: model.RawMessage{
 						Message:   []byte(data),
 						Client:    client,
 						LocalPort: local_port,
@@ -740,7 +742,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 				if s.metrics != nil {
 					s.metrics.IncomingMsgsCounter.WithLabelValues(s.Protocol, client, local_port_s, path).Inc()
 				}
-				raw_messages_chan <- &raw
+				raw_messages_chan <- raw
 			default:
 				logger.Warn("Unknown RELP command", "command", command)
 				if s.metrics != nil {

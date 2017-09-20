@@ -29,7 +29,7 @@ type UdpServiceImpl struct {
 	base.BaseService
 	status     UdpServerStatus
 	statusChan chan UdpServerStatus
-	stasher    model.Stasher
+	stasher    *base.Reporter
 	handler    PacketHandler
 	generator  chan ulid.ULID
 	metrics    *udpMetrics
@@ -69,7 +69,7 @@ func NewUdpMetrics() *udpMetrics {
 	return m
 }
 
-func NewUdpService(stasher model.Stasher, gen chan ulid.ULID, b *sys.BinderClient, l log15.Logger) *UdpServiceImpl {
+func NewUdpService(stasher *base.Reporter, gen chan ulid.ULID, b *sys.BinderClient, l log15.Logger) *UdpServiceImpl {
 	s := UdpServiceImpl{
 		status:    UdpStopped,
 		metrics:   NewUdpMetrics(),
@@ -190,7 +190,7 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 	s := h.Server
 	s.AddConnection(conn)
 
-	raw_messages_chan := make(chan *model.RawMessage)
+	raw_messages_chan := make(chan model.RawMessage)
 
 	defer func() {
 		close(raw_messages_chan)
@@ -228,8 +228,8 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 		var syslogMsg *model.SyslogMessage
 		var err error
 		var uid ulid.ULID
-		var fullMsg *model.TcpUdpParsedMessage
-		var raw *model.RawMessage
+		var fullMsg model.TcpUdpParsedMessage
+		var raw model.RawMessage
 		decoder := utils.SelectDecoder(config.Encoding)
 
 		for raw = range raw_messages_chan {
@@ -237,9 +237,9 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 
 			if err == nil {
 				uid = <-s.generator
-				fullMsg = &model.TcpUdpParsedMessage{
-					Parsed: &model.ParsedMessage{
-						Fields:         syslogMsg,
+				fullMsg = model.TcpUdpParsedMessage{
+					Parsed: model.ParsedMessage{
+						Fields:         *syslogMsg,
 						Client:         raw.Client,
 						LocalPort:      raw.LocalPort,
 						UnixSocketPath: raw.UnixSocketPath,
@@ -261,6 +261,7 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 	var packet []byte
 	var remote net.Addr
 	var size int
+	var raw model.RawMessage
 
 	for {
 		packet = make([]byte, 65536)
@@ -277,7 +278,7 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 			client = strings.Split(remote.String(), ":")[0]
 		}
 
-		raw := model.RawMessage{
+		raw = model.RawMessage{
 			Client:         client,
 			LocalPort:      local_port,
 			UnixSocketPath: path,
@@ -286,7 +287,7 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 		if s.metrics != nil {
 			s.metrics.IncomingMsgsCounter.WithLabelValues(s.Protocol, client, local_port_s, path).Inc()
 		}
-		raw_messages_chan <- &raw
+		raw_messages_chan <- raw
 	}
 
 }

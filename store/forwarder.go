@@ -137,8 +137,8 @@ func (fwder *kafkaForwarder) getAndSendMessages(ctx context.Context, from Store,
 	var filterResult javascript.FilterResult
 	var transformedMsg *model.SyslogMessage
 	var serialized []byte
-	var fullMsg *model.ParsedMessage
-	var kafkaMsg *sarama.ProducerMessage
+	var fullMsg model.ParsedMessage
+	var kafkaMsg sarama.ProducerMessage
 
 ForOutputs:
 	for {
@@ -168,11 +168,11 @@ ForOutputs:
 				env = jsenvs[message.ConfId]
 			}
 
-			topic, errs = env.Topic(message.Parsed.Fields)
+			topic, errs = env.Topic(&message.Parsed.Fields)
 			for _, err = range errs {
 				fwder.logger.Info("Error calculating topic", "error", err, "uid", message.Uid)
 			}
-			partitionKey, errs = env.PartitionKey(message.Parsed.Fields)
+			partitionKey, errs = env.PartitionKey(&message.Parsed.Fields)
 			for _, err := range errs {
 				fwder.logger.Info("Error calculating the partition key", "error", err, "uid", message.Uid)
 			}
@@ -183,7 +183,7 @@ ForOutputs:
 				continue ForOutputs
 			}
 
-			transformedMsg, filterResult, err = env.FilterMessage(message.Parsed.Fields)
+			transformedMsg, filterResult, err = env.FilterMessage(&message.Parsed.Fields)
 
 			switch filterResult {
 			case javascript.DROPPED:
@@ -215,8 +215,8 @@ ForOutputs:
 				continue ForOutputs
 			}
 
-			fullMsg = &model.ParsedMessage{
-				Fields:         transformedMsg,
+			fullMsg = model.ParsedMessage{
+				Fields:         *transformedMsg,
 				Client:         message.Parsed.Client,
 				LocalPort:      message.Parsed.LocalPort,
 				UnixSocketPath: message.Parsed.UnixSocketPath,
@@ -229,7 +229,7 @@ ForOutputs:
 				continue ForOutputs
 			}
 
-			kafkaMsg = &sarama.ProducerMessage{
+			kafkaMsg = sarama.ProducerMessage{
 				Key:       sarama.StringEncoder(partitionKey),
 				Value:     sarama.ByteEncoder(serialized),
 				Topic:     topic,
@@ -244,7 +244,7 @@ ForOutputs:
 				fmt.Fprintln(os.Stderr, string(v))
 				from.ACK(message.Uid)
 			} else {
-				producer.Input() <- kafkaMsg
+				producer.Input() <- &kafkaMsg
 			}
 			ffjson.Pool(serialized)
 		}

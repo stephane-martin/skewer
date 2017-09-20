@@ -452,7 +452,7 @@ func (s *MessageStore) resetFailures() {
 	}
 }
 
-func (s *MessageStore) Stash(m *model.TcpUdpParsedMessage) (fatal error, nonfatal error) {
+func (s *MessageStore) Stash(m model.TcpUdpParsedMessage) (fatal error, nonfatal error) {
 	s.toStashQueue.Put(m)
 	return nil, nil
 }

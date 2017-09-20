@@ -13,10 +13,11 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/journald"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/sys"
 )
 
-func EntryToSyslog(entry map[string]string) *model.ParsedMessage {
+func EntryToSyslog(entry map[string]string) model.ParsedMessage {
 	m := model.SyslogMessage{}
 	properties := map[string]string{}
 	for k, v := range entry {
@@ -68,11 +69,11 @@ func EntryToSyslog(entry map[string]string) *model.ParsedMessage {
 	m.Properties = map[string]map[string]string{}
 	m.Properties["journald"] = properties
 
-	return &model.ParsedMessage{
+	return model.ParsedMessage{
 		Client:         "journald",
 		LocalPort:      0,
 		UnixSocketPath: "",
-		Fields:         &m,
+		Fields:         m,
 	}
 }
 
@@ -93,7 +94,7 @@ func NewJournalMetrics() *journalMetrics {
 }
 
 type JournalService struct {
-	stasher   model.Stasher
+	stasher   *base.Reporter
 	reader    journald.JournaldReader
 	logger    log15.Logger
 	stopchan  chan struct{}
@@ -104,7 +105,7 @@ type JournalService struct {
 	registry  *prometheus.Registry
 }
 
-func NewJournalService(stasher model.Stasher, gen chan ulid.ULID, l log15.Logger) (*JournalService, error) {
+func NewJournalService(stasher *base.Reporter, gen chan ulid.ULID, l log15.Logger) (*JournalService, error) {
 	s := JournalService{
 		stasher:   stasher,
 		generator: gen,
@@ -141,8 +142,7 @@ func (s *JournalService) Start(test bool) (infos []model.ListenerInfo, err error
 		defer s.wgroup.Done()
 
 		var uid ulid.ULID
-		var parsedMessage *model.ParsedMessage
-		var fullParsedMessage *model.TcpUdpParsedMessage
+		var fullParsedMessage model.TcpUdpParsedMessage
 		var entry map[string]string
 		var more bool
 
@@ -150,12 +150,11 @@ func (s *JournalService) Start(test bool) (infos []model.ListenerInfo, err error
 			select {
 			case entry, more = <-s.reader.Entries():
 				if more {
-					parsedMessage = EntryToSyslog(entry)
 					uid = <-s.generator
-					fullParsedMessage = &model.TcpUdpParsedMessage{
+					fullParsedMessage = model.TcpUdpParsedMessage{
 						ConfId: s.Conf.ConfID,
 						Uid:    uid.String(),
-						Parsed: parsedMessage,
+						Parsed: EntryToSyslog(entry),
 					}
 					if s.stasher != nil {
 						s.stasher.Stash(fullParsedMessage)

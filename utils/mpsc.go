@@ -24,8 +24,8 @@ func NewMessageQueue() *MessageQueue {
 	return q
 }
 
-func (q *MessageQueue) Put(m *model.TcpUdpParsedMessage) {
-	n := &messsageNode{msg: m}
+func (q *MessageQueue) Put(m model.TcpUdpParsedMessage) {
+	n := &messsageNode{msg: &m}
 	prev := atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.head)), unsafe.Pointer(n))
 	(*messsageNode)(prev).next = n
 }

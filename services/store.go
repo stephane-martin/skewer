@@ -109,9 +109,9 @@ func (s *storeServiceImpl) doStart(test bool, mu *sync.Mutex) ([]model.ListenerI
 		go func() {
 			defer s.ingestwg.Done()
 			var err error
-			var message *model.TcpUdpParsedMessage
+			var message model.TcpUdpParsedMessage
 			for {
-				message = &model.TcpUdpParsedMessage{}
+				message = model.TcpUdpParsedMessage{}
 				err = message.DecodeMsg(s.reader)
 				if err == nil {
 					s.st.Stash(message)
@@ -223,11 +223,4 @@ func (s *storeServiceImpl) Gather() ([]*dto.MetricFamily, error) {
 	} else {
 		return s.st.Gather()
 	}
-}
-
-// Stash stores the given message into the Store.
-// This method is specific to the StoreService.
-func (s *storeServiceImpl) Stash(m *model.TcpUdpParsedMessage) (fatal error, nonfatal error) {
-	// store a message in the store
-	return s.st.Stash(m)
 }
