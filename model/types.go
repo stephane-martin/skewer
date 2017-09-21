@@ -1,7 +1,6 @@
 package model
 
 import (
-	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -87,17 +86,6 @@ AuditSubMessages: %s
 Properties: %s`
 
 func (m *SyslogMessage) String() string {
-	props := ""
-	// todo: remove json
-	b, err := json.Marshal(m.Properties)
-	if err == nil {
-		props = string(b)
-	}
-	subs := ""
-	b, err = json.Marshal(m.AuditSubMessages)
-	if err == nil {
-		subs = string(b)
-	}
 	return fmt.Sprintf(
 		SyslogMessageFmt,
 		m.Facility,
@@ -111,7 +99,6 @@ func (m *SyslogMessage) String() string {
 		m.Msgid,
 		m.Structured,
 		m.Message,
-		subs,
-		props,
+		m.Properties,
 	)
 }
