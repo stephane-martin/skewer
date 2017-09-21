@@ -97,7 +97,6 @@ type JournalService struct {
 	stasher   *base.Reporter
 	reader    journald.JournaldReader
 	logger    log15.Logger
-	stopchan  chan struct{}
 	Conf      conf.JournaldConfig
 	wgroup    *sync.WaitGroup
 	generator chan ulid.ULID
@@ -128,54 +127,45 @@ func (s *JournalService) Gather() ([]*dto.MetricFamily, error) {
 func (s *JournalService) Start(test bool) (infos []model.ListenerInfo, err error) {
 	infos = []model.ListenerInfo{}
 	if s.reader == nil {
-		// start the journald reader if needed
+		// create the low level journald reader if needed
 		s.reader, err = journald.NewReader(s.logger)
 		if err != nil {
 			return infos, err
 		}
-		s.reader.Start(s.Conf.Encoding)
 	}
-	s.wgroup.Add(1)
-	s.stopchan = make(chan struct{})
+	s.reader.Start(s.Conf.Encoding)
 
+	s.wgroup.Add(1)
 	go func() {
 		defer s.wgroup.Done()
 
 		var uid ulid.ULID
 		var entry map[string]string
-		var more bool
+		entries := s.reader.Entries()
 
-		for {
-			select {
-			case entry, more = <-s.reader.Entries():
-				if more {
-					uid = <-s.generator
-					s.stasher.Stash(model.TcpUdpParsedMessage{
-						ConfId: s.Conf.ConfID,
-						Uid:    uid.String(),
-						Parsed: EntryToSyslog(entry),
-					})
-					s.metrics.IncomingMsgsCounter.WithLabelValues("journald", "journald", "", "").Inc()
-				} else {
-					return
-				}
-			case <-s.stopchan:
-				return
-			}
+		for entry = range entries {
+			uid = <-s.generator
+			s.stasher.Stash(model.TcpUdpParsedMessage{
+				ConfId: s.Conf.ConfID,
+				Uid:    uid.String(),
+				Parsed: EntryToSyslog(entry),
+			})
+			s.metrics.IncomingMsgsCounter.WithLabelValues("journald", "journald", "", "").Inc()
 		}
 	}()
+
 	s.logger.Debug("Journald service has started")
 	return infos, nil
 }
 
 func (s *JournalService) Stop() {
-	close(s.stopchan)
+	s.reader.Stop() // ask the low-level journal reader to stop sending events to Entries()
 	s.wgroup.Wait()
 }
 
 func (s *JournalService) Shutdown() {
-	s.Stop()
 	s.reader.Shutdown()
+	s.wgroup.Wait()
 }
 
 func (s *JournalService) SetConf(c conf.JournaldConfig) {

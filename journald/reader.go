@@ -4,6 +4,7 @@ package journald
 
 import (
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/coreos/go-systemd/sdjournal"
@@ -21,11 +22,12 @@ type JournaldReader interface {
 }
 
 type reader struct {
-	journal  *sdjournal.Journal
-	entries  chan map[string]string
-	stopchan chan bool
-	wgroup   *sync.WaitGroup
-	logger   log15.Logger
+	journal      *sdjournal.Journal
+	entries      chan map[string]string
+	stopchan     chan struct{}
+	shutdownchan chan struct{}
+	wgroup       *sync.WaitGroup
+	logger       log15.Logger
 }
 
 type Converter func(map[string]string) map[string]string
@@ -66,8 +68,8 @@ func NewReader(logger log15.Logger) (JournaldReader, error) {
 		r.journal.Close()
 		return nil, err
 	}
-	r.entries = make(chan map[string]string)
 	r.wgroup = &sync.WaitGroup{}
+	r.shutdownchan = make(chan struct{})
 	return r, nil
 }
 
@@ -75,25 +77,33 @@ func (r *reader) Entries() chan map[string]string {
 	return r.entries
 }
 
-func (r *reader) wait() chan int {
-	events := make(chan int)
+func (r *reader) wait() chan struct{} {
+	events := make(chan struct{})
 	r.wgroup.Add(1)
 
 	go func() {
 		defer r.wgroup.Done()
 		var ev int
 
-	WaitLoop:
 		for {
 			select {
 			case <-r.stopchan:
-				break WaitLoop
+				close(events)
+				return
+			case <-r.shutdownchan:
+				close(events)
+				return
 			default:
 				ev = r.journal.Wait(time.Second)
 				if ev == sdjournal.SD_JOURNAL_APPEND || ev == sdjournal.SD_JOURNAL_INVALIDATE {
-					events <- ev
 					close(events)
-					break WaitLoop
+					return
+				} else if ev == -int(syscall.EBADF) {
+					r.logger.Debug("journal.Wait returned EBADF") // r.journal was closed
+					close(events)
+					return
+				} else if ev != 0 {
+					r.logger.Debug("journal.Wait event", "code", ev)
 				}
 			}
 		}
@@ -103,11 +113,15 @@ func (r *reader) wait() chan int {
 }
 
 func (r *reader) Start(coding string) {
-	r.stopchan = make(chan bool)
-	r.wgroup.Add(1)
+	r.stopchan = make(chan struct{})
+	r.entries = make(chan map[string]string)
 
+	r.wgroup.Add(1)
 	go func() {
-		defer r.wgroup.Done()
+		defer func() {
+			close(r.entries)
+			r.wgroup.Done()
+		}()
 
 		var err error
 		var nb uint64
@@ -124,13 +138,18 @@ func (r *reader) Start(coding string) {
 				default:
 					nb, err = r.journal.Next()
 					if err != nil {
-						r.logger.Warn("journal.Next() error", "error", err)
+						return
 					} else if nb == 0 {
-						break LoopGetEntries
+						select {
+						case <-r.shutdownchan:
+							return
+						default:
+							break LoopGetEntries
+						}
 					} else {
 						entry, err = r.journal.GetEntry()
 						if err != nil {
-							r.logger.Warn("journal.GetEntry() error", "error", err)
+							return
 						} else {
 							r.entries <- converter(entry.Fields)
 						}
@@ -152,12 +171,17 @@ func (r *reader) Start(coding string) {
 func (r *reader) Stop() {
 	if r.stopchan != nil {
 		close(r.stopchan)
+		r.wgroup.Wait()
 	}
-	r.wgroup.Wait()
 }
 
 func (r *reader) Shutdown() {
-	r.Stop()
-	close(r.entries)
-	r.journal.Close()
+	close(r.shutdownchan)
+	r.wgroup.Wait()
+	if r.stopchan != nil {
+		close(r.stopchan)
+	}
+	go func() {
+		r.journal.Close()
+	}()
 }
