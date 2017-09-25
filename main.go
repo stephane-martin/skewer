@@ -15,51 +15,67 @@ import (
 	"github.com/stephane-martin/skewer/cmd"
 	"github.com/stephane-martin/skewer/services"
 	"github.com/stephane-martin/skewer/sys"
-	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/sys/scomp"
 	"github.com/stephane-martin/skewer/utils/logging"
 )
 
+func getLogger(ctx context.Context, name string, handle int) (log15.Logger, error) {
+	loggerConn, err := net.FileConn(os.NewFile(uintptr(handle), "logger"))
+	if err != nil {
+		return nil, err
+	}
+	err = loggerConn.(*net.UnixConn).SetReadBuffer(65536)
+	if err != nil {
+		return nil, err
+	}
+	err = loggerConn.(*net.UnixConn).SetWriteBuffer(65536)
+	if err != nil {
+		return nil, err
+	}
+	return logging.NewRemoteLogger(ctx, loggerConn).New("proc", name), nil
+}
+
 func main() {
-	getLogger := func(ctx context.Context, name string, handle int) (log15.Logger, error) {
-		loggerConn, err := net.FileConn(os.NewFile(uintptr(handle), "logger"))
+	name := os.Args[0]
+	loggerCtx, cancelLogger := context.WithCancel(context.Background())
+	var logger log15.Logger = nil
+
+	cleanup := func(msg string, err error) {
 		if err != nil {
-			return nil, err
+			if len(msg) == 0 {
+				msg = "Process fatal error"
+			}
+			if logger != nil {
+				logger.Crit(msg, "error", err)
+			}
+			fmt.Fprintln(os.Stderr, name, ":", msg, ":", err.Error())
+			time.Sleep(100 * time.Millisecond)
+			cancelLogger()
+			time.Sleep(100 * time.Millisecond)
+			os.Exit(-1)
+		} else {
+			cancelLogger()
+			time.Sleep(100 * time.Millisecond)
 		}
-		err = loggerConn.(*net.UnixConn).SetReadBuffer(65536)
-		if err != nil {
-			return nil, err
-		}
-		err = loggerConn.(*net.UnixConn).SetWriteBuffer(65536)
-		if err != nil {
-			return nil, err
-		}
-		return logging.NewRemoteLogger(ctx, loggerConn).New("proc", name), nil
 	}
 
-	switch name := os.Args[0]; name {
+	switch name {
 	case "skewer-conf":
 		sys.SetNonDumpable()
+		sys.NoNewPriv()
 		signal.Ignore(syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
 
-		loggerCtx, cancelLogger := context.WithCancel(context.Background())
 		logger, err := getLogger(loggerCtx, name, 3)
 		if err != nil {
-			msg := fmt.Sprintf("Could not create a logger for the configuration service: '%s'", err.Error())
-			utils.W(os.Stdout, "starterror", []byte(msg))
-			time.Sleep(100 * time.Millisecond)
-			cancelLogger()
-			os.Exit(-1)
+			cleanup("Could not create a logger for the configuration service", err)
 		}
-
+		err = scomp.SetupSeccomp(name)
+		if err != nil {
+			cleanup("Seccomp setup error", err)
+		}
 		err = services.LaunchConfProvider(logger)
-		if err == nil {
-			time.Sleep(100 * time.Millisecond)
-			cancelLogger()
-		} else {
-			logger.Crit("ConfigurationProvider encountered a fatal error", "error", err)
-			time.Sleep(100 * time.Millisecond)
-			cancelLogger()
-			os.Exit(-1)
+		if err != nil {
+			cleanup("ConfigurationProvider encountered a fatal error", err)
 		}
 
 	case "confined-skewer-journal":
@@ -68,36 +84,25 @@ func main() {
 		sys.SetNonDumpable()
 		path, err := osext.Executable()
 		if err != nil {
-			msg := fmt.Sprintf("Error getting executable path (%s): %s", name, err)
-			utils.W(os.Stdout, "starterror", []byte(msg))
-			os.Exit(-1)
+			cleanup("Error getting executable path", err)
 		}
 		// mask most of directories, but no pivotroot
 		err = sys.SetJournalFs(path)
 		if err != nil {
-			msg := fmt.Sprintf("mount error (%s): %s", name, err)
-			utils.W(os.Stdout, "starterror", []byte(msg))
-			os.Exit(-1)
+			cleanup("mount error", err)
 		}
 		err = syscall.Sethostname([]byte(name))
 		if err != nil {
-			msg := fmt.Sprintf("sethostname error (%s): %s", name, err)
-			utils.W(os.Stdout, "starterror", []byte(msg))
-			os.Exit(-1)
+			cleanup("sethostname error", err)
 		}
 		// from here we don't need root capabilities in the container
 		err = sys.DropAllCapabilities()
 		if err != nil {
-			msg := fmt.Sprintf("Error dropping caps (%s): %s", name, err)
-			utils.W(os.Stdout, "starterror", []byte(msg))
-			os.Exit(-1)
+			cleanup("Error dropping caps", err)
 		}
-
 		err = syscall.Exec(path, []string{os.Args[0][9:]}, os.Environ())
 		if err != nil {
-			msg := fmt.Sprintf("execve error (%s): %s", name, err)
-			utils.W(os.Stdout, "starterror", []byte(msg))
-			os.Exit(-1)
+			cleanup("execve error", err)
 		}
 
 	case "confined-skewer-tcp", "confined-skewer-udp", "confined-skewer-relp", "confined-skewer-store", "confined-skewer-conf":
@@ -105,53 +110,39 @@ func main() {
 		sys.SetNonDumpable()
 		path, err := osext.Executable()
 		if err != nil {
-			msg := fmt.Sprintf("Error getting executable path (%s): %s", name, err)
-			utils.W(os.Stdout, "starterror", []byte(msg))
-			os.Exit(-1)
+			cleanup("Error getting executable path", err)
 		}
 		root, err := sys.MakeChroot(path)
 		if err != nil {
-			msg := fmt.Sprintf("mount error (%s): %s", name, err)
-			utils.W(os.Stdout, "starterror", []byte(msg))
-			os.Exit(-1)
+			cleanup("mount error", err)
 		}
 		err = sys.PivotRoot(root)
 		if err != nil {
-			msg := fmt.Sprintf("pivotroot error (%s): %s", name, err)
-			utils.W(os.Stdout, "starterror", []byte(msg))
-			os.Exit(-1)
+			cleanup("pivotroot error", err)
 		}
 		err = syscall.Sethostname([]byte(name))
 		if err != nil {
-			msg := fmt.Sprintf("sethostname error (%s): %s", name, err)
-			utils.W(os.Stdout, "starterror", []byte(msg))
-			os.Exit(-1)
+			cleanup("sethostname error", err)
 		}
 		// from here we don't need root capabilities in the container
 		err = sys.DropAllCapabilities()
 		if err != nil {
-			msg := fmt.Sprintf("Error dropping caps (%s): %s", name, err)
-			utils.W(os.Stdout, "starterror", []byte(msg))
-			os.Exit(-1)
+			cleanup("Error dropping caps", err)
 		}
 
 		err = syscall.Exec(path, []string{os.Args[0][9:]}, os.Environ())
 		if err != nil {
-			msg := fmt.Sprintf("execve error (%s): %s", name, err)
-			utils.W(os.Stdout, "starterror", []byte(msg))
-			os.Exit(-1)
+			cleanup("execve error", err)
 		}
 
 	case "skewer-tcp", "skewer-udp", "skewer-relp", "skewer-journal", "skewer-audit", "skewer-store":
-		sys.SetNonDumpable()
 		signal.Ignore(syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
+		sys.SetNonDumpable()
+		sys.NoNewPriv()
 
 		var binderClient *sys.BinderClient
 		var pipe *os.File
 		var err error
-
-		loggerCtx, cancelLogger := context.WithCancel(context.Background())
-		logger := log15.New()
 
 		if os.Getenv("SKEWER_HAS_BINDER") == "TRUE" {
 			if os.Getenv("SKEWER_HAS_LOGGER") == "TRUE" {
@@ -173,23 +164,15 @@ func main() {
 		}
 
 		if err != nil {
-			msg := fmt.Sprintf("Could not create logger for plugin (%s): '%s'", name, err.Error())
-			utils.W(os.Stdout, "starterror", []byte(msg))
-			time.Sleep(100 * time.Millisecond)
-			cancelLogger()
-			os.Exit(-1)
+			cleanup("Could not create logger for plugin", err)
 		}
-
-		err = services.Launch(services.NetworkServiceMap[name], os.Getenv("SKEWER_TEST") == "TRUE", binderClient, logger, pipe)
-
+		err = scomp.SetupSeccomp(name)
 		if err != nil {
-			logger.Crit("Plugin encountered a fatal error", "type", name, "error", err)
-			time.Sleep(100 * time.Millisecond)
-			cancelLogger()
-			os.Exit(-1)
-		} else {
-			time.Sleep(100 * time.Millisecond)
-			cancelLogger()
+			cleanup("Seccomp setup error", err)
+		}
+		err = services.Launch(services.NetworkServiceMap[name], os.Getenv("SKEWER_TEST") == "TRUE", binderClient, logger, pipe)
+		if err != nil {
+			cleanup("Plugin encountered a fatal error", err)
 		}
 
 	default:
@@ -199,33 +182,25 @@ func main() {
 
 			applied, err := sys.Predrop()
 			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				os.Exit(-1)
-				return
+				cleanup("Error pre-dropping capabilities", err)
 			}
 
 			if applied {
-				exe, err := os.Executable()
+				exe, err := osext.Executable()
 				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					os.Exit(-1)
+					cleanup("Error getting executable path", err)
 				}
-				envs := os.Environ()
-				args := os.Args
-				err = syscall.Exec(exe, args, envs)
+				err = syscall.Exec(exe, os.Args, os.Environ())
 				if err != nil {
-					fmt.Fprintln(os.Stderr, "Error executing self")
-					fmt.Fprintln(os.Stderr, "- Capabilities")
-					fmt.Fprintln(os.Stderr, sys.GetCaps())
-					fmt.Fprintf(os.Stderr, "- Exe='%s'\n", exe)
-					fmt.Fprintf(os.Stderr, "- Args='%s'\n", args)
-					fmt.Fprintf(os.Stderr, "- Env='%s'\n", envs)
-					fmt.Fprintf(os.Stderr, "- Error='%s'\n", err)
-					os.Exit(-1)
+					cleanup("Error re-executing self", err)
 				}
 			}
-
+		}
+		err := scomp.SetupSeccomp("parent")
+		if err != nil {
+			cleanup("Error setting up seccomp", err)
 		}
 		cmd.Execute()
 	}
+	cleanup("", nil)
 }

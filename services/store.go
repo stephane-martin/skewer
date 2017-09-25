@@ -42,12 +42,12 @@ func NewStoreService(l log15.Logger, pipe *os.File) StoreService {
 		return nil
 	}
 	impl := &storeServiceImpl{
-		logger:   l,
+		reader:   msgp.NewReader(pipe),
+		ingestwg: &sync.WaitGroup{},
 		mu:       &sync.Mutex{},
 		status:   false,
 		pipe:     pipe,
-		reader:   msgp.NewReader(pipe),
-		ingestwg: &sync.WaitGroup{},
+		logger:   l,
 	}
 	impl.shutdownCtx, impl.shutdownStore = context.WithCancel(context.Background())
 	return impl

@@ -141,6 +141,7 @@ func (s *PluginController) Shutdown(killTimeOut time.Duration) {
 		return
 	}
 	s.createdMu.Unlock()
+	name := ReverseNetworkServiceMap[s.typ]
 
 	select {
 	case <-s.ShutdownChan:
@@ -150,7 +151,7 @@ func (s *PluginController) Shutdown(killTimeOut time.Duration) {
 		// ask to shutdown
 		err := s.W("shutdown", utils.NOW)
 		if err != nil {
-			s.logger.Warn("Error writing shutdown to plugin stdin. Kill brutally.", "error", err)
+			s.logger.Warn("Error writing shutdown to plugin stdin. Kill brutally.", "error", err, "type", name)
 			killTimeOut = time.Second
 		}
 
@@ -164,7 +165,7 @@ func (s *PluginController) Shutdown(killTimeOut time.Duration) {
 				<-s.StopChan
 			case <-time.After(killTimeOut):
 				// after timeout kill the process
-				s.logger.Warn("Plugin failed to shutdown before timeout")
+				s.logger.Warn("Plugin failed to shutdown before timeout", "type", name)
 				s.kill(false)
 				<-s.ShutdownChan
 				<-s.StopChan
@@ -423,9 +424,9 @@ func (s *PluginController) listen() chan InfosAndError {
 }
 
 func (s *PluginController) Start() ([]model.ListenerInfo, error) {
+	name := ReverseNetworkServiceMap[s.typ]
 	s.createdMu.Lock()
 	s.startedMu.Lock()
-	name := ReverseNetworkServiceMap[s.typ]
 	if !s.created {
 		s.startedMu.Unlock()
 		s.createdMu.Unlock()
@@ -450,8 +451,9 @@ func (s *PluginController) Start() ([]model.ListenerInfo, error) {
 		case infoserr := <-s.listen():
 			rerr = infoserr.err
 			infos = infoserr.infos
-		case <-time.After(3 * time.Second):
-			rerr = fmt.Errorf("Plugin failed to start before timeout")
+		case <-time.After(5 * time.Second):
+			close(s.StopChan)
+			rerr = fmt.Errorf("Plugin '%s' failed to start before timeout", name)
 		}
 	}
 
@@ -463,6 +465,7 @@ func (s *PluginController) Start() ([]model.ListenerInfo, error) {
 	} else {
 		s.startedMu.Unlock()
 		s.createdMu.Unlock()
+		s.logger.Error("Start error", "error", rerr, "type", name)
 		s.Shutdown(3 * time.Second)
 		return nil, rerr
 	}
