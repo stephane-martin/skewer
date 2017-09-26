@@ -7,7 +7,7 @@ import (
 
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/conf"
-	"github.com/stephane-martin/skewer/sys"
+	"github.com/stephane-martin/skewer/sys/binder"
 )
 
 type Connection interface {
@@ -18,7 +18,7 @@ type BaseService struct {
 	SyslogConfigs   []conf.SyslogConfig
 	ParserConfigs   []conf.ParserConfig
 	Logger          log15.Logger
-	Binder          *sys.BinderClient
+	Binder          *binder.BinderClient
 	UnixSocketPaths []string
 	Protocol        string
 	Connections     map[Connection]bool

@@ -11,7 +11,7 @@ import (
 	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/services/linux"
 	"github.com/stephane-martin/skewer/services/network"
-	"github.com/stephane-martin/skewer/sys"
+	"github.com/stephane-martin/skewer/sys/binder"
 )
 
 type NetworkServiceType int
@@ -68,7 +68,7 @@ func ConfigureAndStartService(s NetworkService, c conf.BaseConfig, test bool) ([
 
 }
 
-func Factory(t NetworkServiceType, reporter *base.Reporter, gen chan ulid.ULID, b *sys.BinderClient, l log15.Logger, pipe *os.File) NetworkService {
+func Factory(t NetworkServiceType, reporter *base.Reporter, gen chan ulid.ULID, b *binder.BinderClient, l log15.Logger, pipe *os.File) NetworkService {
 	switch t {
 	case TCP:
 		return network.NewTcpService(reporter, gen, b, l)

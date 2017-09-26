@@ -1,6 +1,6 @@
 // +build linux
 
-package sys
+package capabilities
 
 /*
 #include <sys/types.h>
@@ -16,6 +16,7 @@ import (
 
 	"github.com/hashicorp/go-version"
 	"github.com/shirou/gopsutil/host"
+	"github.com/stephane-martin/skewer/sys"
 	"github.com/syndtr/gocapability/capability"
 	"golang.org/x/sys/unix"
 )
@@ -42,7 +43,6 @@ func Setgid(gid int) {
 
 func NoNewPriv() error {
 	return unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
-	//return nil
 }
 
 func DropAllCapabilities() error {
@@ -112,7 +112,6 @@ func Predrop() (bool, error) {
 	}
 
 	if applied {
-
 		// make the current capabilities "ambient" (needs linux kernel 4.3), so
 		// that we can execve ourself and keep the caps
 		c.caps.Clear(capability.AMBIENT)
@@ -138,7 +137,7 @@ func Predrop() (bool, error) {
 }
 
 func NeedFixLinuxPrivileges(uid, gid string) (bool, error) {
-	numuid, _, err := LookupUid(uid, gid)
+	numuid, _, err := sys.LookupUid(uid, gid)
 	if err != nil {
 		return false, err
 	}
@@ -151,7 +150,7 @@ func NeedFixLinuxPrivileges(uid, gid string) (bool, error) {
 }
 
 func FixLinuxPrivileges(uid, gid string) error {
-	numuid, numgid, err := LookupUid(uid, gid)
+	numuid, numgid, err := sys.LookupUid(uid, gid)
 	if err != nil {
 		return err
 	}

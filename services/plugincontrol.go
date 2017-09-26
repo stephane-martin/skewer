@@ -18,7 +18,7 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/consul"
 	"github.com/stephane-martin/skewer/model"
-	"github.com/stephane-martin/skewer/sys"
+	"github.com/stephane-martin/skewer/sys/namespaces"
 	"github.com/stephane-martin/skewer/utils"
 )
 
@@ -538,7 +538,7 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath string, co
 			return err
 		}
 
-		err = sys.StartInNamespaces(s.cmd, dumpable, "", "")
+		err = namespaces.StartInNamespaces(s.cmd, dumpable, "", "")
 
 		if err != nil {
 			s.logger.Warn("Starting plugin in user namespace failed", "error", err, "type", name)
@@ -568,7 +568,7 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath string, co
 			return err
 		}
 
-		err = sys.StartInNamespaces(s.cmd, dumpable, storePath, "")
+		err = namespaces.StartInNamespaces(s.cmd, dumpable, storePath, "")
 
 		if err != nil {
 			s.logger.Warn("Starting plugin in user namespace failed", "error", err, "type", name)
@@ -597,7 +597,7 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath string, co
 			return err
 		}
 
-		err = sys.StartInNamespaces(s.cmd, dumpable, "", "")
+		err = namespaces.StartInNamespaces(s.cmd, dumpable, "", "")
 
 		if err != nil {
 			s.logger.Warn("Starting plugin in user namespace failed", "error", err, "type", name)

@@ -1,3 +1,5 @@
+// +build linux
+
 package scomp
 
 //go:generate goderive .

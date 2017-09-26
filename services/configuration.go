@@ -16,7 +16,7 @@ import (
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/consul"
-	"github.com/stephane-martin/skewer/sys"
+	"github.com/stephane-martin/skewer/sys/namespaces"
 	"github.com/stephane-martin/skewer/utils"
 )
 
@@ -87,7 +87,7 @@ func (c *ConfigurationService) Start() error {
 	}
 	c.stdin = stdin
 
-	err = sys.StartInNamespaces(cmd, false, "", c.confdir)
+	err = namespaces.StartInNamespaces(cmd, false, "", c.confdir)
 	if err != nil {
 		c.logger.Warn("Starting configuration service in user namespace has failed", "error", err)
 		cmd, stdin, stdout, err = setupCmd("skewer-conf", 0, c.loggerHandle, nil, false)

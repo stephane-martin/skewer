@@ -16,7 +16,7 @@ import (
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/services/errors"
-	"github.com/stephane-martin/skewer/sys"
+	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/utils"
 )
 
@@ -69,7 +69,7 @@ type TcpServiceImpl struct {
 	registry   *prometheus.Registry
 }
 
-func NewTcpService(reporter *base.Reporter, gen chan ulid.ULID, b *sys.BinderClient, l log15.Logger) *TcpServiceImpl {
+func NewTcpService(reporter *base.Reporter, gen chan ulid.ULID, b *binder.BinderClient, l log15.Logger) *TcpServiceImpl {
 	s := TcpServiceImpl{
 		status:    TcpStopped,
 		reporter:  reporter,

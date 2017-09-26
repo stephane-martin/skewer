@@ -1,6 +1,6 @@
 // +build linux
 
-package sys
+package namespaces
 
 import (
 	"fmt"
@@ -11,7 +11,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/EricLagergren/go-gnulib/ttyname"
+	dump "github.com/stephane-martin/skewer/sys/dumpable"
 	"github.com/stephane-martin/skewer/utils"
 )
 
@@ -24,21 +24,7 @@ type mountPoint struct {
 }
 
 func StartInNamespaces(command *exec.Cmd, dumpable bool, storePath string, confDir string) error {
-	myTtyName := ""
-	if ttyname.IsAtty(1) {
-		myTtyName, _ = ttyname.TtyName(1)
-		command.Env = append(command.Env, fmt.Sprintf("SKEWER_TTYNAME=%s", myTtyName))
-	}
-
-	confDir = strings.TrimSpace(confDir)
-	if len(confDir) > 0 {
-		command.Env = append(command.Env, fmt.Sprintf("SKEWER_CONF_DIR=%s", confDir))
-	}
-
-	storePath = strings.TrimSpace(storePath)
-	if len(storePath) > 0 {
-		command.Env = append(command.Env, fmt.Sprintf("SKEWER_STORE_PATH=%s", storePath))
-	}
+	command.Env = append(command.Env, setupEnv(storePath, confDir)...)
 
 	command.SysProcAttr = &syscall.SysProcAttr{
 		Cloneflags: syscall.CLONE_NEWUSER | syscall.CLONE_NEWPID | syscall.CLONE_NEWUTS | syscall.CLONE_NEWNS,
@@ -61,11 +47,11 @@ func StartInNamespaces(command *exec.Cmd, dumpable bool, storePath string, confD
 
 	// TODO: DUMPABLE should only be set in the child, just to write uid_map
 	if !dumpable {
-		SetDumpable()
+		dump.SetDumpable()
 	}
 	err := command.Start()
 	if !dumpable {
-		SetNonDumpable()
+		dump.SetNonDumpable()
 	}
 	return err
 }

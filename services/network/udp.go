@@ -14,7 +14,7 @@ import (
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/services/errors"
-	"github.com/stephane-martin/skewer/sys"
+	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/utils"
 )
 
@@ -69,7 +69,7 @@ func NewUdpMetrics() *udpMetrics {
 	return m
 }
 
-func NewUdpService(stasher *base.Reporter, gen chan ulid.ULID, b *sys.BinderClient, l log15.Logger) *UdpServiceImpl {
+func NewUdpService(stasher *base.Reporter, gen chan ulid.ULID, b *binder.BinderClient, l log15.Logger) *UdpServiceImpl {
 	s := UdpServiceImpl{
 		status:    UdpStopped,
 		metrics:   NewUdpMetrics(),
@@ -155,8 +155,8 @@ func (s *UdpServiceImpl) ListenPacket() []model.ListenerInfo {
 						Protocol:       s.Protocol,
 					})
 					s.UnixSocketPaths = append(s.UnixSocketPaths, syslogConf.UnixSocketPath)
-					conn.(*sys.FilePacketConn).PacketConn.(*net.UnixConn).SetReadBuffer(65536)
-					conn.(*sys.FilePacketConn).PacketConn.(*net.UnixConn).SetWriteBuffer(65536)
+					conn.(*binder.FilePacketConn).PacketConn.(*net.UnixConn).SetReadBuffer(65536)
+					conn.(*binder.FilePacketConn).PacketConn.(*net.UnixConn).SetWriteBuffer(65536)
 					s.wg.Add(1)
 					go s.handleConnection(conn, syslogConf)
 				}
@@ -172,8 +172,8 @@ func (s *UdpServiceImpl) ListenPacket() []model.ListenerInfo {
 						Port:     syslogConf.Port,
 						Protocol: syslogConf.Protocol,
 					})
-					conn.(*sys.FilePacketConn).PacketConn.(*net.UDPConn).SetReadBuffer(65536)
-					conn.(*sys.FilePacketConn).PacketConn.(*net.UDPConn).SetReadBuffer(65536)
+					conn.(*binder.FilePacketConn).PacketConn.(*net.UDPConn).SetReadBuffer(65536)
+					conn.(*binder.FilePacketConn).PacketConn.(*net.UDPConn).SetReadBuffer(65536)
 					s.wg.Add(1)
 					go s.handleConnection(conn, syslogConf)
 				}

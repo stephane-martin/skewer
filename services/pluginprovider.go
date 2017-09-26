@@ -12,11 +12,11 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/services/base"
-	"github.com/stephane-martin/skewer/sys"
+	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/utils"
 )
 
-func Launch(typ NetworkServiceType, test bool, binderClient *sys.BinderClient, logger log15.Logger, pipe *os.File) error {
+func Launch(typ NetworkServiceType, test bool, binderClient *binder.BinderClient, logger log15.Logger, pipe *os.File) error {
 	generator := utils.Generator(context.Background(), logger)
 
 	var command string

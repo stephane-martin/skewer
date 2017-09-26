@@ -1,6 +1,6 @@
 // +build linux
 
-package sys
+package dumpable
 
 import "golang.org/x/sys/unix"
 

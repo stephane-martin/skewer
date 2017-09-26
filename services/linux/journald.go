@@ -14,7 +14,7 @@ import (
 	"github.com/stephane-martin/skewer/journald"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/base"
-	"github.com/stephane-martin/skewer/sys"
+	"github.com/stephane-martin/skewer/sys/capabilities"
 )
 
 func EntryToSyslog(entry map[string]string) model.ParsedMessage {
@@ -114,8 +114,8 @@ func NewJournalService(stasher *base.Reporter, gen chan ulid.ULID, l log15.Logge
 		wgroup:    &sync.WaitGroup{},
 	}
 	s.registry.MustRegister(s.metrics.IncomingMsgsCounter)
-	if sys.CapabilitiesSupported {
-		l.Debug("Capabilities", "caps", sys.GetCaps())
+	if capabilities.CapabilitiesSupported {
+		l.Debug("Capabilities", "caps", capabilities.GetCaps())
 	}
 	return &s, nil
 }

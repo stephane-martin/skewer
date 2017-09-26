@@ -25,6 +25,9 @@ import (
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services"
 	"github.com/stephane-martin/skewer/sys"
+	"github.com/stephane-martin/skewer/sys/binder"
+	"github.com/stephane-martin/skewer/sys/capabilities"
+	"github.com/stephane-martin/skewer/sys/dumpable"
 	"github.com/stephane-martin/skewer/utils/logging"
 )
 
@@ -81,7 +84,7 @@ func runserve() {
 	}
 
 	if !dumpableFlag {
-		err := sys.SetNonDumpable()
+		err := dumpable.SetNonDumpable()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error setting PR_SET_DUMPABLE: %s\n", err)
 		}
@@ -89,7 +92,7 @@ func runserve() {
 
 	if os.Getenv("SKEWER_LINUX_CHILD") == "TRUE" {
 		// we are in the final child on linux
-		err := sys.NoNewPriv()
+		err := capabilities.NoNewPriv()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(-1)
@@ -104,12 +107,12 @@ func runserve() {
 
 	if os.Getenv("SKEWER_CHILD") == "TRUE" {
 		// we are in the child
-		if sys.CapabilitiesSupported {
+		if capabilities.CapabilitiesSupported {
 			// another execve is necessary on Linux to ensure that
 			// the following capability drop will be effective on
 			// all go threads
 			runtime.LockOSThread()
-			err := sys.DropNetBind()
+			err := capabilities.DropNetBind()
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 			}
@@ -124,7 +127,7 @@ func runserve() {
 				os.Exit(-1)
 			}
 		} else {
-			err := sys.NoNewPriv()
+			err := capabilities.NoNewPriv()
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				os.Exit(-1)
@@ -139,10 +142,10 @@ func runserve() {
 	}
 
 	// we are in the parent
-	if sys.CapabilitiesSupported {
+	if capabilities.CapabilitiesSupported {
 		// under Linux, re-exec ourself immediately with fewer privileges
 		runtime.LockOSThread()
-		need_fix, err := sys.NeedFixLinuxPrivileges(uidFlag, gidFlag)
+		need_fix, err := capabilities.NeedFixLinuxPrivileges(uidFlag, gidFlag)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(-1)
@@ -153,15 +156,15 @@ func runserve() {
 				fmt.Fprintln(os.Stderr, "Uid", os.Getuid())
 				fmt.Fprintln(os.Stderr, "Gid", os.Getgid())
 				fmt.Fprintln(os.Stderr, "Capabilities")
-				fmt.Fprintln(os.Stderr, sys.GetCaps())
+				fmt.Fprintln(os.Stderr, capabilities.GetCaps())
 				os.Exit(-1)
 			}
-			err = sys.FixLinuxPrivileges(uidFlag, gidFlag)
+			err = capabilities.FixLinuxPrivileges(uidFlag, gidFlag)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				os.Exit(-1)
 			}
-			err = sys.NoNewPriv()
+			err = capabilities.NoNewPriv()
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				os.Exit(-1)
@@ -215,7 +218,7 @@ func runserve() {
 	binderUdpHandle, binderParentUdpHandle := mustSocketPair(syscall.SOCK_STREAM)
 	binderRelpHandle, binderParentRelpHandle := mustSocketPair(syscall.SOCK_STREAM)
 
-	err = sys.Binder([]int{binderParentHandle, binderParentTcpHandle, binderParentUdpHandle, binderParentRelpHandle}, logger) // returns immediately
+	err = binder.Binder([]int{binderParentHandle, binderParentTcpHandle, binderParentUdpHandle, binderParentRelpHandle}, logger) // returns immediately
 	if err != nil {
 		logger.Crit("Error setting the root binder", "error", err)
 		os.Exit(-1)
@@ -327,11 +330,11 @@ func Serve() error {
 	logger = logging.NewRemoteLogger(loggerCtx, loggerConn).New("proc", "child")
 
 	logger.Debug("Serve() runs under user", "uid", os.Getuid(), "gid", os.Getgid())
-	if sys.CapabilitiesSupported {
-		logger.Debug("Capabilities", "caps", sys.GetCaps())
+	if capabilities.CapabilitiesSupported {
+		logger.Debug("Capabilities", "caps", capabilities.GetCaps())
 	}
 
-	binderClient, err := sys.NewBinderClient(binderFile, logger)
+	binderClient, err := binder.NewBinderClient(binderFile, logger)
 	if err != nil {
 		logger.Error("Error binding to the root parent socket", "error", err)
 		binderClient = nil
@@ -418,7 +421,7 @@ func Serve() error {
 		if auditlogs.Supported {
 			logger.Info("Linux audit logs are supported")
 			if c.Audit.Enabled {
-				if !sys.CanReadAuditLogs() {
+				if !capabilities.CanReadAuditLogs() {
 					logger.Info("Audit logs are requested, but the needed Linux Capability is not present. Disabling.")
 				} else if sys.HasAnyProcess([]string{"go-audit", "auditd"}) {
 					logger.Warn("Audit logs are requested, but go-audit or auditd process is already running, so we disable audit logs in skewer")

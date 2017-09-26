@@ -22,7 +22,8 @@ import (
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/services/errors"
-	"github.com/stephane-martin/skewer/sys"
+	"github.com/stephane-martin/skewer/sys/binder"
+	"github.com/stephane-martin/skewer/sys/capabilities"
 	"github.com/stephane-martin/skewer/utils"
 )
 
@@ -117,14 +118,14 @@ type RelpService struct {
 	impl     *RelpServiceImpl
 	logger   log15.Logger
 	reporter *base.Reporter
-	b        *sys.BinderClient
+	b        *binder.BinderClient
 	sc       []conf.SyslogConfig
 	pc       []conf.ParserConfig
 	kc       conf.KafkaConfig
 	wg       *sync.WaitGroup
 }
 
-func NewRelpService(r *base.Reporter, b *sys.BinderClient, l log15.Logger) *RelpService {
+func NewRelpService(r *base.Reporter, b *binder.BinderClient, l log15.Logger) *RelpService {
 	s := &RelpService{b: b, logger: l, reporter: r, wg: &sync.WaitGroup{}}
 	s.impl = NewRelpServiceImpl(s.b, s.logger)
 	return s
@@ -137,8 +138,8 @@ func (s *RelpService) Gather() ([]*dto.MetricFamily, error) {
 func (s *RelpService) Start(test bool) (infos []model.ListenerInfo, err error) {
 	// the Relp service manages registration in Consul by itself and
 	// therefore does not report infos
-	if sys.CapabilitiesSupported {
-		s.logger.Debug("Capabilities", "caps", sys.GetCaps())
+	if capabilities.CapabilitiesSupported {
+		s.logger.Debug("Capabilities", "caps", capabilities.GetCaps())
 	}
 	infos = []model.ListenerInfo{}
 	s.impl = NewRelpServiceImpl(s.b, s.logger)
@@ -210,7 +211,7 @@ type RelpServiceImpl struct {
 	registry    *prometheus.Registry
 }
 
-func NewRelpServiceImpl(b *sys.BinderClient, logger log15.Logger) *RelpServiceImpl {
+func NewRelpServiceImpl(b *binder.BinderClient, logger log15.Logger) *RelpServiceImpl {
 	s := RelpServiceImpl{status: Stopped, metrics: NewRelpMetrics(), registry: prometheus.NewRegistry()}
 	s.StreamingService.init()
 	s.registry.MustRegister(

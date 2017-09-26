@@ -14,7 +14,10 @@ import (
 	"github.com/kardianos/osext"
 	"github.com/stephane-martin/skewer/cmd"
 	"github.com/stephane-martin/skewer/services"
-	"github.com/stephane-martin/skewer/sys"
+	"github.com/stephane-martin/skewer/sys/binder"
+	"github.com/stephane-martin/skewer/sys/capabilities"
+	"github.com/stephane-martin/skewer/sys/dumpable"
+	"github.com/stephane-martin/skewer/sys/namespaces"
 	"github.com/stephane-martin/skewer/sys/scomp"
 	"github.com/stephane-martin/skewer/utils/logging"
 )
@@ -61,8 +64,8 @@ func main() {
 
 	switch name {
 	case "skewer-conf":
-		sys.SetNonDumpable()
-		sys.NoNewPriv()
+		dumpable.SetNonDumpable()
+		capabilities.NoNewPriv()
 		signal.Ignore(syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
 
 		logger, err := getLogger(loggerCtx, name, 3)
@@ -81,13 +84,13 @@ func main() {
 	case "confined-skewer-journal":
 		// journal is a special case, as /run/log/journal and /var/log/journal
 		// can not be bind-mounted (probably because of setgid bits)
-		sys.SetNonDumpable()
+		dumpable.SetNonDumpable()
 		path, err := osext.Executable()
 		if err != nil {
 			cleanup("Error getting executable path", err)
 		}
 		// mask most of directories, but no pivotroot
-		err = sys.SetJournalFs(path)
+		err = namespaces.SetJournalFs(path)
 		if err != nil {
 			cleanup("mount error", err)
 		}
@@ -96,7 +99,7 @@ func main() {
 			cleanup("sethostname error", err)
 		}
 		// from here we don't need root capabilities in the container
-		err = sys.DropAllCapabilities()
+		err = capabilities.DropAllCapabilities()
 		if err != nil {
 			cleanup("Error dropping caps", err)
 		}
@@ -106,28 +109,31 @@ func main() {
 		}
 
 	case "confined-skewer-tcp", "confined-skewer-udp", "confined-skewer-relp", "confined-skewer-store", "confined-skewer-conf":
-		// we are root inside the user namespace that was created by plugin control
-		sys.SetNonDumpable()
 		path, err := osext.Executable()
 		if err != nil {
 			cleanup("Error getting executable path", err)
 		}
-		root, err := sys.MakeChroot(path)
-		if err != nil {
-			cleanup("mount error", err)
-		}
-		err = sys.PivotRoot(root)
-		if err != nil {
-			cleanup("pivotroot error", err)
-		}
-		err = syscall.Sethostname([]byte(name))
-		if err != nil {
-			cleanup("sethostname error", err)
-		}
-		// from here we don't need root capabilities in the container
-		err = sys.DropAllCapabilities()
-		if err != nil {
-			cleanup("Error dropping caps", err)
+		if capabilities.CapabilitiesSupported {
+			// we are root inside the user namespace that was created by plugin control
+			dumpable.SetNonDumpable()
+
+			root, err := namespaces.MakeChroot(path)
+			if err != nil {
+				cleanup("mount error", err)
+			}
+			err = namespaces.PivotRoot(root)
+			if err != nil {
+				cleanup("pivotroot error", err)
+			}
+			err = syscall.Sethostname([]byte(name))
+			if err != nil {
+				cleanup("sethostname error", err)
+			}
+			// from here we don't need root capabilities in the container
+			err = capabilities.DropAllCapabilities()
+			if err != nil {
+				cleanup("Error dropping caps", err)
+			}
 		}
 
 		err = syscall.Exec(path, []string{os.Args[0][9:]}, os.Environ())
@@ -137,10 +143,10 @@ func main() {
 
 	case "skewer-tcp", "skewer-udp", "skewer-relp", "skewer-journal", "skewer-audit", "skewer-store":
 		signal.Ignore(syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
-		sys.SetNonDumpable()
-		sys.NoNewPriv()
+		dumpable.SetNonDumpable()
+		capabilities.NoNewPriv()
 
-		var binderClient *sys.BinderClient
+		var binderClient *binder.BinderClient
 		var pipe *os.File
 		var err error
 
@@ -153,7 +159,7 @@ func main() {
 			} else if os.Getenv("SKEWER_HAS_PIPE") == "TRUE" {
 				pipe = os.NewFile(4, "pipe")
 			}
-			binderClient, _ = sys.NewBinderClient(os.NewFile(3, "binder"), logger)
+			binderClient, _ = binder.NewBinderClient(os.NewFile(3, "binder"), logger)
 		} else if os.Getenv("SKEWER_HAS_LOGGER") == "TRUE" {
 			logger, err = getLogger(loggerCtx, name, 3)
 			if os.Getenv("SKEWER_HAS_PIPE") == "TRUE" {
@@ -176,11 +182,11 @@ func main() {
 		}
 
 	default:
-		if sys.CapabilitiesSupported {
+		if capabilities.CapabilitiesSupported {
 			runtime.LockOSThread()
 			// very early we drop most of linux capabilities
 
-			applied, err := sys.Predrop()
+			applied, err := capabilities.Predrop()
 			if err != nil {
 				cleanup("Error pre-dropping capabilities", err)
 			}
@@ -195,11 +201,13 @@ func main() {
 					cleanup("Error re-executing self", err)
 				}
 			}
+
+			err = scomp.SetupSeccomp("parent")
+			if err != nil {
+				cleanup("Error setting up seccomp", err)
+			}
 		}
-		err := scomp.SetupSeccomp("parent")
-		if err != nil {
-			cleanup("Error setting up seccomp", err)
-		}
+
 		cmd.Execute()
 	}
 	cleanup("", nil)

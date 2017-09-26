@@ -9,7 +9,7 @@ import (
 	"github.com/hashicorp/go-version"
 	"github.com/shirou/gopsutil/host"
 	"github.com/spf13/cobra"
-	"github.com/stephane-martin/skewer/sys"
+	"github.com/stephane-martin/skewer/sys/capabilities"
 	"github.com/syndtr/gocapability/capability"
 )
 
@@ -37,7 +37,7 @@ to quickly create a Cobra application.`,
 			fmt.Println("audit_read", caps.Get(capability.EFFECTIVE, capability.CAP_AUDIT_READ))
 			fmt.Println("lockmem", caps.Get(capability.EFFECTIVE, capability.CAP_IPC_LOCK))
 
-			err = sys.Drop(1000, 1000)
+			err = capabilities.Drop(1000, 1000)
 			if err != nil {
 				fmt.Println("dropping caps failed:", err)
 			}
