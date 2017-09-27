@@ -17,7 +17,6 @@ import (
 	"github.com/inconshreveable/log15"
 	"github.com/kardianos/osext"
 	"github.com/spf13/cobra"
-	"github.com/stephane-martin/skewer/auditlogs"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/consul"
 	"github.com/stephane-martin/skewer/journald"
@@ -417,36 +416,38 @@ func Serve() error {
 	auditServicePlugin := services.NewPluginController(services.Audit, st, consulRegistry, 0, 12, logger)
 	journalServicePlugin := services.NewPluginController(services.Journal, st, consulRegistry, 0, 11, logger)
 
-	startAudit := func(curconf *conf.BaseConfig) {
-		if auditlogs.Supported {
-			logger.Info("Linux audit logs are supported")
-			if c.Audit.Enabled {
-				if !capabilities.CanReadAuditLogs() {
-					logger.Info("Audit logs are requested, but the needed Linux Capability is not present. Disabling.")
-				} else if sys.HasAnyProcess([]string{"go-audit", "auditd"}) {
-					logger.Warn("Audit logs are requested, but go-audit or auditd process is already running, so we disable audit logs in skewer")
-				} else {
-					logger.Info("Linux audit logs are enabled")
-					err := auditServicePlugin.Create(testFlag, dumpableFlag, "", "")
-					if err != nil {
-						logger.Warn("Error creating Audit plugin", "error", err)
-						return
-					}
-					auditServicePlugin.SetConf(*curconf)
-					_, err = auditServicePlugin.Start()
-					if err == nil {
-						logger.Debug("Linux audit plugin has been started")
+	/*
+		startAudit := func(curconf *conf.BaseConfig) {
+			if auditlogs.Supported {
+				logger.Info("Linux audit logs are supported")
+				if c.Audit.Enabled {
+					if !capabilities.CanReadAuditLogs() {
+						logger.Info("Audit logs are requested, but the needed Linux Capability is not present. Disabling.")
+					} else if sys.HasAnyProcess([]string{"go-audit", "auditd"}) {
+						logger.Warn("Audit logs are requested, but go-audit or auditd process is already running, so we disable audit logs in skewer")
 					} else {
-						logger.Error("Error starting Linux Audit plugin", "error", err)
+						logger.Info("Linux audit logs are enabled")
+						err := auditServicePlugin.Create(testFlag, dumpableFlag, "", "")
+						if err != nil {
+							logger.Warn("Error creating Audit plugin", "error", err)
+							return
+						}
+						auditServicePlugin.SetConf(*curconf)
+						_, err = auditServicePlugin.Start()
+						if err == nil {
+							logger.Debug("Linux audit plugin has been started")
+						} else {
+							logger.Error("Error starting Linux Audit plugin", "error", err)
+						}
 					}
+				} else {
+					logger.Info("Linux audit logs are disabled (not requested or not Linux)")
 				}
 			} else {
-				logger.Info("Linux audit logs are disabled (not requested or not Linux)")
+				logger.Info("Linux audit logs are not supported")
 			}
-		} else {
-			logger.Info("Linux audit logs are not supported")
 		}
-	}
+	*/
 
 	startJournal := func(curconf *conf.BaseConfig) {
 		// retrieve messages from journald
@@ -551,11 +552,13 @@ func Serve() error {
 		}
 	}
 
-	stopAudit := func() {
-		if auditlogs.Supported && c.Audit.Enabled {
-			auditServicePlugin.Shutdown(3 * time.Second)
+	/*
+		stopAudit := func() {
+			if auditlogs.Supported && c.Audit.Enabled {
+				auditServicePlugin.Shutdown(3 * time.Second)
+			}
 		}
-	}
+	*/
 
 	Reload := func(newConf *conf.BaseConfig) (fatal error) {
 		logger.Info("Reloading configuration")
@@ -581,15 +584,16 @@ func Serve() error {
 				wg.Done()
 			}()
 		}
-
-		if auditlogs.Supported {
-			wg.Add(1)
-			go func() {
-				stopAudit()
-				startAudit(newConf)
-				wg.Done()
-			}()
-		}
+		/*
+			if auditlogs.Supported {
+				wg.Add(1)
+				go func() {
+					stopAudit()
+					startAudit(newConf)
+					wg.Done()
+				}()
+			}
+		*/
 
 		// reset the RELP service
 		wg.Add(1)
@@ -636,8 +640,8 @@ func Serve() error {
 		stopJournal(true)
 		logger.Debug("Stopped journald service")
 
-		stopAudit()
-		logger.Debug("Stopped linux audit service")
+		//stopAudit()
+		//logger.Debug("Stopped linux audit service")
 
 		stopTCP()
 		logger.Debug("The TCP service has been stopped")
@@ -659,7 +663,7 @@ func Serve() error {
 	defer destructor()
 
 	startJournal(c)
-	startAudit(c)
+	//startAudit(c)
 	startRELP(c)
 	startTCP(c)
 	startUDP(c)

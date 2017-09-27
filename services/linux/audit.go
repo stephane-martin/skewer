@@ -49,11 +49,11 @@ func auditToSyslog(auditMsg *model.AuditMessageGroup, hostname string, aconf *co
 		Severity:         model.Severity(aconf.Severity),
 		Priority:         model.Priority(8*aconf.Facility + aconf.Severity),
 		Hostname:         hostname,
-		TimeReported:     treported,
-		TimeGenerated:    tgenerated,
+		TimeReportedNum:  treported,
+		TimeGeneratedNum: tgenerated,
 		Msgid:            strconv.FormatInt(int64(auditMsg.Seq), 10),
 		Procid:           "",
-		AuditSubMessages: auditMsg.Msgs,
+		//AuditSubMessages: auditMsg.Msgs,
 	}
 
 	if len(auditMsg.UidMap) > 0 {

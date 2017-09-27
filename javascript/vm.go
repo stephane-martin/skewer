@@ -3,7 +3,6 @@ package javascript
 import (
 	"bytes"
 	"fmt"
-	"strconv"
 	"strings"
 	"text/template"
 
@@ -14,7 +13,7 @@ import (
 	"golang.org/x/text/encoding/unicode"
 )
 
-var jsSyslogMessage string = `function SyslogMessage(p, f, s, v, timer, timeg, host, app, proc, msgid, structured, msg, subs, props) {
+var jsSyslogMessage string = `function SyslogMessage(p, f, s, v, timer, timeg, host, app, proc, msgid, structured, msg, props) {
 	this.Priority = p;
 	this.Facility = f;
 	this.Severity = s;
@@ -27,21 +26,20 @@ var jsSyslogMessage string = `function SyslogMessage(p, f, s, v, timer, timeg, h
 	this.Msgid = msgid;
 	this.Structured = structured;
 	this.Message = msg;
-	this.SubMessages = subs;
 	this.Properties = props;
 }
 
-function NewSyslogMessage(p, f, s, v, timer, timeg, host, app, proc, msgid, structured, msg, subs, props) {
-	return new SyslogMessage(p, f, s, v, timer, timeg, host, app, proc, msgid, structured, msg, subs, props);
+function NewSyslogMessage(p, f, s, v, timer, timeg, host, app, proc, msgid, structured, msg, props) {
+	return new SyslogMessage(p, f, s, v, timer, timeg, host, app, proc, msgid, structured, msg, props);
 }
 
 function NewEmptySyslogMessage() {
 	var n = Date.now()
-	return new SyslogMessage(0, 0, 0, 1, n, n, "", "", "", "", "", "", [], {});
+	return new SyslogMessage(0, 0, 0, 1, n, n, "", "", "", "", "", "", {});
 }
 
 function SyslogMessageToGo(m) {
-	return new SyslogMessage(m.Priority, m.Facility, m.Severity, m.Version, m.TimeReported.getTime(), m.TimeGenerated.getTime(), m.Hostname, m.Appname, m.Procid, m.Msgid, m.Structured, m.Message, m.SubMessages, m.Properties);
+	return new SyslogMessage(m.Priority, m.Facility, m.Severity, m.Version, m.TimeReported.getTime(), m.TimeGenerated.getTime(), m.Hostname, m.Appname, m.Procid, m.Msgid, m.Structured, m.Message, m.Properties);
 }
 
 var FILTER = {
@@ -409,8 +407,8 @@ func (e *Environment) toJsMessage(m model.SyslogMessage) (sm goja.Value, err err
 	f := e.runtime.ToValue(int(m.Facility))
 	s := e.runtime.ToValue(int(m.Severity))
 	v := e.runtime.ToValue(int(m.Version))
-	timeg := e.runtime.ToValue(m.TimeGenerated / 1000000)
-	timer := e.runtime.ToValue(m.TimeReported / 1000000)
+	timeg := e.runtime.ToValue(m.TimeGeneratedNum / 1000000)
+	timer := e.runtime.ToValue(m.TimeReportedNum / 1000000)
 	host := e.runtime.ToValue(m.Hostname)
 	app := e.runtime.ToValue(m.Appname)
 	proc := e.runtime.ToValue(m.Procid)
@@ -419,13 +417,15 @@ func (e *Environment) toJsMessage(m model.SyslogMessage) (sm goja.Value, err err
 	msg := e.runtime.ToValue(m.Message)
 	props := e.runtime.ToValue(m.Properties)
 
-	subs := make([]string, 0, len(m.AuditSubMessages))
-	for _, sub := range m.AuditSubMessages {
-		subs = append(subs, fmt.Sprintf("%d:%s", sub.Type, sub.Data))
-	}
-	jsSubs := e.runtime.ToValue(&subs)
+	/*
+		subs := make([]string, 0, len(m.AuditSubMessages))
+		for _, sub := range m.AuditSubMessages {
+			subs = append(subs, fmt.Sprintf("%d:%s", sub.Type, sub.Data))
+		}
+		jsSubs := e.runtime.ToValue(&subs)
+	*/
 
-	sm, err = e.jsNewSyslogMessage(nil, p, f, s, v, timer, timeg, host, app, proc, msgid, structured, msg, jsSubs, props)
+	sm, err = e.jsNewSyslogMessage(nil, p, f, s, v, timer, timeg, host, app, proc, msgid, structured, msg, props)
 	if err != nil {
 		return nil, err
 	}
@@ -447,35 +447,37 @@ func (e *Environment) fromJsMessage(sm goja.Value) (m model.SyslogMessage, err e
 		return m, err
 	}
 
-	var parts []string
-	var t int
-	var sub string
-	subMessages := make([]model.AuditSubMessage, 0, len(imsg.SubMessages))
+	/*
+		var parts []string
+		var t int
+			var sub string
+				subMessages := make([]model.AuditSubMessage, 0, len(imsg.SubMessages))
 
-	for _, sub = range imsg.SubMessages {
-		parts = strings.SplitN(sub, ":", 2)
-		if len(parts) == 2 {
-			t, err = strconv.Atoi(parts[0])
-			if err == nil {
-				subMessages = append(subMessages, model.AuditSubMessage{Data: parts[1], Type: uint16(t)})
-			}
-		}
-	}
+				for _, sub = range imsg.SubMessages {
+					parts = strings.SplitN(sub, ":", 2)
+					if len(parts) == 2 {
+						t, err = strconv.Atoi(parts[0])
+						if err == nil {
+							subMessages = append(subMessages, model.AuditSubMessage{Data: parts[1], Type: uint16(t)})
+						}
+					}
+				}
+	*/
 
 	return model.SyslogMessage{
 		Priority:         model.Priority(imsg.Priority),
 		Facility:         model.Facility(imsg.Facility),
 		Severity:         model.Severity(imsg.Severity),
 		Version:          model.Version(imsg.Version),
-		TimeGenerated:    imsg.TimeGenerated * 1000000,
-		TimeReported:     imsg.TimeReported * 1000000,
+		TimeGeneratedNum: imsg.TimeGenerated * 1000000,
+		TimeReportedNum:  imsg.TimeReported * 1000000,
 		Hostname:         imsg.Hostname,
 		Appname:          imsg.Appname,
 		Procid:           imsg.Procid,
 		Msgid:            imsg.Msgid,
 		Structured:       imsg.Structured,
 		Message:          imsg.Message,
-		AuditSubMessages: subMessages,
-		Properties:       imsg.Properties,
+		//AuditSubMessages: subMessages,
+		Properties: imsg.Properties,
 	}, nil
 }

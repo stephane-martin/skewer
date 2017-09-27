@@ -52,7 +52,6 @@ func deriveDeepCopy(dst, src *BaseConfig) {
 		copy(dst.Parsers, src.Parsers)
 	}
 	dst.Journald = src.Journald
-	dst.Audit = src.Audit
 	dst.Metrics = src.Metrics
 }
 

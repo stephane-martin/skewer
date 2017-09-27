@@ -136,8 +136,8 @@ func (fwder *kafkaForwarder) getAndSendMessages(ctx context.Context, from Store,
 	var err error
 	var filterResult javascript.FilterResult
 	var serialized []byte
-	var fullMsg model.ExportedMessage
 	var kafkaMsg *sarama.ProducerMessage
+	var reported time.Time
 
 ForOutputs:
 	for {
@@ -202,17 +202,11 @@ ForOutputs:
 				continue ForOutputs
 			}
 
-			fullMsg = model.ExportedMessage{
-				ParsedMessage: model.ParsedMessage{
-					Fields:         message.Parsed.Fields,
-					Client:         message.Parsed.Client,
-					LocalPort:      message.Parsed.LocalPort,
-					UnixSocketPath: message.Parsed.UnixSocketPath,
-				},
-				TimeGenerated: time.Unix(0, message.Parsed.Fields.TimeGenerated).UTC(),
-				TimeReported:  time.Unix(0, message.Parsed.Fields.TimeReported).UTC(),
-			}
-			serialized, err = ffjson.Marshal(&fullMsg)
+			reported = time.Unix(0, message.Parsed.Fields.TimeReportedNum).UTC()
+			message.Parsed.Fields.TimeGenerated = time.Unix(0, message.Parsed.Fields.TimeGeneratedNum).UTC().Format(time.RFC3339Nano)
+			message.Parsed.Fields.TimeReported = reported.Format(time.RFC3339Nano)
+
+			serialized, err = ffjson.Marshal(&message.Parsed)
 
 			if err != nil {
 				fwder.logger.Warn("Error serializing message", "error", err, "uid", message.Uid)
@@ -224,7 +218,7 @@ ForOutputs:
 				Key:       sarama.StringEncoder(partitionKey),
 				Value:     sarama.ByteEncoder(serialized),
 				Topic:     topic,
-				Timestamp: fullMsg.TimeReported,
+				Timestamp: reported,
 				Metadata:  message.Uid,
 			}
 

@@ -777,29 +777,7 @@ func (j *ExportedMessage) MarshalJSONBuf(buf fflib.EncodingBuffer) error {
 	var obj []byte
 	_ = obj
 	_ = err
-	buf.WriteString(`{ "timereported":`)
-
-	{
-
-		obj, err = j.TimeReported.MarshalJSON()
-		if err != nil {
-			return err
-		}
-		buf.Write(obj)
-
-	}
-	buf.WriteString(`,"timegenerated":`)
-
-	{
-
-		obj, err = j.TimeGenerated.MarshalJSON()
-		if err != nil {
-			return err
-		}
-		buf.Write(obj)
-
-	}
-	buf.WriteString(`,"fields":`)
+	buf.WriteString(`{ "fields":`)
 
 	{
 
@@ -913,7 +891,11 @@ func (j *SyslogMessage) MarshalJSONBuf(buf fflib.EncodingBuffer) error {
 	fflib.FormatBits2(buf, uint64(j.Severity), 10, j.Severity < 0)
 	buf.WriteString(`","version":"`)
 	fflib.FormatBits2(buf, uint64(j.Version), 10, j.Version < 0)
-	buf.WriteString(`","hostname":`)
+	buf.WriteString(`","timereported":`)
+	fflib.WriteJsonString(buf, string(j.TimeReported))
+	buf.WriteString(`,"timegenerated":`)
+	fflib.WriteJsonString(buf, string(j.TimeGenerated))
+	buf.WriteString(`,"hostname":`)
 	fflib.WriteJsonString(buf, string(j.Hostname))
 	buf.WriteString(`,"appname":`)
 	fflib.WriteJsonString(buf, string(j.Appname))
@@ -936,30 +918,6 @@ func (j *SyslogMessage) MarshalJSONBuf(buf fflib.EncodingBuffer) error {
 	buf.WriteString(`"message":`)
 	fflib.WriteJsonString(buf, string(j.Message))
 	buf.WriteByte(',')
-	if len(j.AuditSubMessages) != 0 {
-		buf.WriteString(`"audit":`)
-		if j.AuditSubMessages != nil {
-			buf.WriteString(`[`)
-			for i, v := range j.AuditSubMessages {
-				if i != 0 {
-					buf.WriteString(`,`)
-				}
-
-				{
-
-					err = v.MarshalJSONBuf(buf)
-					if err != nil {
-						return err
-					}
-
-				}
-			}
-			buf.WriteString(`]`)
-		} else {
-			buf.WriteString(`null`)
-		}
-		buf.WriteByte(',')
-	}
 	if len(j.Properties) != 0 {
 		buf.WriteString(`"properties":`)
 		/* Falling back. type=map[string]map[string]string kind=map */

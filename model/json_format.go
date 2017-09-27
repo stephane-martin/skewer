@@ -84,18 +84,18 @@ func ParseJsonFormat(m []byte, decoder *encoding.Decoder) (msg SyslogMessage, re
 	}
 
 	msg = SyslogMessage{
-		Priority:      Priority(pri),
-		Facility:      Facility(pri / 8),
-		Severity:      Severity(pri % 8),
-		Version:       1,
-		TimeReported:  reported.UnixNano(),
-		TimeGenerated: generated.UnixNano(),
-		Hostname:      hostname,
-		Appname:       appname,
-		Procid:        procid,
-		Msgid:         msgid,
-		Structured:    structured,
-		Message:       strings.TrimSpace(sourceMsg.Message),
+		Priority:         Priority(pri),
+		Facility:         Facility(pri / 8),
+		Severity:         Severity(pri % 8),
+		Version:          1,
+		TimeReportedNum:  reported.UnixNano(),
+		TimeGeneratedNum: generated.UnixNano(),
+		Hostname:         hostname,
+		Appname:          appname,
+		Procid:           procid,
+		Msgid:            msgid,
+		Structured:       structured,
+		Message:          strings.TrimSpace(sourceMsg.Message),
 	}
 
 	if len(sourceMsg.Properties) > 0 {

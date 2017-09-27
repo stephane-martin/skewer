@@ -582,69 +582,61 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 		}()
 
 		e := javascript.NewFilterEnvironment(config.FilterFunc, config.TopicFunc, config.TopicTmpl, config.PartitionFunc, config.PartitionTmpl, s.Logger)
-		var m model.RelpParsedMessage
+		var message model.RelpParsedMessage
 		var topic string
 		var partitionKey string
 		var errs []error
 		var err error
 		var filterResult javascript.FilterResult
-		var fullMsg model.ExportedMessage
 		var kafkaMsg *sarama.ProducerMessage
 		var serialized []byte
+		var reported time.Time
 
 	ForParsedChan:
-		for m = range parsed_messages_chan {
-			topic, errs = e.Topic(m.Parsed.Fields)
+		for message = range parsed_messages_chan {
+			topic, errs = e.Topic(message.Parsed.Fields)
 			for _, err = range errs {
-				logger.Info("Error calculating topic", "error", err, "txnr", m.Txnr)
+				logger.Info("Error calculating topic", "error", err, "txnr", message.Txnr)
 			}
-			partitionKey, errs = e.PartitionKey(m.Parsed.Fields)
+			partitionKey, errs = e.PartitionKey(message.Parsed.Fields)
 			for _, err = range errs {
-				logger.Info("Error calculating the partition key", "error", err, "txnr", m.Txnr)
+				logger.Info("Error calculating the partition key", "error", err, "txnr", message.Txnr)
 			}
 
 			if len(topic) == 0 || len(partitionKey) == 0 {
-				logger.Warn("Topic or PartitionKey could not be calculated", "txnr", m.Txnr)
-				other_fails_chan <- m.Txnr
+				logger.Warn("Topic or PartitionKey could not be calculated", "txnr", message.Txnr)
+				other_fails_chan <- message.Txnr
 				continue ForParsedChan
 			}
-			// TODO: check
-			//originalMsg = &m.Parsed.Fields
-			filterResult, err = e.FilterMessage(&m.Parsed.Fields)
+			filterResult, err = e.FilterMessage(&message.Parsed.Fields)
 
 			switch filterResult {
 			case javascript.DROPPED:
-				other_successes_chan <- m.Txnr
+				other_successes_chan <- message.Txnr
 				s.metrics.MessageFilteringCounter.WithLabelValues("dropped", client).Inc()
 				continue ForParsedChan
 			case javascript.REJECTED:
-				other_fails_chan <- m.Txnr
+				other_fails_chan <- message.Txnr
 				s.metrics.MessageFilteringCounter.WithLabelValues("rejected", client).Inc()
 				continue ForParsedChan
 			case javascript.PASS:
 				s.metrics.MessageFilteringCounter.WithLabelValues("passing", client).Inc()
 			default:
-				other_fails_chan <- m.Txnr
-				logger.Warn("Error happened processing message", "txnr", m.Txnr, "error", err)
+				other_fails_chan <- message.Txnr
+				logger.Warn("Error happened processing message", "txnr", message.Txnr, "error", err)
 				s.metrics.MessageFilteringCounter.WithLabelValues("unknown", client).Inc()
 				continue ForParsedChan
 			}
 
-			fullMsg = model.ExportedMessage{
-				ParsedMessage: model.ParsedMessage{
-					Fields:         m.Parsed.Fields,
-					Client:         m.Parsed.Client,
-					LocalPort:      m.Parsed.LocalPort,
-					UnixSocketPath: m.Parsed.UnixSocketPath,
-				},
-				TimeGenerated: time.Unix(0, m.Parsed.Fields.TimeGenerated).UTC(),
-				TimeReported:  time.Unix(0, m.Parsed.Fields.TimeReported).UTC(),
-			}
-			serialized, err = ffjson.Marshal(&fullMsg)
+			reported = time.Unix(0, message.Parsed.Fields.TimeReportedNum).UTC()
+			message.Parsed.Fields.TimeGenerated = time.Unix(0, message.Parsed.Fields.TimeGeneratedNum).UTC().Format(time.RFC3339Nano)
+			message.Parsed.Fields.TimeReported = reported.Format(time.RFC3339Nano)
+
+			serialized, err = ffjson.Marshal(&message.Parsed)
 
 			if err != nil {
-				logger.Warn("Error generating Kafka message", "error", err, "txnr", m.Txnr)
-				other_fails_chan <- m.Txnr
+				logger.Warn("Error generating Kafka message", "error", err, "txnr", message.Txnr)
+				other_fails_chan <- message.Txnr
 				continue ForParsedChan
 			}
 
@@ -652,17 +644,17 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 				Key:       sarama.StringEncoder(partitionKey),
 				Value:     sarama.ByteEncoder(serialized),
 				Topic:     topic,
-				Timestamp: fullMsg.TimeReported,
-				Metadata:  m.Txnr,
+				Timestamp: reported,
+				Metadata:  message.Txnr,
 			}
 
 			if s.test {
 				v, _ := kafkaMsg.Value.Encode()
 				pkey, _ := kafkaMsg.Key.Encode()
-				fmt.Fprintf(os.Stderr, "pkey: '%s' topic:'%s' txnr:'%d'\n", pkey, kafkaMsg.Topic, m.Txnr)
+				fmt.Fprintf(os.Stderr, "pkey: '%s' topic:'%s' txnr:'%d'\n", pkey, kafkaMsg.Topic, message.Txnr)
 				fmt.Fprintln(os.Stderr, string(v))
 				fmt.Fprintln(os.Stderr)
-				other_successes_chan <- m.Txnr
+				other_successes_chan <- message.Txnr
 			} else {
 				producer.Input() <- kafkaMsg
 			}

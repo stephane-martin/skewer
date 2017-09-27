@@ -10,6 +10,8 @@ func deriveEqualSyslogMsg(this, that *SyslogMessage) bool {
 			this.Facility == that.Facility &&
 			this.Severity == that.Severity &&
 			this.Version == that.Version &&
+			this.TimeReportedNum == that.TimeReportedNum &&
+			this.TimeGeneratedNum == that.TimeGeneratedNum &&
 			this.TimeReported == that.TimeReported &&
 			this.TimeGenerated == that.TimeGenerated &&
 			this.Hostname == that.Hostname &&
@@ -18,28 +20,11 @@ func deriveEqualSyslogMsg(this, that *SyslogMessage) bool {
 			this.Msgid == that.Msgid &&
 			this.Structured == that.Structured &&
 			this.Message == that.Message &&
-			deriveEqual(this.AuditSubMessages, that.AuditSubMessages) &&
-			deriveEqual_(this.Properties, that.Properties)
+			deriveEqual(this.Properties, that.Properties)
 }
 
 // deriveEqual returns whether this and that are equal.
-func deriveEqual(this, that []AuditSubMessage) bool {
-	if this == nil || that == nil {
-		return this == nil && that == nil
-	}
-	if len(this) != len(that) {
-		return false
-	}
-	for i := 0; i < len(this); i++ {
-		if !(this[i] == that[i]) {
-			return false
-		}
-	}
-	return true
-}
-
-// deriveEqual_ returns whether this and that are equal.
-func deriveEqual_(this, that map[string]map[string]string) bool {
+func deriveEqual(this, that map[string]map[string]string) bool {
 	if this == nil || that == nil {
 		return this == nil && that == nil
 	}
@@ -51,15 +36,15 @@ func deriveEqual_(this, that map[string]map[string]string) bool {
 		if !ok {
 			return false
 		}
-		if !(deriveEqual_1(v, thatv)) {
+		if !(deriveEqual_(v, thatv)) {
 			return false
 		}
 	}
 	return true
 }
 
-// deriveEqual_1 returns whether this and that are equal.
-func deriveEqual_1(this, that map[string]string) bool {
+// deriveEqual_ returns whether this and that are equal.
+func deriveEqual_(this, that map[string]string) bool {
 	if this == nil || that == nil {
 		return this == nil && that == nil
 	}

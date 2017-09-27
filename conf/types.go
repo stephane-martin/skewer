@@ -10,8 +10,8 @@ type BaseConfig struct {
 	Store    StoreConfig    `mapstructure:"store" toml:"store" json:"store"`
 	Parsers  []ParserConfig `mapstructure:"parser" toml:"parser" json:"parser"`
 	Journald JournaldConfig `mapstructure:"journald" toml:"journald" json:"journald"`
-	Audit    AuditConfig    `mapstructure:"audit" toml:"audit" json:"audit"`
-	Metrics  MetricsConfig  `mapstructure:"metrics" toml:"metrics" json:"metrics"`
+	//Audit    AuditConfig    `mapstructure:"audit" toml:"audit" json:"audit"`
+	Metrics MetricsConfig `mapstructure:"metrics" toml:"metrics" json:"metrics"`
 }
 
 type MetricsConfig struct {

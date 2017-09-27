@@ -4,7 +4,6 @@ package model
 
 import (
 	"bytes"
-	"encoding/json"
 	"unicode/utf8"
 
 	"golang.org/x/text/encoding"
@@ -117,19 +116,21 @@ func Parse(m []byte, format string, decoder *encoding.Decoder, dont_parse_sd boo
 		return sm, err
 	}
 	// special handling of JSON messages produced by go-audit
-	if sm.Appname == "go-audit" {
-		var auditMsg AuditMessageGroup
-		err = json.Unmarshal([]byte(sm.Message), &auditMsg)
-		if err != nil {
-			return sm, nil
+	/*
+		if sm.Appname == "go-audit" {
+			var auditMsg AuditMessageGroup
+			err = json.Unmarshal([]byte(sm.Message), &auditMsg)
+			if err != nil {
+				return sm, nil
+			}
+			sm.AuditSubMessages = auditMsg.Msgs
+			if len(auditMsg.UidMap) > 0 {
+				sm.Properties = map[string]map[string]string{}
+				sm.Properties["uid_map"] = auditMsg.UidMap
+			}
+			sm.Message = ""
 		}
-		sm.AuditSubMessages = auditMsg.Msgs
-		if len(auditMsg.UidMap) > 0 {
-			sm.Properties = map[string]map[string]string{}
-			sm.Properties["uid_map"] = auditMsg.UidMap
-		}
-		sm.Message = ""
-	}
+	*/
 	return sm, nil
 }
 

@@ -57,9 +57,9 @@ func ConfigureAndStartService(s NetworkService, c conf.BaseConfig, test bool) ([
 	case *linux.JournalService:
 		s.SetConf(c.Journald)
 		return s.Start(test)
-	case *linux.AuditService:
-		s.SetAuditConf(c.Audit)
-		return s.Start(test)
+	//case *linux.AuditService:
+	//	s.SetAuditConf(c.Audit)
+	//	return s.Start(test)
 	case *storeServiceImpl:
 		return s.SetConfAndRestart(c, test)
 	default:

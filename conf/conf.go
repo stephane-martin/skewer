@@ -39,8 +39,8 @@ func newBaseConf() *BaseConfig {
 		Store:    StoreConfig{},
 		Parsers:  []ParserConfig{},
 		Journald: JournaldConfig{},
-		Audit:    AuditConfig{},
-		Metrics:  MetricsConfig{},
+		//Audit:    AuditConfig{},
+		Metrics: MetricsConfig{},
 	}
 	return &baseConf
 }
@@ -149,6 +149,7 @@ func (c *SyslogConfig) CalculateID() *SyslogConfig {
 	return c
 }
 
+/*
 func (c *AuditConfig) CalculateID() *AuditConfig {
 	auditSyslogConf := &SyslogConfig{
 		TopicTmpl:     c.TopicTmpl,
@@ -160,6 +161,7 @@ func (c *AuditConfig) CalculateID() *AuditConfig {
 	c.ConfID = auditSyslogConf.CalculateID().ConfID
 	return c
 }
+*/
 
 func (c *JournaldConfig) CalculateID() *JournaldConfig {
 	journalSyslogConf := &SyslogConfig{
@@ -530,18 +532,20 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 		}
 	}
 
-	aconf := AuditConfig{}
-	if len(auditConf) > 0 {
-		vi = viper.New()
-		SetAuditDefaults(vi, false)
-		for k, v := range auditConf {
-			vi.Set(k, v)
+	/*
+		aconf := AuditConfig{}
+		if len(auditConf) > 0 {
+			vi = viper.New()
+			SetAuditDefaults(vi, false)
+			for k, v := range auditConf {
+				vi.Set(k, v)
+			}
+			err := vi.Unmarshal(&aconf)
+			if err != nil {
+				return err
+			}
 		}
-		err := vi.Unmarshal(&aconf)
-		if err != nil {
-			return err
-		}
-	}
+	*/
 
 	kconf := KafkaConfig{}
 	if len(kafkaConf) > 0 {
@@ -593,9 +597,11 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 	if len(journaldConf) > 0 {
 		c.Journald = jconf
 	}
-	if len(auditConf) > 0 {
-		c.Audit = aconf
-	}
+	/*
+		if len(auditConf) > 0 {
+			c.Audit = aconf
+		}
+	*/
 	if len(metricsConf) > 0 {
 		c.Metrics = mconf
 	}
@@ -752,7 +758,7 @@ func (c *BaseConfig) Complete() (err error) {
 		c.Syslog[i] = *c.Syslog[i].CalculateID()
 	}
 	c.Journald = *c.Journald.CalculateID()
-	c.Audit = *c.Audit.CalculateID()
+	//c.Audit = *c.Audit.CalculateID()
 
 	return nil
 }

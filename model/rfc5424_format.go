@@ -51,22 +51,22 @@ func ParseRfc5424Format(m []byte, decoder *encoding.Decoder, dont_parse_sd bool)
 	n := time.Now().UnixNano()
 	s := string(splits[1])
 	if s == "-" {
-		smsg.TimeReported = time.Now().UnixNano()
+		smsg.TimeReportedNum = time.Now().UnixNano()
 	}
-	if smsg.TimeReported == 0 {
+	if smsg.TimeReportedNum == 0 {
 		t1, err := time.Parse(time.RFC3339Nano, s)
 		if err != nil {
 			t2, err := time.Parse(time.RFC3339, s)
 			if err != nil {
-				smsg.TimeReported = n
+				smsg.TimeReportedNum = n
 			} else {
-				smsg.TimeReported = t2.UnixNano()
+				smsg.TimeReportedNum = t2.UnixNano()
 			}
 		} else {
-			smsg.TimeReported = t1.UnixNano()
+			smsg.TimeReportedNum = t1.UnixNano()
 		}
 	}
-	smsg.TimeGenerated = n
+	smsg.TimeGeneratedNum = n
 
 	s = string(splits[2])
 	if s != "-" {

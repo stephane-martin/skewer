@@ -46,7 +46,7 @@ func EntryToSyslog(entry map[string]string) model.ParsedMessage {
 		case "_source_realtime_timestamp": // microseconds
 			t, err := strconv.ParseInt(v, 10, 64)
 			if err == nil {
-				m.TimeReported = t * 1000
+				m.TimeReportedNum = t * 1000
 			}
 		default:
 			if strings.HasPrefix(k, "_") {
@@ -61,9 +61,9 @@ func EntryToSyslog(entry map[string]string) model.ParsedMessage {
 	if len(m.Procid) == 0 {
 		m.Procid = entry["SYSLOG_PID"]
 	}
-	m.TimeGenerated = time.Now().UnixNano()
-	if m.TimeReported == 0 {
-		m.TimeReported = m.TimeGenerated
+	m.TimeGeneratedNum = time.Now().UnixNano()
+	if m.TimeReportedNum == 0 {
+		m.TimeReportedNum = m.TimeGeneratedNum
 	}
 	m.Priority = model.Priority(int(m.Facility)*8 + int(m.Severity))
 	m.Properties = map[string]map[string]string{}
