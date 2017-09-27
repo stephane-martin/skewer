@@ -13,6 +13,7 @@ type Facility int
 type Severity int
 type Version int
 
+/*
 type AuditSubMessage struct {
 	Type uint16 `json:"type" msg:"type"`
 	Data string `json:"data" msg:"data"`
@@ -24,6 +25,7 @@ type AuditMessageGroup struct {
 	Msgs      []AuditSubMessage `json:"messages" msg:"messages"`
 	UidMap    map[string]string `json:"uid_map" msg:"uid_map"`
 }
+*/
 
 // ffjson: nodecoder
 type SyslogMessage struct {

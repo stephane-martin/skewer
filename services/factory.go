@@ -84,8 +84,8 @@ func Factory(t NetworkServiceType, reporter *base.Reporter, gen chan ulid.ULID, 
 			l.Error("Error creating the journal service", "error", err)
 			return nil
 		}
-	case Audit:
-		return linux.NewAuditService(reporter, gen, l)
+	//case Audit:
+	//	return linux.NewAuditService(reporter, gen, l)
 	case Store:
 		return NewStoreService(l, pipe)
 	default:
