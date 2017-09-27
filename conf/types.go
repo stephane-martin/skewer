@@ -10,8 +10,7 @@ type BaseConfig struct {
 	Store    StoreConfig    `mapstructure:"store" toml:"store" json:"store"`
 	Parsers  []ParserConfig `mapstructure:"parser" toml:"parser" json:"parser"`
 	Journald JournaldConfig `mapstructure:"journald" toml:"journald" json:"journald"`
-	//Audit    AuditConfig    `mapstructure:"audit" toml:"audit" json:"audit"`
-	Metrics MetricsConfig `mapstructure:"metrics" toml:"metrics" json:"metrics"`
+	Metrics  MetricsConfig  `mapstructure:"metrics" toml:"metrics" json:"metrics"`
 }
 
 type MetricsConfig struct {
@@ -77,26 +76,6 @@ type JournaldConfig struct {
 	FilterFunc    string `mapstructure:"filter_func" toml:"filter_func" json:"filter_func"`
 	Encoding      string `mapstructure:"encoding" toml:"encoding" json:"encoding"`
 	ConfID        string `mapstructure:"-" toml:"-" json:"conf_id"`
-}
-
-type AuditConfig struct {
-	Enabled         bool   `mapstructure:"enabled" toml:"enabled" json:"enabled"`
-	SocketBuffer    int    `mapstructure:"socket_buffer" toml:"socket_buffer" json:"socket_buffer"`
-	EventsMin       int    `mapstructure:"events_min" toml:"events_min" json:"events_min"`
-	EventsMax       int    `mapstructure:"events_max" toml:"events_max" json:"events_max"`
-	MessageTracking bool   `mapstructure:"message_tracking" toml:"message_tracking" json:"message_tracking"`
-	LogOutOfOrder   bool   `mapstructure:"log_out_of_order" toml:"log_out_of_order" json:"log_out_of_order"`
-	MaxOutOfOrder   int    `mapstructure:"max_out_of_order" toml:"max_out_of_order" json:"max_out_of_order"`
-	Appname         string `mapstructure:"appname" toml:"appname" json:"appname"`
-	Severity        int    `mapstructure:"severity" toml:"severity" json:"severity"`
-	Facility        int    `mapstructure:"facility" toml:"facility" json:"facility"`
-	TopicTmpl       string `mapstructure:"topic_tmpl" toml:"topic_tmpl" json:"topic_tmpl"`
-	TopicFunc       string `mapstructure:"topic_function" toml:"topic_function" json:"topic_function"`
-	PartitionTmpl   string `mapstructure:"partition_key_tmpl" toml:"partition_key_tmpl" json:"partition_key_tmpl"`
-	PartitionFunc   string `mapstructure:"partition_key_func" toml:"partition_key_func" json:"partition_key_func"`
-	FilterFunc      string `mapstructure:"filter_func" toml:"filter_func" json:"filter_func"`
-	Encoding        string `mapstructure:"encoding" toml:"encoding" json:"encoding"`
-	ConfID          string `mapstructure:"-" toml:"-" json:"conf_id"`
 }
 
 type SyslogConfig struct {

@@ -137,22 +137,4 @@
   partition_key_func = ""
   filter_func = ""
 
-# linux only. the user skewer runs on needs the CAP_AUDIT_CONTROL and CAP_AUDIT_READ capabilities.
-# the code is similar to what the "go-audit" utility does.
-[audit]
-  enabled = false
-  socket_buffer = 0
-  events_min = 1300
-  events_max = 1399
-  message_tracking = true
-  log_out_of_order = false
-  max_out_of_order = 500
-  appname = "audit"
-  severity = 6
-  facility = 0
-  topic_tmpl = "linux-audit-topic"
-  topic_function = ""
-  partition_key_tmpl = "pk-{{.Hostname}}"
-  partition_key_func = ""
-  filter_func = ""
 

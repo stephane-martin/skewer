@@ -13,38 +13,23 @@ type Facility int
 type Severity int
 type Version int
 
-/*
-type AuditSubMessage struct {
-	Type uint16 `json:"type" msg:"type"`
-	Data string `json:"data" msg:"data"`
-}
-
-type AuditMessageGroup struct {
-	Seq       int               `json:"sequence" msg:"sequence"`
-	AuditTime string            `json:"timestamp" msg:"timestamp"`
-	Msgs      []AuditSubMessage `json:"messages" msg:"messages"`
-	UidMap    map[string]string `json:"uid_map" msg:"uid_map"`
-}
-*/
-
 // ffjson: nodecoder
 type SyslogMessage struct {
-	Priority         Priority `json:"priority,string" msg:"priority"`
-	Facility         Facility `json:"facility,string" msg:"facility"`
-	Severity         Severity `json:"severity,string" msg:"severity"`
-	Version          Version  `json:"version,string" msg:"version"`
-	TimeReportedNum  int64    `json:"-" msg:"timereportednum"`
-	TimeGeneratedNum int64    `json:"-" msg:"timegeneratednum"`
-	TimeReported     string   `json:"timereported" msg:"timereported"`
-	TimeGenerated    string   `json:"timegenerated" msg:"timegenerated"`
-	Hostname         string   `json:"hostname" msg:"hostname"`
-	Appname          string   `json:"appname" msg:"appname"`
-	Procid           string   `json:"procid,omitempty" msg:"procid"`
-	Msgid            string   `json:"msgid,omitempty" msg:"msgid"`
-	Structured       string   `json:"structured,omitempty" msg:"structured"`
-	Message          string   `json:"message" msg:"message"`
-	//AuditSubMessages []AuditSubMessage            `json:"audit,omitempty" msg:"audit"`
-	Properties map[string]map[string]string `json:"properties,omitempty" msg:"properties"`
+	Priority         Priority                     `json:"priority,string" msg:"priority"`
+	Facility         Facility                     `json:"facility,string" msg:"facility"`
+	Severity         Severity                     `json:"severity,string" msg:"severity"`
+	Version          Version                      `json:"version,string" msg:"version"`
+	TimeReportedNum  int64                        `json:"-" msg:"timereportednum"`
+	TimeGeneratedNum int64                        `json:"-" msg:"timegeneratednum"`
+	TimeReported     string                       `json:"timereported" msg:"timereported"`
+	TimeGenerated    string                       `json:"timegenerated" msg:"timegenerated"`
+	Hostname         string                       `json:"hostname" msg:"hostname"`
+	Appname          string                       `json:"appname" msg:"appname"`
+	Procid           string                       `json:"procid,omitempty" msg:"procid"`
+	Msgid            string                       `json:"msgid,omitempty" msg:"msgid"`
+	Structured       string                       `json:"structured,omitempty" msg:"structured"`
+	Message          string                       `json:"message" msg:"message"`
+	Properties       map[string]map[string]string `json:"properties,omitempty" msg:"properties"`
 }
 
 // ffjson: nodecoder
@@ -84,7 +69,6 @@ ProcID: %s
 MsgID: %s
 Structured: %s
 Message: %s
-AuditSubMessages: %s
 Properties: %s`
 
 func (m *SyslogMessage) String() string {

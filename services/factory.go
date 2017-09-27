@@ -21,7 +21,6 @@ const (
 	UDP
 	RELP
 	Journal
-	Audit
 	Store
 )
 
@@ -30,7 +29,6 @@ var NetworkServiceMap map[string]NetworkServiceType = map[string]NetworkServiceT
 	"skewer-udp":     UDP,
 	"skewer-relp":    RELP,
 	"skewer-journal": Journal,
-	"skewer-audit":   Audit,
 	"skewer-store":   Store,
 }
 
@@ -57,9 +55,6 @@ func ConfigureAndStartService(s NetworkService, c conf.BaseConfig, test bool) ([
 	case *linux.JournalService:
 		s.SetConf(c.Journald)
 		return s.Start(test)
-	//case *linux.AuditService:
-	//	s.SetAuditConf(c.Audit)
-	//	return s.Start(test)
 	case *storeServiceImpl:
 		return s.SetConfAndRestart(c, test)
 	default:
@@ -84,8 +79,6 @@ func Factory(t NetworkServiceType, reporter *base.Reporter, gen chan ulid.ULID, 
 			l.Error("Error creating the journal service", "error", err)
 			return nil
 		}
-	//case Audit:
-	//	return linux.NewAuditService(reporter, gen, l)
 	case Store:
 		return NewStoreService(l, pipe)
 	default:

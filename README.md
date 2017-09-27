@@ -15,7 +15,7 @@ to post bugs and ask questions.
 
 -   Listens on TCP, UDP or RELP
 -   Can fetch log messages from Journald (on Linux)
--   Can fetch audit logs from the kernel (on Linux)
+-   Can fetch audit logs from the kernel (on Linux, by Journald)
 -   Configuration can be provided as a configuration file, or optionally
     fetched from Consul
 -   Can register the TCP and RELP listeners as services in Consul
@@ -66,9 +66,6 @@ to post bugs and ask questions.
     correctly received by Kafka. The emitter is responsible to keep the
     message as long as we don't notify him. So in this case, there is no
     'Store' mechanism involved.
-
--   skewer uses a Netlink connection to fetch audit logs from the Linux Kernel.
-    audit logs are then pushed in the Store, and afterwards sent to Kafka
 
 -   skewer uses the C Journald API to fetch messages from Journald. Journald
     messages are push to the Store, and afterwards sent to Kafka.
@@ -143,9 +140,6 @@ Flags are documented in the command line help.
 
     You can provide a `--test` command line flag to print the collected
     messages instead of sending them to Kafka.
-
-    Some capabilities are required to talk to the kernel for audits logs. The
-    supplementary unix group 'adm' is required to talk to Journald.
 
     To make it simple it is possible to launch skewer as root. It will first drop the
     unneeded privileges, switch to a normal user, and then start operations 

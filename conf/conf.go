@@ -39,8 +39,7 @@ func newBaseConf() *BaseConfig {
 		Store:    StoreConfig{},
 		Parsers:  []ParserConfig{},
 		Journald: JournaldConfig{},
-		//Audit:    AuditConfig{},
-		Metrics: MetricsConfig{},
+		Metrics:  MetricsConfig{},
 	}
 	return &baseConf
 }
@@ -148,20 +147,6 @@ func (c *SyslogConfig) CalculateID() *SyslogConfig {
 	c.ConfID = base64.StdEncoding.EncodeToString(h[:])
 	return c
 }
-
-/*
-func (c *AuditConfig) CalculateID() *AuditConfig {
-	auditSyslogConf := &SyslogConfig{
-		TopicTmpl:     c.TopicTmpl,
-		TopicFunc:     c.TopicFunc,
-		PartitionTmpl: c.PartitionTmpl,
-		PartitionFunc: c.PartitionFunc,
-		FilterFunc:    c.FilterFunc,
-	}
-	c.ConfID = auditSyslogConf.CalculateID().ConfID
-	return c
-}
-*/
 
 func (c *JournaldConfig) CalculateID() *JournaldConfig {
 	journalSyslogConf := &SyslogConfig{
@@ -425,7 +410,6 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 	journaldConf := map[string]string{}
 	kafkaConf := map[string]string{}
 	storeConf := map[string]string{}
-	auditConf := map[string]string{}
 	metricsConf := map[string]string{}
 	parsersConfMap := map[string]map[string]string{}
 	prefixLen := len(prefix)
@@ -446,12 +430,6 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 		case "journald":
 			if len(splits) == 2 {
 				journaldConf[splits[1]] = v
-			} else {
-				logger.Debug("Ignoring Consul KV", "key", k, "value", v)
-			}
-		case "audit":
-			if len(splits) == 2 {
-				auditConf[splits[1]] = v
 			} else {
 				logger.Debug("Ignoring Consul KV", "key", k, "value", v)
 			}
@@ -532,21 +510,6 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 		}
 	}
 
-	/*
-		aconf := AuditConfig{}
-		if len(auditConf) > 0 {
-			vi = viper.New()
-			SetAuditDefaults(vi, false)
-			for k, v := range auditConf {
-				vi.Set(k, v)
-			}
-			err := vi.Unmarshal(&aconf)
-			if err != nil {
-				return err
-			}
-		}
-	*/
-
 	kconf := KafkaConfig{}
 	if len(kafkaConf) > 0 {
 		vi = viper.New()
@@ -597,11 +560,6 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 	if len(journaldConf) > 0 {
 		c.Journald = jconf
 	}
-	/*
-		if len(auditConf) > 0 {
-			c.Audit = aconf
-		}
-	*/
 	if len(metricsConf) > 0 {
 		c.Metrics = mconf
 	}
@@ -758,7 +716,6 @@ func (c *BaseConfig) Complete() (err error) {
 		c.Syslog[i] = *c.Syslog[i].CalculateID()
 	}
 	c.Journald = *c.Journald.CalculateID()
-	//c.Audit = *c.Audit.CalculateID()
 
 	return nil
 }

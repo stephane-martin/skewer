@@ -20,10 +20,6 @@ func GetCaps() string {
 	return ""
 }
 
-func CanReadAuditLogs() bool {
-	return false
-}
-
 func Predrop() error {
 	return nil
 }

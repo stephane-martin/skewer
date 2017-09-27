@@ -11,7 +11,6 @@ func SetDefaults(v *viper.Viper) {
 	SetKafkaDefaults(v, true)
 	SetStoreDefaults(v, true)
 	SetJournaldDefaults(v, true)
-	SetAuditDefaults(v, true)
 	SetMetricsDefaults(v, true)
 }
 
@@ -22,27 +21,6 @@ func SetMetricsDefaults(v *viper.Viper, prefixed bool) {
 	}
 	v.SetDefault(prefix+"path", "/metrics")
 	v.SetDefault(prefix+"port", 8080)
-}
-
-func SetAuditDefaults(v *viper.Viper, prefixed bool) {
-	prefix := ""
-	if prefixed {
-		prefix = "audit."
-	}
-	v.SetDefault(prefix+"enabled", false)
-	v.SetDefault(prefix+"socket_buffer", 0)
-	v.SetDefault(prefix+"events_min", 1300)
-	v.SetDefault(prefix+"events_max", 1399)
-	v.SetDefault(prefix+"message_tracking", true)
-	v.SetDefault(prefix+"log_out_of_order", false)
-	v.SetDefault(prefix+"max_out_of_order", 500)
-	v.SetDefault(prefix+"appname", "audit")
-	v.SetDefault(prefix+"severity", 6)
-	v.SetDefault(prefix+"facility", 0)
-	v.SetDefault(prefix+"topic_tmpl", "linux-audit-topic")
-	v.SetDefault(prefix+"partition_key_tmpl", "pk-{{.Hostname}}")
-	v.SetDefault(prefix+"encoding", "utf8")
-
 }
 
 func SetJournaldDefaults(v *viper.Viper, prefixed bool) {

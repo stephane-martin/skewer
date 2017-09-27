@@ -238,9 +238,6 @@ func runserve() {
 	loggerJournalHandle, loggerParentJournalHandle := mustSocketPair(syscall.SOCK_DGRAM)
 	loggerJournalConn := getLoggerConn(loggerParentJournalHandle)
 
-	loggerAuditHandle, loggerParentAuditHandle := mustSocketPair(syscall.SOCK_DGRAM)
-	loggerAuditConn := getLoggerConn(loggerParentAuditHandle)
-
 	loggerConfigurationHandle, loggerParentConfigurationHandle := mustSocketPair(syscall.SOCK_DGRAM)
 	loggerConfigurationConn := getLoggerConn(loggerParentConfigurationHandle)
 
@@ -248,8 +245,7 @@ func runserve() {
 	loggerStoreConn := getLoggerConn(loggerParentStoreHandle)
 
 	logging.LogReceiver(context.Background(), rootlogger, []net.Conn{
-		loggerChildConn, loggerTcpConn, loggerUdpConn, loggerRelpConn, loggerJournalConn, loggerAuditConn, loggerConfigurationConn,
-		loggerStoreConn,
+		loggerChildConn, loggerTcpConn, loggerUdpConn, loggerRelpConn, loggerJournalConn, loggerConfigurationConn, loggerStoreConn,
 	})
 
 	logger.Debug("Target user", "uid", numuid, "gid", numgid)
@@ -277,7 +273,6 @@ func runserve() {
 			os.NewFile(uintptr(loggerUdpHandle), "udp_logger_file"),
 			os.NewFile(uintptr(loggerRelpHandle), "relp_logger_file"),
 			os.NewFile(uintptr(loggerJournalHandle), "journal_logger_file"),
-			os.NewFile(uintptr(loggerAuditHandle), "audit_logger_file"),
 			os.NewFile(uintptr(loggerConfigurationHandle), "config_logger_file"),
 			os.NewFile(uintptr(loggerStoreHandle), "store_logger_file"),
 		},
@@ -353,7 +348,7 @@ func Serve() error {
 		Prefix:     consulPrefix,
 	}
 
-	confSvc := services.NewConfigurationService(13, logger)
+	confSvc := services.NewConfigurationService(12, logger)
 	startConfSvc := func() chan *conf.BaseConfig {
 		confSvc.SetConfDir(configDirName)
 		confSvc.SetConsulParams(params)
@@ -387,7 +382,7 @@ func Serve() error {
 	metricsServer := &metrics.MetricsServer{}
 
 	// setup the Store
-	st := services.NewStorePlugin(14, logger)
+	st := services.NewStorePlugin(13, logger)
 	st.SetConf(*c)
 	err = st.Create(testFlag, dumpableFlag, storeDirname, "")
 	if err != nil {
@@ -409,45 +404,10 @@ func Serve() error {
 	sig_chan := make(chan os.Signal, 10)
 	signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 
-	// retrieve linux audit logs
 	relpServicePlugin := services.NewPluginController(services.RELP, st, consulRegistry, 6, 10, logger)
 	tcpServicePlugin := services.NewPluginController(services.TCP, st, consulRegistry, 4, 8, logger)
 	udpServicePlugin := services.NewPluginController(services.UDP, st, consulRegistry, 5, 9, logger)
-	auditServicePlugin := services.NewPluginController(services.Audit, st, consulRegistry, 0, 12, logger)
 	journalServicePlugin := services.NewPluginController(services.Journal, st, consulRegistry, 0, 11, logger)
-
-	/*
-		startAudit := func(curconf *conf.BaseConfig) {
-			if auditlogs.Supported {
-				logger.Info("Linux audit logs are supported")
-				if c.Audit.Enabled {
-					if !capabilities.CanReadAuditLogs() {
-						logger.Info("Audit logs are requested, but the needed Linux Capability is not present. Disabling.")
-					} else if sys.HasAnyProcess([]string{"go-audit", "auditd"}) {
-						logger.Warn("Audit logs are requested, but go-audit or auditd process is already running, so we disable audit logs in skewer")
-					} else {
-						logger.Info("Linux audit logs are enabled")
-						err := auditServicePlugin.Create(testFlag, dumpableFlag, "", "")
-						if err != nil {
-							logger.Warn("Error creating Audit plugin", "error", err)
-							return
-						}
-						auditServicePlugin.SetConf(*curconf)
-						_, err = auditServicePlugin.Start()
-						if err == nil {
-							logger.Debug("Linux audit plugin has been started")
-						} else {
-							logger.Error("Error starting Linux Audit plugin", "error", err)
-						}
-					}
-				} else {
-					logger.Info("Linux audit logs are disabled (not requested or not Linux)")
-				}
-			} else {
-				logger.Info("Linux audit logs are not supported")
-			}
-		}
-	*/
 
 	startJournal := func(curconf *conf.BaseConfig) {
 		// retrieve messages from journald
@@ -552,14 +512,6 @@ func Serve() error {
 		}
 	}
 
-	/*
-		stopAudit := func() {
-			if auditlogs.Supported && c.Audit.Enabled {
-				auditServicePlugin.Shutdown(3 * time.Second)
-			}
-		}
-	*/
-
 	Reload := func(newConf *conf.BaseConfig) (fatal error) {
 		logger.Info("Reloading configuration")
 		// first, let's stop the HTTP server for metrics
@@ -584,16 +536,6 @@ func Serve() error {
 				wg.Done()
 			}()
 		}
-		/*
-			if auditlogs.Supported {
-				wg.Add(1)
-				go func() {
-					stopAudit()
-					startAudit(newConf)
-					wg.Done()
-				}()
-			}
-		*/
 
 		// reset the RELP service
 		wg.Add(1)
@@ -624,7 +566,6 @@ func Serve() error {
 		metricsServer.NewConf(
 			newConf.Metrics,
 			journalServicePlugin,
-			auditServicePlugin,
 			relpServicePlugin,
 			tcpServicePlugin,
 			udpServicePlugin,
@@ -639,9 +580,6 @@ func Serve() error {
 
 		stopJournal(true)
 		logger.Debug("Stopped journald service")
-
-		//stopAudit()
-		//logger.Debug("Stopped linux audit service")
 
 		stopTCP()
 		logger.Debug("The TCP service has been stopped")
@@ -663,7 +601,6 @@ func Serve() error {
 	defer destructor()
 
 	startJournal(c)
-	//startAudit(c)
 	startRELP(c)
 	startTCP(c)
 	startUDP(c)
@@ -671,7 +608,6 @@ func Serve() error {
 	metricsServer.NewConf(
 		c.Metrics,
 		journalServicePlugin,
-		auditServicePlugin,
 		relpServicePlugin,
 		tcpServicePlugin,
 		udpServicePlugin,

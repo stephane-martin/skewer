@@ -417,14 +417,6 @@ func (e *Environment) toJsMessage(m model.SyslogMessage) (sm goja.Value, err err
 	msg := e.runtime.ToValue(m.Message)
 	props := e.runtime.ToValue(m.Properties)
 
-	/*
-		subs := make([]string, 0, len(m.AuditSubMessages))
-		for _, sub := range m.AuditSubMessages {
-			subs = append(subs, fmt.Sprintf("%d:%s", sub.Type, sub.Data))
-		}
-		jsSubs := e.runtime.ToValue(&subs)
-	*/
-
 	sm, err = e.jsNewSyslogMessage(nil, p, f, s, v, timer, timeg, host, app, proc, msgid, structured, msg, props)
 	if err != nil {
 		return nil, err
@@ -447,23 +439,6 @@ func (e *Environment) fromJsMessage(sm goja.Value) (m model.SyslogMessage, err e
 		return m, err
 	}
 
-	/*
-		var parts []string
-		var t int
-			var sub string
-				subMessages := make([]model.AuditSubMessage, 0, len(imsg.SubMessages))
-
-				for _, sub = range imsg.SubMessages {
-					parts = strings.SplitN(sub, ":", 2)
-					if len(parts) == 2 {
-						t, err = strconv.Atoi(parts[0])
-						if err == nil {
-							subMessages = append(subMessages, model.AuditSubMessage{Data: parts[1], Type: uint16(t)})
-						}
-					}
-				}
-	*/
-
 	return model.SyslogMessage{
 		Priority:         model.Priority(imsg.Priority),
 		Facility:         model.Facility(imsg.Facility),
@@ -477,7 +452,6 @@ func (e *Environment) fromJsMessage(sm goja.Value) (m model.SyslogMessage, err e
 		Msgid:            imsg.Msgid,
 		Structured:       imsg.Structured,
 		Message:          imsg.Message,
-		//AuditSubMessages: subMessages,
-		Properties: imsg.Properties,
+		Properties:       imsg.Properties,
 	}, nil
 }

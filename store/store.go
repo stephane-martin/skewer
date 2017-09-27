@@ -253,20 +253,6 @@ func (s *MessageStore) StoreAllSyslogConfigs(c conf.BaseConfig) (err error) {
 			return err
 		}
 	}
-	/*
-		auditSyslogConf := conf.SyslogConfig{
-			TopicTmpl:     c.Audit.TopicTmpl,
-			TopicFunc:     c.Audit.TopicFunc,
-			PartitionTmpl: c.Audit.PartitionTmpl,
-			PartitionFunc: c.Audit.PartitionFunc,
-			FilterFunc:    c.Audit.FilterFunc,
-			ConfID:        c.Audit.ConfID,
-		}
-		err = s.StoreSyslogConfig(auditSyslogConf)
-		if err != nil {
-			return err
-		}
-	*/
 
 	journalSyslogConf := conf.SyslogConfig{
 		TopicTmpl:     c.Journald.TopicTmpl,

@@ -27,8 +27,6 @@ var CapabilitiesSupported bool = true
 func init() {
 	CAPS_TO_KEEP = []capability.Cap{
 		capability.CAP_NET_BIND_SERVICE,
-		capability.CAP_AUDIT_READ,
-		capability.CAP_AUDIT_CONTROL,
 		capability.CAP_IPC_LOCK,
 	}
 }
@@ -156,14 +154,6 @@ func FixLinuxPrivileges(uid, gid string) error {
 	}
 
 	return Drop(numuid, numgid)
-}
-
-func CanReadAuditLogs() bool {
-	c, err := NewCapabilitiesQuery()
-	if err != nil {
-		return false
-	}
-	return c.CanReadAuditLogs()
 }
 
 type CapabilitiesQuery struct {
@@ -383,8 +373,4 @@ func (c *CapabilitiesQuery) CanModifySecurebits() bool {
 
 func (c *CapabilitiesQuery) CanChangeUid() bool {
 	return c.caps.Get(capability.EFFECTIVE, capability.CAP_SETUID) && c.caps.Get(capability.EFFECTIVE, capability.CAP_SETGID)
-}
-
-func (c *CapabilitiesQuery) CanReadAuditLogs() bool {
-	return c.caps.Get(capability.EFFECTIVE, capability.CAP_AUDIT_READ) && c.caps.Get(capability.EFFECTIVE, capability.CAP_AUDIT_CONTROL)
 }
