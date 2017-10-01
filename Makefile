@@ -1,7 +1,8 @@
 .POSIX:
 .SUFFIXES:
 .SILENT: vet
-	
+
+SED=/usr/local/bin/gsed
 BINARY=skewer
 COMMIT=$(shell git rev-parse HEAD)
 VERSION=0.1
@@ -53,7 +54,7 @@ model/types_ffjson.go: model/types.go
 sys/scomp/derived.gen.go: sys/scomp/seccomp.go
 	test -n "${GOPATH}"  # test $$GOPATH
 	go generate github.com/stephane-martin/skewer/sys/scomp
-
+	gsed -i '1i// +build linux\n' sys/scomp/derived.gen.go
 
 generate: model/types_gen.go utils/logging/types_gen.go conf/derived.gen.go utils/logging/derived.gen.go metrics/derived.gen.go consul/derived.gen.go sys/derived.gen.go model/derived.gen.go model/types_ffjson.go sys/scomp/derived.gen.go
 
