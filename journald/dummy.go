@@ -3,16 +3,15 @@
 package journald
 
 import (
-	"context"
-
 	"github.com/inconshreveable/log15"
 )
 
 var Supported bool = false
 
 type JournaldReader interface {
-	Start()
+	Start(coding string)
 	Stop()
+	Shutdown()
 	Entries() chan map[string]string
 }
 
@@ -20,14 +19,15 @@ type reader struct {
 	entries chan map[string]string
 }
 
-func NewReader(ctx context.Context, logger log15.Logger) (JournaldReader, error) {
+func NewReader(logger log15.Logger) (JournaldReader, error) {
 	r := &reader{}
 	r.entries = make(chan map[string]string)
 	return r, nil
 }
 
-func (r *reader) Start() {}
-func (r *reader) Stop()  {}
+func (r *reader) Start(coding string) {}
+func (r *reader) Stop()               {}
+func (r *reader) Shutdown()           {}
 
 func (r *reader) Entries() chan map[string]string {
 	return r.entries
