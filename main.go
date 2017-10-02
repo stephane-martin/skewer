@@ -14,6 +14,7 @@ import (
 	"github.com/kardianos/osext"
 	"github.com/stephane-martin/skewer/cmd"
 	"github.com/stephane-martin/skewer/services"
+	"github.com/stephane-martin/skewer/sys"
 	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/sys/capabilities"
 	"github.com/stephane-martin/skewer/sys/dumpable"
@@ -94,7 +95,7 @@ func main() {
 		if err != nil {
 			cleanup("mount error", err)
 		}
-		err = syscall.Sethostname([]byte(name))
+		err = sys.SetHostname(name)
 		if err != nil {
 			cleanup("sethostname error", err)
 		}
@@ -125,7 +126,7 @@ func main() {
 			if err != nil {
 				cleanup("pivotroot error", err)
 			}
-			err = syscall.Sethostname([]byte(name))
+			err = sys.SetHostname(name)
 			if err != nil {
 				cleanup("sethostname error", err)
 			}

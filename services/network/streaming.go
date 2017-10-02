@@ -12,17 +12,17 @@ import (
 )
 
 type StreamHandler interface {
-	HandleConnection(conn net.Conn, config *conf.SyslogConfig)
+	HandleConnection(conn net.Conn, config conf.SyslogConfig)
 }
 
 type TCPListenerConf struct {
 	Listener net.Listener
-	Conf     *conf.SyslogConfig
+	Conf     conf.SyslogConfig
 }
 
 type UnixListenerConf struct {
 	Listener net.Listener
-	Conf     *conf.SyslogConfig
+	Conf     conf.SyslogConfig
 }
 
 type StreamingService struct {
@@ -61,7 +61,7 @@ func (s *StreamingService) initTCPListeners() []model.ListenerInfo {
 				nb++
 				lc := UnixListenerConf{
 					Listener: l,
-					Conf:     &syslogConf,
+					Conf:     syslogConf,
 				}
 				s.unixListeners = append(s.unixListeners, &lc)
 				s.UnixSocketPaths = append(s.UnixSocketPaths, syslogConf.UnixSocketPath)
@@ -76,7 +76,7 @@ func (s *StreamingService) initTCPListeners() []model.ListenerInfo {
 				nb++
 				lc := TCPListenerConf{
 					Listener: l,
-					Conf:     &syslogConf,
+					Conf:     syslogConf,
 				}
 				s.tcpListeners = append(s.tcpListeners, &lc)
 			}
@@ -97,7 +97,6 @@ func (s *StreamingService) initTCPListeners() []model.ListenerInfo {
 			Protocol: tcpc.Conf.Protocol,
 		})
 	}
-
 	return infos
 }
 
@@ -110,7 +109,7 @@ func (s *StreamingService) resetTCPListeners() {
 	}
 }
 
-func (s *StreamingService) handleConnection(conn net.Conn, config *conf.SyslogConfig) {
+func (s *StreamingService) handleConnection(conn net.Conn, config conf.SyslogConfig) {
 	s.handler.HandleConnection(conn, config)
 }
 

@@ -20,10 +20,14 @@ func GetCaps() string {
 	return ""
 }
 
-func Predrop() error {
-	return nil
+func Predrop() (bool, error) {
+	return false, nil
 }
 
 func NoNewPriv() error {
+	return nil
+}
+
+func DropAllCapabilities() error {
 	return nil
 }
