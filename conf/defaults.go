@@ -1,7 +1,7 @@
 package conf
 
 import (
-	"os/exec"
+	"os"
 
 	"github.com/spf13/viper"
 	sarama "gopkg.in/Shopify/sarama.v1"
@@ -29,12 +29,7 @@ func SetJournaldDefaults(v *viper.Viper, prefixed bool) {
 	if prefixed {
 		prefix = "journald."
 	}
-	_, err := exec.LookPath("systemctl")
-	if err == nil {
-		v.SetDefault(prefix+"enabled", true)
-	} else {
-		v.SetDefault(prefix+"enabled", false)
-	}
+	v.SetDefault(prefix+"enabled", os.Getenv("SKEWER_HAVE_SYSTEMCTL") == "TRUE")
 	v.SetDefault(prefix+"topic_tmpl", "journald-{{.Appname}}")
 	v.SetDefault(prefix+"partition_key_tmpl", "pk-{{.Hostname}}")
 	v.SetDefault(prefix+"encoding", "utf8")

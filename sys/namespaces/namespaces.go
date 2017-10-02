@@ -11,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/EricLagergren/go-gnulib/ttyname"
 	dump "github.com/stephane-martin/skewer/sys/dumpable"
 	"github.com/stephane-martin/skewer/utils"
 )
@@ -200,12 +201,12 @@ func SetJournalFs(targetExec string) error {
 
 func MakeChroot(targetExec string) (string, error) {
 	systemMountsMap := map[string]bool{
-		//"/etc",
-		//"/var",
-		"/bin": true, // TODO: remove (systemctl in path to detect if we should collect from journald...)
-		//"/usr/bin":  true,
-		//"/sbin":     true,
-		//"/usr/sbin": true,
+	//"/etc": true,
+	//"/var": true,
+	//"/bin": true,
+	//"/usr/bin":  true,
+	//"/sbin":     true,
+	//"/usr/sbin": true,
 	}
 
 	confDir := strings.TrimSpace(os.Getenv("SKEWER_CONF_DIR"))
@@ -315,52 +316,12 @@ func MakeChroot(targetExec string) (string, error) {
 	}
 
 	// bind mount shared libraries from /lib and /lib64
-	// TODO: optimize the search for shared libs
-
-	hiddens := []string{
-		"/lib/modules", "/lib/apparmor", "/lib/firmware", "/lib/modprobe.d", "/lib/recovery-mode", "/lib/udev", "/lib/brltty", "/lib/cgmanager",
-		"/lib/crda", "/lib/cryptsetup", "/lib/hdparm", "/lib/ifupdown", "/lib/init", "/lib/linux-sound-base", "/lib/ufw", "/lib/xtables",
-		"/lib/security",
-	}
-
 	shared_libs := []string{}
-
 	if _, err := os.Stat("/lib"); err == nil {
-		filepath.Walk("/lib", func(path string, info os.FileInfo, err error) error {
-			if info.IsDir() {
-				return nil
-			}
-			if strings.Contains(path, "/security/") {
-				return nil
-			}
-			for _, prefix := range hiddens {
-				if strings.HasPrefix(path, prefix) {
-					return nil
-				}
-			}
-			if strings.HasSuffix(path, ".so") || strings.Contains(path, ".so.") {
-				shared_libs = append(shared_libs, path)
-			}
-			return nil
-		})
+		shared_libs = append(shared_libs, myWalk("/lib")...)
 	}
-
 	if _, err := os.Stat("/lib64"); err == nil {
-		filepath.Walk("/lib64", func(path string, info os.FileInfo, err error) error {
-			for _, prefix := range hiddens {
-				if info.IsDir() {
-					return nil
-				}
-				if strings.HasPrefix(path, prefix) {
-					return nil
-				}
-			}
-
-			if strings.HasSuffix(path, ".so") || strings.Contains(path, ".so.") {
-				shared_libs = append(shared_libs, path)
-			}
-			return nil
-		})
+		shared_libs = append(shared_libs, myWalk("/lib64")...)
 	}
 
 	for _, library := range shared_libs {
@@ -463,4 +424,29 @@ func MakeChroot(targetExec string) (string, error) {
 	}
 
 	return root, nil
+}
+
+func setupEnv(storePath string, confDir string) (env []string) {
+	env = []string{}
+	if ttyname.IsAtty(1) {
+		myTtyName, _ := ttyname.TtyName(1)
+		env = append(env, fmt.Sprintf("SKEWER_TTYNAME=%s", myTtyName))
+	}
+
+	confDir = strings.TrimSpace(confDir)
+	if len(confDir) > 0 {
+		env = append(env, fmt.Sprintf("SKEWER_CONF_DIR=%s", confDir))
+	}
+
+	storePath = strings.TrimSpace(storePath)
+	if len(storePath) > 0 {
+		env = append(env, fmt.Sprintf("SKEWER_STORE_PATH=%s", storePath))
+	}
+
+	_, err := exec.LookPath("systemctl")
+	if err == nil {
+		env = append(env, "SKEWER_HAVE_SYSTEMCTL=TRUE")
+	}
+
+	return env
 }
