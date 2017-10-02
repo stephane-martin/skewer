@@ -137,7 +137,7 @@ type tcpHandler struct {
 	Server *TcpServiceImpl
 }
 
-func (h tcpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) {
+func (h tcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 
 	var local_port int
 
