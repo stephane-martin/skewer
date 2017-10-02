@@ -214,9 +214,10 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 				}
 				fatal, nonfatal := s.reporter.Stash(fullMsg)
 				if fatal != nil {
-					// TODO: the Store is not working properly
+					logger.Error("Fatal error stashing TCP message", "error", fatal)
+					conn.Close()
 				} else if nonfatal != nil {
-					logger.Warn("Error stashing TCP message", "error", nonfatal)
+					logger.Warn("Non-fatal error stashing TCP message", "error", nonfatal)
 				}
 			} else {
 				if s.metrics != nil {
@@ -239,26 +240,22 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 		scanner.Split(LFTcpSplit)
 	}
 
-	for {
-		if scanner.Scan() {
-			if timeout > 0 {
-				conn.SetReadDeadline(time.Now().Add(timeout))
-			}
-			if s.metrics != nil {
-				s.metrics.IncomingMsgsCounter.WithLabelValues(s.Protocol, client, local_port_s, path).Inc()
-			}
-			rawMessagesChan <- model.RawMessage{
-				Client:    client,
-				LocalPort: local_port,
-				Message:   scanner.Bytes(),
-			}
-
-		} else {
-			logger.Info("End of TCP client connection", "error", scanner.Err())
-			close(rawMessagesChan)
-			return
+	for scanner.Scan() {
+		if timeout > 0 {
+			conn.SetReadDeadline(time.Now().Add(timeout))
 		}
+		if s.metrics != nil {
+			s.metrics.IncomingMsgsCounter.WithLabelValues(s.Protocol, client, local_port_s, path).Inc()
+		}
+		rawMessagesChan <- model.RawMessage{
+			Client:    client,
+			LocalPort: local_port,
+			Message:   scanner.Bytes(),
+		}
+
 	}
+	logger.Info("End of TCP client connection", "error", scanner.Err())
+	close(rawMessagesChan)
 }
 
 func LFTcpSplit(data []byte, atEOF bool) (int, []byte, error) {

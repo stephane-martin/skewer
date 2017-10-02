@@ -676,9 +676,14 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 				f, nonf = s.reporter.Stash(stmsg)
 				if f == nil && nonf == nil {
 					other_successes_chan <- message.Txnr
+				} else if f != nil {
+					other_fails_chan <- message.Txnr
+					logger.Error("Fatal error pushing RELP message to the Store", "err", f)
+					s.StopAndWait()
+					return
 				} else {
 					other_fails_chan <- message.Txnr
-					// todo: error handling
+					logger.Warn("Non fatal error pushing RELP message to the Store", "err", nonf)
 				}
 			} else {
 				// send messages to Kafka
