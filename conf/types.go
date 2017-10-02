@@ -5,12 +5,13 @@ import (
 )
 
 type BaseConfig struct {
-	Syslog   []SyslogConfig `mapstructure:"syslog" toml:"syslog" json:"syslog"`
-	Kafka    KafkaConfig    `mapstructure:"kafka" toml:"kafka" json:"kafka"`
-	Store    StoreConfig    `mapstructure:"store" toml:"store" json:"store"`
-	Parsers  []ParserConfig `mapstructure:"parser" toml:"parser" json:"parser"`
-	Journald JournaldConfig `mapstructure:"journald" toml:"journald" json:"journald"`
-	Metrics  MetricsConfig  `mapstructure:"metrics" toml:"metrics" json:"metrics"`
+	Syslog     []SyslogConfig `mapstructure:"syslog" toml:"syslog" json:"syslog"`
+	Kafka      KafkaConfig    `mapstructure:"kafka" toml:"kafka" json:"kafka"`
+	Store      StoreConfig    `mapstructure:"store" toml:"store" json:"store"`
+	Parsers    []ParserConfig `mapstructure:"parser" toml:"parser" json:"parser"`
+	Journald   JournaldConfig `mapstructure:"journald" toml:"journald" json:"journald"`
+	Metrics    MetricsConfig  `mapstructure:"metrics" toml:"metrics" json:"metrics"`
+	DirectRelp bool           `mapstructure:"directrelp" toml:"directrelp" json:"directrelp"`
 }
 
 type MetricsConfig struct {

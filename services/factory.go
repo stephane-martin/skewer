@@ -50,7 +50,7 @@ func ConfigureAndStartService(s NetworkService, c conf.BaseConfig, test bool) ([
 		s.SetConf(c.Syslog, c.Parsers)
 		return s.Start(test)
 	case *network.RelpService:
-		s.SetConf(c.Syslog, c.Parsers, c.Kafka)
+		s.SetConf(c.Syslog, c.Parsers, c.Kafka, c.DirectRelp)
 		return s.Start(test)
 	case *linux.JournalService:
 		s.SetConf(c.Journald)
@@ -70,7 +70,7 @@ func Factory(t NetworkServiceType, reporter *base.Reporter, gen chan ulid.ULID, 
 	case UDP:
 		return network.NewUdpService(reporter, gen, b, l)
 	case RELP:
-		return network.NewRelpService(reporter, b, l)
+		return network.NewRelpService(reporter, gen, b, l)
 	case Journal:
 		svc, err := linux.NewJournalService(reporter, gen, l)
 		if err == nil {

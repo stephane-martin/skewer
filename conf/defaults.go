@@ -12,6 +12,7 @@ func SetDefaults(v *viper.Viper) {
 	SetStoreDefaults(v, true)
 	SetJournaldDefaults(v, true)
 	SetMetricsDefaults(v, true)
+	v.SetDefault("directrelp", true)
 }
 
 func SetMetricsDefaults(v *viper.Viper, prefixed bool) {

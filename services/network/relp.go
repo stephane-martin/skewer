@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/oklog/ulid"
 	"github.com/pquerna/ffjson/ffjson"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
@@ -123,11 +124,13 @@ type RelpService struct {
 	pc       []conf.ParserConfig
 	kc       conf.KafkaConfig
 	wg       *sync.WaitGroup
+	direct   bool
+	gen      chan ulid.ULID
 }
 
-func NewRelpService(r *base.Reporter, b *binder.BinderClient, l log15.Logger) *RelpService {
-	s := &RelpService{b: b, logger: l, reporter: r, wg: &sync.WaitGroup{}}
-	s.impl = NewRelpServiceImpl(s.b, s.logger)
+func NewRelpService(r *base.Reporter, gen chan ulid.ULID, b *binder.BinderClient, l log15.Logger) *RelpService {
+	s := &RelpService{b: b, logger: l, reporter: r, wg: &sync.WaitGroup{}, direct: true, gen: gen}
+	s.impl = NewRelpServiceImpl(s.direct, gen, r, s.b, s.logger)
 	return s
 }
 
@@ -142,7 +145,7 @@ func (s *RelpService) Start(test bool) (infos []model.ListenerInfo, err error) {
 		s.logger.Debug("Capabilities", "caps", capabilities.GetCaps())
 	}
 	infos = []model.ListenerInfo{}
-	s.impl = NewRelpServiceImpl(s.b, s.logger)
+	s.impl = NewRelpServiceImpl(s.direct, s.gen, s.reporter, s.b, s.logger)
 
 	s.wg.Add(1)
 	go func() {
@@ -194,10 +197,11 @@ func (s *RelpService) Stop() {
 	s.wg.Wait()
 }
 
-func (s *RelpService) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig, kc conf.KafkaConfig) {
+func (s *RelpService) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig, kc conf.KafkaConfig, direct bool) {
 	s.sc = sc
 	s.pc = pc
 	s.kc = kc
+	s.direct = direct
 }
 
 type RelpServiceImpl struct {
@@ -209,10 +213,13 @@ type RelpServiceImpl struct {
 	test        bool
 	metrics     *relpMetrics
 	registry    *prometheus.Registry
+	reporter    *base.Reporter
+	direct      bool
+	gen         chan ulid.ULID
 }
 
-func NewRelpServiceImpl(b *binder.BinderClient, logger log15.Logger) *RelpServiceImpl {
-	s := RelpServiceImpl{status: Stopped, metrics: NewRelpMetrics(), registry: prometheus.NewRegistry()}
+func NewRelpServiceImpl(direct bool, gen chan ulid.ULID, reporter *base.Reporter, b *binder.BinderClient, logger log15.Logger) *RelpServiceImpl {
+	s := RelpServiceImpl{status: Stopped, metrics: NewRelpMetrics(), registry: prometheus.NewRegistry(), reporter: reporter, direct: direct, gen: gen}
 	s.StreamingService.init()
 	s.registry.MustRegister(
 		s.metrics.ClientConnectionCounter,
@@ -255,7 +262,7 @@ func (s *RelpServiceImpl) Start(test bool) ([]model.ListenerInfo, error) {
 		s.Logger.Info("Listening on RELP", "nb_services", len(infos))
 	}
 
-	if !s.test {
+	if !s.test && s.direct {
 		var err error
 		s.kafkaClient, err = s.kafkaConf.GetClient()
 		if err != nil {
@@ -435,7 +442,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 
 	var producer sarama.AsyncProducer
 
-	if s.test {
+	if s.test || !s.direct {
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
@@ -583,6 +590,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 
 		e := javascript.NewFilterEnvironment(config.FilterFunc, config.TopicFunc, config.TopicTmpl, config.PartitionFunc, config.PartitionTmpl, s.Logger)
 		var message model.RelpParsedMessage
+		var stmsg model.TcpUdpParsedMessage
 		var topic string
 		var partitionKey string
 		var errs []error
@@ -591,6 +599,9 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 		var kafkaMsg *sarama.ProducerMessage
 		var serialized []byte
 		var reported time.Time
+		var f error
+		var nonf error
+		var uid ulid.ULID
 
 	ForParsedChan:
 		for message = range parsed_messages_chan {
@@ -648,14 +659,29 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 				Metadata:  message.Txnr,
 			}
 
-			if s.test {
-				v, _ := kafkaMsg.Value.Encode()
-				pkey, _ := kafkaMsg.Key.Encode()
-				fmt.Fprintf(os.Stderr, "pkey: '%s' topic:'%s' txnr:'%d'\n", pkey, kafkaMsg.Topic, message.Txnr)
-				fmt.Fprintln(os.Stderr, string(v))
+			if s.test && s.direct {
+				// "fake" send messages to kafka
+				fmt.Fprintf(os.Stderr, "pkey: '%s' topic:'%s' txnr:'%d'\n", partitionKey, topic, message.Txnr)
+				fmt.Fprintln(os.Stderr, string(serialized))
 				fmt.Fprintln(os.Stderr)
 				other_successes_chan <- message.Txnr
+			} else if !s.direct {
+				// send messages to the Store
+				uid = <-s.gen
+				stmsg = model.TcpUdpParsedMessage{
+					Uid:    uid.String(),
+					Parsed: message.Parsed,
+					ConfId: config.ConfID,
+				}
+				f, nonf = s.reporter.Stash(stmsg)
+				if f == nil && nonf == nil {
+					other_successes_chan <- message.Txnr
+				} else {
+					other_fails_chan <- message.Txnr
+					// todo: error handling
+				}
 			} else {
+				// send messages to Kafka
 				producer.Input() <- kafkaMsg
 			}
 			ffjson.Pool(serialized)
@@ -669,77 +695,73 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config *conf.SyslogConfig) 
 	scanner := bufio.NewScanner(conn)
 	scanner.Split(RelpSplit)
 	var raw model.RelpRawMessage
-	for {
-		if scanner.Scan() {
-			if timeout > 0 {
-				conn.SetReadDeadline(time.Now().Add(timeout))
-			}
-			line := scanner.Text()
-			splits := strings.SplitN(line, " ", 4)
-			txnr, _ := strconv.Atoi(splits[0])
-			command := splits[1]
-			datalen, _ := strconv.Atoi(splits[2])
-			data := ""
-			if datalen != 0 {
-				data = strings.Trim(splits[3], " \r\n")
-			}
-			switch command {
-			case "open":
-				if relpIsOpen {
-					logger.Warn("Received open command twice")
-					if s.metrics != nil {
-						s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
-					}
-					return
-				}
-				answer := fmt.Sprintf("%d rsp %d 200 OK\n%s\n", txnr, len(data)+7, data)
-				conn.Write([]byte(answer))
-				relpIsOpen = true
-				logger.Info("Received 'open' command")
-			case "close":
-				if !relpIsOpen {
-					logger.Warn("Received close command before open")
-					if s.metrics != nil {
-						s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
-					}
-					return
-				}
-				answer := fmt.Sprintf("%d rsp 0\n0 serverclose 0\n", txnr)
-				conn.Write([]byte(answer))
-				relpIsOpen = false
-				logger.Info("Received 'close' command")
-			case "syslog":
-				if !relpIsOpen {
-					logger.Warn("Received syslog command before open")
-					if s.metrics != nil {
-						s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
-					}
-					return
-				}
-				raw = model.RelpRawMessage{
-					Txnr: txnr,
-					Raw: model.RawMessage{
-						Message:   []byte(data),
-						Client:    client,
-						LocalPort: local_port,
-					},
-				}
-				if s.metrics != nil {
-					s.metrics.IncomingMsgsCounter.WithLabelValues(s.Protocol, client, local_port_s, path).Inc()
-				}
-				raw_messages_chan <- raw
-			default:
-				logger.Warn("Unknown RELP command", "command", command)
+	for scanner.Scan() {
+		if timeout > 0 {
+			conn.SetReadDeadline(time.Now().Add(timeout))
+		}
+		line := scanner.Text()
+		splits := strings.SplitN(line, " ", 4)
+		txnr, _ := strconv.Atoi(splits[0])
+		command := splits[1]
+		datalen, _ := strconv.Atoi(splits[2])
+		data := ""
+		if datalen != 0 {
+			data = strings.Trim(splits[3], " \r\n")
+		}
+		switch command {
+		case "open":
+			if relpIsOpen {
+				logger.Warn("Received open command twice")
 				if s.metrics != nil {
 					s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
 				}
 				return
 			}
-		} else {
-			logger.Info("Scanning the RELP stream has ended", "error", scanner.Err())
+			answer := fmt.Sprintf("%d rsp %d 200 OK\n%s\n", txnr, len(data)+7, data)
+			conn.Write([]byte(answer))
+			relpIsOpen = true
+			logger.Info("Received 'open' command")
+		case "close":
+			if !relpIsOpen {
+				logger.Warn("Received close command before open")
+				if s.metrics != nil {
+					s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
+				}
+				return
+			}
+			answer := fmt.Sprintf("%d rsp 0\n0 serverclose 0\n", txnr)
+			conn.Write([]byte(answer))
+			relpIsOpen = false
+			logger.Info("Received 'close' command")
+		case "syslog":
+			if !relpIsOpen {
+				logger.Warn("Received syslog command before open")
+				if s.metrics != nil {
+					s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
+				}
+				return
+			}
+			raw = model.RelpRawMessage{
+				Txnr: txnr,
+				Raw: model.RawMessage{
+					Message:   []byte(data),
+					Client:    client,
+					LocalPort: local_port,
+				},
+			}
+			if s.metrics != nil {
+				s.metrics.IncomingMsgsCounter.WithLabelValues(s.Protocol, client, local_port_s, path).Inc()
+			}
+			raw_messages_chan <- raw
+		default:
+			logger.Warn("Unknown RELP command", "command", command)
+			if s.metrics != nil {
+				s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
+			}
 			return
 		}
 	}
+	logger.Info("Scanning the RELP stream has ended", "error", scanner.Err())
 }
 
 func splitSpaceOrLF(r rune) bool {
