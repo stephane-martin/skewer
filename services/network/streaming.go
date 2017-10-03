@@ -27,8 +27,8 @@ type UnixListenerConf struct {
 
 type StreamingService struct {
 	base.BaseService
-	tcpListeners  []*TCPListenerConf
-	unixListeners []*UnixListenerConf
+	tcpListeners  []TCPListenerConf
+	unixListeners []UnixListenerConf
 	acceptsWg     *sync.WaitGroup
 	handler       StreamHandler
 	wg            *sync.WaitGroup
@@ -36,8 +36,8 @@ type StreamingService struct {
 
 func (s *StreamingService) init() {
 	s.BaseService.Init()
-	s.tcpListeners = []*TCPListenerConf{}
-	s.unixListeners = []*UnixListenerConf{}
+	s.tcpListeners = []TCPListenerConf{}
+	s.unixListeners = []UnixListenerConf{}
 	s.acceptsWg = &sync.WaitGroup{}
 	s.wg = &sync.WaitGroup{}
 }
@@ -45,8 +45,8 @@ func (s *StreamingService) init() {
 func (s *StreamingService) initTCPListeners() []model.ListenerInfo {
 	nb := 0
 	s.ClearConnections()
-	s.tcpListeners = []*TCPListenerConf{}
-	s.unixListeners = []*UnixListenerConf{}
+	s.tcpListeners = []TCPListenerConf{}
+	s.unixListeners = []UnixListenerConf{}
 	//fmt.Println(s.SyslogConfigs)
 	for _, syslogConf := range s.SyslogConfigs {
 		if syslogConf.Protocol != s.Protocol {
@@ -63,7 +63,7 @@ func (s *StreamingService) initTCPListeners() []model.ListenerInfo {
 					Listener: l,
 					Conf:     syslogConf,
 				}
-				s.unixListeners = append(s.unixListeners, &lc)
+				s.unixListeners = append(s.unixListeners, lc)
 				s.UnixSocketPaths = append(s.UnixSocketPaths, syslogConf.UnixSocketPath)
 			}
 		} else {
@@ -78,7 +78,7 @@ func (s *StreamingService) initTCPListeners() []model.ListenerInfo {
 					Listener: l,
 					Conf:     syslogConf,
 				}
-				s.tcpListeners = append(s.tcpListeners, &lc)
+				s.tcpListeners = append(s.tcpListeners, lc)
 			}
 		}
 	}
@@ -113,7 +113,7 @@ func (s *StreamingService) handleConnection(conn net.Conn, config conf.SyslogCon
 	s.handler.HandleConnection(conn, config)
 }
 
-func (s *StreamingService) AcceptUnix(lc *UnixListenerConf) {
+func (s *StreamingService) AcceptUnix(lc UnixListenerConf) {
 	defer s.wg.Done()
 	defer s.acceptsWg.Done()
 	for {
@@ -134,7 +134,7 @@ func (s *StreamingService) AcceptUnix(lc *UnixListenerConf) {
 
 }
 
-func (s *StreamingService) AcceptTCP(lc *TCPListenerConf) {
+func (s *StreamingService) AcceptTCP(lc TCPListenerConf) {
 	defer s.wg.Done()
 	defer s.acceptsWg.Done()
 	for {
