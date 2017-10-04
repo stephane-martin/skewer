@@ -87,11 +87,13 @@
 			"revisionTime": "2016-10-29T20:57:26Z"
 		},
 		{
-			"checksumSHA1": "PwtU0c5gKWscNUQBUUPfU1MX5Ss=",
+			"checksumSHA1": "Yy63LkjSlUK0e9PJg21H4QREebc=",
 			"path": "github.com/dgraph-io/badger",
-			"revision": "9ed12b9ece41c0bc071d91e8cef9e1ac8f5836fb",
-			"revisionTime": "2017-09-14T05:15:36Z",
-			"tree": true
+			"revision": "7f945c8fffd35e73f278fc3f0bce9961398dc1e1",
+			"revisionTime": "2017-09-28T02:11:23Z",
+			"tree": true,
+			"version": "v0.8",
+			"versionExact": "v0.8"
 		},
 		{
 			"checksumSHA1": "S+FGkbnggonu1yt282X/FoM4vuo=",
@@ -829,10 +831,12 @@
 			"revisionTime": "2017-04-21T08:09:44Z"
 		},
 		{
-			"checksumSHA1": "DuNdObYNGCFB5Kcw61dkBAOAj8Q=",
+			"checksumSHA1": "iUafQRt0zfZuin1IYz9Zuc0Ovjo=",
 			"path": "gopkg.in/Shopify/sarama.v1",
-			"revision": "c01858abb625b73a3af51d0798e4ad42c8147093",
-			"revisionTime": "2017-05-08T18:36:27Z"
+			"revision": "bbdbe644099b7fdc8327d5cc69c030945188b2e9",
+			"revisionTime": "2017-10-04T12:52:49Z",
+			"version": "v1.13.0",
+			"versionExact": "v1.13.0"
 		},
 		{
 			"checksumSHA1": "fALlQNY1fM99NesfLJ50KguWsio=",
