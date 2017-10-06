@@ -18,8 +18,8 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/consul"
 	"github.com/stephane-martin/skewer/model"
-	"github.com/stephane-martin/skewer/sys/namespaces"
 	"github.com/stephane-martin/skewer/sys/capabilities"
+	"github.com/stephane-martin/skewer/sys/namespaces"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/queue"
 )
@@ -476,7 +476,6 @@ func (s *PluginController) Start() ([]model.ListenerInfo, error) {
 
 func setupCmd(name string, binderHandle int, loggerHandle int, messagePipe *os.File, test bool) (*exec.Cmd, io.WriteCloser, io.ReadCloser, error) {
 	exe, err := osext.Executable()
-	fmt.Fprintln(os.Stderr, "current exe", exe)
 	if err != nil {
 		return nil, nil, nil, err
 	}
