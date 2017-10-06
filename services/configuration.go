@@ -17,6 +17,7 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/consul"
 	"github.com/stephane-martin/skewer/sys/namespaces"
+	"github.com/stephane-martin/skewer/sys/capabilities"
 	"github.com/stephane-martin/skewer/utils"
 )
 
@@ -78,18 +79,24 @@ func (c *ConfigurationService) Chan() chan *conf.BaseConfig {
 }
 
 func (c *ConfigurationService) Start() error {
+	var err error
+	var cmd *exec.Cmd
+	var stdin io.WriteCloser
+	var stdout io.ReadCloser
 	c.output = make(chan *conf.BaseConfig)
-	cmd, stdin, stdout, err := setupCmd("confined-skewer-conf", 0, c.loggerHandle, nil, false)
 
-	if err != nil {
-		close(c.output)
-		return err
+	if capabilities.CapabilitiesSupported {
+		cmd, stdin, stdout, err = setupCmd("confined-skewer-conf", 0, c.loggerHandle, nil, false)
+		if err != nil {
+			close(c.output)
+			return err
+		}
+		err = namespaces.StartInNamespaces(cmd, false, "", c.confdir)
 	}
-	c.stdin = stdin
-
-	err = namespaces.StartInNamespaces(cmd, false, "", c.confdir)
 	if err != nil {
 		c.logger.Warn("Starting configuration service in user namespace has failed", "error", err)
+	}
+	if err != nil || !capabilities.CapabilitiesSupported {
 		cmd, stdin, stdout, err = setupCmd("skewer-conf", 0, c.loggerHandle, nil, false)
 		err = cmd.Start()
 	}

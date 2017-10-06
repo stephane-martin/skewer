@@ -19,6 +19,7 @@ import (
 	"github.com/stephane-martin/skewer/consul"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/sys/namespaces"
+	"github.com/stephane-martin/skewer/sys/capabilities"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/queue"
 )
@@ -475,6 +476,7 @@ func (s *PluginController) Start() ([]model.ListenerInfo, error) {
 
 func setupCmd(name string, binderHandle int, loggerHandle int, messagePipe *os.File, test bool) (*exec.Cmd, io.WriteCloser, io.ReadCloser, error) {
 	exe, err := osext.Executable()
+	fmt.Fprintln(os.Stderr, "current exe", exe)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -533,17 +535,20 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath string, co
 		// if creating the namespaces fails, fallback to classical start
 		// this way we can support environments where user namespaces are not
 		// available
-		s.cmd, s.stdin, s.stdout, err = setupCmd(fmt.Sprintf("confined-%s", name), s.binderHandle, s.loggerHandle, nil, test)
-		if err != nil {
-			close(s.ShutdownChan)
-			s.createdMu.Unlock()
-			return err
+		if capabilities.CapabilitiesSupported {
+			s.cmd, s.stdin, s.stdout, err = setupCmd(fmt.Sprintf("confined-%s", name), s.binderHandle, s.loggerHandle, nil, test)
+			if err != nil {
+				close(s.ShutdownChan)
+				s.createdMu.Unlock()
+				return err
+			}
+			err = namespaces.StartInNamespaces(s.cmd, dumpable, "", "")
 		}
-
-		err = namespaces.StartInNamespaces(s.cmd, dumpable, "", "")
 
 		if err != nil {
 			s.logger.Warn("Starting plugin in user namespace failed", "error", err, "type", name)
+		}
+		if err != nil || !capabilities.CapabilitiesSupported {
 			s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.binderHandle, s.loggerHandle, nil, test)
 			if err != nil {
 				close(s.ShutdownChan)
@@ -561,19 +566,22 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath string, co
 			return err
 		}
 		s.pipe = pipew
-		s.cmd, s.stdin, s.stdout, err = setupCmd(fmt.Sprintf("confined-%s", name), s.binderHandle, s.loggerHandle, piper, test)
-		if err != nil {
-			piper.Close()
-			pipew.Close()
-			close(s.ShutdownChan)
-			s.createdMu.Unlock()
-			return err
+		if capabilities.CapabilitiesSupported {
+			s.cmd, s.stdin, s.stdout, err = setupCmd(fmt.Sprintf("confined-%s", name), s.binderHandle, s.loggerHandle, piper, test)
+			if err != nil {
+				piper.Close()
+				pipew.Close()
+				close(s.ShutdownChan)
+				s.createdMu.Unlock()
+				return err
+			}
+			err = namespaces.StartInNamespaces(s.cmd, dumpable, storePath, "")
 		}
-
-		err = namespaces.StartInNamespaces(s.cmd, dumpable, storePath, "")
 
 		if err != nil {
 			s.logger.Warn("Starting plugin in user namespace failed", "error", err, "type", name)
+		}
+		if err != nil || !capabilities.CapabilitiesSupported {
 			s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.binderHandle, s.loggerHandle, piper, test)
 			if err != nil {
 				piper.Close()
