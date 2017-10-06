@@ -20,6 +20,7 @@ import (
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/sys/namespaces"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/queue"
 )
 
 // PluginController launches and controls the plugins services
@@ -656,9 +657,8 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath string, co
 
 type StorePlugin struct {
 	*PluginController
-	*utils.MessageQueue
-	stopChan chan struct{}
-	pushwg   *sync.WaitGroup
+	*queue.MessageQueue
+	pushwg *sync.WaitGroup
 }
 
 func (s *StorePlugin) pushqueue() {
@@ -686,14 +686,14 @@ func (s *StorePlugin) pushqueue() {
 }
 
 func (s *StorePlugin) push() {
-	for s.MessageQueue.Wait(s.stopChan) {
+	for s.MessageQueue.Wait() {
 		s.pushqueue()
 	}
 	s.pushwg.Done()
 }
 
 func (s *StorePlugin) Shutdown(killTimeOut time.Duration) {
-	close(s.stopChan)                        // will make push() return
+	s.MessageQueue.Dispose()                 // will make push() return
 	s.pushwg.Wait()                          // wait that push() returns
 	s.pushqueue()                            // empty the queue, in case there are pending messages
 	s.pipe.Close()                           // signal the child that we are done sending messages
@@ -710,8 +710,7 @@ func (s *StorePlugin) Stash(m model.TcpUdpParsedMessage) (fatal error, nonfatal 
 
 func NewStorePlugin(loggerHandle int, l log15.Logger) *StorePlugin {
 	s := &StorePlugin{PluginController: NewPluginController(Store, nil, nil, 0, loggerHandle, l)}
-	s.MessageQueue = utils.NewMessageQueue()
-	s.stopChan = make(chan struct{})
+	s.MessageQueue = queue.NewMessageQueue()
 	s.pushwg = &sync.WaitGroup{}
 	s.pushwg.Add(1)
 	go s.push()

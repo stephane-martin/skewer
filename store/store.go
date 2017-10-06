@@ -14,6 +14,7 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/queue"
 )
 
 type storeMetrics struct {
@@ -57,10 +58,10 @@ type MessageStore struct {
 	closedChan     chan struct{}
 	FatalErrorChan chan struct{}
 
-	toStashQueue    *utils.MessageQueue
-	ackQueue        *utils.AckQueue
-	nackQueue       *utils.AckQueue
-	permerrorsQueue *utils.AckQueue
+	toStashQueue    *queue.MessageQueue
+	ackQueue        *queue.AckQueue
+	nackQueue       *queue.AckQueue
+	permerrorsQueue *queue.AckQueue
 
 	OutputsChan chan *model.TcpUdpParsedMessage
 }
@@ -94,10 +95,10 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 	store.registry.MustRegister(store.metrics.BadgerGauge)
 	store.logger = l.New("class", "MessageStore")
 
-	store.toStashQueue = utils.NewMessageQueue()
-	store.ackQueue = utils.NewAckQueue()
-	store.nackQueue = utils.NewAckQueue()
-	store.permerrorsQueue = utils.NewAckQueue()
+	store.toStashQueue = queue.NewMessageQueue()
+	store.ackQueue = queue.NewAckQueue()
+	store.nackQueue = queue.NewAckQueue()
+	store.permerrorsQueue = queue.NewAckQueue()
 
 	store.ready_mu = &sync.Mutex{}
 	store.availMsgCond = sync.NewCond(store.ready_mu)
@@ -140,8 +141,7 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 	store.wg.Add(1)
 	go func() {
 		defer store.wg.Done()
-		done := ctx.Done()
-		for utils.WaitManyAckQueues(done, store.ackQueue, store.nackQueue, store.permerrorsQueue) {
+		for queue.WaitManyAckQueues(store.ackQueue, store.nackQueue, store.permerrorsQueue) {
 			store.doACK(store.ackQueue.GetMany(300))
 			store.doNACK(store.nackQueue.GetMany(300))
 			store.doPermanentError(store.permerrorsQueue.GetMany(300))
@@ -151,12 +151,21 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 
 	store.wg.Add(1)
 	go func() {
-		defer store.wg.Done()
-		done := ctx.Done()
-		for store.toStashQueue.Wait(done) {
+		<-ctx.Done()
+		store.toStashQueue.Dispose()
+		store.ackQueue.Dispose()
+		store.nackQueue.Dispose()
+		store.permerrorsQueue.Dispose()
+		store.wg.Done()
+	}()
+
+	store.wg.Add(1)
+	go func() {
+		for store.toStashQueue.Wait() {
 			store.ingest(store.toStashQueue.GetMany(1000))
 		}
 		store.logger.Debug("Store goroutine WaitMessages ended")
+		store.wg.Done()
 	}()
 
 	store.wg.Add(1)

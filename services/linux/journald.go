@@ -1,10 +1,7 @@
 package linux
 
 import (
-	"strconv"
-	"strings"
 	"sync"
-	"time"
 
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
@@ -16,66 +13,6 @@ import (
 	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/sys/capabilities"
 )
-
-func EntryToSyslog(entry map[string]string) model.ParsedMessage {
-	m := model.SyslogMessage{}
-	properties := map[string]string{}
-	for k, v := range entry {
-		k = strings.ToLower(k)
-		switch k {
-		case "syslog_identifier":
-		case "_comm":
-			m.Appname = v
-		case "message":
-			m.Message = v
-		case "syslog_pid":
-		case "_pid":
-			m.Procid = v
-		case "priority":
-			p, err := strconv.Atoi(v)
-			if err == nil {
-				m.Severity = model.Severity(p)
-			}
-		case "syslog_facility":
-			f, err := strconv.Atoi(v)
-			if err == nil {
-				m.Facility = model.Facility(f)
-			}
-		case "_hostname":
-			m.Hostname = v
-		case "_source_realtime_timestamp": // microseconds
-			t, err := strconv.ParseInt(v, 10, 64)
-			if err == nil {
-				m.TimeReportedNum = t * 1000
-			}
-		default:
-			if strings.HasPrefix(k, "_") {
-				properties[k] = v
-			}
-
-		}
-	}
-	if len(m.Appname) == 0 {
-		m.Appname = entry["SYSLOG_IDENTIFIER"]
-	}
-	if len(m.Procid) == 0 {
-		m.Procid = entry["SYSLOG_PID"]
-	}
-	m.TimeGeneratedNum = time.Now().UnixNano()
-	if m.TimeReportedNum == 0 {
-		m.TimeReportedNum = m.TimeGeneratedNum
-	}
-	m.Priority = model.Priority(int(m.Facility)*8 + int(m.Severity))
-	m.Properties = map[string]map[string]string{}
-	m.Properties["journald"] = properties
-
-	return model.ParsedMessage{
-		Client:         "journald",
-		LocalPort:      0,
-		UnixSocketPath: "",
-		Fields:         m,
-	}
-}
 
 type journalMetrics struct {
 	IncomingMsgsCounter *prometheus.CounterVec
@@ -128,7 +65,7 @@ func (s *JournalService) Start(test bool) (infos []model.ListenerInfo, err error
 	infos = []model.ListenerInfo{}
 	if s.reader == nil {
 		// create the low level journald reader if needed
-		s.reader, err = journald.NewReader(s.logger)
+		s.reader, err = journald.NewReader(s.generator, s.logger)
 		if err != nil {
 			return infos, err
 		}
@@ -139,17 +76,12 @@ func (s *JournalService) Start(test bool) (infos []model.ListenerInfo, err error
 	go func() {
 		defer s.wgroup.Done()
 
-		var uid ulid.ULID
-		var entry map[string]string
+		var entry model.TcpUdpParsedMessage
 		entries := s.reader.Entries()
 
 		for entry = range entries {
-			uid = <-s.generator
-			s.stasher.Stash(model.TcpUdpParsedMessage{
-				ConfId: s.Conf.ConfID,
-				Uid:    uid.String(),
-				Parsed: EntryToSyslog(entry),
-			})
+			entry.ConfId = s.Conf.ConfID
+			s.stasher.Stash(entry)
 			s.metrics.IncomingMsgsCounter.WithLabelValues("journald", "journald", "", "").Inc()
 		}
 	}()
