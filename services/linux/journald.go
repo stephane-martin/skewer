@@ -88,9 +88,9 @@ func (s *JournalService) Start(test bool) (infos []model.ListenerInfo, err error
 				}
 				for _, entry = range entries {
 					entry.ConfId = s.Conf.ConfID
-					s.stasher.Stash(*entry)
-					s.metrics.IncomingMsgsCounter.WithLabelValues("journald", "journald", "", "").Inc()
 				}
+				s.stasher.StashMany(entries)
+				s.metrics.IncomingMsgsCounter.WithLabelValues("journald", "journald", "", "").Add(float64(len(entries)))
 			}
 		}
 	}()

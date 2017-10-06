@@ -227,7 +227,6 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 		var syslogMsg model.SyslogMessage
 		var err error
 		var uid ulid.ULID
-		var fullMsg model.TcpUdpParsedMessage
 		var raw model.RawMessage
 		decoder := utils.SelectDecoder(config.Encoding)
 
@@ -236,7 +235,7 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 
 			if err == nil {
 				uid = <-s.generator
-				fullMsg = model.TcpUdpParsedMessage{
+				s.stasher.Stash(model.TcpUdpParsedMessage{
 					Parsed: model.ParsedMessage{
 						Fields:         syslogMsg,
 						Client:         raw.Client,
@@ -245,8 +244,7 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 					},
 					Uid:    uid.String(),
 					ConfId: config.ConfID,
-				}
-				s.stasher.Stash(fullMsg)
+				})
 			} else {
 				if s.metrics != nil {
 					s.metrics.ParsingErrorCounter.WithLabelValues(s.Protocol, raw.Client, config.Format).Inc()
@@ -260,6 +258,7 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 	var packet []byte
 	var remote net.Addr
 	var size int
+	var client string
 
 	for {
 		packet = make([]byte, 65536)
@@ -269,7 +268,7 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 			close(raw_messages_chan)
 			return
 		}
-		client := ""
+		client = ""
 		if remote == nil {
 			// unix socket
 			client = "localhost"

@@ -191,8 +191,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 
 		var uid ulid.ULID
 		var syslogMsg model.SyslogMessage
-		var err error
-		var fullMsg model.TcpUdpParsedMessage
+		var err, fatal, nonfatal error
 		var raw model.RawMessage
 		decoder := utils.SelectDecoder(config.Encoding)
 
@@ -202,7 +201,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 
 			if err == nil {
 				uid = <-s.generator
-				fullMsg = model.TcpUdpParsedMessage{
+				fatal, nonfatal = s.reporter.Stash(model.TcpUdpParsedMessage{
 					Parsed: model.ParsedMessage{
 						Fields:         syslogMsg,
 						Client:         raw.Client,
@@ -211,8 +210,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 					},
 					Uid:    uid.String(),
 					ConfId: config.ConfID,
-				}
-				fatal, nonfatal := s.reporter.Stash(fullMsg)
+				})
 				if fatal != nil {
 					logger.Error("Fatal error stashing TCP message", "error", fatal)
 					conn.Close()
