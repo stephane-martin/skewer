@@ -196,7 +196,6 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 		decoder := utils.SelectDecoder(config.Encoding)
 
 		for raw = range rawMessagesChan {
-
 			syslogMsg, err = parser.Parse(raw.Message, decoder, config.DontParseSD)
 
 			if err == nil {

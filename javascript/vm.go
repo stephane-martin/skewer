@@ -86,17 +86,18 @@ type ParsersEnvironment interface {
 }
 
 func NewParsersEnvironment(logger log15.Logger) ParsersEnvironment {
-	return newEnv("", "", "", "", "", logger)
+	return newEnv("", "", "", "", "", "", logger)
 }
 
 type FilterEnvironment interface {
 	FilterMessage(m *model.SyslogMessage) (result *model.SyslogMessage, filterResult FilterResult, err error)
-	PartitionKey(m *model.SyslogMessage) (partitionKey string, errs []error)
+	PartitionKey(m model.SyslogMessage) (partitionKey string, errs []error)
+	PartitionNumber(m model.SyslogMessage) (partitionNumber int32, errs []error)
 	Topic(m *model.SyslogMessage) (topic string, errs []error)
 }
 
-func NewFilterEnvironment(filterFunc, topicFunc, topicTmpl, partitionKeyFunc, partitionKeyTmpl string, logger log15.Logger) *Environment {
-	return newEnv(filterFunc, topicFunc, topicTmpl, partitionKeyFunc, partitionKeyTmpl, logger)
+func NewFilterEnvironment(filterFunc, topicFunc, topicTmpl, partitionKeyFunc, partitionKeyTmpl, partitionNumberFunc string, logger log15.Logger) *Environment {
+	return newEnv(filterFunc, topicFunc, topicTmpl, partitionKeyFunc, partitionKeyTmpl, partitionNumberFunc, logger)
 }
 
 type Environment struct {
@@ -107,6 +108,7 @@ type Environment struct {
 	jsFilterMessages    goja.Callable
 	jsTopic             goja.Callable
 	jsPartitionKey      goja.Callable
+	jsPartitionNumber   goja.Callable
 	jsParsers           map[string]goja.Callable
 	topicTmpl           *template.Template
 	partitionKeyTmpl    *template.Template
@@ -156,7 +158,7 @@ func (p *ConcreteParser) Parse(rawMessage []byte, decoder *encoding.Decoder, don
 	return parsedMessage, nil
 }
 
-func newEnv(filterFunc, topicFunc, topicTmpl, partitionKeyFunc, partitionKeyTmpl string, logger log15.Logger) *Environment {
+func newEnv(filterFunc, topicFunc, topicTmpl, partitionKeyFunc, partitionKeyTmpl, partitionNumberFunc string, logger log15.Logger) *Environment {
 
 	e := Environment{}
 	e.logger = logger.New("class", "Environment")
@@ -186,6 +188,7 @@ func newEnv(filterFunc, topicFunc, topicTmpl, partitionKeyFunc, partitionKeyTmpl
 	topicFunc = strings.TrimSpace(topicFunc)
 	partitionKeyFunc = strings.TrimSpace(partitionKeyFunc)
 	filterFunc = strings.TrimSpace(filterFunc)
+	partitionNumberFunc = strings.TrimSpace(partitionNumberFunc)
 
 	if len(topicFunc) > 0 {
 		err := e.setTopicFunc(topicFunc)
@@ -205,6 +208,13 @@ func newEnv(filterFunc, topicFunc, topicTmpl, partitionKeyFunc, partitionKeyTmpl
 			e.logger.Warn("Error setting the JS Filter() func", "error", err)
 		}
 	}
+	if len(partitionNumberFunc) > 0 {
+		err := e.setPartitionNumberFunc(partitionNumberFunc)
+		if err != nil {
+			e.logger.Warn("Error setting the JS PartitionNumber() func", "error", err)
+		}
+	}
+
 	return &e
 }
 
@@ -272,6 +282,23 @@ func (e *Environment) setPartitionKeyFunc(f string) error {
 		return &NotAFunctionError{"PartitionKey"}
 	}
 	e.jsPartitionKey = jsPartitionKey
+	return nil
+}
+
+func (e *Environment) setPartitionNumberFunc(f string) error {
+	_, err := e.runtime.RunString(f)
+	if err != nil {
+		return err
+	}
+	v := e.runtime.Get("PartitionNumber")
+	if v == nil {
+		return &ObjectNotFoundError{"PartitionNumber"}
+	}
+	jsPartitionNumber, b := goja.AssertFunction(v)
+	if !b {
+		return &NotAFunctionError{"PartitionNumber"}
+	}
+	e.jsPartitionNumber = jsPartitionNumber
 	return nil
 }
 
@@ -358,6 +385,28 @@ func (e *Environment) PartitionKey(m model.SyslogMessage) (partitionKey string, 
 		}
 	}
 	return partitionKey, errs
+}
+
+func (e *Environment) PartitionNumber(m model.SyslogMessage) (partitionNumber int32, errs []error) {
+	errs = []error{}
+	var err error
+	var jsMessage goja.Value
+	var jsPartitionNumber goja.Value
+
+	if e.jsPartitionNumber != nil {
+		jsMessage, err = e.toJsMessage(m)
+		if err == nil {
+			jsPartitionNumber, err = e.jsPartitionNumber(nil, jsMessage)
+			if err == nil {
+				partitionNumber = int32(jsPartitionNumber.ToInteger())
+			} else {
+				errs = append(errs, ExecutingJSErrorFactory(err, "PartitionNumber"))
+			}
+		} else {
+			errs = append(errs, &ConversionGoJsError{ExecutingJSErrorFactory(err, "NewSyslogMessage")})
+		}
+	}
+	return
 }
 
 func (e *Environment) FilterMessage(m *model.SyslogMessage) (filterResult FilterResult, err error) {

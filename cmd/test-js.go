@@ -32,7 +32,8 @@ var testjsCmd = &cobra.Command{
 		logger := log15.New()
 		ffunc := `function FilterMessages(m) { m.Message="bla"; return FILTER.PASS; }`
 		tfunc := `function Topic(m) { return "topic-" + m.Appname; }`
-		env := javascript.NewFilterEnvironment(ffunc, tfunc, "", "", "", logger)
+		pfunc := `function PartitionNumber(m) {return 4; }`
+		env := javascript.NewFilterEnvironment(ffunc, tfunc, "", "", "", pfunc, logger)
 		m := model.SyslogMessage{}
 		m.TimeReportedNum = time.Now().UnixNano()
 		m.TimeGeneratedNum = time.Now().Add(time.Hour).UnixNano()
@@ -57,6 +58,10 @@ var testjsCmd = &cobra.Command{
 		topic, errs := env.Topic(m)
 		fmt.Println(errs)
 		fmt.Println(topic)
+
+		pnumber, errs := env.PartitionNumber(m)
+		fmt.Println(errs)
+		fmt.Println(pnumber)
 
 	},
 }

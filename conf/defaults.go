@@ -62,6 +62,7 @@ func SetKafkaDefaults(v *viper.Viper, prefixed bool) {
 	v.SetDefault(prefix+"flush_messages_max", 0)
 	v.SetDefault(prefix+"retry_send_max", 3)
 	v.SetDefault(prefix+"retry_send_backoff", "100ms")
+	v.SetDefault(prefix+"partitioner", "hash")
 }
 
 func SetStoreDefaults(v *viper.Viper, prefixed bool) {

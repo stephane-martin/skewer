@@ -35,21 +35,12 @@ func (q *MessageQueue) Dispose() {
 	atomic.StoreInt32(&q.disposed, 1)
 }
 
-func (q *MessageQueue) Put(m model.TcpUdpParsedMessage) error {
-	n := &messsageNode{msg: &m}
-	if q.Disposed() {
-		return ErrDisposed
-	}
-	(*messsageNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.head)), unsafe.Pointer(n))).next = n
-	return nil
-}
-
 func (q *MessageQueue) Has() bool {
 	return q.tail.next != nil
 }
 
 func (q *MessageQueue) Wait() bool {
-	var nb int
+	var nb uint64
 	for {
 		if q.Has() {
 			return true
@@ -81,6 +72,15 @@ func (q *MessageQueue) Get() (m *model.TcpUdpParsedMessage, err error) {
 		err = ErrDisposed
 	}
 	return
+}
+
+func (q *MessageQueue) Put(m model.TcpUdpParsedMessage) error {
+	n := &messsageNode{msg: &m}
+	if q.Disposed() {
+		return ErrDisposed
+	}
+	(*messsageNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.head)), unsafe.Pointer(n))).next = n
+	return nil
 }
 
 func (q *MessageQueue) GetMany(max int) []*model.TcpUdpParsedMessage {

@@ -588,11 +588,20 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 			s.wg.Done()
 		}()
 
-		e := javascript.NewFilterEnvironment(config.FilterFunc, config.TopicFunc, config.TopicTmpl, config.PartitionFunc, config.PartitionTmpl, s.Logger)
+		e := javascript.NewFilterEnvironment(
+			config.FilterFunc,
+			config.TopicFunc,
+			config.TopicTmpl,
+			config.PartitionFunc,
+			config.PartitionTmpl,
+			config.PartitionNumberFunc,
+			s.Logger,
+		)
 		var message model.RelpParsedMessage
 		var stmsg model.TcpUdpParsedMessage
 		var topic string
 		var partitionKey string
+		var partitionNumber int32
 		var errs []error
 		var err error
 		var filterResult javascript.FilterResult
@@ -609,16 +618,20 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 			for _, err = range errs {
 				logger.Info("Error calculating topic", "error", err, "txnr", message.Txnr)
 			}
-			partitionKey, errs = e.PartitionKey(message.Parsed.Fields)
-			for _, err = range errs {
-				logger.Info("Error calculating the partition key", "error", err, "txnr", message.Txnr)
-			}
-
-			if len(topic) == 0 || len(partitionKey) == 0 {
+			if len(topic) == 0 {
 				logger.Warn("Topic or PartitionKey could not be calculated", "txnr", message.Txnr)
 				other_fails_chan <- message.Txnr
 				continue ForParsedChan
 			}
+			partitionKey, errs = e.PartitionKey(message.Parsed.Fields)
+			for _, err = range errs {
+				logger.Info("Error calculating the partition key", "error", err, "txnr", message.Txnr)
+			}
+			partitionNumber, errs = e.PartitionNumber(message.Parsed.Fields)
+			for _, err = range errs {
+				logger.Info("Error calculating the partition number", "error", err, "txnr", message.Txnr)
+			}
+
 			filterResult, err = e.FilterMessage(&message.Parsed.Fields)
 
 			switch filterResult {
@@ -653,6 +666,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 
 			kafkaMsg = &sarama.ProducerMessage{
 				Key:       sarama.StringEncoder(partitionKey),
+				Partition: partitionNumber,
 				Value:     sarama.ByteEncoder(serialized),
 				Topic:     topic,
 				Timestamp: reported,

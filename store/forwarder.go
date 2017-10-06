@@ -132,6 +132,7 @@ func (fwder *kafkaForwarder) getAndSendMessages(ctx context.Context, from Store,
 	var message *model.TcpUdpParsedMessage
 	var topic string
 	var partitionKey string
+	var partitionNumber int32
 	var errs []error
 	var err error
 	var filterResult javascript.FilterResult
@@ -162,6 +163,7 @@ ForOutputs:
 					config.TopicTmpl,
 					config.PartitionFunc,
 					config.PartitionTmpl,
+					config.PartitionNumberFunc,
 					fwder.logger,
 				)
 				env = jsenvs[message.ConfId]
@@ -171,15 +173,18 @@ ForOutputs:
 			for _, err = range errs {
 				fwder.logger.Info("Error calculating topic", "error", err, "uid", message.Uid)
 			}
+			if len(topic) == 0 {
+				fwder.logger.Warn("Topic or PartitionKey could not be calculated", "uid", message.Uid)
+				from.PermError(message.Uid)
+				continue ForOutputs
+			}
 			partitionKey, errs = env.PartitionKey(message.Parsed.Fields)
 			for _, err := range errs {
 				fwder.logger.Info("Error calculating the partition key", "error", err, "uid", message.Uid)
 			}
-
-			if len(topic) == 0 || len(partitionKey) == 0 {
-				fwder.logger.Warn("Topic or PartitionKey could not be calculated", "uid", message.Uid)
-				from.PermError(message.Uid)
-				continue ForOutputs
+			partitionNumber, errs = env.PartitionNumber(message.Parsed.Fields)
+			for _, err := range errs {
+				fwder.logger.Info("Error calculating the partition number", "error", err, "uid", message.Uid)
 			}
 
 			filterResult, err = env.FilterMessage(&message.Parsed.Fields)
@@ -216,6 +221,7 @@ ForOutputs:
 
 			kafkaMsg = &sarama.ProducerMessage{
 				Key:       sarama.StringEncoder(partitionKey),
+				Partition: partitionNumber,
 				Value:     sarama.ByteEncoder(serialized),
 				Topic:     topic,
 				Timestamp: reported,

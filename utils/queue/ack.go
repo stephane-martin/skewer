@@ -46,7 +46,7 @@ func (q *AckQueue) Has() bool {
 }
 
 func (q *AckQueue) Wait(stopChan <-chan struct{}) bool {
-	var nb int
+	var nb uint64
 	for {
 		if q.Has() {
 			return true
@@ -68,7 +68,7 @@ func (q *AckQueue) Wait(stopChan <-chan struct{}) bool {
 }
 
 func WaitManyAckQueues(queues ...*AckQueue) bool {
-	var nb int
+	var nb uint64
 	var q *AckQueue
 MainLoop:
 	for {

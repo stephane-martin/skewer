@@ -215,6 +215,8 @@ func ImportSyslogConfig(data []byte) (*SyslogConfig, error) {
 
 func (c *KafkaConfig) GetSaramaConfig() (*sarama.Config, error) {
 	s := sarama.NewConfig()
+	s.ClientID = c.ClientID
+	s.ChannelBufferSize = c.ChannelBufferSize
 	s.Net.MaxOpenRequests = c.MaxOpenRequests
 	s.Net.DialTimeout = c.DialTimeout
 	s.Net.ReadTimeout = c.ReadTimeout
@@ -234,13 +236,11 @@ func (c *KafkaConfig) GetSaramaConfig() (*sarama.Config, error) {
 	s.Producer.Flush.MaxMessages = c.FlushMessagesMax
 	s.Producer.Retry.Backoff = c.RetrySendBackoff
 	s.Producer.Retry.Max = c.RetrySendMax
-	s.ClientID = c.ClientID
-	s.ChannelBufferSize = c.ChannelBufferSize
 
 	v, _ := ParseVersion(c.Version) // the ignored error has been checked at launch
 	s.Version = v
 
-	switch c.Compression {
+	switch strings.TrimSpace(strings.ToLower(c.Compression)) {
 	case "snappy":
 		s.Producer.Compression = sarama.CompressionSnappy
 	case "gzip":
@@ -262,8 +262,18 @@ func (c *KafkaConfig) GetSaramaConfig() (*sarama.Config, error) {
 
 	}
 
+	switch c.Partitioner {
+	case "manual":
+		s.Producer.Partitioner = sarama.NewManualPartitioner
+	case "random":
+		s.Producer.Partitioner = sarama.NewRandomPartitioner
+	case "roundrobin":
+		s.Producer.Partitioner = sarama.NewRoundRobinPartitioner
+	default:
+		s.Producer.Partitioner = sarama.NewHashPartitioner
+	}
+
 	// MetricRegistry ?
-	// partitioner ?
 	return s, nil
 }
 
@@ -716,6 +726,9 @@ func (c *BaseConfig) Complete() (err error) {
 		c.Syslog[i] = *c.Syslog[i].CalculateID()
 	}
 	c.Journald = *c.Journald.CalculateID()
+	c.Kafka.Partitioner = strings.TrimSpace(strings.ToLower(c.Kafka.Partitioner))
+	c.Kafka.Partitioner = strings.Replace(c.Kafka.Partitioner, "-", "", -1)
+	c.Kafka.Partitioner = strings.Replace(c.Kafka.Partitioner, "_", "", -1)
 
 	return nil
 }
