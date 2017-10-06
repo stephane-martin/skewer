@@ -621,6 +621,12 @@
 			"revisionTime": "2015-05-23T23:00:31Z"
 		},
 		{
+			"checksumSHA1": "GTuks1G8VJyrst8KIa7AtiKrSGg=",
+			"path": "github.com/ylih/extrasys",
+			"revision": "48c6a025836d8f4eb4ffd5470ceafcf140932118",
+			"revisionTime": "2016-04-06T22:13:57Z"
+		},
+		{
 			"checksumSHA1": "TT1rac6kpQp2vz24m5yDGUNQ/QQ=",
 			"path": "golang.org/x/crypto/cast5",
 			"revision": "0fe963104e9d1877082f8fb38f816fcd97eb1d10",
