@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"runtime"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -45,6 +46,7 @@ func (q *AckQueue) Has() bool {
 }
 
 func (q *AckQueue) Wait(stopChan <-chan struct{}) bool {
+	var nb int
 	for {
 		if q.Has() {
 			return true
@@ -52,12 +54,21 @@ func (q *AckQueue) Wait(stopChan <-chan struct{}) bool {
 		if q.Disposed() {
 			return false
 		}
-		time.Sleep(100 * time.Millisecond)
-		//runtime.Gosched()
+		if nb < 22 {
+			runtime.Gosched()
+		} else if nb < 24 {
+			time.Sleep(time.Millisecond)
+		} else if nb < 26 {
+			time.Sleep(10 * time.Millisecond)
+		} else {
+			time.Sleep(100 * time.Millisecond)
+		}
+		nb++
 	}
 }
 
 func WaitManyAckQueues(queues ...*AckQueue) bool {
+	var nb int
 	var q *AckQueue
 MainLoop:
 	for {
@@ -68,8 +79,16 @@ MainLoop:
 		}
 		for _, q = range queues {
 			if !q.Disposed() {
-				time.Sleep(100 * time.Millisecond)
-				//runtime.Gosched()
+				if nb < 22 {
+					runtime.Gosched()
+				} else if nb < 24 {
+					time.Sleep(time.Millisecond)
+				} else if nb < 26 {
+					time.Sleep(10 * time.Millisecond)
+				} else {
+					time.Sleep(100 * time.Millisecond)
+				}
+				nb++
 				continue MainLoop
 			}
 		}

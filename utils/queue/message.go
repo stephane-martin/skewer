@@ -2,6 +2,7 @@ package queue
 
 import (
 	//"runtime"
+	"runtime"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -48,6 +49,7 @@ func (q *MessageQueue) Has() bool {
 }
 
 func (q *MessageQueue) Wait() bool {
+	var nb int
 	for {
 		if q.Has() {
 			return true
@@ -55,8 +57,16 @@ func (q *MessageQueue) Wait() bool {
 		if q.Disposed() {
 			return false
 		}
-		time.Sleep(100 * time.Millisecond)
-		//runtime.Gosched()
+		if nb < 22 {
+			runtime.Gosched()
+		} else if nb < 24 {
+			time.Sleep(time.Millisecond)
+		} else if nb < 26 {
+			time.Sleep(10 * time.Millisecond)
+		} else {
+			time.Sleep(100 * time.Millisecond)
+		}
+		nb++
 	}
 }
 
