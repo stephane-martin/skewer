@@ -5,25 +5,18 @@ package journald
 import (
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
-	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/utils/queue"
 )
 
 var Supported bool = false
 
-type JournaldReader interface {
-	Start(coding string)
-	Stop()
-	Shutdown()
-	Entries() chan model.TcpUdpParsedMessage
-}
-
 type reader struct {
-	entries chan model.TcpUdpParsedMessage
+	entries *queue.MessageQueue
 }
 
 func NewReader(generator chan ulid.ULID, logger log15.Logger) (JournaldReader, error) {
 	r := &reader{}
-	r.entries = make(chan model.TcpUdpParsedMessage)
+	r.entries = queue.NewMessageQueue()
 	return r, nil
 }
 
@@ -31,6 +24,6 @@ func (r *reader) Start(coding string) {}
 func (r *reader) Stop()               {}
 func (r *reader) Shutdown()           {}
 
-func (r *reader) Entries() chan model.TcpUdpParsedMessage {
+func (r *reader) Entries() *queue.MessageQueue {
 	return r.entries
 }

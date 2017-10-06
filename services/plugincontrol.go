@@ -150,6 +150,7 @@ func (s *PluginController) Shutdown(killTimeOut time.Duration) {
 		<-s.StopChan
 	default:
 		// ask to shutdown
+		s.logger.Debug("Controller is asked to shutdown", "type", name)
 		err := s.W("shutdown", utils.NOW)
 		if err != nil {
 			s.logger.Warn("Error writing shutdown to plugin stdin. Kill brutally.", "error", err, "type", name)

@@ -76,13 +76,22 @@ func (s *JournalService) Start(test bool) (infos []model.ListenerInfo, err error
 	go func() {
 		defer s.wgroup.Done()
 
-		var entry model.TcpUdpParsedMessage
-		entries := s.reader.Entries()
+		var entries []*model.TcpUdpParsedMessage
+		var entry *model.TcpUdpParsedMessage
+		q := s.reader.Entries()
 
-		for entry = range entries {
-			entry.ConfId = s.Conf.ConfID
-			s.stasher.Stash(entry)
-			s.metrics.IncomingMsgsCounter.WithLabelValues("journald", "journald", "", "").Inc()
+		for q.Wait() {
+			for {
+				entries = q.GetMany(1000)
+				if len(entries) == 0 {
+					break
+				}
+				for _, entry = range entries {
+					entry.ConfId = s.Conf.ConfID
+					s.stasher.Stash(*entry)
+					s.metrics.IncomingMsgsCounter.WithLabelValues("journald", "journald", "", "").Inc()
+				}
+			}
 		}
 	}()
 

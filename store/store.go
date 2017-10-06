@@ -140,18 +140,19 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 
 	store.wg.Add(1)
 	go func() {
-		defer store.wg.Done()
 		for queue.WaitManyAckQueues(store.ackQueue, store.nackQueue, store.permerrorsQueue) {
 			store.doACK(store.ackQueue.GetMany(300))
 			store.doNACK(store.nackQueue.GetMany(300))
 			store.doPermanentError(store.permerrorsQueue.GetMany(300))
 		}
 		store.logger.Debug("Store goroutine WaitAck ended")
+		store.wg.Done()
 	}()
 
 	store.wg.Add(1)
 	go func() {
 		<-ctx.Done()
+		store.logger.Debug("Store is asked to stop")
 		store.toStashQueue.Dispose()
 		store.ackQueue.Dispose()
 		store.nackQueue.Dispose()

@@ -14,20 +14,14 @@ import (
 	"github.com/oklog/ulid"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/queue"
 )
 
 var Supported bool = true
 
-type JournaldReader interface {
-	Start(coding string)
-	Stop()
-	Shutdown()
-	Entries() chan model.TcpUdpParsedMessage
-}
-
 type reader struct {
 	journal      *sdjournal.Journal
-	entries      chan model.TcpUdpParsedMessage
+	entries      *queue.MessageQueue
 	stopchan     chan struct{}
 	shutdownchan chan struct{}
 	wgroup       *sync.WaitGroup
@@ -142,7 +136,7 @@ func NewReader(generator chan ulid.ULID, logger log15.Logger) (JournaldReader, e
 	return r, nil
 }
 
-func (r *reader) Entries() chan model.TcpUdpParsedMessage {
+func (r *reader) Entries() *queue.MessageQueue {
 	return r.entries
 }
 
@@ -183,12 +177,13 @@ func (r *reader) wait() chan struct{} {
 
 func (r *reader) Start(coding string) {
 	r.stopchan = make(chan struct{})
-	r.entries = make(chan model.TcpUdpParsedMessage)
+	r.entries = queue.NewMessageQueue()
 
 	r.wgroup.Add(1)
 	go func() {
 		defer func() {
-			close(r.entries)
+			r.entries.Dispose()
+			//close(r.entries)
 			r.wgroup.Done()
 		}()
 
@@ -220,7 +215,7 @@ func (r *reader) Start(coding string) {
 						if err != nil {
 							return
 						} else {
-							r.entries <- converter(entry.Fields)
+							r.entries.Put(converter(entry.Fields))
 						}
 					}
 				}

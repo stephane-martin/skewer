@@ -82,6 +82,7 @@ func Launch(typ NetworkServiceType, test bool, binderClient *binder.BinderClient
 			// here we *do not return*. So the plugin process continues to live
 			// and to listen for subsequent control commands
 		case "shutdown":
+			logger.Debug("provider is asked to stop", "type", name)
 			svc.Shutdown()
 			base.W("shutdown", base.SUCC)
 			// at the end of shutdown command, we *return*. So the plugin

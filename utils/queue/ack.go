@@ -1,8 +1,8 @@
 package queue
 
 import (
-	"runtime"
 	"sync/atomic"
+	"time"
 	"unsafe"
 )
 
@@ -52,7 +52,8 @@ func (q *AckQueue) Wait(stopChan <-chan struct{}) bool {
 		if q.Disposed() {
 			return false
 		}
-		runtime.Gosched()
+		time.Sleep(100 * time.Millisecond)
+		//runtime.Gosched()
 	}
 }
 
@@ -67,6 +68,8 @@ MainLoop:
 		}
 		for _, q = range queues {
 			if !q.Disposed() {
+				time.Sleep(100 * time.Millisecond)
+				//runtime.Gosched()
 				continue MainLoop
 			}
 		}

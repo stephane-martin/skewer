@@ -1,8 +1,9 @@
 package queue
 
 import (
-	"runtime"
+	//"runtime"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"github.com/stephane-martin/skewer/model"
@@ -54,7 +55,8 @@ func (q *MessageQueue) Wait() bool {
 		if q.Disposed() {
 			return false
 		}
-		runtime.Gosched()
+		time.Sleep(100 * time.Millisecond)
+		//runtime.Gosched()
 	}
 }
 
