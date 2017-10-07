@@ -484,6 +484,12 @@
 			"revisionTime": "2016-11-28T21:05:44Z"
 		},
 		{
+			"checksumSHA1": "bCj0+g9CKyCA90SlDxaPA6+zZeg=",
+			"path": "github.com/seccomp/libseccomp-golang",
+			"revision": "f6ec81daf48e41bf48b475afc7fe06a26bfb72d1",
+			"revisionTime": "2017-06-09T13:46:05Z"
+		},
+		{
 			"checksumSHA1": "Fdwr+DDDCpcZNYjFmz8WOdqoGxo=",
 			"path": "github.com/shirou/gopsutil",
 			"revision": "aa0a3bce9d1f4efc710ed812f19f77851da2eedd",
