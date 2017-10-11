@@ -24,8 +24,13 @@ type mountPoint struct {
 	Data   string
 }
 
-func StartInNamespaces(command *exec.Cmd, dumpable bool, storePath string, confDir string) error {
-	command.Env = append(command.Env, setupEnv(storePath, confDir)...)
+func StartInNamespaces(command *exec.Cmd, dumpable bool, storePath, confDir, acctPath string) error {
+	acctDir := ""
+	acctPath = strings.TrimSpace(acctPath)
+	if len(acctPath) > 0 {
+		acctDir = filepath.Dir(acctPath)
+	}
+	command.Env = append(command.Env, setupEnv(storePath, confDir, acctDir)...)
 
 	command.SysProcAttr = &syscall.SysProcAttr{
 		Cloneflags: syscall.CLONE_NEWUSER | syscall.CLONE_NEWPID | syscall.CLONE_NEWUTS | syscall.CLONE_NEWNS,
@@ -212,6 +217,11 @@ func MakeChroot(targetExec string) (string, error) {
 	confDir := strings.TrimSpace(os.Getenv("SKEWER_CONF_DIR"))
 	if len(confDir) > 0 {
 		systemMountsMap[confDir] = true
+	}
+
+	acctDir := strings.TrimSpace(os.Getenv("SKEWER_ACCT_DIR"))
+	if len(acctDir) > 0 {
+		systemMountsMap[acctDir] = true
 	}
 
 	systemMounts := make([]string, 0, len(systemMountsMap))
@@ -426,7 +436,7 @@ func MakeChroot(targetExec string) (string, error) {
 	return root, nil
 }
 
-func setupEnv(storePath string, confDir string) (env []string) {
+func setupEnv(storePath string, confDir string, acctDir string) (env []string) {
 	env = []string{}
 	if ttyname.IsAtty(1) {
 		myTtyName, _ := ttyname.TtyName(1)
@@ -441,6 +451,11 @@ func setupEnv(storePath string, confDir string) (env []string) {
 	storePath = strings.TrimSpace(storePath)
 	if len(storePath) > 0 {
 		env = append(env, fmt.Sprintf("SKEWER_STORE_PATH=%s", storePath))
+	}
+
+	acctDir = strings.TrimSpace(acctDir)
+	if len(acctDir) > 0 {
+		env = append(env, fmt.Sprintf("SKEWER_ACCT_DIR=%s", acctDir))
 	}
 
 	_, err := exec.LookPath("systemctl")

@@ -119,7 +119,7 @@ func main() {
 			cleanup("execve error", err)
 		}
 
-	case "confined-skewer-tcp", "confined-skewer-udp", "confined-skewer-relp", "confined-skewer-store", "confined-skewer-conf":
+	case "confined-skewer-accounting", "confined-skewer-tcp", "confined-skewer-udp", "confined-skewer-relp", "confined-skewer-store", "confined-skewer-conf":
 		path, err := osext.Executable()
 		if err != nil {
 			cleanup("Error getting executable path", err)
