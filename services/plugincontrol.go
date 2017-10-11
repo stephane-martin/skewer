@@ -198,12 +198,12 @@ type InfosAndError struct {
 
 func (s *PluginController) listen() chan InfosAndError {
 	startErrorChan := make(chan InfosAndError)
+	name := ReverseNetworkServiceMap[s.typ]
 
 	go func() {
 		var once sync.Once
 		initialized := false
 		kill := false
-		name := ReverseNetworkServiceMap[s.typ]
 		normalStop := false
 
 		defer func() {
@@ -407,7 +407,6 @@ func (s *PluginController) listen() chan InfosAndError {
 			// So we know that the plugin child has exited
 			// Let's wait that the shutdown channel has been closed before executing the defer()
 			<-s.ShutdownChan
-			return
 		} else {
 			// plugin has sent an invalid message that could not be interpreted by scanner
 			once.Do(func() {
@@ -417,10 +416,14 @@ func (s *PluginController) listen() chan InfosAndError {
 				}
 				close(startErrorChan)
 			})
-			s.logger.Error("Plugin scanner error", "error", err)
-			kill = true
-			return
+			if err == io.EOF {
+				<-s.ShutdownChan
+			} else {
+				s.logger.Error("Plugin scanner error", "type", name, "error", err)
+				kill = true
+			}
 		}
+		return
 
 	}()
 	return startErrorChan
