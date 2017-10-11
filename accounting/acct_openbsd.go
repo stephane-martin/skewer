@@ -16,11 +16,11 @@ import (
 	"unsafe"
 )
 
-var AHZ int64 = C.AHZ
+var Ahz int64 = C.AHZ
 var Ssize int = C.sizeof_struct_acct
 
 func Tick() int64 {
-	return AHZ
+	return Ahz
 }
 
 type Status uint8
