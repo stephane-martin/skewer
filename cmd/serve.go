@@ -52,7 +52,6 @@ var consulServiceName string
 var uidFlag string
 var gidFlag string
 var dumpableFlag bool
-var noMlockFlag bool
 var profile bool
 
 func init() {
@@ -68,19 +67,10 @@ func init() {
 	serveCmd.Flags().StringVar(&uidFlag, "uid", "", "Switch to this user ID (when launched as root)")
 	serveCmd.Flags().StringVar(&gidFlag, "gid", "", "Switch to this group ID (when launched as root)")
 	serveCmd.Flags().BoolVar(&dumpableFlag, "dumpable", false, "if set, the skewer process will be traceable/dumpable")
-	serveCmd.Flags().BoolVar(&noMlockFlag, "no-mlock", false, "if set, skewer will not mlock() its memory")
 	serveCmd.Flags().BoolVar(&profile, "profile", false, "if set, profile memory")
 }
 
 func runserve() {
-
-	// try to set mlock and non-dumpable for both child and parent
-	if sys.MlockSupported && !noMlockFlag {
-		err := sys.MlockAll()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error executing MlockAll(): %s\n", err)
-		}
-	}
 
 	if !dumpableFlag {
 		err := dumpable.SetNonDumpable()

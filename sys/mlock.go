@@ -5,10 +5,8 @@ package sys
 import "syscall"
 import "golang.org/x/sys/unix"
 
-func init() {
-	MlockSupported = true
-}
+var MlockSupported bool = true
 
-func mlockall() error {
+func MlockAll() error {
 	return unix.Mlockall(syscall.MCL_CURRENT | syscall.MCL_FUTURE)
 }

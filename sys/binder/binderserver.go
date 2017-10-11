@@ -68,12 +68,12 @@ func BinderListen(ctx context.Context, logger log15.Logger, schan chan *BinderCo
 	return l, nil
 }
 
-func BinderPacket(addr string) (net.PacketConn, error) {
+func BinderPacket(addr string) (conn net.PacketConn, err error) {
 	parts := strings.SplitN(addr, ":", 2)
 	lnet := parts[0]
 	laddr := parts[1]
 
-	conn, err := net.ListenPacket(lnet, laddr)
+	conn, err = net.ListenPacket(lnet, laddr)
 
 	if err != nil {
 		return nil, err
