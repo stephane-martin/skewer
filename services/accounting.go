@@ -71,6 +71,7 @@ func (s *AccountingService) Start(test bool) (infos []model.ListenerInfo, err er
 	if err != nil {
 		return
 	}
+	tick := accounting.Tick()
 
 	s.wgroup.Add(1)
 	go func() {
@@ -102,7 +103,7 @@ func (s *AccountingService) Start(test bool) (infos []model.ListenerInfo, err er
 				s.logger.Error("Unexpected error while reading the accounting file", "error", err)
 				return
 			} else {
-				acct = accounting.MakeAcct(buf)
+				acct = accounting.MakeAcct(buf, tick)
 				uid = <-s.generator
 				s.stasher.Stash(model.TcpUdpParsedMessage{
 					ConfId: s.Conf.ConfID,

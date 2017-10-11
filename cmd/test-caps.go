@@ -9,6 +9,7 @@ import (
 	"github.com/hashicorp/go-version"
 	"github.com/shirou/gopsutil/host"
 	"github.com/spf13/cobra"
+	"github.com/stephane-martin/skewer/sys"
 	"github.com/stephane-martin/skewer/sys/capabilities"
 	"github.com/syndtr/gocapability/capability"
 )
@@ -24,7 +25,7 @@ Cobra is a CLI library for Go that empowers applications.
 This application is a tool to generate the needed files
 to quickly create a Cobra application.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("test-caps called")
+		fmt.Println("test-caps called", sys.GetTick())
 		caps, err := capability.NewPid(os.Getpid())
 		if err == nil {
 			fmt.Println(caps)

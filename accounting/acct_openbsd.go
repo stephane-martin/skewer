@@ -16,8 +16,12 @@ import (
 	"unsafe"
 )
 
-var Ahz int64 = C.AHZ
+var AHZ int64 = C.AHZ
 var Ssize int = C.sizeof_struct_acct
+
+func Tick() int64 {
+	return AHZ
+}
 
 type Status uint8
 
@@ -87,7 +91,7 @@ func (a *Acct) Properties() (m map[string]string) {
 }
 
 func Comp2Int(c C.comp_t) int64 {
-	return int64(C.cvt(c)) * 1000 / Ahz
+	return int64(C.cvt(c))
 }
 
 func Comm(b *C.char) string {
@@ -100,7 +104,7 @@ func Comm(b *C.char) string {
 	return C.GoString((*C.char)(unsafe.Pointer(&temp[0])))
 }
 
-func MakeAcct(buf []byte) (dest Acct) {
+func MakeAcct(buf []byte, tick int64) (dest Acct) {
 	p := (*C.struct_acct)(unsafe.Pointer(&buf[0]))
 	uid := strconv.FormatUint(uint64(p.ac_uid), 10)
 	gid := strconv.FormatUint(uint64(p.ac_gid), 10)
@@ -116,9 +120,9 @@ func MakeAcct(buf []byte) (dest Acct) {
 	}
 	dest = Acct{
 		Comm:  Comm(&p.ac_comm[0]),
-		Utime: time.Duration(Comp2Int(p.ac_utime)) * time.Millisecond,
-		Stime: time.Duration(Comp2Int(p.ac_stime)) * time.Millisecond,
-		Etime: time.Duration(Comp2Int(p.ac_etime)) * time.Millisecond,
+		Utime: time.Duration(Comp2Int(p.ac_utime)*1000/tick) * time.Millisecond,
+		Stime: time.Duration(Comp2Int(p.ac_stime)*1000/tick) * time.Millisecond,
+		Etime: time.Duration(Comp2Int(p.ac_etime)*1000/tick) * time.Millisecond,
 		Btime: time.Unix(int64(p.ac_btime), 0).UTC(),
 		Uid:   username,
 		Gid:   groupname,

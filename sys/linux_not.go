@@ -11,3 +11,7 @@ func (e NotLinuxError) Error() string {
 func SetHostname(name string) error {
 	return nil
 }
+
+func GetTick() int {
+	return 0
+}
