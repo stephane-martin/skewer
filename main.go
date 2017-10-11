@@ -44,6 +44,11 @@ func main() {
 	loggerCtx, cancelLogger := context.WithCancel(context.Background())
 	var logger log15.Logger = nil
 
+	if runtime.GOOS == "openbsd" {
+		// so that we execute IP capabilities probes before the call to pledge
+		net.Dial("udp4", "127.0.0.1:80")
+	}
+
 	cleanup := func(msg string, err error) {
 		if err != nil {
 			if len(msg) == 0 {
@@ -65,6 +70,7 @@ func main() {
 
 	switch name {
 	case "skewer-conf":
+		sys.MlockAll()
 		dumpable.SetNonDumpable()
 		capabilities.NoNewPriv()
 		signal.Ignore(syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
@@ -76,6 +82,10 @@ func main() {
 		err = scomp.SetupSeccomp(name)
 		if err != nil {
 			cleanup("Seccomp setup error", err)
+		}
+		err = scomp.SetupPledge(name)
+		if err != nil {
+			cleanup("Pledge setup error", err)
 		}
 		err = services.LaunchConfProvider(logger)
 		if err != nil {
@@ -143,6 +153,9 @@ func main() {
 		}
 
 	case "skewer-tcp", "skewer-udp", "skewer-relp", "skewer-journal", "skewer-store", "skewer-accounting":
+		if name != "skewer-store" {
+			sys.MlockAll()
+		}
 		signal.Ignore(syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
 		dumpable.SetNonDumpable()
 		capabilities.NoNewPriv()
@@ -173,9 +186,14 @@ func main() {
 		if err != nil {
 			cleanup("Could not create logger for plugin", err)
 		}
+
 		err = scomp.SetupSeccomp(name)
 		if err != nil {
 			cleanup("Seccomp setup error", err)
+		}
+		err = scomp.SetupPledge(name)
+		if err != nil {
+			cleanup("Pledge setup error", err)
 		}
 		err = services.Launch(services.NetworkServiceMap[name], os.Getenv("SKEWER_TEST") == "TRUE", binderClient, logger, pipe)
 		if err != nil {
@@ -183,6 +201,7 @@ func main() {
 		}
 
 	default:
+		sys.MlockAll()
 		if capabilities.CapabilitiesSupported {
 			runtime.LockOSThread()
 			// very early we drop most of linux capabilities
@@ -203,10 +222,15 @@ func main() {
 				}
 			}
 
-			err = scomp.SetupSeccomp("parent")
-			if err != nil {
-				cleanup("Error setting up seccomp", err)
-			}
+		}
+		err := scomp.SetupSeccomp("parent")
+		if err != nil {
+			cleanup("Error setting up seccomp", err)
+		}
+
+		err = scomp.SetupPledge("parent")
+		if err != nil {
+			cleanup("Error setting up pledge", err)
 		}
 
 		cmd.Execute()
