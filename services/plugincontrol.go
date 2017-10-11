@@ -401,6 +401,7 @@ func (s *PluginController) listen() chan InfosAndError {
 			}
 		}
 		err := scanner.Err()
+		s.logger.Debug("Plugin scanner returned", "type", name)
 		if err == nil {
 			// 'scanner' has returned without error.
 			// It means that the plugin child stdout is EOF = closed.
@@ -408,6 +409,7 @@ func (s *PluginController) listen() chan InfosAndError {
 			// Let's wait that the shutdown channel has been closed before executing the defer()
 			<-s.ShutdownChan
 		} else {
+			s.logger.Debug("Plugin scanner error", "type", name, "error", err)
 			// plugin has sent an invalid message that could not be interpreted by scanner
 			once.Do(func() {
 				startErrorChan <- InfosAndError{
@@ -416,7 +418,7 @@ func (s *PluginController) listen() chan InfosAndError {
 				}
 				close(startErrorChan)
 			})
-			if err == io.EOF {
+			if err == io.EOF || err == io.ErrClosedPipe || err == io.ErrUnexpectedEOF {
 				<-s.ShutdownChan
 			} else {
 				s.logger.Error("Plugin scanner error", "type", name, "error", err)

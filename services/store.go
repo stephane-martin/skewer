@@ -202,15 +202,10 @@ func (s *storeServiceImpl) Shutdown() {
 		return
 	default:
 	}
-	s.logger.Debug("Store svc before stop")
 	s.Stop()
-	s.logger.Debug("Store svc after stop, before ingestwg wait")
 	s.ingestwg.Wait() // wait until we are done ingesting new messages
-	s.logger.Debug("Store svc after wait, before shutdown")
 	s.shutdownStore()
-	s.logger.Debug("Store svc after shutdown, before waitfinished")
 	s.st.WaitFinished()
-	s.logger.Debug("Store svc after waitfinished")
 	s.pipe.Close()
 }
 

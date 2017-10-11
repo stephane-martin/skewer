@@ -22,14 +22,16 @@ const (
 	RELP
 	Journal
 	Store
+	Accounting
 )
 
 var NetworkServiceMap map[string]NetworkServiceType = map[string]NetworkServiceType{
-	"skewer-tcp":     TCP,
-	"skewer-udp":     UDP,
-	"skewer-relp":    RELP,
-	"skewer-journal": Journal,
-	"skewer-store":   Store,
+	"skewer-tcp":        TCP,
+	"skewer-udp":        UDP,
+	"skewer-relp":       RELP,
+	"skewer-journal":    Journal,
+	"skewer-store":      Store,
+	"skewer-accounting": Accounting,
 }
 
 var ReverseNetworkServiceMap map[NetworkServiceType]string
@@ -55,6 +57,9 @@ func ConfigureAndStartService(s NetworkService, c conf.BaseConfig, test bool) ([
 	case *linux.JournalService:
 		s.SetConf(c.Journald)
 		return s.Start(test)
+	case *AccountingService:
+		s.SetConf(c.Accounting)
+		return s.Start(test)
 	case *storeServiceImpl:
 		return s.SetConfAndRestart(c, test)
 	default:
@@ -77,6 +82,14 @@ func Factory(t NetworkServiceType, reporter *base.Reporter, gen chan ulid.ULID, 
 			return svc
 		} else {
 			l.Error("Error creating the journal service", "error", err)
+			return nil
+		}
+	case Accounting:
+		svc, err := NewAccountingService(reporter, gen, l)
+		if err == nil {
+			return svc
+		} else {
+			l.Error("Error creating the accounting service", "error", err)
 			return nil
 		}
 	case Store:

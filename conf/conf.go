@@ -160,6 +160,18 @@ func (c *JournaldConfig) CalculateID() *JournaldConfig {
 	return c
 }
 
+func (c *AccountingConfig) CalculateID() *AccountingConfig {
+	accSyslogConf := &SyslogConfig{
+		TopicTmpl:     c.TopicTmpl,
+		TopicFunc:     c.TopicFunc,
+		PartitionTmpl: c.PartitionTmpl,
+		PartitionFunc: c.PartitionFunc,
+		FilterFunc:    c.FilterFunc,
+	}
+	c.ConfID = accSyslogConf.CalculateID().ConfID
+	return c
+}
+
 func (c *SyslogConfig) GetClientAuthType() tls.ClientAuthType {
 	s := strings.TrimSpace(c.ClientAuthType)
 	if len(s) == 0 {
@@ -416,12 +428,13 @@ func InitLoad(ctx context.Context, confDir string, params consul.ConnParams, log
 }
 
 func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix string, logger log15.Logger) error {
-	syslogConfMap := map[string]map[string]string{}
-	journaldConf := map[string]string{}
-	kafkaConf := map[string]string{}
-	storeConf := map[string]string{}
-	metricsConf := map[string]string{}
-	parsersConfMap := map[string]map[string]string{}
+	rawSyslogConf := map[string]map[string]string{}
+	rawJournalConf := map[string]string{}
+	rawKafkaConf := map[string]string{}
+	rawStoreConf := map[string]string{}
+	rawMetricsConf := map[string]string{}
+	rawParsersConf := map[string]map[string]string{}
+	rawAccountingConf := map[string]string{}
 	prefixLen := len(prefix)
 
 	for k, v := range params {
@@ -430,43 +443,49 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 		switch splits[0] {
 		case "syslog":
 			if len(splits) == 3 {
-				if _, ok := syslogConfMap[splits[1]]; !ok {
-					syslogConfMap[splits[1]] = map[string]string{}
+				if _, ok := rawSyslogConf[splits[1]]; !ok {
+					rawSyslogConf[splits[1]] = map[string]string{}
 				}
-				syslogConfMap[splits[1]][splits[2]] = v
+				rawSyslogConf[splits[1]][splits[2]] = v
 			} else {
 				logger.Debug("Ignoring Consul KV", "key", k, "value", v)
 			}
 		case "journald":
 			if len(splits) == 2 {
-				journaldConf[splits[1]] = v
+				rawJournalConf[splits[1]] = v
 			} else {
 				logger.Debug("Ignoring Consul KV", "key", k, "value", v)
 			}
 		case "kafka":
 			if len(splits) == 2 {
-				kafkaConf[splits[1]] = v
+				rawKafkaConf[splits[1]] = v
 			} else {
 				logger.Debug("Ignoring Consul KV", "key", k, "value", v)
 			}
 		case "store":
 			if len(splits) == 2 {
-				storeConf[splits[1]] = v
+				rawStoreConf[splits[1]] = v
 			} else {
 				logger.Debug("Ignoring Consul KV", "key", k, "value", v)
 			}
 		case "parsers":
 			if len(splits) == 3 {
-				if _, ok := parsersConfMap[splits[1]]; !ok {
-					parsersConfMap[splits[1]] = map[string]string{}
+				if _, ok := rawParsersConf[splits[1]]; !ok {
+					rawParsersConf[splits[1]] = map[string]string{}
 				}
-				parsersConfMap[splits[1]][splits[2]] = v
+				rawParsersConf[splits[1]][splits[2]] = v
 			} else {
 				logger.Debug("Ignoring Consul KV", "key", k, "value", v)
 			}
 		case "metrics":
 			if len(splits) == 2 {
-				metricsConf[splits[1]] = v
+				rawMetricsConf[splits[1]] = v
+			} else {
+				logger.Debug("Ignoring Consul KV", "key", k, "value", v)
+			}
+		case "accounting":
+			if len(splits) == 2 {
+				rawAccountingConf[splits[1]] = v
 			} else {
 				logger.Debug("Ignoring Consul KV", "key", k, "value", v)
 			}
@@ -478,7 +497,7 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 	var vi *viper.Viper
 
 	syslogConfs := []SyslogConfig{}
-	for _, syslogConf := range syslogConfMap {
+	for _, syslogConf := range rawSyslogConf {
 		vi = viper.New()
 		for k, v := range syslogConf {
 			vi.Set(k, v)
@@ -493,7 +512,7 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 	}
 
 	parsersConf := []ParserConfig{}
-	for parserName, pConf := range parsersConfMap {
+	for parserName, pConf := range rawParsersConf {
 		parserConf := ParserConfig{Name: parserName}
 		vi := viper.New()
 		for k, v := range pConf {
@@ -507,53 +526,66 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 		}
 	}
 
-	jconf := JournaldConfig{}
-	if len(journaldConf) > 0 {
+	journalConf := JournaldConfig{}
+	if len(rawJournalConf) > 0 {
 		vi = viper.New()
 		SetJournaldDefaults(vi, false)
-		for k, v := range journaldConf {
+		for k, v := range rawJournalConf {
 			vi.Set(k, v)
 		}
-		err := vi.Unmarshal(&jconf)
+		err := vi.Unmarshal(&journalConf)
 		if err != nil {
 			return err
 		}
 	}
 
-	kconf := KafkaConfig{}
-	if len(kafkaConf) > 0 {
+	kafkaConf := KafkaConfig{}
+	if len(rawKafkaConf) > 0 {
 		vi = viper.New()
 		SetKafkaDefaults(vi, false)
-		for k, v := range kafkaConf {
+		for k, v := range rawKafkaConf {
 			vi.Set(k, v)
 		}
-		err := vi.Unmarshal(&kconf)
+		err := vi.Unmarshal(&kafkaConf)
 		if err != nil {
 			return err
 		}
 	}
 
-	sconf := StoreConfig{}
-	if len(storeConf) > 0 {
+	storeConf := StoreConfig{}
+	if len(rawStoreConf) > 0 {
 		vi = viper.New()
 		SetStoreDefaults(vi, false)
-		for k, v := range storeConf {
+		for k, v := range rawStoreConf {
 			vi.Set(k, v)
 		}
-		err := vi.Unmarshal(&sconf)
+		err := vi.Unmarshal(&storeConf)
 		if err != nil {
 			return err
 		}
 	}
 
-	mconf := MetricsConfig{}
-	if len(metricsConf) > 0 {
+	metricsConf := MetricsConfig{}
+	if len(rawMetricsConf) > 0 {
 		vi = viper.New()
 		SetMetricsDefaults(vi, false)
-		for k, v := range metricsConf {
+		for k, v := range rawMetricsConf {
 			vi.Set(k, v)
 		}
-		err := vi.Unmarshal(&mconf)
+		err := vi.Unmarshal(&metricsConf)
+		if err != nil {
+			return err
+		}
+	}
+
+	accountingConf := AccountingConfig{}
+	if len(rawAccountingConf) > 0 {
+		vi = viper.New()
+		SetAccountingDefaults(vi, false)
+		for k, v := range rawAccountingConf {
+			vi.Set(k, v)
+		}
+		err := vi.Unmarshal(&accountingConf)
 		if err != nil {
 			return err
 		}
@@ -561,17 +593,21 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 
 	c.Syslog = append(c.Syslog, syslogConfs...)
 	c.Parsers = append(c.Parsers, parsersConf...)
-	if len(kafkaConf) > 0 {
-		c.Kafka = kconf
+
+	if len(rawKafkaConf) > 0 {
+		c.Kafka = kafkaConf
 	}
-	if len(storeConf) > 0 {
-		c.Store = sconf
+	if len(rawStoreConf) > 0 {
+		c.Store = storeConf
 	}
-	if len(journaldConf) > 0 {
-		c.Journald = jconf
+	if len(rawJournalConf) > 0 {
+		c.Journald = journalConf
 	}
-	if len(metricsConf) > 0 {
-		c.Metrics = mconf
+	if len(rawMetricsConf) > 0 {
+		c.Metrics = metricsConf
+	}
+	if len(rawAccountingConf) > 0 {
+		c.Accounting = accountingConf
 	}
 
 	return nil
@@ -726,6 +762,7 @@ func (c *BaseConfig) Complete() (err error) {
 		c.Syslog[i] = *c.Syslog[i].CalculateID()
 	}
 	c.Journald = *c.Journald.CalculateID()
+	c.Accounting = *c.Accounting.CalculateID()
 	c.Kafka.Partitioner = strings.TrimSpace(strings.ToLower(c.Kafka.Partitioner))
 	c.Kafka.Partitioner = strings.Replace(c.Kafka.Partitioner, "-", "", -1)
 	c.Kafka.Partitioner = strings.Replace(c.Kafka.Partitioner, "_", "", -1)

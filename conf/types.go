@@ -5,13 +5,14 @@ import (
 )
 
 type BaseConfig struct {
-	Syslog     []SyslogConfig `mapstructure:"syslog" toml:"syslog" json:"syslog"`
-	Kafka      KafkaConfig    `mapstructure:"kafka" toml:"kafka" json:"kafka"`
-	Store      StoreConfig    `mapstructure:"store" toml:"store" json:"store"`
-	Parsers    []ParserConfig `mapstructure:"parser" toml:"parser" json:"parser"`
-	Journald   JournaldConfig `mapstructure:"journald" toml:"journald" json:"journald"`
-	Metrics    MetricsConfig  `mapstructure:"metrics" toml:"metrics" json:"metrics"`
-	DirectRelp bool           `mapstructure:"directrelp" toml:"directrelp" json:"directrelp"`
+	Syslog     []SyslogConfig   `mapstructure:"syslog" toml:"syslog" json:"syslog"`
+	Kafka      KafkaConfig      `mapstructure:"kafka" toml:"kafka" json:"kafka"`
+	Store      StoreConfig      `mapstructure:"store" toml:"store" json:"store"`
+	Parsers    []ParserConfig   `mapstructure:"parser" toml:"parser" json:"parser"`
+	Journald   JournaldConfig   `mapstructure:"journald" toml:"journald" json:"journald"`
+	Metrics    MetricsConfig    `mapstructure:"metrics" toml:"metrics" json:"metrics"`
+	Accounting AccountingConfig `mapstructure:"accounting" toml:"accounting" json:"accounting"`
+	DirectRelp bool             `mapstructure:"directrelp" toml:"directrelp" json:"directrelp"`
 }
 
 type MetricsConfig struct {
@@ -79,6 +80,19 @@ type JournaldConfig struct {
 	FilterFunc          string `mapstructure:"filter_func" toml:"filter_func" json:"filter_func"`
 	Encoding            string `mapstructure:"encoding" toml:"encoding" json:"encoding"`
 	ConfID              string `mapstructure:"-" toml:"-" json:"conf_id"`
+}
+
+type AccountingConfig struct {
+	Period              time.Duration `mapstructure:"period" toml:"period" json:"period"`
+	Path                string        `mapstructure:"path" toml:"path" json:"path"`
+	Enabled             bool          `mapstructure:"enabled" toml:"enabled" json:"enabled"`
+	TopicTmpl           string        `mapstructure:"topic_tmpl" toml:"topic_tmpl" json:"topic_tmpl"`
+	TopicFunc           string        `mapstructure:"topic_function" toml:"topic_function" json:"topic_function"`
+	PartitionTmpl       string        `mapstructure:"partition_key_tmpl" toml:"partition_key_tmpl" json:"partition_key_tmpl"`
+	PartitionFunc       string        `mapstructure:"partition_key_func" toml:"partition_key_func" json:"partition_key_func"`
+	PartitionNumberFunc string        `mapstructure:"partition_number_func" toml:"partition_number_func" json:"partition_number_func"`
+	FilterFunc          string        `mapstructure:"filter_func" toml:"filter_func" json:"filter_func"`
+	ConfID              string        `mapstructure:"-" toml:"-" json:"conf_id"`
 }
 
 type SyslogConfig struct {

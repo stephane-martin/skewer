@@ -53,7 +53,7 @@ func NewRelpMetrics() *relpMetrics {
 	m.IncomingMsgsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "skw_incoming_messages_total",
-			Help: "total number of syslog messages that were received",
+			Help: "total number of messages that were received",
 		},
 		[]string{"protocol", "client", "port", "path"},
 	)

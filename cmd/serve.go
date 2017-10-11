@@ -244,8 +244,12 @@ func runserve() {
 	loggerStoreHandle, loggerParentStoreHandle := mustSocketPair(syscall.SOCK_DGRAM)
 	loggerStoreConn := getLoggerConn(loggerParentStoreHandle)
 
+	loggerAcctHandle, loggerParentAcctHandle := mustSocketPair(syscall.SOCK_DGRAM)
+	loggerAcctConn := getLoggerConn(loggerParentAcctHandle)
+
 	logging.LogReceiver(context.Background(), rootlogger, []net.Conn{
 		loggerChildConn, loggerTcpConn, loggerUdpConn, loggerRelpConn, loggerJournalConn, loggerConfigurationConn, loggerStoreConn,
+		loggerAcctConn,
 	})
 
 	logger.Debug("Target user", "uid", numuid, "gid", numgid)
@@ -275,6 +279,7 @@ func runserve() {
 			os.NewFile(uintptr(loggerJournalHandle), "journal_logger_file"),
 			os.NewFile(uintptr(loggerConfigurationHandle), "config_logger_file"),
 			os.NewFile(uintptr(loggerStoreHandle), "store_logger_file"),
+			os.NewFile(uintptr(loggerAcctHandle), "acct_logger_file"),
 		},
 		Env: []string{"SKEWER_CHILD=TRUE", "PATH=/bin:/usr/bin"},
 	}
@@ -408,12 +413,31 @@ func Serve() error {
 	tcpServicePlugin := services.NewPluginController(services.TCP, st, consulRegistry, 4, 8, logger)
 	udpServicePlugin := services.NewPluginController(services.UDP, st, consulRegistry, 5, 9, logger)
 	journalServicePlugin := services.NewPluginController(services.Journal, st, consulRegistry, 0, 11, logger)
+	accountingServicePlugin := services.NewPluginController(services.Accounting, st, consulRegistry, 0, 14, logger)
+
+	startAccounting := func(curconf *conf.BaseConfig) {
+		if curconf.Accounting.Enabled {
+			logger.Info("Process accounting is enabled")
+			err := accountingServicePlugin.Create(testFlag, dumpableFlag, "", "")
+			if err != nil {
+				logger.Warn("Error creating the accounting plugin", "error", err)
+				return
+			}
+			accountingServicePlugin.SetConf(*curconf)
+			_, err = accountingServicePlugin.Start()
+			if err != nil {
+				logger.Warn("Error starting accounting plugin", "error", err)
+			} else {
+				logger.Debug("Accounting plugin has been started")
+			}
+		}
+	}
 
 	startJournal := func(curconf *conf.BaseConfig) {
 		// retrieve messages from journald
 		if journald.Supported {
 			logger.Info("Journald is supported")
-			if c.Journald.Enabled {
+			if curconf.Journald.Enabled {
 				logger.Info("Journald service is enabled")
 				// in fact Create() will only do something the first time startJournal() is called
 				err := journalServicePlugin.Create(testFlag, dumpableFlag, "", "")
@@ -499,8 +523,12 @@ func Serve() error {
 		relpServicePlugin.Shutdown(3 * time.Second)
 	}
 
+	stopAccounting := func() {
+		accountingServicePlugin.Shutdown(3 * time.Second)
+	}
+
 	stopJournal := func(shutdown bool) {
-		if journald.Supported && c.Journald.Enabled {
+		if journald.Supported {
 			if shutdown {
 				journalServicePlugin.Shutdown(5 * time.Second)
 			} else {
@@ -514,12 +542,13 @@ func Serve() error {
 
 	Reload := func(newConf *conf.BaseConfig) (fatal error) {
 		logger.Info("Reloading configuration")
-		// first, let's stop the HTTP server for metrics
+		// first, let's stop the HTTP server that reports the metrics
 		metricsServer.Stop()
-		// reset the kafka forwarder
+		// stop the kafka forwarder
 		st.Stop()
 		logger.Debug("The forwarder has been stopped")
 		st.SetConf(*newConf)
+		// restart the kafka forwarder
 		_, fatal = st.Start()
 		if fatal != nil {
 			return fatal
@@ -528,7 +557,7 @@ func Serve() error {
 		wg := &sync.WaitGroup{}
 
 		if journald.Supported {
-			// reset the journald service
+			// restart the journal service
 			wg.Add(1)
 			go func() {
 				stopJournal(false)
@@ -537,7 +566,15 @@ func Serve() error {
 			}()
 		}
 
-		// reset the RELP service
+		// restart the accounting service
+		wg.Add(1)
+		go func() {
+			stopAccounting()
+			startAccounting(newConf)
+			wg.Done()
+		}()
+
+		// restart the RELP service
 		wg.Add(1)
 		go func() {
 			stopRELP()
@@ -545,7 +582,7 @@ func Serve() error {
 			wg.Done()
 		}()
 
-		// reset the TCP service
+		// restart the TCP service
 		wg.Add(1)
 		go func() {
 			stopTCP()
@@ -553,7 +590,7 @@ func Serve() error {
 			wg.Done()
 		}()
 
-		// reset the UDP service
+		// restart the UDP service
 		wg.Add(1)
 		go func() {
 			stopUDP()
@@ -562,10 +599,11 @@ func Serve() error {
 		}()
 		wg.Wait()
 
-		// restart the HTTP server for metrics
+		// restart the HTTP metrics server
 		metricsServer.NewConf(
 			newConf.Metrics,
 			journalServicePlugin,
+			accountingServicePlugin,
 			relpServicePlugin,
 			tcpServicePlugin,
 			udpServicePlugin,
@@ -577,6 +615,9 @@ func Serve() error {
 	destructor := func() {
 		stopRELP()
 		logger.Debug("The RELP service has been stopped")
+
+		stopAccounting()
+		logger.Debug("Stopped accounting service")
 
 		stopJournal(true)
 		logger.Debug("Stopped journald service")
@@ -601,6 +642,7 @@ func Serve() error {
 	defer destructor()
 
 	startJournal(c)
+	startAccounting(c)
 	startRELP(c)
 	startTCP(c)
 	startUDP(c)
@@ -608,6 +650,7 @@ func Serve() error {
 	metricsServer.NewConf(
 		c.Metrics,
 		journalServicePlugin,
+		accountingServicePlugin,
 		relpServicePlugin,
 		tcpServicePlugin,
 		udpServicePlugin,

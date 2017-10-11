@@ -12,7 +12,20 @@ func SetDefaults(v *viper.Viper) {
 	SetStoreDefaults(v, true)
 	SetJournaldDefaults(v, true)
 	SetMetricsDefaults(v, true)
+	SetAccountingDefaults(v, true)
 	v.SetDefault("directrelp", true)
+}
+
+func SetAccountingDefaults(v *viper.Viper, prefixed bool) {
+	prefix := ""
+	if prefixed {
+		prefix = "accounting."
+	}
+	v.SetDefault(prefix+"enabled", false)
+	v.SetDefault(prefix+"path", AccountingPath)
+	v.SetDefault(prefix+"period", "1s")
+	v.SetDefault(prefix+"topic_tmpl", "accounting")
+	v.SetDefault(prefix+"partition_key_tmpl", "pk-accounting")
 }
 
 func SetMetricsDefaults(v *viper.Viper, prefixed bool) {

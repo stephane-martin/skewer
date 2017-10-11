@@ -142,7 +142,7 @@ func main() {
 			cleanup("execve error", err)
 		}
 
-	case "skewer-tcp", "skewer-udp", "skewer-relp", "skewer-journal", "skewer-store":
+	case "skewer-tcp", "skewer-udp", "skewer-relp", "skewer-journal", "skewer-store", "skewer-accounting":
 		signal.Ignore(syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
 		dumpable.SetNonDumpable()
 		capabilities.NoNewPriv()

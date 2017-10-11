@@ -145,14 +145,14 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 			store.doNACK(store.nackQueue.GetMany(300))
 			store.doPermanentError(store.permerrorsQueue.GetMany(300))
 		}
-		store.logger.Debug("Store goroutine WaitAck ended")
+		//store.logger.Debug("Store goroutine WaitAck ended")
 		store.wg.Done()
 	}()
 
 	store.wg.Add(1)
 	go func() {
 		<-ctx.Done()
-		store.logger.Debug("Store is asked to stop")
+		//store.logger.Debug("Store is asked to stop")
 		store.toStashQueue.Dispose()
 		store.ackQueue.Dispose()
 		store.nackQueue.Dispose()
@@ -165,7 +165,7 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 		for store.toStashQueue.Wait() {
 			store.ingest(store.toStashQueue.GetMany(1000))
 		}
-		store.logger.Debug("Store goroutine WaitMessages ended")
+		// store.logger.Debug("Store goroutine WaitMessages ended")
 		store.wg.Done()
 	}()
 
@@ -188,7 +188,7 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 				store.resetFailures()
 			case <-ctx.Done():
 				store.ticker.Stop()
-				store.logger.Debug("Store ticker has been stopped")
+				// store.logger.Debug("Store ticker has been stopped")
 				return
 			}
 		}
@@ -273,6 +273,19 @@ func (s *MessageStore) StoreAllSyslogConfigs(c conf.BaseConfig) (err error) {
 		ConfID:        c.Journald.ConfID,
 	}
 	err = s.StoreSyslogConfig(journalSyslogConf)
+	if err != nil {
+		return err
+	}
+
+	accSyslogConf := conf.SyslogConfig{
+		TopicTmpl:     c.Accounting.TopicTmpl,
+		TopicFunc:     c.Accounting.TopicFunc,
+		PartitionTmpl: c.Accounting.PartitionTmpl,
+		PartitionFunc: c.Accounting.PartitionFunc,
+		FilterFunc:    c.Accounting.FilterFunc,
+		ConfID:        c.Accounting.ConfID,
+	}
+	err = s.StoreSyslogConfig(accSyslogConf)
 	if err != nil {
 		return err
 	}

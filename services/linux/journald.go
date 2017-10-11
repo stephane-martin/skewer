@@ -1,6 +1,7 @@
 package linux
 
 import (
+	"os"
 	"sync"
 
 	"github.com/inconshreveable/log15"
@@ -23,7 +24,7 @@ func NewJournalMetrics() *journalMetrics {
 	m.IncomingMsgsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "skw_incoming_messages_total",
-			Help: "total number of syslog messages that were received",
+			Help: "total number of messages that were received",
 		},
 		[]string{"protocol", "client", "port", "path"},
 	)
@@ -63,6 +64,11 @@ func (s *JournalService) Gather() ([]*dto.MetricFamily, error) {
 
 func (s *JournalService) Start(test bool) (infos []model.ListenerInfo, err error) {
 	infos = []model.ListenerInfo{}
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = "unknown"
+	}
+
 	if s.reader == nil {
 		// create the low level journald reader if needed
 		s.reader, err = journald.NewReader(s.generator, s.logger)
@@ -90,7 +96,8 @@ func (s *JournalService) Start(test bool) (infos []model.ListenerInfo, err error
 					entry.ConfId = s.Conf.ConfID
 				}
 				s.stasher.StashMany(entries)
-				s.metrics.IncomingMsgsCounter.WithLabelValues("journald", "journald", "", "").Add(float64(len(entries)))
+				// protocol, client, port, path
+				s.metrics.IncomingMsgsCounter.WithLabelValues("journald", hostname, "", "").Add(float64(len(entries)))
 			}
 		}
 	}()
