@@ -269,7 +269,7 @@ func (c *BinderClient) ListenPacket(lnet string, laddr string) (net.PacketConn, 
 	delete(c.IncomingPacketConn, addr)
 	c.ipacketMu.Unlock()
 	if !more {
-		return nil, nil // should not happen
+		return nil, fmt.Errorf("There was an error when asking the parent process for a packet connection")
 	}
 	if len(conn.err) > 0 {
 		return nil, fmt.Errorf(conn.err)
