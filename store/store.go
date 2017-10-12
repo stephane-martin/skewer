@@ -162,8 +162,12 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 
 	store.wg.Add(1)
 	go func() {
+		var err error
 		for store.toStashQueue.Wait() {
-			store.ingest(store.toStashQueue.GetMany(1000))
+			_, err = store.ingest(store.toStashQueue.GetMany(1000))
+			if err != nil {
+				store.logger.Warn("Ingestion error in the Store", "error", err)
+			}
 		}
 		// store.logger.Debug("Store goroutine WaitMessages ended")
 		store.wg.Done()
@@ -557,6 +561,7 @@ func (s *MessageStore) retrieve(n int) (messages map[string]*model.TcpUdpParsedM
 					fetched++
 				} else {
 					invalidEntries = append(invalidEntries, uid)
+					s.logger.Debug("invalid entry", "uid", uid, "message", string(message_b), "error", err)
 				}
 			} else {
 				invalidEntries = append(invalidEntries, uid)
