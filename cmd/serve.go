@@ -379,7 +379,7 @@ func Serve() error {
 	// setup the Store
 	st := services.NewStorePlugin(13, logger)
 	st.SetConf(*c)
-	err = st.Create(testFlag, dumpableFlag, storeDirname, "")
+	err = st.Create(testFlag, dumpableFlag, storeDirname, "", "")
 	if err != nil {
 		logger.Crit("Can't create the message Store", "error", err)
 		time.Sleep(100 * time.Millisecond)
@@ -408,7 +408,7 @@ func Serve() error {
 	startAccounting := func(curconf *conf.BaseConfig) {
 		if curconf.Accounting.Enabled {
 			logger.Info("Process accounting is enabled")
-			err := accountingServicePlugin.Create(testFlag, dumpableFlag, "", "")
+			err := accountingServicePlugin.Create(testFlag, dumpableFlag, "", "", curconf.Accounting.Path)
 			if err != nil {
 				logger.Warn("Error creating the accounting plugin", "error", err)
 				return
@@ -430,7 +430,7 @@ func Serve() error {
 			if curconf.Journald.Enabled {
 				logger.Info("Journald service is enabled")
 				// in fact Create() will only do something the first time startJournal() is called
-				err := journalServicePlugin.Create(testFlag, dumpableFlag, "", "")
+				err := journalServicePlugin.Create(testFlag, dumpableFlag, "", "", "")
 				if err != nil {
 					logger.Warn("Error creating Journald plugin", "error", err)
 					return
@@ -451,7 +451,7 @@ func Serve() error {
 	}
 
 	startRELP := func(curconf *conf.BaseConfig) {
-		err := relpServicePlugin.Create(testFlag, dumpableFlag, "", "")
+		err := relpServicePlugin.Create(testFlag, dumpableFlag, "", "", "")
 		if err != nil {
 			logger.Warn("Error creating RELP plugin", "error", err)
 			return
@@ -468,7 +468,7 @@ func Serve() error {
 	var tcpinfos []model.ListenerInfo
 
 	startTCP := func(curconf *conf.BaseConfig) {
-		err := tcpServicePlugin.Create(testFlag, dumpableFlag, "", "")
+		err := tcpServicePlugin.Create(testFlag, dumpableFlag, "", "", "")
 		if err != nil {
 			logger.Warn("Error creating TCP plugin", "error", err)
 			return
@@ -485,7 +485,7 @@ func Serve() error {
 	}
 
 	startUDP := func(curconf *conf.BaseConfig) {
-		err := udpServicePlugin.Create(testFlag, dumpableFlag, "", "")
+		err := udpServicePlugin.Create(testFlag, dumpableFlag, "", "", "")
 		if err != nil {
 			logger.Warn("Error creating UDP plugin", "error", err)
 			return

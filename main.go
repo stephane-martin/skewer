@@ -40,6 +40,14 @@ func getLogger(ctx context.Context, name string, handle int) (log15.Logger, erro
 }
 
 func main() {
+	numcpus := runtime.NumCPU()
+	maxprocs := numcpus * 8
+	if maxprocs < 16 {
+		maxprocs = 16
+	}
+	runtime.GOMAXPROCS(maxprocs)
+
+
 	name := os.Args[0]
 	loggerCtx, cancelLogger := context.WithCancel(context.Background())
 	var logger log15.Logger = nil
@@ -119,7 +127,7 @@ func main() {
 			cleanup("execve error", err)
 		}
 
-	case "confined-skewer-tcp", "confined-skewer-udp", "confined-skewer-relp", "confined-skewer-store", "confined-skewer-conf":
+	case "confined-skewer-accounting", "confined-skewer-tcp", "confined-skewer-udp", "confined-skewer-relp", "confined-skewer-store", "confined-skewer-conf":
 		path, err := osext.Executable()
 		if err != nil {
 			cleanup("Error getting executable path", err)

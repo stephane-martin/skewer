@@ -520,7 +520,7 @@ func setupCmd(name string, binderHandle int, loggerHandle int, messagePipe *os.F
 	return cmd, in, out, nil
 }
 
-func (s *PluginController) Create(test bool, dumpable bool, storePath string, confDir string) error {
+func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, acctPath string) error {
 	// if the provider process already lives, Create() just returns
 	s.createdMu.Lock()
 	if s.created {
@@ -546,7 +546,30 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath string, co
 				s.createdMu.Unlock()
 				return err
 			}
-			err = namespaces.StartInNamespaces(s.cmd, dumpable, "", "")
+			err = namespaces.StartInNamespaces(s.cmd, dumpable, "", "", "")
+		}
+
+		if err != nil {
+			s.logger.Warn("Starting plugin in user namespace failed", "error", err, "type", name)
+		}
+		if err != nil || !capabilities.CapabilitiesSupported {
+			s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.binderHandle, s.loggerHandle, nil, test)
+			if err != nil {
+				close(s.ShutdownChan)
+				s.createdMu.Unlock()
+				return err
+			}
+			err = s.cmd.Start()
+		}
+	case Accounting:
+		if capabilities.CapabilitiesSupported {
+			s.cmd, s.stdin, s.stdout, err = setupCmd(fmt.Sprintf("confined-%s", name), s.binderHandle, s.loggerHandle, nil, test)
+			if err != nil {
+				close(s.ShutdownChan)
+				s.createdMu.Unlock()
+				return err
+			}
+			err = namespaces.StartInNamespaces(s.cmd, dumpable, "", "", acctPath)
 		}
 
 		if err != nil {
@@ -579,7 +602,7 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath string, co
 				s.createdMu.Unlock()
 				return err
 			}
-			err = namespaces.StartInNamespaces(s.cmd, dumpable, storePath, "")
+			err = namespaces.StartInNamespaces(s.cmd, dumpable, storePath, "", "")
 		}
 
 		if err != nil {
@@ -611,7 +634,7 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath string, co
 			return err
 		}
 
-		err = namespaces.StartInNamespaces(s.cmd, dumpable, "", "")
+		err = namespaces.StartInNamespaces(s.cmd, dumpable, "", "", "")
 
 		if err != nil {
 			s.logger.Warn("Starting plugin in user namespace failed", "error", err, "type", name)
