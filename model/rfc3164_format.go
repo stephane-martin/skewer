@@ -37,6 +37,7 @@ func ParseRfc3164Format(m []byte, decoder *encoding.Decoder) (smsg SyslogMessage
 	n := time.Now().UnixNano()
 	def_smsg.TimeGeneratedNum = n
 	def_smsg.TimeReportedNum = n
+	smsg.TimeGeneratedNum = n
 
 	smsg.Properties = map[string]map[string]string{}
 	if !bytes.HasPrefix(m, []byte("<")) {
@@ -72,14 +73,11 @@ func ParseRfc3164Format(m []byte, decoder *encoding.Decoder) (smsg SyslogMessage
 			t2, e := time.Parse(time.RFC3339, s0)
 			if e != nil {
 				smsg.Message = string(m)
-				smsg.TimeGenerated = def_smsg.TimeGenerated
-				smsg.TimeReported = def_smsg.TimeReported
+				smsg.TimeReportedNum = def_smsg.TimeReportedNum
 				return smsg, nil
 			}
-			smsg.TimeGeneratedNum = t2.UnixNano()
 			smsg.TimeReportedNum = t2.UnixNano()
 		} else {
-			smsg.TimeGeneratedNum = t1.UnixNano()
 			smsg.TimeReportedNum = t1.UnixNano()
 		}
 		if len(s) == 1 {
@@ -90,20 +88,17 @@ func ParseRfc3164Format(m []byte, decoder *encoding.Decoder) (smsg SyslogMessage
 		// old unix timestamp
 		if len(s) < 3 {
 			smsg.Message = string(m)
-			smsg.TimeGenerated = def_smsg.TimeGenerated
-			smsg.TimeReported = def_smsg.TimeReported
+			smsg.TimeReportedNum = def_smsg.TimeReportedNum
 			return smsg, nil
 		}
 		timestamp_b := bytes.Join(s[0:3], SP)
 		t, e := time.Parse(time.Stamp, string(timestamp_b))
 		if e != nil {
 			smsg.Message = string(m)
-			smsg.TimeGenerated = def_smsg.TimeGenerated
-			smsg.TimeReported = def_smsg.TimeReported
+			smsg.TimeReportedNum = def_smsg.TimeReportedNum
 			return smsg, nil
 		}
 		t = t.AddDate(time.Now().Year(), 0, 0)
-		smsg.TimeGeneratedNum = t.UnixNano()
 		smsg.TimeReportedNum = t.UnixNano()
 		if len(s) == 3 {
 			return smsg, nil

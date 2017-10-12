@@ -272,6 +272,17 @@ func LFTcpSplit(data []byte, atEOF bool) (int, []byte, error) {
 	}
 }
 
+func getline(data []byte, trimmed int) (int, []byte, error) {
+	lf := bytes.IndexByte(data, '\n')
+	if lf >= 0 {
+		token := bytes.Trim(data[0:lf], " \r\n")
+		return lf + trimmed + 1, token, nil
+	} else {
+		// data does not contain a full syslog line
+		return 0, nil, nil
+	}
+}
+
 func TcpSplit(data []byte, atEOF bool) (int, []byte, error) {
 	trimmed_data := bytes.TrimLeft(data, " \r\n")
 	if len(trimmed_data) == 0 {
@@ -279,18 +290,9 @@ func TcpSplit(data []byte, atEOF bool) (int, []byte, error) {
 	}
 	trimmed := len(data) - len(trimmed_data)
 	if trimmed_data[0] == byte('<') {
-		// LF framing
-		lf := bytes.IndexByte(trimmed_data, '\n')
-		if lf >= 0 {
-			token := bytes.Trim(trimmed_data[0:lf], " \r\n")
-			advance := trimmed + lf + 1
-			return advance, token, nil
-		} else {
-			// data does not contain a full syslog line
-			return 0, nil, nil
-		}
+		return getline(trimmed_data, trimmed)
 	} else {
-		// octet counting framing
+		// octet counting framing?
 		sp := bytes.IndexAny(trimmed_data, " \n")
 		if sp <= 0 {
 			return 0, nil, nil
@@ -298,7 +300,8 @@ func TcpSplit(data []byte, atEOF bool) (int, []byte, error) {
 		datalen_s := bytes.Trim(trimmed_data[0:sp], " \r\n")
 		datalen, err := strconv.Atoi(string(datalen_s))
 		if err != nil {
-			return 0, nil, err
+			// the first part is not a number, so back to LF
+			return getline(trimmed_data, trimmed)
 		}
 		advance := trimmed + sp + 1 + datalen
 		if len(data) >= advance {
