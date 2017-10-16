@@ -482,7 +482,11 @@ func (s *MessageStore) ingest(queue []*model.TcpUdpParsedMessage) (int, error) {
 	for _, m := range queue {
 		b, err := m.MarshalMsg(nil)
 		if err == nil {
-			marshalledQueue[m.Uid] = b
+			if len(b) == 0 {
+				s.logger.Warn("Ingestion of empty message", "uid", m.Uid)
+			} else {
+				marshalledQueue[m.Uid] = b
+			}
 		} else {
 			s.logger.Warn("The store discarded a message that could not be marshaled", "error", err)
 		}
@@ -503,9 +507,7 @@ func (s *MessageStore) ingest(queue []*model.TcpUdpParsedMessage) (int, error) {
 		return 0, errMsg
 	}
 
-	if s.metrics != nil {
-		s.metrics.BadgerGauge.WithLabelValues("messages").Add(float64(len(marshalledQueue) - len(errorMsgKeys)))
-	}
+	s.metrics.BadgerGauge.WithLabelValues("messages").Add(float64(len(marshalledQueue) - len(errorMsgKeys)))
 
 	for _, k := range errorMsgKeys {
 		delete(marshalledQueue, k)
@@ -553,7 +555,7 @@ func (s *MessageStore) retrieve(n int) (messages map[string]*model.TcpUdpParsedM
 		uid := iter.Key()
 		message_b, err := s.messagesDB.Get(uid)
 		if err == nil {
-			if message_b != nil {
+			if len(message_b) > 0 {
 				message = &model.TcpUdpParsedMessage{}
 				_, err := message.UnmarshalMsg(message_b)
 				if err == nil {
@@ -561,10 +563,11 @@ func (s *MessageStore) retrieve(n int) (messages map[string]*model.TcpUdpParsedM
 					fetched++
 				} else {
 					invalidEntries = append(invalidEntries, uid)
-					s.logger.Debug("invalid entry", "uid", uid, "message", string(message_b), "error", err)
+					s.logger.Debug("retrieved invalid entry", "uid", uid, "message", string(message_b), "error", err)
 				}
 			} else {
 				invalidEntries = append(invalidEntries, uid)
+				s.logger.Debug("retrieved empty entry", "uid", uid)
 			}
 		} else {
 			s.logger.Warn("Error getting message content from message queue", "uid", uid, "error", err)
