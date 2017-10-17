@@ -87,6 +87,13 @@ func NewUdpService(stasher *base.Reporter, gen chan ulid.ULID, b *binder.BinderC
 	return &s
 }
 
+func (s *UdpServiceImpl) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig) {
+	s.BaseService.Pool = &sync.Pool{New: func() interface{} {
+		return &model.RawUdpMessage{}
+	}}
+	s.BaseService.SetConf(sc, pc)
+}
+
 func (s *UdpServiceImpl) Gather() ([]*dto.MetricFamily, error) {
 	return s.registry.Gather()
 }
@@ -126,11 +133,8 @@ func (s *UdpServiceImpl) Stop() {
 		s.UnlockStatus()
 		return
 	}
-	s.Logger.Debug("Closing UDP connections")
 	s.CloseConnections()
-	s.Logger.Debug("Waiting for UDP goroutines")
 	s.wg.Wait()
-	s.Logger.Debug("UdpServer goroutines have ended")
 
 	s.status = UdpStopped
 	s.statusChan <- UdpStopped
@@ -149,7 +153,12 @@ func (s *UdpServiceImpl) ListenPacket() []model.ListenerInfo {
 				if err != nil {
 					s.Logger.Warn("Listen unixgram error", "error", err)
 				} else {
-					s.Logger.Debug("Listener", "protocol", s.Protocol, "path", syslogConf.UnixSocketPath, "format", syslogConf.Format)
+					s.Logger.Debug(
+						"Unixgram listener",
+						"protocol", s.Protocol,
+						"path", syslogConf.UnixSocketPath,
+						"format", syslogConf.Format,
+					)
 					udpinfos = append(udpinfos, model.ListenerInfo{
 						UnixSocketPath: syslogConf.UnixSocketPath,
 						Protocol:       s.Protocol,
@@ -166,7 +175,13 @@ func (s *UdpServiceImpl) ListenPacket() []model.ListenerInfo {
 				if err != nil {
 					s.Logger.Warn("Listen UDP error", "error", err)
 				} else {
-					s.Logger.Debug("Listener", "protocol", s.Protocol, "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
+					s.Logger.Debug(
+						"UDP listener",
+						"protocol", s.Protocol,
+						"bind_addr", syslogConf.BindAddr,
+						"port", syslogConf.Port,
+						"format", syslogConf.Format,
+					)
 					udpinfos = append(udpinfos, model.ListenerInfo{
 						BindAddr: syslogConf.BindAddr,
 						Port:     syslogConf.Port,
@@ -184,33 +199,33 @@ func (s *UdpServiceImpl) ListenPacket() []model.ListenerInfo {
 }
 
 func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConfig) {
-	var local_port int
+	var localPort int
+	var localPortS string
+	var path string
 	var err error
+	rawMessages := make(chan *model.RawUdpMessage)
 
 	s := h.Server
 	s.AddConnection(conn)
-
-	raw_messages_chan := make(chan model.RawMessage)
 
 	defer func() {
 		s.RemoveConnection(conn)
 		s.wg.Done()
 	}()
 
-	path := ""
 	local := conn.LocalAddr()
 	if local != nil {
 		l := local.String()
 		s := strings.Split(l, ":")
-		local_port, err = strconv.Atoi(s[len(s)-1])
+		localPort, err = strconv.Atoi(s[len(s)-1])
 		if err != nil {
-			path = l
+			path = strings.TrimSpace(l)
+		} else {
+			localPortS = strconv.FormatInt(int64(localPort), 10)
 		}
 	}
-	path = strings.TrimSpace(path)
-	local_port_s := strconv.FormatInt(int64(local_port), 10)
 
-	logger := s.Logger.New("protocol", s.Protocol, "local_port", local_port, "unix_socket_path", path, "format", config.Format)
+	logger := s.Logger.New("protocol", s.Protocol, "local_port", localPortS, "unix_socket_path", path)
 
 	// pull messages from raw_messages_chan, parse them and push them to the Store
 	s.wg.Add(1)
@@ -220,70 +235,69 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 		e := NewParsersEnv(s.ParserConfigs, s.Logger)
 		parser := e.GetParser(config.Format)
 		if parser == nil {
-			logger.Crit("Unknown parser")
+			logger.Crit("Unknown parser", "format", config.Format)
 			return
 		}
 
 		var syslogMsg model.SyslogMessage
 		var err error
-		var uid ulid.ULID
-		var raw model.RawMessage
+		var raw *model.RawUdpMessage
 		decoder := utils.SelectDecoder(config.Encoding)
 
-		for raw = range raw_messages_chan {
-			syslogMsg, err = parser.Parse(raw.Message, decoder, config.DontParseSD)
-
+		for raw = range rawMessages {
+			syslogMsg, err = parser.Parse(raw.Message[:raw.Size], decoder, config.DontParseSD)
 			if err == nil {
-				uid = <-s.generator
-				s.stasher.Stash(model.TcpUdpParsedMessage{
-					Parsed: model.ParsedMessage{
-						Fields:         syslogMsg,
-						Client:         raw.Client,
-						LocalPort:      raw.LocalPort,
-						UnixSocketPath: raw.UnixSocketPath,
-					},
-					Uid:    uid.String(),
-					ConfId: config.ConfID,
-				})
-			} else {
-				if s.metrics != nil {
-					s.metrics.ParsingErrorCounter.WithLabelValues(s.Protocol, raw.Client, config.Format).Inc()
+				if !syslogMsg.Empty() {
+					s.stasher.Stash(model.TcpUdpParsedMessage{
+						Parsed: model.ParsedMessage{
+							Fields:         syslogMsg,
+							Client:         raw.Client,
+							LocalPort:      raw.LocalPort,
+							UnixSocketPath: raw.UnixSocketPath,
+						},
+						Uid:    <-s.generator,
+						ConfId: config.ConfID,
+					})
 				}
+			} else {
+				s.metrics.ParsingErrorCounter.WithLabelValues(s.Protocol, raw.Client, config.Format).Inc()
 				logger.Info("Parsing error", "client", raw.Client, "message", raw.Message, "error", err)
 			}
+			s.Pool.Put(raw)
 		}
 	}()
 
 	// Syslog UDP server
-	var packet []byte
 	var remote net.Addr
-	var size int
-	var client string
+	var rawmsg *model.RawUdpMessage
 
 	for {
-		packet = make([]byte, 65536)
-		size, remote, err = conn.ReadFrom(packet)
+		rawmsg = s.Pool.Get().(*model.RawUdpMessage)
+		rawmsg.Size, remote, err = conn.ReadFrom(rawmsg.Message[:])
 		if err != nil {
+			// todo: select more precise error
 			logger.Debug("Error reading UDP", "error", err)
-			close(raw_messages_chan)
+			s.Pool.Put(rawmsg)
+			close(rawMessages)
 			return
 		}
-		client = ""
+		if rawmsg.Size == 0 {
+			s.Pool.Put(rawmsg)
+			continue
+		}
+		rawmsg.LocalPort = localPort
+		rawmsg.UnixSocketPath = path
+		rawmsg.Client = ""
 		if remote == nil {
 			// unix socket
-			client = "localhost"
+			rawmsg.Client = "localhost"
 		} else {
-			client = strings.Split(remote.String(), ":")[0]
+			rawmsg.Client = strings.Split(remote.String(), ":")[0]
 		}
 
-		s.metrics.IncomingMsgsCounter.WithLabelValues(s.Protocol, client, local_port_s, path).Inc()
-		raw_messages_chan <- model.RawMessage{
-			Client:         client,
-			LocalPort:      local_port,
-			UnixSocketPath: path,
-			Message:        packet[:size],
-		}
-
+		// todo: use a bounded queue rather than a channel
+		rawMessages <- rawmsg
+		s.metrics.IncomingMsgsCounter.WithLabelValues(s.Protocol, rawmsg.Client, localPortS, path).Inc()
 	}
 
 }

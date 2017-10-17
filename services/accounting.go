@@ -107,7 +107,7 @@ func (s *AccountingService) Start(test bool) (infos []model.ListenerInfo, err er
 				uid = <-s.generator
 				s.stasher.Stash(model.TcpUdpParsedMessage{
 					ConfId: s.Conf.ConfID,
-					Uid:    uid.String(),
+					Uid:    uid,
 					Parsed: model.ParsedMessage{
 						Client:         hostname,
 						LocalPort:      0,

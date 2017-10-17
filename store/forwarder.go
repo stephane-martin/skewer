@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/inconshreveable/log15"
+	"github.com/oklog/ulid"
 	"github.com/pquerna/ffjson/ffjson"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
@@ -126,7 +127,7 @@ func (fwder *kafkaForwarder) getAndSendMessages(ctx context.Context, from Store,
 		fwder.wg.Done()
 	}()
 
-	jsenvs := map[string]*javascript.Environment{}
+	jsenvs := map[ulid.ULID]*javascript.Environment{}
 	done := ctx.Done()
 	var more bool
 	var message *model.TcpUdpParsedMessage
@@ -139,6 +140,7 @@ func (fwder *kafkaForwarder) getAndSendMessages(ctx context.Context, from Store,
 	var serialized []byte
 	var kafkaMsg *sarama.ProducerMessage
 	var reported time.Time
+	var uid ulid.ULID
 
 ForOutputs:
 	for {
@@ -149,12 +151,13 @@ ForOutputs:
 			if !more {
 				return
 			}
+			uid = message.Uid
 			env, ok := jsenvs[message.ConfId]
 			if !ok {
 				config, err := from.GetSyslogConfig(message.ConfId)
 				if err != nil {
 					fwder.logger.Warn("Could not find the stored configuration for a message", "confId", message.ConfId, "msgId", message.Uid)
-					from.PermError(message.Uid)
+					from.PermError(uid)
 					continue ForOutputs
 				}
 				jsenvs[message.ConfId] = javascript.NewFilterEnvironment(
@@ -175,7 +178,7 @@ ForOutputs:
 			}
 			if len(topic) == 0 {
 				fwder.logger.Warn("Topic or PartitionKey could not be calculated", "uid", message.Uid)
-				from.PermError(message.Uid)
+				from.PermError(uid)
 				continue ForOutputs
 			}
 			partitionKey, errs = env.PartitionKey(message.Parsed.Fields)
@@ -191,17 +194,17 @@ ForOutputs:
 
 			switch filterResult {
 			case javascript.DROPPED:
-				from.ACK(message.Uid)
+				from.ACK(uid)
 				fwder.metrics.MessageFilteringCounter.WithLabelValues("dropped", message.Parsed.Client).Inc()
 				continue ForOutputs
 			case javascript.REJECTED:
 				fwder.metrics.MessageFilteringCounter.WithLabelValues("rejected", message.Parsed.Client).Inc()
-				from.NACK(message.Uid)
+				from.NACK(uid)
 				continue ForOutputs
 			case javascript.PASS:
 				fwder.metrics.MessageFilteringCounter.WithLabelValues("passing", message.Parsed.Client).Inc()
 			default:
-				from.PermError(message.Uid)
+				from.PermError(uid)
 				fwder.logger.Warn("Error happened processing message", "uid", message.Uid, "error", err)
 				fwder.metrics.MessageFilteringCounter.WithLabelValues("unknown", message.Parsed.Client).Inc()
 				continue ForOutputs
@@ -215,7 +218,7 @@ ForOutputs:
 
 			if err != nil {
 				fwder.logger.Warn("Error serializing message", "error", err, "uid", message.Uid)
-				from.PermError(message.Uid)
+				from.PermError(uid)
 				continue ForOutputs
 			}
 
@@ -225,15 +228,15 @@ ForOutputs:
 				Value:     sarama.ByteEncoder(serialized),
 				Topic:     topic,
 				Timestamp: reported,
-				Metadata:  message.Uid,
+				Metadata:  uid,
 			}
 
 			if producer == nil {
 				v, _ := kafkaMsg.Value.Encode()
 				pkey, _ := kafkaMsg.Key.Encode()
-				fwder.logger.Info("Message", "partitionkey", string(pkey), "topic", kafkaMsg.Topic, "msgid", message.Uid)
+				fwder.logger.Debug("Message", "partitionkey", string(pkey), "topic", kafkaMsg.Topic, "msgid", ulid.ULID(message.Uid).String())
 				fmt.Fprintln(os.Stderr, string(v))
-				from.ACK(message.Uid)
+				from.ACK(uid)
 			} else {
 				producer.Input() <- kafkaMsg
 			}
@@ -276,7 +279,7 @@ func (fwder *kafkaForwarder) listenKafkaResponses(from Store, succChan <-chan *s
 		select {
 		case succ, more := <-succChan:
 			if more {
-				from.ACK(succ.Metadata.(string))
+				from.ACK(succ.Metadata.(ulid.ULID))
 				if fwder.metrics != nil {
 					fwder.metrics.KafkaAckNackCounter.WithLabelValues("ack", succ.Topic).Inc()
 				}
@@ -286,7 +289,7 @@ func (fwder *kafkaForwarder) listenKafkaResponses(from Store, succChan <-chan *s
 
 		case fail, more := <-failChan:
 			if more {
-				from.NACK(fail.Msg.Metadata.(string))
+				from.NACK(fail.Msg.Metadata.(ulid.ULID))
 				fwder.logger.Info("Kafka producer error", "error", fail.Error())
 				if model.IsFatalKafkaError(fail.Err) {
 					once.Do(func() { close(fwder.errorChan) })

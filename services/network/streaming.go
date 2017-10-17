@@ -27,11 +27,12 @@ type UnixListenerConf struct {
 
 type StreamingService struct {
 	base.BaseService
-	tcpListeners  []TCPListenerConf
-	unixListeners []UnixListenerConf
-	acceptsWg     *sync.WaitGroup
-	handler       StreamHandler
-	wg            *sync.WaitGroup
+	tcpListeners   []TCPListenerConf
+	unixListeners  []UnixListenerConf
+	acceptsWg      *sync.WaitGroup
+	handler        StreamHandler
+	wg             *sync.WaitGroup
+	maxMessageSize int
 }
 
 func (s *StreamingService) init() {
@@ -212,4 +213,16 @@ func (s *StreamingService) Listen() {
 		// close the client connections
 		s.CloseConnections()
 	}()
+}
+
+func (s *StreamingService) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig) {
+	sizes := []int{}
+	for _, c := range sc {
+		sizes = append(sizes, c.MaxMessageSize)
+	}
+	s.maxMessageSize = deriveMaxSize(sizes, int(0))
+	s.BaseService.Pool = &sync.Pool{New: func() interface{} {
+		return &model.RawTcpMessage{Message: make([]byte, s.maxMessageSize, s.maxMessageSize)}
+	}}
+	s.BaseService.SetConf(sc, pc)
 }

@@ -40,16 +40,11 @@ type ParsedMessage struct {
 	UnixSocketPath string        `json:"unix_socket_path,omitempty" msg:"unix_socket_path"`
 }
 
-// ffjson: nodecoder
-type ExportedMessage struct {
-	ParsedMessage
-}
-
 // ffjson: skip
 type TcpUdpParsedMessage struct {
 	Parsed ParsedMessage `json:"parsed" msg:"parsed"`
-	Uid    string        `json:"uid" msg:"uid"`
-	ConfId string        `json:"conf_id" msg:"conf_id"`
+	Uid    [16]byte      `json:"uid" msg:"uid"`
+	ConfId [16]byte      `json:"conf_id" msg:"conf_id"`
 }
 
 // ffjson: skip
@@ -87,4 +82,8 @@ func (m *SyslogMessage) String() string {
 		m.Message,
 		m.Properties,
 	)
+}
+
+func (m *SyslogMessage) Empty() bool {
+	return len(m.Message) == 0 && len(m.Structured) == 0 && len(m.Properties) == 0
 }

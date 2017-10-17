@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 
+	"github.com/oklog/ulid"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
@@ -11,12 +12,12 @@ import (
 type Store interface {
 	Stash(m model.TcpUdpParsedMessage) (error, error)
 	Outputs() chan *model.TcpUdpParsedMessage
-	ACK(uid string)
-	NACK(uid string)
-	PermError(uid string)
+	ACK(uid ulid.ULID)
+	NACK(uid ulid.ULID)
+	PermError(uid ulid.ULID)
 	Errors() chan struct{}
 	WaitFinished()
-	GetSyslogConfig(configID string) (*conf.SyslogConfig, error)
+	GetSyslogConfig(configID ulid.ULID) (*conf.SyslogConfig, error)
 	StoreAllSyslogConfigs(c conf.BaseConfig) error
 	ReadAllBadgers() (map[string]string, map[string]string, map[string]string)
 	Gather() ([]*dto.MetricFamily, error)

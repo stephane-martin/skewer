@@ -348,6 +348,13 @@ func (s *RelpServiceImpl) doStop(final bool, wait bool) {
 	}
 }
 
+func (s *RelpServiceImpl) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig) {
+	s.BaseService.Pool = &sync.Pool{New: func() interface{} {
+		return &model.RawRelpMessage{Message: make([]byte, 132000, 132000)}
+	}}
+	s.BaseService.SetConf(sc, pc)
+}
+
 type RelpHandler struct {
 	Server *RelpServiceImpl
 }
@@ -361,7 +368,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 	s := h.Server
 	s.AddConnection(conn)
 
-	raw_messages_chan := make(chan model.RelpRawMessage)
+	rawMessagesChan := make(chan *model.RawRelpMessage)
 	parsed_messages_chan := make(chan model.RelpParsedMessage)
 	other_successes_chan := make(chan int)
 	other_fails_chan := make(chan int)
@@ -406,36 +413,37 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 			return
 		}
 
-		var raw model.RelpRawMessage
+		var raw *model.RawRelpMessage
 		var syslogMsg model.SyslogMessage
 		var err error
 		var parsedMsg model.RelpParsedMessage
 		decoder := utils.SelectDecoder(config.Encoding)
 
-		for raw = range raw_messages_chan {
-			syslogMsg, err = parser.Parse(raw.Raw.Message, decoder, config.DontParseSD)
+		for raw = range rawMessagesChan {
+			syslogMsg, err = parser.Parse(raw.Message[:raw.Size], decoder, config.DontParseSD)
 			if err == nil {
 				parsedMsg = model.RelpParsedMessage{
 					Parsed: model.ParsedMessage{
 						Fields:         syslogMsg,
-						Client:         raw.Raw.Client,
-						LocalPort:      raw.Raw.LocalPort,
-						UnixSocketPath: raw.Raw.UnixSocketPath,
+						Client:         raw.Client,
+						LocalPort:      raw.LocalPort,
+						UnixSocketPath: raw.UnixSocketPath,
 					},
 					Txnr: raw.Txnr,
 				}
 				parsed_messages_chan <- parsedMsg
-			} else if s.metrics != nil {
+			} else {
 				s.metrics.ParsingErrorCounter.WithLabelValues(s.Protocol, client, config.Format).Inc()
-				logger.Warn("Parsing error", "message", raw.Raw.Message, "error", err)
+				logger.Warn("Parsing error", "message", raw.Message, "error", err)
 			}
+			s.Pool.Put(raw)
 		}
 		close(parsed_messages_chan)
 	}()
 
 	defer func() {
 		// closing raw_messages_chan causes parsed_messages_chan to be closed too, because of the goroutine just above
-		close(raw_messages_chan)
+		close(rawMessagesChan)
 		s.RemoveConnection(conn)
 		s.wg.Done()
 	}()
@@ -610,7 +618,6 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 		var reported time.Time
 		var f error
 		var nonf error
-		var uid ulid.ULID
 
 	ForParsedChan:
 		for message = range parsed_messages_chan {
@@ -681,9 +688,8 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 				other_successes_chan <- message.Txnr
 			} else if !s.direct {
 				// send messages to the Store
-				uid = <-s.gen
 				stmsg = model.TcpUdpParsedMessage{
-					Uid:    uid.String(),
+					Uid:    <-s.gen,
 					Parsed: message.Parsed,
 					ConfId: config.ConfID,
 				}
@@ -713,19 +719,25 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 	}
 	scanner := bufio.NewScanner(conn)
 	scanner.Split(RelpSplit)
-	var raw model.RelpRawMessage
+	scanner.Buffer(make([]byte, 0, 132000), 132000)
+	var rawmsg *model.RawRelpMessage
+Loop:
 	for scanner.Scan() {
 		if timeout > 0 {
 			conn.SetReadDeadline(time.Now().Add(timeout))
 		}
-		line := scanner.Text()
-		splits := strings.SplitN(line, " ", 4)
-		txnr, _ := strconv.Atoi(splits[0])
-		command := splits[1]
-		datalen, _ := strconv.Atoi(splits[2])
-		data := ""
+		line := scanner.Bytes()
+		splits := bytes.SplitN(line, []byte(" "), 4)
+		txnr, _ := strconv.Atoi(string(splits[0]))
+		command := string(splits[1])
+		datalen, _ := strconv.Atoi(string(splits[2]))
+		data := []byte{}
 		if datalen != 0 {
-			data = strings.Trim(splits[3], " \r\n")
+			if len(splits) == 4 {
+				data = bytes.Trim(splits[3], " \r\n")
+			} else {
+				// TODO
+			}
 		}
 		switch command {
 		case "open":
@@ -736,7 +748,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 				}
 				return
 			}
-			answer := fmt.Sprintf("%d rsp %d 200 OK\n%s\n", txnr, len(data)+7, data)
+			answer := fmt.Sprintf("%d rsp %d 200 OK\n%s\n", txnr, len(data)+7, string(data))
 			conn.Write([]byte(answer))
 			relpIsOpen = true
 			logger.Info("Received 'open' command")
@@ -755,23 +767,22 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 		case "syslog":
 			if !relpIsOpen {
 				logger.Warn("Received syslog command before open")
-				if s.metrics != nil {
-					s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
-				}
+				s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
 				return
 			}
-			raw = model.RelpRawMessage{
-				Txnr: txnr,
-				Raw: model.RawMessage{
-					Message:   []byte(data),
-					Client:    client,
-					LocalPort: local_port,
-				},
+			rawmsg = s.Pool.Get().(*model.RawRelpMessage)
+			rawmsg.Txnr = txnr
+			rawmsg.Client = client
+			rawmsg.LocalPort = local_port
+			rawmsg.UnixSocketPath = path
+			if len(data) == 0 {
+				s.Pool.Put(rawmsg)
+				continue Loop
 			}
-			if s.metrics != nil {
-				s.metrics.IncomingMsgsCounter.WithLabelValues(s.Protocol, client, local_port_s, path).Inc()
-			}
-			raw_messages_chan <- raw
+			rawmsg.Size = len(data)
+			copy(rawmsg.Message, data)
+			s.metrics.IncomingMsgsCounter.WithLabelValues(s.Protocol, client, local_port_s, path).Inc()
+			rawMessagesChan <- rawmsg
 		default:
 			logger.Warn("Unknown RELP command", "command", command)
 			if s.metrics != nil {

@@ -32,14 +32,15 @@ func ParseRfc3164Format(m []byte, decoder *encoding.Decoder) (smsg SyslogMessage
 	if err != nil {
 		return smsg, &InvalidEncodingError{Err: err}
 	}
+	m = bytes.TrimSpace(m)
 
 	def_smsg := SyslogMessage{Message: string(m)}
 	n := time.Now().UnixNano()
 	def_smsg.TimeGeneratedNum = n
 	def_smsg.TimeReportedNum = n
 	smsg.TimeGeneratedNum = n
-
 	smsg.Properties = map[string]map[string]string{}
+
 	if !bytes.HasPrefix(m, []byte("<")) {
 		return def_smsg, nil
 	}

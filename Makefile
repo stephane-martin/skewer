@@ -11,9 +11,13 @@ LDFLAGS=-ldflags '-X github.com/stephane-martin/skewer/cmd.Version=${VERSION} -X
 SOURCES = $(shell find . -type f -name '*.go' -not -path "./vendor/*")
 SUBDIRS = $(shell find . -type d -regex './[a-z].*' -not -path './vendor*' -not -path '*.shapesdoc' | xargs)
 
-$(BINARY): ${SOURCES} model/types_gen.go utils/logging/types_gen.go conf/derived.gen.go utils/logging/derived.gen.go metrics/derived.gen.go consul/derived.gen.go sys/derived.gen.go model/derived.gen.go model/types_ffjson.go sys/scomp/derived.gen.go sys/namespaces/derived.gen.go
+$(BINARY): ${SOURCES} model/types_gen.go utils/logging/types_gen.go conf/derived.gen.go utils/logging/derived.gen.go metrics/derived.gen.go consul/derived.gen.go sys/derived.gen.go model/derived.gen.go model/types_ffjson.go sys/scomp/derived.gen.go sys/namespaces/derived.gen.go services/network/derived.gen.go
 	test -n "${GOPATH}"  # test $$GOPATH
 	go build ${LDFLAGS} -o ${BINARY}
+
+services/network/derived.gen.go:
+	test -n "${GOPATH}"  # test $$GOPATH
+	go generate github.com/stephane-martin/skewer/services/network
 
 model/types_gen.go: model/types.go
 	test -n "${GOPATH}"  # test $$GOPATH
@@ -60,7 +64,7 @@ sys/namespaces/derived.gen.go: sys/namespaces/base.go
 	test -n "${GOPATH}"  # test $$GOPATH
 	go generate github.com/stephane-martin/skewer/sys/namespaces
 
-generate: model/types_gen.go utils/logging/types_gen.go conf/derived.gen.go utils/logging/derived.gen.go metrics/derived.gen.go consul/derived.gen.go sys/derived.gen.go model/derived.gen.go model/types_ffjson.go sys/scomp/derived.gen.go sys/namespaces/derived.gen.go
+generate: model/types_gen.go utils/logging/types_gen.go conf/derived.gen.go utils/logging/derived.gen.go metrics/derived.gen.go consul/derived.gen.go sys/derived.gen.go model/derived.gen.go model/types_ffjson.go sys/scomp/derived.gen.go sys/namespaces/derived.gen.go services/network/derived.gen.go
 
 clean:
 	rm -f ${BINARY} 

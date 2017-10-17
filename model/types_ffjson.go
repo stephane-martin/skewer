@@ -8,59 +8,6 @@ import (
 )
 
 // MarshalJSON marshal bytes to json - template
-func (j *ExportedMessage) MarshalJSON() ([]byte, error) {
-	var buf fflib.Buffer
-	if j == nil {
-		buf.WriteString("null")
-		return buf.Bytes(), nil
-	}
-	err := j.MarshalJSONBuf(&buf)
-	if err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-// MarshalJSONBuf marshal buff to json - template
-func (j *ExportedMessage) MarshalJSONBuf(buf fflib.EncodingBuffer) error {
-	if j == nil {
-		buf.WriteString("null")
-		return nil
-	}
-	var err error
-	var obj []byte
-	_ = obj
-	_ = err
-	buf.WriteString(`{ "fields":`)
-
-	{
-
-		err = j.Fields.MarshalJSONBuf(buf)
-		if err != nil {
-			return err
-		}
-
-	}
-	buf.WriteByte(',')
-	if len(j.Client) != 0 {
-		buf.WriteString(`"client":`)
-		fflib.WriteJsonString(buf, string(j.Client))
-		buf.WriteByte(',')
-	}
-	buf.WriteString(`"local_port":"`)
-	fflib.FormatBits2(buf, uint64(j.LocalPort), 10, j.LocalPort < 0)
-	buf.WriteString(`",`)
-	if len(j.UnixSocketPath) != 0 {
-		buf.WriteString(`"unix_socket_path":`)
-		fflib.WriteJsonString(buf, string(j.UnixSocketPath))
-		buf.WriteByte(',')
-	}
-	buf.Rewind(1)
-	buf.WriteByte('}')
-	return nil
-}
-
-// MarshalJSON marshal bytes to json - template
 func (j *ParsedMessage) MarshalJSON() ([]byte, error) {
 	var buf fflib.Buffer
 	if j == nil {

@@ -3,6 +3,7 @@ package queue
 import (
 	//"runtime"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -10,21 +11,23 @@ import (
 	"github.com/stephane-martin/skewer/model"
 )
 
-type messsageNode struct {
-	next *messsageNode
+type messageNode struct {
+	next *messageNode
 	msg  *model.TcpUdpParsedMessage
 }
 
 type MessageQueue struct {
-	head     *messsageNode
-	tail     *messsageNode
+	head     *messageNode
+	tail     *messageNode
 	disposed int32
+	pool     *sync.Pool
 }
 
 func NewMessageQueue() *MessageQueue {
-	stub := &messsageNode{}
-	q := &MessageQueue{head: stub, tail: stub, disposed: 0}
-	return q
+	stub := &messageNode{}
+	return &MessageQueue{head: stub, tail: stub, disposed: 0, pool: &sync.Pool{New: func() interface{} {
+		return &messageNode{}
+	}}}
 }
 
 func (q *MessageQueue) Disposed() bool {
@@ -61,25 +64,33 @@ func (q *MessageQueue) Wait() bool {
 	}
 }
 
-func (q *MessageQueue) Get() (m *model.TcpUdpParsedMessage, err error) {
+func (q *MessageQueue) Get() (*model.TcpUdpParsedMessage, error) {
 	tail := q.tail
 	next := tail.next
 	if next != nil {
-		q.tail = next
-		tail.msg = next.msg
-		m = tail.msg
+		//q.tail = next
+		//tail.msg = next.msg
+		//m = tail.msg
+		(*messageNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.tail)), unsafe.Pointer(next))).msg = next.msg
+		q.pool.Put(tail)
+		return next.msg, nil
 	} else if q.Disposed() {
-		err = ErrDisposed
+		return nil, ErrDisposed
+	} else {
+		return nil, nil
 	}
-	return
 }
 
 func (q *MessageQueue) Put(m model.TcpUdpParsedMessage) error {
-	n := &messsageNode{msg: &m}
 	if q.Disposed() {
 		return ErrDisposed
 	}
-	(*messsageNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.head)), unsafe.Pointer(n))).next = n
+	n := q.pool.Get().(*messageNode)
+	n.msg = &m
+	n.next = nil
+	(*messageNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.head)), unsafe.Pointer(n))).next = n
+	// q.head.next = n
+	// q.head = n
 	return nil
 }
 
@@ -89,10 +100,13 @@ func (q *MessageQueue) GetMany(max int) []*model.TcpUdpParsedMessage {
 	res := make([]*model.TcpUdpParsedMessage, 0, max)
 	for {
 		elt, err = q.Get()
-		if (elt == nil) || (len(res) > max) || (err != nil) {
+		if elt == nil || err != nil {
 			break
 		}
 		res = append(res, elt)
+		if len(res) == max {
+			break
+		}
 	}
 	return res
 }

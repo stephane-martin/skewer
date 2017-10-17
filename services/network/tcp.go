@@ -1,5 +1,7 @@
 package network
 
+//go:generate goderive .
+
 import (
 	"bufio"
 	"bytes"
@@ -144,7 +146,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 	s := h.Server
 	s.AddConnection(conn)
 
-	rawMessagesChan := make(chan model.RawMessage)
+	rawMessagesChan := make(chan *model.RawTcpMessage)
 
 	defer func() {
 		s.RemoveConnection(conn)
@@ -189,17 +191,15 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 			return
 		}
 
-		var uid ulid.ULID
 		var syslogMsg model.SyslogMessage
 		var err, fatal, nonfatal error
-		var raw model.RawMessage
+		var raw *model.RawTcpMessage
 		decoder := utils.SelectDecoder(config.Encoding)
 
 		for raw = range rawMessagesChan {
-			syslogMsg, err = parser.Parse(raw.Message, decoder, config.DontParseSD)
+			syslogMsg, err = parser.Parse(raw.Message[:raw.Size], decoder, config.DontParseSD)
 
 			if err == nil {
-				uid = <-s.generator
 				fatal, nonfatal = s.reporter.Stash(model.TcpUdpParsedMessage{
 					Parsed: model.ParsedMessage{
 						Fields:         syslogMsg,
@@ -207,7 +207,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 						LocalPort:      raw.LocalPort,
 						UnixSocketPath: raw.UnixSocketPath,
 					},
-					Uid:    uid.String(),
+					Uid:    <-s.generator,
 					ConfId: config.ConfID,
 				})
 				if fatal != nil {
@@ -217,11 +217,10 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 					logger.Warn("Non-fatal error stashing TCP message", "error", nonfatal)
 				}
 			} else {
-				if s.metrics != nil {
-					s.metrics.ParsingErrorCounter.WithLabelValues(s.Protocol, client, config.Format).Inc()
-				}
+				s.metrics.ParsingErrorCounter.WithLabelValues(s.Protocol, client, config.Format).Inc()
 				logger.Info("Parsing error", "Message", raw.Message, "error", err)
 			}
+			s.Pool.Put(raw)
 		}
 	}()
 
@@ -236,6 +235,8 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 	default:
 		scanner.Split(LFTcpSplit)
 	}
+	var rawmsg *model.RawTcpMessage
+	scanner.Buffer(make([]byte, 0, s.maxMessageSize), s.maxMessageSize)
 
 	for scanner.Scan() {
 		if timeout > 0 {
@@ -244,11 +245,17 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 		if s.metrics != nil {
 			s.metrics.IncomingMsgsCounter.WithLabelValues(s.Protocol, client, local_port_s, path).Inc()
 		}
-		rawMessagesChan <- model.RawMessage{
-			Client:    client,
-			LocalPort: local_port,
-			Message:   scanner.Bytes(),
+		rawmsg = s.Pool.Get().(*model.RawTcpMessage)
+		rawmsg.Client = client
+		rawmsg.LocalPort = local_port
+		rawmsg.UnixSocketPath = path
+		rawmsg.Size = len(scanner.Bytes())
+		if rawmsg.Size == 0 {
+			s.Pool.Put(rawmsg)
+			continue
 		}
+		copy(rawmsg.Message, scanner.Bytes())
+		rawMessagesChan <- rawmsg
 
 	}
 	logger.Info("End of TCP client connection", "error", scanner.Err())

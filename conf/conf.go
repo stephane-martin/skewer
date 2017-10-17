@@ -5,12 +5,12 @@ package conf
 import (
 	"bytes"
 	"context"
-	"crypto/sha512"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"net"
 	"strconv"
 	"strings"
@@ -143,8 +143,8 @@ func (l KafkaVersion) Greater(r KafkaVersion) bool {
 }
 
 func (c *SyslogConfig) CalculateID() *SyslogConfig {
-	h := sha512.Sum512(c.Export())
-	c.ConfID = base64.StdEncoding.EncodeToString(h[:])
+	h := fnv.New128a().Sum(c.Export())
+	copy(c.ConfID[:], h)
 	return c
 }
 
@@ -697,6 +697,9 @@ func (c *BaseConfig) Complete() (err error) {
 		}
 		if syslogConf.Encoding == "" {
 			c.Syslog[i].Encoding = "utf8"
+		}
+		if syslogConf.MaxMessageSize == 0 {
+			c.Syslog[i].MaxMessageSize = 65536
 		}
 
 		if len(c.Syslog[i].TopicTmpl) > 0 {

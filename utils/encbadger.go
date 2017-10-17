@@ -1,13 +1,16 @@
 package utils
 
-import "github.com/dgraph-io/badger"
+import (
+	"github.com/dgraph-io/badger"
+	"github.com/oklog/ulid"
+)
 
 type PartitionKeyIterator interface {
 	Close()
 	Next()
 	Rewind()
 	Valid() bool
-	Key() string
+	Key() ulid.ULID
 }
 
 type PartitionKeyValueIterator interface {
@@ -15,32 +18,32 @@ type PartitionKeyValueIterator interface {
 	Next()
 	Rewind()
 	Valid() bool
-	Key() string
+	Key() ulid.ULID
 	Value() []byte
 }
 
 type Partition interface {
-	ListKeys() []string
+	ListKeys() []ulid.ULID
 	Count() int
-	Delete(key string) error
-	DeleteMany(keys []string) ([]string, error)
-	Set(key string, value []byte) error
-	AddMany(m map[string][]byte) ([]string, error)
-	Get(key string) ([]byte, error)
-	Exists(key string) (bool, error)
+	Delete(key ulid.ULID) error
+	DeleteMany(keys []ulid.ULID) ([]ulid.ULID, error)
+	Set(key ulid.ULID, value []byte) error
+	AddMany(m map[ulid.ULID][]byte) ([]ulid.ULID, error)
+	Get(key ulid.ULID) ([]byte, error)
+	Exists(key ulid.ULID) (bool, error)
 	KeyIterator(prefetchSize int) PartitionKeyIterator
 	KeyValueIterator(prefetchSize int) PartitionKeyValueIterator
 }
 
 type partitionImpl struct {
 	parent *badger.KV
-	prefix string
+	prefix []byte
 }
 
-func (p *partitionImpl) Get(key string) ([]byte, error) {
+func (p *partitionImpl) Get(key ulid.ULID) ([]byte, error) {
 	val := []byte{}
 	item := &badger.KVItem{}
-	err := p.parent.Get([]byte(p.prefix+key), item)
+	err := p.parent.Get(append(p.prefix, key[:]...), item)
 	if err != nil {
 		return nil, err
 	}
@@ -57,18 +60,18 @@ func (p *partitionImpl) Get(key string) ([]byte, error) {
 	return val, nil
 }
 
-func (p *partitionImpl) Set(key string, value []byte) error {
-	return p.parent.Set([]byte(p.prefix+key), value, byte(0))
+func (p *partitionImpl) Set(key ulid.ULID, value []byte) error {
+	return p.parent.Set(append(p.prefix, key[:]...), value, byte(0))
 }
 
-func (p *partitionImpl) AddMany(m map[string][]byte) (errors []string, err error) {
-	errors = []string{}
+func (p *partitionImpl) AddMany(m map[ulid.ULID][]byte) (errors []ulid.ULID, err error) {
+	errors = []ulid.ULID{}
 	if len(m) == 0 {
 		return
 	}
 	entries := make([]*badger.Entry, 0, len(m))
 	for k, v := range m {
-		entries = badger.EntriesSet(entries, []byte(p.prefix+k), v)
+		entries = badger.EntriesSet(entries, append(p.prefix, k[:]...), v)
 	}
 	err = p.parent.BatchSet(entries)
 	if err == nil {
@@ -76,28 +79,30 @@ func (p *partitionImpl) AddMany(m map[string][]byte) (errors []string, err error
 	}
 	for _, entry := range entries {
 		if entry.Error != nil {
-			errors = append(errors, string(entry.Key)[len(p.prefix):])
+			var uid ulid.ULID
+			copy(uid[:], entry.Key[len(p.prefix):])
+			errors = append(errors, uid)
 		}
 	}
 	return
 }
 
-func (p *partitionImpl) Exists(key string) (bool, error) {
-	return p.parent.Exists([]byte(p.prefix + key))
+func (p *partitionImpl) Exists(key ulid.ULID) (bool, error) {
+	return p.parent.Exists(append(p.prefix, key[:]...))
 }
 
-func (p *partitionImpl) Delete(key string) error {
-	return p.parent.Delete([]byte(p.prefix + key))
+func (p *partitionImpl) Delete(key ulid.ULID) error {
+	return p.parent.Delete(append(p.prefix, key[:]...))
 }
 
-func (p *partitionImpl) DeleteMany(keys []string) (errors []string, err error) {
-	errors = []string{}
+func (p *partitionImpl) DeleteMany(keys []ulid.ULID) (errors []ulid.ULID, err error) {
+	errors = []ulid.ULID{}
 	if len(keys) == 0 {
 		return
 	}
 	entries := make([]*badger.Entry, 0, len(keys))
 	for _, key := range keys {
-		entries = badger.EntriesDelete(entries, []byte(p.prefix+key))
+		entries = badger.EntriesDelete(entries, append(p.prefix, key[:]...))
 	}
 	err = p.parent.BatchSet(entries)
 	if err == nil {
@@ -105,14 +110,16 @@ func (p *partitionImpl) DeleteMany(keys []string) (errors []string, err error) {
 	}
 	for _, entry := range entries {
 		if entry.Error != nil {
-			errors = append(errors, string(entry.Key)[len(p.prefix):])
+			var uid ulid.ULID
+			copy(uid[:], entry.Key[len(p.prefix):])
+			errors = append(errors, uid)
 		}
 	}
 	return
 }
 
-func (p *partitionImpl) ListKeys() []string {
-	l := []string{}
+func (p *partitionImpl) ListKeys() []ulid.ULID {
+	l := []ulid.ULID{}
 	iter := p.KeyIterator(1000)
 	for iter.Rewind(); iter.Valid(); iter.Next() {
 		l = append(l, iter.Key())
@@ -172,16 +179,17 @@ func (i *partitionIterImpl) Valid() bool {
 	return i.iterator.ValidForPrefix([]byte(i.partition.prefix))
 }
 
-func (i *partitionIterImpl) Key() string {
+func (i *partitionIterImpl) Key() (uid ulid.ULID) {
 	item := i.iterator.Item()
 	if item == nil {
-		return ""
+		return uid
 	} else {
 		key := item.Key()
 		if key == nil {
-			return ""
+			return uid
 		} else {
-			return string(key)[len(i.partition.prefix):]
+			copy(uid[:], key[len(i.partition.prefix):])
+			return uid
 		}
 	}
 }
@@ -200,7 +208,7 @@ func (i *partitionIterImpl) Value() []byte {
 	}
 }
 
-func NewPartition(parent *badger.KV, prefix string) Partition {
+func NewPartition(parent *badger.KV, prefix []byte) Partition {
 	return &partitionImpl{parent: parent, prefix: prefix}
 }
 
@@ -218,7 +226,7 @@ func (i *encryptedIterator) Close() {
 	i.iter.Close()
 }
 
-func (i *encryptedIterator) Key() string {
+func (i *encryptedIterator) Key() ulid.ULID {
 	return i.iter.Key()
 }
 
@@ -258,11 +266,11 @@ func (encDB *EncryptedDB) KeyValueIterator(prefetchSize int) PartitionKeyValueIt
 	return &encryptedIterator{iter: encDB.db.KeyValueIterator(prefetchSize), db: encDB}
 }
 
-func (encDB *EncryptedDB) Exists(key string) (bool, error) {
+func (encDB *EncryptedDB) Exists(key ulid.ULID) (bool, error) {
 	return encDB.db.Exists(key)
 }
 
-func (encDB *EncryptedDB) ListKeys() []string {
+func (encDB *EncryptedDB) ListKeys() []ulid.ULID {
 	return encDB.db.ListKeys()
 }
 
@@ -270,15 +278,15 @@ func (encDB *EncryptedDB) Count() int {
 	return encDB.db.Count()
 }
 
-func (encDB *EncryptedDB) Delete(key string) error {
+func (encDB *EncryptedDB) Delete(key ulid.ULID) error {
 	return encDB.db.Delete(key)
 }
 
-func (encDB *EncryptedDB) DeleteMany(keys []string) ([]string, error) {
+func (encDB *EncryptedDB) DeleteMany(keys []ulid.ULID) ([]ulid.ULID, error) {
 	return encDB.db.DeleteMany(keys)
 }
 
-func (encDB *EncryptedDB) Set(key string, value []byte) error {
+func (encDB *EncryptedDB) Set(key ulid.ULID, value []byte) error {
 	encValue, err := Encrypt(value, encDB.secret)
 	if err != nil {
 		return err
@@ -286,10 +294,10 @@ func (encDB *EncryptedDB) Set(key string, value []byte) error {
 	return encDB.db.Set(key, encValue)
 }
 
-func (encDB *EncryptedDB) AddMany(m map[string][]byte) (errors []string, err error) {
+func (encDB *EncryptedDB) AddMany(m map[ulid.ULID][]byte) (errors []ulid.ULID, err error) {
 	var encValue []byte
-	errors = []string{}
-	encm := map[string][]byte{}
+	errors = []ulid.ULID{}
+	encm := map[ulid.ULID][]byte{}
 
 	for k, v := range m {
 		encValue, err = Encrypt(v, encDB.secret)
@@ -307,7 +315,7 @@ func (encDB *EncryptedDB) AddMany(m map[string][]byte) (errors []string, err err
 	return
 }
 
-func (encDB *EncryptedDB) Get(key string) ([]byte, error) {
+func (encDB *EncryptedDB) Get(key ulid.ULID) ([]byte, error) {
 	encVal, err := encDB.db.Get(key)
 	if err != nil {
 		return nil, err

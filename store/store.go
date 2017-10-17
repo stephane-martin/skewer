@@ -9,6 +9,7 @@ import (
 
 	"github.com/dgraph-io/badger"
 	"github.com/inconshreveable/log15"
+	"github.com/oklog/ulid"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
@@ -114,17 +115,17 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 	}
 	store.badger = kv
 
-	store.messagesDB = utils.NewPartition(kv, "messages")
+	store.messagesDB = utils.NewPartition(kv, []byte("messages"))
 	if len(cfg.Secret) > 0 {
 		store.messagesDB = utils.NewEncryptedPartition(store.messagesDB, cfg.SecretB)
 		store.logger.Info("The badger store is encrypted")
 	}
 
-	store.readyDB = utils.NewPartition(kv, "ready")
-	store.sentDB = utils.NewPartition(kv, "sent")
-	store.failedDB = utils.NewPartition(kv, "failed")
-	store.permerrorsDB = utils.NewPartition(kv, "permerrors")
-	store.syslogConfigsDB = utils.NewPartition(kv, "configs")
+	store.readyDB = utils.NewPartition(kv, []byte("ready"))
+	store.sentDB = utils.NewPartition(kv, []byte("sent"))
+	store.failedDB = utils.NewPartition(kv, []byte("failed"))
+	store.permerrorsDB = utils.NewPartition(kv, []byte("permerrors"))
+	store.syslogConfigsDB = utils.NewPartition(kv, []byte("configs"))
 
 	// only once, push back messages from previous run that may have been stuck in the sent queue
 	store.resetStuckInSent()
@@ -209,7 +210,7 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 			close(store.OutputsChan)
 			store.wg.Done()
 		}()
-		var messages map[string]*model.TcpUdpParsedMessage
+		var messages map[ulid.ULID]*model.TcpUdpParsedMessage
 		for {
 		wait_messages:
 			for {
@@ -315,7 +316,7 @@ func (s *MessageStore) StoreSyslogConfig(config conf.SyslogConfig) error {
 	return nil
 }
 
-func (s *MessageStore) GetSyslogConfig(confID string) (*conf.SyslogConfig, error) {
+func (s *MessageStore) GetSyslogConfig(confID ulid.ULID) (*conf.SyslogConfig, error) {
 	data, err := s.syslogConfigsDB.Get(confID)
 	if err != nil {
 		return nil, err
@@ -355,7 +356,7 @@ func (s *MessageStore) pruneOrphaned() {
 	uids := s.messagesDB.ListKeys()
 
 	// check if the corresponding uid exists in "ready" or "failed" or "permerrors"
-	orphaned_uids := []string{}
+	orphaned_uids := []ulid.ULID{}
 	for _, uid := range uids {
 		e1, err1 := s.readyDB.Exists(uid)
 		if err1 == nil && !e1 {
@@ -397,8 +398,8 @@ func (s *MessageStore) resetFailures() {
 	for {
 		now := time.Now()
 		iter := s.failedDB.KeyValueIterator(1000)
-		uids := []string{}
-		invalidUids := []string{}
+		uids := []ulid.ULID{}
+		invalidUids := []ulid.ULID{}
 		for iter.Rewind(); iter.Valid(); iter.Next() {
 			uid := iter.Key()
 			time_s := string(iter.Value())
@@ -431,7 +432,7 @@ func (s *MessageStore) resetFailures() {
 		}
 
 		s.ready_mu.Lock()
-		readyBatch := map[string][]byte{}
+		readyBatch := map[ulid.ULID][]byte{}
 		for _, uid := range uids {
 			readyBatch[uid] = []byte("true")
 		}
@@ -447,7 +448,7 @@ func (s *MessageStore) resetFailures() {
 			for _, uid := range errs {
 				delete(readyBatch, uid)
 			}
-			failedBatch := make([]string, 0, len(readyBatch))
+			failedBatch := make([]ulid.ULID, 0, len(readyBatch))
 			for uid := range readyBatch {
 				failedBatch = append(failedBatch, uid)
 			}
@@ -478,7 +479,7 @@ func (s *MessageStore) ingest(queue []*model.TcpUdpParsedMessage) (int, error) {
 		return 0, nil
 	}
 
-	marshalledQueue := map[string][]byte{}
+	marshalledQueue := map[ulid.ULID][]byte{}
 	for _, m := range queue {
 		b, err := m.MarshalMsg(nil)
 		if err == nil {
@@ -542,14 +543,14 @@ func (s *MessageStore) ingest(queue []*model.TcpUdpParsedMessage) (int, error) {
 	return ingested, errMsg
 }
 
-func (s *MessageStore) retrieve(n int) (messages map[string]*model.TcpUdpParsedMessage) {
+func (s *MessageStore) retrieve(n int) (messages map[ulid.ULID]*model.TcpUdpParsedMessage) {
 	s.messages_mu.Lock()
 
-	messages = map[string]*model.TcpUdpParsedMessage{}
+	messages = map[ulid.ULID]*model.TcpUdpParsedMessage{}
 
 	iter := s.readyDB.KeyIterator(n)
 	var fetched int = 0
-	invalidEntries := []string{}
+	invalidEntries := []ulid.ULID{}
 	var message *model.TcpUdpParsedMessage
 	for iter.Rewind(); iter.Valid() && fetched < n; iter.Next() {
 		uid := iter.Key()
@@ -598,7 +599,7 @@ func (s *MessageStore) retrieve(n int) (messages map[string]*model.TcpUdpParsedM
 		return messages
 	}
 
-	sentBatch := map[string][]byte{}
+	sentBatch := map[ulid.ULID][]byte{}
 	for uid, _ := range messages {
 		sentBatch[uid] = []byte("true")
 	}
@@ -612,7 +613,7 @@ func (s *MessageStore) retrieve(n int) (messages map[string]*model.TcpUdpParsedM
 	for _, errKey := range errs {
 		delete(sentBatch, errKey)
 	}
-	readyBatch := make([]string, 0, len(sentBatch))
+	readyBatch := make([]ulid.ULID, 0, len(sentBatch))
 	for k := range sentBatch {
 		readyBatch = append(readyBatch, k)
 	}
@@ -631,11 +632,19 @@ func (s *MessageStore) retrieve(n int) (messages map[string]*model.TcpUdpParsedM
 	return messages
 }
 
-func (s *MessageStore) ACK(uid string) {
+func (s *MessageStore) ACK(uid ulid.ULID) {
 	s.ackQueue.Put(uid)
 }
 
-func (s *MessageStore) doACK(uids []string) {
+func ulidsToStrings(ulids []ulid.ULID) []string {
+	uids := make([]string, 0, len(ulids))
+	for _, ulid := range ulids {
+		uids = append(uids, ulid.String())
+	}
+	return uids
+}
+
+func (s *MessageStore) doACK(uids []ulid.ULID) {
 	if len(uids) == 0 {
 		return
 	}
@@ -648,14 +657,14 @@ func (s *MessageStore) doACK(uids []string) {
 		if s.metrics != nil {
 			s.metrics.BadgerGauge.WithLabelValues("sent").Sub(float64(len(uids) - len(errs)))
 		}
-		uids_map := map[string]bool{}
+		uids_map := map[ulid.ULID]bool{}
 		for _, uid := range uids {
 			uids_map[uid] = true
 		}
 		for _, uid := range errs {
 			delete(uids_map, uid)
 		}
-		uids = make([]string, 0, len(uids_map))
+		uids = make([]ulid.ULID, 0, len(uids_map))
 		for uid := range uids_map {
 			uids = append(uids, uid)
 		}
@@ -670,17 +679,17 @@ func (s *MessageStore) doACK(uids []string) {
 	s.messages_mu.Unlock()
 }
 
-func (s *MessageStore) NACK(uid string) {
+func (s *MessageStore) NACK(uid ulid.ULID) {
 	s.nackQueue.Put(uid)
 }
 
-func (s *MessageStore) doNACK(uids []string) {
+func (s *MessageStore) doNACK(uids []ulid.ULID) {
 	if len(uids) == 0 {
 		return
 	}
 	s.failed_mu.Lock()
 	times := time.Now().Format(time.RFC3339)
-	failedBatch := map[string][]byte{}
+	failedBatch := map[ulid.ULID][]byte{}
 	for _, uid := range uids {
 		failedBatch[uid] = []byte(times)
 	}
@@ -695,7 +704,7 @@ func (s *MessageStore) doNACK(uids []string) {
 		for _, uid := range errs {
 			delete(failedBatch, uid)
 		}
-		uids = make([]string, 0, len(failedBatch))
+		uids = make([]ulid.ULID, 0, len(failedBatch))
 		for uid := range failedBatch {
 			uids = append(uids, uid)
 		}
@@ -710,16 +719,16 @@ func (s *MessageStore) doNACK(uids []string) {
 	s.failed_mu.Unlock()
 }
 
-func (s *MessageStore) PermError(uid string) {
+func (s *MessageStore) PermError(uid ulid.ULID) {
 	s.permerrorsQueue.Put(uid)
 }
 
-func (s *MessageStore) doPermanentError(uids []string) {
+func (s *MessageStore) doPermanentError(uids []ulid.ULID) {
 	if len(uids) == 0 {
 		return
 	}
 	times := time.Now().Format(time.RFC3339)
-	permBatch := map[string][]byte{}
+	permBatch := map[ulid.ULID][]byte{}
 	for _, uid := range uids {
 		permBatch[uid] = []byte(times)
 	}
@@ -734,7 +743,7 @@ func (s *MessageStore) doPermanentError(uids []string) {
 		for _, uid := range errs {
 			delete(permBatch, uid)
 		}
-		uids = make([]string, 0, len(permBatch))
+		uids = make([]ulid.ULID, 0, len(permBatch))
 		for uid := range permBatch {
 			uids = append(uids, uid)
 		}

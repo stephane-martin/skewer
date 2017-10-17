@@ -2,25 +2,33 @@ package queue
 
 import (
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"github.com/oklog/ulid"
 )
+
+var empty ulid.ULID
 
 type ackNode struct {
 	next *ackNode
-	msg  string
+	uid  ulid.ULID
 }
 
 type AckQueue struct {
 	head     *ackNode
 	tail     *ackNode
 	disposed int32
+	pool     *sync.Pool
 }
 
 func NewAckQueue() *AckQueue {
 	stub := &ackNode{}
-	q := &AckQueue{head: stub, tail: stub, disposed: 0}
+	q := &AckQueue{head: stub, tail: stub, disposed: 0, pool: &sync.Pool{New: func() interface{} {
+		return &ackNode{}
+	}}}
 	return q
 }
 
@@ -32,8 +40,26 @@ func (q *AckQueue) Dispose() {
 	atomic.StoreInt32(&q.disposed, 1)
 }
 
-func (q *AckQueue) Put(m string) error {
-	n := &ackNode{msg: m}
+func (q *AckQueue) Get() (ulid.ULID, error) {
+	tail := q.tail
+	next := tail.next
+	if next != nil {
+		//q.tail = next
+		//tail.msg = next.msg
+		//s = tail.msg
+		(*ackNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.tail)), unsafe.Pointer(next))).uid = next.uid
+		q.pool.Put(tail)
+		return next.uid, nil
+	} else if q.Disposed() {
+		return empty, ErrDisposed
+	}
+	return empty, nil
+}
+
+func (q *AckQueue) Put(uid ulid.ULID) error {
+	n := q.pool.Get().(*ackNode)
+	n.uid = uid
+	n.next = nil
 	if q.Disposed() {
 		return ErrDisposed
 	}
@@ -96,29 +122,19 @@ MainLoop:
 	}
 }
 
-func (q *AckQueue) Get() (s string, err error) {
-	tail := q.tail
-	next := tail.next
-	if next != nil {
-		q.tail = next
-		tail.msg = next.msg
-		s = tail.msg
-	} else if q.Disposed() {
-		err = ErrDisposed
-	}
-	return
-}
-
-func (q *AckQueue) GetMany(max int) []string {
-	var elt string
+func (q *AckQueue) GetMany(max int) []ulid.ULID {
+	var elt ulid.ULID
 	var err error
-	res := make([]string, 0, max)
+	res := make([]ulid.ULID, 0, max)
 	for {
 		elt, err = q.Get()
-		if (elt == "") || (len(res) > max) || (err != nil) {
+		if elt == empty || err != nil {
 			break
 		}
 		res = append(res, elt)
+		if len(res) == max {
+			break
+		}
 	}
 	return res
 }

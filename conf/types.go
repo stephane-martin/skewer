@@ -2,6 +2,8 @@ package conf
 
 import (
 	"time"
+
+	"github.com/oklog/ulid"
 )
 
 type BaseConfig struct {
@@ -71,15 +73,15 @@ type KafkaConfig struct {
 }
 
 type JournaldConfig struct {
-	Enabled             bool   `mapstructure:"enabled" toml:"enabled" json:"enabled"`
-	TopicTmpl           string `mapstructure:"topic_tmpl" toml:"topic_tmpl" json:"topic_tmpl"`
-	TopicFunc           string `mapstructure:"topic_function" toml:"topic_function" json:"topic_function"`
-	PartitionTmpl       string `mapstructure:"partition_key_tmpl" toml:"partition_key_tmpl" json:"partition_key_tmpl"`
-	PartitionFunc       string `mapstructure:"partition_key_func" toml:"partition_key_func" json:"partition_key_func"`
-	PartitionNumberFunc string `mapstructure:"partition_number_func" toml:"partition_number_func" json:"partition_number_func"`
-	FilterFunc          string `mapstructure:"filter_func" toml:"filter_func" json:"filter_func"`
-	Encoding            string `mapstructure:"encoding" toml:"encoding" json:"encoding"`
-	ConfID              string `mapstructure:"-" toml:"-" json:"conf_id"`
+	Enabled             bool      `mapstructure:"enabled" toml:"enabled" json:"enabled"`
+	TopicTmpl           string    `mapstructure:"topic_tmpl" toml:"topic_tmpl" json:"topic_tmpl"`
+	TopicFunc           string    `mapstructure:"topic_function" toml:"topic_function" json:"topic_function"`
+	PartitionTmpl       string    `mapstructure:"partition_key_tmpl" toml:"partition_key_tmpl" json:"partition_key_tmpl"`
+	PartitionFunc       string    `mapstructure:"partition_key_func" toml:"partition_key_func" json:"partition_key_func"`
+	PartitionNumberFunc string    `mapstructure:"partition_number_func" toml:"partition_number_func" json:"partition_number_func"`
+	FilterFunc          string    `mapstructure:"filter_func" toml:"filter_func" json:"filter_func"`
+	Encoding            string    `mapstructure:"encoding" toml:"encoding" json:"encoding"`
+	ConfID              ulid.ULID `mapstructure:"-" toml:"-" json:"conf_id"`
 }
 
 type AccountingConfig struct {
@@ -92,7 +94,7 @@ type AccountingConfig struct {
 	PartitionFunc       string        `mapstructure:"partition_key_func" toml:"partition_key_func" json:"partition_key_func"`
 	PartitionNumberFunc string        `mapstructure:"partition_number_func" toml:"partition_number_func" json:"partition_number_func"`
 	FilterFunc          string        `mapstructure:"filter_func" toml:"filter_func" json:"filter_func"`
-	ConfID              string        `mapstructure:"-" toml:"-" json:"conf_id"`
+	ConfID              ulid.ULID     `mapstructure:"-" toml:"-" json:"conf_id"`
 }
 
 type SyslogConfig struct {
@@ -118,5 +120,6 @@ type SyslogConfig struct {
 	CertFile            string        `mapstructure:"cert_file" toml:"cert_file" json:"cert_file"`
 	ClientAuthType      string        `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
 	Encoding            string        `mapstructure:"encoding" toml:"encoding" json:"encoding"`
-	ConfID              string        `mapstructure:"-" toml:"-" json:"conf_id"`
+	ConfID              ulid.ULID     `mapstructure:"-" toml:"-" json:"conf_id"`
+	MaxMessageSize      int           `mapstructure:"maxmessagesize" toml:"maxmessagesize" json:"maxmessagesize"`
 }
