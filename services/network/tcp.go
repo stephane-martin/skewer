@@ -20,6 +20,7 @@ import (
 	"github.com/stephane-martin/skewer/services/errors"
 	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/queue"
 )
 
 type TcpServerStatus int
@@ -146,7 +147,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 	s := h.Server
 	s.AddConnection(conn)
 
-	rawMessagesChan := make(chan *model.RawTcpMessage)
+	rawMessagesChan := queue.NewRawTCPRing(1000)
 
 	defer func() {
 		s.RemoveConnection(conn)
@@ -196,7 +197,11 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 		var raw *model.RawTcpMessage
 		decoder := utils.SelectDecoder(config.Encoding)
 
-		for raw = range rawMessagesChan {
+		for {
+			raw, err = rawMessagesChan.Get()
+			if err != nil {
+				break
+			}
 			syslogMsg, err = parser.Parse(raw.Message[:raw.Size], decoder, config.DontParseSD)
 
 			if err == nil {
@@ -255,11 +260,11 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 			continue
 		}
 		copy(rawmsg.Message, scanner.Bytes())
-		rawMessagesChan <- rawmsg
+		rawMessagesChan.Put(rawmsg)
 
 	}
 	logger.Info("End of TCP client connection", "error", scanner.Err())
-	close(rawMessagesChan)
+	rawMessagesChan.Dispose()
 }
 
 func LFTcpSplit(data []byte, atEOF bool) (int, []byte, error) {

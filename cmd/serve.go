@@ -307,7 +307,9 @@ func runserve() {
 
 func Serve() error {
 	globalCtx, gCancel := context.WithCancel(context.Background())
+	defer gCancel()
 	shutdownCtx, shutdown := context.WithCancel(globalCtx)
+	defer shutdown()
 	var logger log15.Logger
 
 	binderFile := os.NewFile(3, "binder")
@@ -316,6 +318,7 @@ func Serve() error {
 	loggerConn.(*net.UnixConn).SetReadBuffer(65536)
 	loggerConn.(*net.UnixConn).SetWriteBuffer(65536)
 	loggerCtx, cancelLogger := context.WithCancel(context.Background())
+	defer cancelLogger()
 	logger = logging.NewRemoteLogger(loggerCtx, loggerConn).New("proc", "child")
 
 	logger.Debug("Serve() runs under user", "uid", os.Getuid(), "gid", os.Getgid())
@@ -383,16 +386,12 @@ func Serve() error {
 	if err != nil {
 		logger.Crit("Can't create the message Store", "error", err)
 		time.Sleep(100 * time.Millisecond)
-		gCancel()
-		cancelLogger()
 		return err
 	}
 	_, err = st.Start()
 	if err != nil {
 		logger.Crit("Can't start the forwarder", "error", err)
 		time.Sleep(100 * time.Millisecond)
-		gCancel()
-		cancelLogger()
 		return err
 	}
 
@@ -517,9 +516,9 @@ func Serve() error {
 		accountingServicePlugin.Shutdown(3 * time.Second)
 	}
 
-	stopJournal := func(shutdown bool) {
+	stopJournal := func(sht bool) {
 		if journald.Supported {
-			if shutdown {
+			if sht {
 				journalServicePlugin.Shutdown(5 * time.Second)
 			} else {
 				// we keep the same instance of the journald plugin, so
