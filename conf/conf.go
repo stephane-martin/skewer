@@ -435,6 +435,7 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 	rawMetricsConf := map[string]string{}
 	rawParsersConf := map[string]map[string]string{}
 	rawAccountingConf := map[string]string{}
+	rawMainConf := map[string]string{}
 	prefixLen := len(prefix)
 
 	for k, v := range params {
@@ -489,6 +490,12 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 			} else {
 				logger.Debug("Ignoring Consul KV", "key", k, "value", v)
 			}
+		case "main":
+			if len(splits) == 2 {
+				rawMainConf[splits[1]] = v
+			} else {
+				logger.Debug("Ignoring Consul KV", "key", k, "value", v)
+			}
 		default:
 			logger.Debug("Ignoring Consul KV", "key", k, "value", v)
 		}
@@ -537,6 +544,7 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 		if err != nil {
 			return err
 		}
+		c.Journald = journalConf
 	}
 
 	kafkaConf := KafkaConfig{}
@@ -550,6 +558,7 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 		if err != nil {
 			return err
 		}
+		c.Kafka = kafkaConf
 	}
 
 	storeConf := StoreConfig{}
@@ -563,6 +572,7 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 		if err != nil {
 			return err
 		}
+		c.Store = storeConf
 	}
 
 	metricsConf := MetricsConfig{}
@@ -576,6 +586,7 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 		if err != nil {
 			return err
 		}
+		c.Metrics = metricsConf
 	}
 
 	accountingConf := AccountingConfig{}
@@ -589,25 +600,35 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 		if err != nil {
 			return err
 		}
+		c.Accounting = accountingConf
+	}
+
+	mainConf := MainConfig{}
+	if len(rawMainConf) > 0 {
+		vi = viper.New()
+		SetMainDefaults(vi, false)
+		for k, v := range rawMainConf {
+			vi.Set(k, v)
+		}
+		err := vi.Unmarshal(&mainConf)
+		if err != nil {
+			return err
+		}
+		c.Main = mainConf
 	}
 
 	c.Syslog = append(c.Syslog, syslogConfs...)
 	c.Parsers = append(c.Parsers, parsersConf...)
 
 	if len(rawKafkaConf) > 0 {
-		c.Kafka = kafkaConf
 	}
 	if len(rawStoreConf) > 0 {
-		c.Store = storeConf
 	}
 	if len(rawJournalConf) > 0 {
-		c.Journald = journalConf
 	}
 	if len(rawMetricsConf) > 0 {
-		c.Metrics = metricsConf
 	}
 	if len(rawAccountingConf) > 0 {
-		c.Accounting = accountingConf
 	}
 
 	return nil
@@ -697,9 +718,6 @@ func (c *BaseConfig) Complete() (err error) {
 		}
 		if syslogConf.Encoding == "" {
 			c.Syslog[i].Encoding = "utf8"
-		}
-		if syslogConf.MaxMessageSize == 0 {
-			c.Syslog[i].MaxMessageSize = 65536
 		}
 
 		if len(c.Syslog[i].TopicTmpl) > 0 {

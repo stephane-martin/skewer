@@ -16,6 +16,7 @@ import (
 	"github.com/stephane-martin/skewer/services/errors"
 	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/queue"
 )
 
 type UdpServerStatus int
@@ -87,11 +88,11 @@ func NewUdpService(stasher *base.Reporter, gen chan ulid.ULID, b *binder.BinderC
 	return &s
 }
 
-func (s *UdpServiceImpl) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig) {
+func (s *UdpServiceImpl) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig, queueSize uint64) {
 	s.BaseService.Pool = &sync.Pool{New: func() interface{} {
 		return &model.RawUdpMessage{}
 	}}
-	s.BaseService.SetConf(sc, pc)
+	s.BaseService.SetConf(sc, pc, queueSize)
 }
 
 func (s *UdpServiceImpl) Gather() ([]*dto.MetricFamily, error) {
@@ -203,9 +204,9 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 	var localPortS string
 	var path string
 	var err error
-	rawMessages := make(chan *model.RawUdpMessage)
-
 	s := h.Server
+	rawMessages := queue.NewRawUdpRing(s.QueueSize)
+
 	s.AddConnection(conn)
 
 	defer func() {
@@ -244,7 +245,11 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 		var raw *model.RawUdpMessage
 		decoder := utils.SelectDecoder(config.Encoding)
 
-		for raw = range rawMessages {
+		for {
+			raw, err = rawMessages.Get()
+			if err != nil {
+				break
+			}
 			syslogMsg, err = parser.Parse(raw.Message[:raw.Size], decoder, config.DontParseSD)
 			if err == nil {
 				if !syslogMsg.Empty() {
@@ -278,8 +283,7 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 			// todo: select more precise error
 			logger.Debug("Error reading UDP", "error", err)
 			s.Pool.Put(rawmsg)
-			close(rawMessages)
-			return
+			break
 		}
 		if rawmsg.Size == 0 {
 			s.Pool.Put(rawmsg)
@@ -295,9 +299,9 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 			rawmsg.Client = strings.Split(remote.String(), ":")[0]
 		}
 
-		// todo: use a bounded queue rather than a channel
-		rawMessages <- rawmsg
+		rawMessages.Put(rawmsg)
 		s.metrics.IncomingMsgsCounter.WithLabelValues(s.Protocol, rawmsg.Client, localPortS, path).Inc()
 	}
+	rawMessages.Dispose()
 
 }

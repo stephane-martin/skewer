@@ -54,7 +54,7 @@ func deriveDeepCopy(dst, src *BaseConfig) {
 	dst.Journald = src.Journald
 	dst.Metrics = src.Metrics
 	dst.Accounting = src.Accounting
-	dst.DirectRelp = src.DirectRelp
+	dst.Main = src.Main
 }
 
 // deriveDeepCopy_ recursively copies the contents of src into dst.

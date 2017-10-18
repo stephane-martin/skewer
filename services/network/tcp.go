@@ -8,6 +8,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/inconshreveable/log15"
@@ -136,6 +137,13 @@ func (s *TcpServiceImpl) Stop() {
 	s.UnlockStatus()
 }
 
+func (s *TcpServiceImpl) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig, queueSize uint64, messageSize int) {
+	s.BaseService.Pool = &sync.Pool{New: func() interface{} {
+		return &model.RawTcpMessage{Message: make([]byte, messageSize, messageSize)}
+	}}
+	s.StreamingService.SetConf(sc, pc, queueSize, messageSize)
+}
+
 type tcpHandler struct {
 	Server *TcpServiceImpl
 }
@@ -147,7 +155,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 	s := h.Server
 	s.AddConnection(conn)
 
-	rawMessagesChan := queue.NewRawTCPRing(1000)
+	rawMessagesChan := queue.NewRawTCPRing(s.QueueSize)
 
 	defer func() {
 		s.RemoveConnection(conn)
@@ -241,7 +249,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 		scanner.Split(LFTcpSplit)
 	}
 	var rawmsg *model.RawTcpMessage
-	scanner.Buffer(make([]byte, 0, s.maxMessageSize), s.maxMessageSize)
+	scanner.Buffer(make([]byte, 0, s.MaxMessageSize), s.MaxMessageSize)
 
 	for scanner.Scan() {
 		if timeout > 0 {

@@ -32,7 +32,7 @@ type StreamingService struct {
 	acceptsWg      *sync.WaitGroup
 	handler        StreamHandler
 	wg             *sync.WaitGroup
-	maxMessageSize int
+	MaxMessageSize int
 }
 
 func (s *StreamingService) init() {
@@ -215,14 +215,7 @@ func (s *StreamingService) Listen() {
 	}()
 }
 
-func (s *StreamingService) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig) {
-	sizes := []int{}
-	for _, c := range sc {
-		sizes = append(sizes, c.MaxMessageSize)
-	}
-	s.maxMessageSize = deriveMaxSize(sizes, int(0))
-	s.BaseService.Pool = &sync.Pool{New: func() interface{} {
-		return &model.RawTcpMessage{Message: make([]byte, s.maxMessageSize, s.maxMessageSize)}
-	}}
-	s.BaseService.SetConf(sc, pc)
+func (s *StreamingService) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig, queueSize uint64, messageSize int) {
+	s.MaxMessageSize = messageSize
+	s.BaseService.SetConf(sc, pc, queueSize)
 }

@@ -13,7 +13,17 @@ func SetDefaults(v *viper.Viper) {
 	SetJournaldDefaults(v, true)
 	SetMetricsDefaults(v, true)
 	SetAccountingDefaults(v, true)
-	v.SetDefault("directrelp", true)
+	SetMainDefaults(v, true)
+}
+
+func SetMainDefaults(v *viper.Viper, prefixed bool) {
+	prefix := ""
+	if prefixed {
+		prefix = "main."
+	}
+	v.SetDefault(prefix+"direct_relp", false)
+	v.SetDefault(prefix+"max_input_message_size", 65536)
+	v.SetDefault(prefix+"input_queue_size", 1024)
 }
 
 func SetAccountingDefaults(v *viper.Viper, prefixed bool) {

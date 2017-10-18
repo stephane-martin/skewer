@@ -46,13 +46,13 @@ func init() {
 func ConfigureAndStartService(s NetworkService, c conf.BaseConfig, test bool) ([]model.ListenerInfo, error) {
 	switch s := s.(type) {
 	case *network.TcpServiceImpl:
-		s.SetConf(c.Syslog, c.Parsers)
+		s.SetConf(c.Syslog, c.Parsers, c.Main.InputQueueSize, c.Main.MaxInputMessageSize)
 		return s.Start(test)
 	case *network.UdpServiceImpl:
-		s.SetConf(c.Syslog, c.Parsers)
+		s.SetConf(c.Syslog, c.Parsers, c.Main.InputQueueSize)
 		return s.Start(test)
 	case *network.RelpService:
-		s.SetConf(c.Syslog, c.Parsers, c.Kafka, c.DirectRelp)
+		s.SetConf(c.Syslog, c.Parsers, c.Kafka, c.Main.DirectRelp, c.Main.InputQueueSize)
 		return s.Start(test)
 	case *linux.JournalService:
 		s.SetConf(c.Journald)

@@ -14,7 +14,13 @@ type BaseConfig struct {
 	Journald   JournaldConfig   `mapstructure:"journald" toml:"journald" json:"journald"`
 	Metrics    MetricsConfig    `mapstructure:"metrics" toml:"metrics" json:"metrics"`
 	Accounting AccountingConfig `mapstructure:"accounting" toml:"accounting" json:"accounting"`
-	DirectRelp bool             `mapstructure:"directrelp" toml:"directrelp" json:"directrelp"`
+	Main       MainConfig       `mapstructure:"main" toml:"main" json:"main"`
+}
+
+type MainConfig struct {
+	DirectRelp          bool   `mapstructure:"direct_relp" toml:"direct_relp" json:"direct_relp"`
+	InputQueueSize      uint64 `mapstructure:"input_queue_size" toml:"input_queue_size" json:"input_queue_size"`
+	MaxInputMessageSize int    `mapstructure:"max_input_message_size" toml:"max_input_message_size" json:"max_input_message_size"`
 }
 
 type MetricsConfig struct {
@@ -121,5 +127,4 @@ type SyslogConfig struct {
 	ClientAuthType      string        `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
 	Encoding            string        `mapstructure:"encoding" toml:"encoding" json:"encoding"`
 	ConfID              ulid.ULID     `mapstructure:"-" toml:"-" json:"conf_id"`
-	MaxMessageSize      int           `mapstructure:"maxmessagesize" toml:"maxmessagesize" json:"maxmessagesize"`
 }

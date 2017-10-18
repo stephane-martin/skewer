@@ -116,16 +116,17 @@ func NewRelpMetrics() *relpMetrics {
 }
 
 type RelpService struct {
-	impl     *RelpServiceImpl
-	logger   log15.Logger
-	reporter *base.Reporter
-	b        *binder.BinderClient
-	sc       []conf.SyslogConfig
-	pc       []conf.ParserConfig
-	kc       conf.KafkaConfig
-	wg       *sync.WaitGroup
-	direct   bool
-	gen      chan ulid.ULID
+	impl      *RelpServiceImpl
+	logger    log15.Logger
+	reporter  *base.Reporter
+	b         *binder.BinderClient
+	sc        []conf.SyslogConfig
+	pc        []conf.ParserConfig
+	kc        conf.KafkaConfig
+	wg        *sync.WaitGroup
+	direct    bool
+	gen       chan ulid.ULID
+	QueueSize uint64
 }
 
 func NewRelpService(r *base.Reporter, gen chan ulid.ULID, b *binder.BinderClient, l log15.Logger) *RelpService {
@@ -160,8 +161,7 @@ func (s *RelpService) Start(test bool) (infos []model.ListenerInfo, err error) {
 
 			case Stopped:
 				s.impl.Logger.Debug("The RELP service is stopped")
-				s.impl.SetConf(s.sc, s.pc)
-				s.impl.SetKafkaConf(s.kc)
+				s.impl.SetConf(s.sc, s.pc, s.kc, s.QueueSize)
 				infos, err := s.impl.Start(test)
 				if err == nil {
 					s.reporter.Report(infos)
@@ -197,11 +197,12 @@ func (s *RelpService) Stop() {
 	s.wg.Wait()
 }
 
-func (s *RelpService) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig, kc conf.KafkaConfig, direct bool) {
+func (s *RelpService) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig, kc conf.KafkaConfig, direct bool, queueSize uint64) {
 	s.sc = sc
 	s.pc = pc
 	s.kc = kc
 	s.direct = direct
+	s.QueueSize = queueSize
 }
 
 type RelpServiceImpl struct {
@@ -237,10 +238,6 @@ func NewRelpServiceImpl(direct bool, gen chan ulid.ULID, reporter *base.Reporter
 	s.StreamingService.handler = RelpHandler{Server: &s}
 	s.StatusChan = make(chan RelpServerStatus, 10)
 	return &s
-}
-
-func (s *RelpServiceImpl) SetKafkaConf(c conf.KafkaConfig) {
-	s.kafkaConf = c
 }
 
 func (s *RelpServiceImpl) Start(test bool) ([]model.ListenerInfo, error) {
@@ -348,11 +345,12 @@ func (s *RelpServiceImpl) doStop(final bool, wait bool) {
 	}
 }
 
-func (s *RelpServiceImpl) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig) {
+func (s *RelpServiceImpl) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig, kc conf.KafkaConfig, queueSize uint64) {
+	s.StreamingService.SetConf(sc, pc, queueSize, 132000)
+	s.kafkaConf = kc
 	s.BaseService.Pool = &sync.Pool{New: func() interface{} {
 		return &model.RawRelpMessage{Message: make([]byte, 132000, 132000)}
 	}}
-	s.BaseService.SetConf(sc, pc)
 }
 
 type RelpHandler struct {

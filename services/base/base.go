@@ -22,6 +22,7 @@ type BaseService struct {
 	UnixSocketPaths []string
 	Protocol        string
 	Connections     map[Connection]bool
+	QueueSize       uint64
 
 	connMutex   *sync.Mutex
 	statusMutex *sync.Mutex
@@ -43,9 +44,10 @@ func (s *BaseService) UnlockStatus() {
 	s.statusMutex.Unlock()
 }
 
-func (s *BaseService) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig) {
+func (s *BaseService) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig, queueSize uint64) {
 	s.SyslogConfigs = sc
 	s.ParserConfigs = pc
+	s.QueueSize = queueSize
 }
 
 func (s *BaseService) AddConnection(conn Connection) {
