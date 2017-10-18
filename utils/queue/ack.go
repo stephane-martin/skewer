@@ -83,11 +83,11 @@ func (q *AckQueue) Wait(stopChan <-chan struct{}) bool {
 		if nb < 22 {
 			runtime.Gosched()
 		} else if nb < 24 {
-			time.Sleep(time.Millisecond)
+			time.Sleep(1000000)
 		} else if nb < 26 {
-			time.Sleep(10 * time.Millisecond)
+			time.Sleep(10000000)
 		} else {
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(100000000)
 		}
 		nb++
 	}

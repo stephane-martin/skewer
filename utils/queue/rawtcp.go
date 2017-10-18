@@ -58,6 +58,7 @@ func (rb *RawTCPRing) Offer(item *model.RawTcpMessage) (bool, error) {
 
 func (rb *RawTCPRing) put(item *model.RawTcpMessage, offer bool) (bool, error) {
 	var n *rawtcpnode
+	var nb uint64
 	pos := atomic.LoadUint64(&rb.queue)
 L:
 	for {
@@ -82,7 +83,16 @@ L:
 			return false, nil
 		}
 
-		runtime.Gosched() // free up the cpu before the next iteration
+		if nb < 22 {
+			runtime.Gosched()
+		} else if nb < 24 {
+			time.Sleep(1000000)
+		} else if nb < 26 {
+			time.Sleep(10000000)
+		} else {
+			time.Sleep(100000000)
+		}
+		nb++
 	}
 
 	n.data = item
@@ -108,6 +118,7 @@ func (rb *RawTCPRing) Poll(timeout time.Duration) (*model.RawTcpMessage, error) 
 		n     *rawtcpnode
 		pos   = atomic.LoadUint64(&rb.dequeue)
 		start time.Time
+		nb    uint64
 	)
 	if timeout > 0 {
 		start = time.Now()
@@ -133,7 +144,17 @@ L:
 		if atomic.LoadUint64(&rb.disposed) == 1 {
 			return nil, ErrDisposed
 		}
-		runtime.Gosched() // free up the cpu before the next iteration
+
+		if nb < 22 {
+			runtime.Gosched()
+		} else if nb < 24 {
+			time.Sleep(1000000)
+		} else if nb < 26 {
+			time.Sleep(10000000)
+		} else {
+			time.Sleep(100000000)
+		}
+		nb++
 	}
 	data := n.data
 	n.data = nil
