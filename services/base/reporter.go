@@ -14,16 +14,26 @@ var stdoutLock sync.Mutex
 
 var SUCC []byte = []byte("SUCCESS")
 
-func W(header string, message []byte) (err error) {
+func W(header string, m []byte) (err error) {
 	stdoutLock.Lock()
-	err = utils.W(os.Stdout, header, message)
+	err = utils.W(os.Stdout, header, m)
 	stdoutLock.Unlock()
-	return err
+	return
 }
 
 type Reporter struct {
 	Name   string
 	Logger log15.Logger
+	Pipe   *os.File
+}
+
+func (s *Reporter) W(b []byte) error {
+	if s.Pipe == nil {
+		return W("syslog", b)
+	} else {
+		_, err := s.Pipe.Write(b)
+		return err
+	}
 }
 
 func (s *Reporter) StashMany(msgs []*model.TcpUdpParsedMessage) (fatal error, nonfatal error) {
@@ -32,21 +42,18 @@ func (s *Reporter) StashMany(msgs []*model.TcpUdpParsedMessage) (fatal error, no
 	var err error
 	var m *model.TcpUdpParsedMessage
 
-	stdoutLock.Lock()
 	for _, m = range msgs {
 		b, err = m.MarshalMsg(nil)
 		if err == nil {
-			err = utils.W(os.Stdout, "syslog", b)
+			err = s.W(b)
 			if err != nil {
 				s.Logger.Crit("Could not write message to upstream. There was message loss", "error", err, "type", s.Name)
-				stdoutLock.Unlock()
 				return err, nil
 			}
 		} else {
 			s.Logger.Warn("A syslog message could not be serialized", "type", s.Name, "error", err)
 		}
 	}
-	stdoutLock.Unlock()
 	return nil, nil
 }
 
@@ -54,7 +61,7 @@ func (s *Reporter) Stash(m model.TcpUdpParsedMessage) (fatal error, nonfatal err
 	// when the plugin *produces* a syslog message, write it to stdout
 	b, err := m.MarshalMsg(nil)
 	if err == nil {
-		err = W("syslog", b)
+		err = s.W(b)
 		if err != nil {
 			s.Logger.Crit("Could not write message to upstream. There was message loss", "error", err, "type", s.Name)
 			return err, nil

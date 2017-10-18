@@ -23,7 +23,7 @@ func Launch(typ NetworkServiceType, test bool, binderClient *binder.BinderClient
 	name := ReverseNetworkServiceMap[typ]
 	hasConf := false
 
-	reporter := &base.Reporter{Name: name, Logger: logger}
+	reporter := &base.Reporter{Name: name, Logger: logger, Pipe: pipe}
 	svc := Factory(typ, reporter, generator, binderClient, logger, pipe)
 	if svc == nil {
 		err := fmt.Errorf("The Service Factory returned 'nil' for plugin '%s'", name)

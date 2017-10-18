@@ -115,7 +115,7 @@ func (s *storeServiceImpl) doStart(test bool, mu *sync.Mutex) ([]model.ListenerI
 				err = message.DecodeMsg(s.reader)
 				if err == nil {
 					s.st.Stash(message)
-				} else if err == io.EOF {
+				} else if err == io.EOF || err == io.ErrClosedPipe || err == io.ErrUnexpectedEOF {
 					return
 				} else {
 					fmt.Fprintln(os.Stderr, "ZOOOOG", err)

@@ -21,4 +21,3 @@ func SetJournalFs(targetExec string) error {
 func MakeChroot(targetExec string) (string, error) {
 	return "", nil
 }
-

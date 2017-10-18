@@ -22,6 +22,7 @@ import (
 	"github.com/stephane-martin/skewer/sys/namespaces"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/queue"
+	"github.com/tinylib/msgp/msgp"
 )
 
 var SP []byte = []byte(" ")
@@ -198,6 +199,28 @@ type InfosAndError struct {
 	err   error
 }
 
+func (s *PluginController) listenpipe() {
+	if s.pipe == nil {
+		return
+	}
+	reader := msgp.NewReader(s.pipe)
+	var err error
+	var message model.TcpUdpParsedMessage
+	for {
+		message = model.TcpUdpParsedMessage{}
+		err = message.DecodeMsg(reader)
+		if err == nil {
+			s.stasher.Stash(message)
+		} else if err == io.EOF || err == io.ErrClosedPipe || err == io.ErrUnexpectedEOF {
+			return
+		} else {
+			s.logger.Error("Unexpected error when listening to the plugin pipe", "error", err)
+			return
+		}
+
+	}
+}
+
 func (s *PluginController) listen() chan InfosAndError {
 	startErrorChan := make(chan InfosAndError)
 	name := ReverseNetworkServiceMap[s.typ]
@@ -248,7 +271,7 @@ func (s *PluginController) listen() chan InfosAndError {
 			close(s.StopChan)
 		}() // end of defer
 
-		// read JSON encoded messages that the plugin is going to write on stdout
+		// read the encoded messages that the plugin may write on stdout
 		scanner := bufio.NewScanner(s.stdout)
 		scanner.Split(utils.PluginSplit)
 		scanner.Buffer(make([]byte, 0, 132000), 132000)
@@ -533,41 +556,31 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 
 	s.ShutdownChan = make(chan struct{})
 	s.ExitCode = 0
-
 	var err error
 	name := ReverseNetworkServiceMap[s.typ]
+	if s.typ != Accounting {
+		acctPath = ""
+	}
 
 	switch s.typ {
-	case RELP, TCP, UDP:
+	case RELP, TCP, UDP, Accounting, Journal:
+		// the plugin will use this pipe to report syslog messages
+		piper, pipew, err := os.Pipe()
+		if err != nil {
+			close(s.ShutdownChan)
+			s.createdMu.Unlock()
+			return err
+		}
+		s.pipe = piper
+
 		// if creating the namespaces fails, fallback to classical start
 		// this way we can support environments where user namespaces are not
 		// available
 		if capabilities.CapabilitiesSupported {
-			s.cmd, s.stdin, s.stdout, err = setupCmd(fmt.Sprintf("confined-%s", name), s.binderHandle, s.loggerHandle, nil, test)
+			s.cmd, s.stdin, s.stdout, err = setupCmd(fmt.Sprintf("confined-%s", name), s.binderHandle, s.loggerHandle, pipew, test)
 			if err != nil {
-				close(s.ShutdownChan)
-				s.createdMu.Unlock()
-				return err
-			}
-			err = namespaces.StartInNamespaces(s.cmd, dumpable, "", "", "")
-		}
-
-		if err != nil {
-			s.logger.Warn("Starting plugin in user namespace failed", "error", err, "type", name)
-		}
-		if err != nil || !capabilities.CapabilitiesSupported {
-			s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.binderHandle, s.loggerHandle, nil, test)
-			if err != nil {
-				close(s.ShutdownChan)
-				s.createdMu.Unlock()
-				return err
-			}
-			err = s.cmd.Start()
-		}
-	case Accounting:
-		if capabilities.CapabilitiesSupported {
-			s.cmd, s.stdin, s.stdout, err = setupCmd(fmt.Sprintf("confined-%s", name), s.binderHandle, s.loggerHandle, nil, test)
-			if err != nil {
+				piper.Close()
+				pipew.Close()
 				close(s.ShutdownChan)
 				s.createdMu.Unlock()
 				return err
@@ -579,13 +592,21 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 			s.logger.Warn("Starting plugin in user namespace failed", "error", err, "type", name)
 		}
 		if err != nil || !capabilities.CapabilitiesSupported {
-			s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.binderHandle, s.loggerHandle, nil, test)
+			s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.binderHandle, s.loggerHandle, pipew, test)
 			if err != nil {
+				piper.Close()
+				pipew.Close()
 				close(s.ShutdownChan)
 				s.createdMu.Unlock()
 				return err
 			}
 			err = s.cmd.Start()
+		}
+		pipew.Close()
+		if err == nil {
+			go s.listenpipe()
+		} else {
+			piper.Close()
 		}
 
 	case Store:
@@ -625,29 +646,6 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 		piper.Close()
 		if err != nil {
 			pipew.Close()
-		}
-
-	case Journal:
-		s.cmd, s.stdin, s.stdout, err = setupCmd(fmt.Sprintf("confined-%s", name), s.binderHandle, s.loggerHandle, nil, test)
-		//s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.binderHandle, s.loggerHandle, test)
-
-		if err != nil {
-			close(s.ShutdownChan)
-			s.createdMu.Unlock()
-			return err
-		}
-
-		err = namespaces.StartInNamespaces(s.cmd, dumpable, "", "", "")
-
-		if err != nil {
-			s.logger.Warn("Starting plugin in user namespace failed", "error", err, "type", name)
-			s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.binderHandle, s.loggerHandle, nil, test)
-			if err != nil {
-				close(s.ShutdownChan)
-				s.createdMu.Unlock()
-				return err
-			}
-			err = s.cmd.Start()
 		}
 
 	default:
@@ -715,10 +713,11 @@ func (s *StorePlugin) pushqueue() {
 			if err == nil {
 				_, err = s.pipe.Write(messageb)
 				if err != nil {
-					fmt.Fprintln(os.Stderr, "BLLLALALA", err)
+					s.logger.Error("Unexpected error when writing messages to the Store pipe", "error", err)
+					return
 				}
 			} else {
-				fmt.Fprintln(os.Stderr, "OHHHHENOCDE", err, message)
+				s.logger.Warn("A message provided by a plugin could not be serialized", "error", err)
 			}
 		}
 	}
