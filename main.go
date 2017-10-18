@@ -40,14 +40,6 @@ func getLogger(ctx context.Context, name string, handle int) (log15.Logger, erro
 }
 
 func main() {
-	numcpus := runtime.NumCPU()
-	maxprocs := numcpus * 8
-	if maxprocs < 16 {
-		maxprocs = 16
-	}
-	runtime.GOMAXPROCS(maxprocs)
-
-
 	name := os.Args[0]
 	loggerCtx, cancelLogger := context.WithCancel(context.Background())
 	var logger log15.Logger = nil
@@ -161,7 +153,9 @@ func main() {
 		}
 
 	case "skewer-tcp", "skewer-udp", "skewer-relp", "skewer-journal", "skewer-store", "skewer-accounting":
-		if name != "skewer-store" {
+		if name == "skewer-store" {
+			runtime.GOMAXPROCS(128)
+		} else {
 			sys.MlockAll()
 		}
 		signal.Ignore(syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
