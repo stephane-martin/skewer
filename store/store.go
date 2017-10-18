@@ -164,7 +164,7 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 	store.wg.Add(1)
 	go func() {
 		var err error
-		for store.toStashQueue.Wait() {
+		for store.toStashQueue.Wait(0) {
 			_, err = store.ingest(store.toStashQueue.GetMany(1000))
 			if err != nil {
 				store.logger.Warn("Ingestion error in the Store", "error", err)

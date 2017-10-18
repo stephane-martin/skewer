@@ -722,7 +722,7 @@ func (s *StorePlugin) pushqueue() {
 }
 
 func (s *StorePlugin) push() {
-	for s.MessageQueue.Wait() {
+	for s.MessageQueue.Wait(0) {
 		s.pushqueue()
 	}
 	s.pushwg.Done()

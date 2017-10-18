@@ -42,23 +42,30 @@ func (q *MessageQueue) Has() bool {
 	return q.tail.next != nil
 }
 
-func (q *MessageQueue) Wait() bool {
+func (q *MessageQueue) Wait(timeout time.Duration) bool {
+	var start time.Time
+	if timeout > 0 {
+		start = time.Now()
+	}
 	var nb uint64
 	for {
-		if q.Has() {
+		if q.tail.next != nil {
 			return true
 		}
-		if q.Disposed() {
+		if timeout > 0 && time.Since(start) >= timeout {
+			return false
+		}
+		if atomic.LoadInt32(&q.disposed) == 1 {
 			return false
 		}
 		if nb < 22 {
 			runtime.Gosched()
 		} else if nb < 24 {
-			time.Sleep(time.Millisecond)
+			time.Sleep(1000000)
 		} else if nb < 26 {
-			time.Sleep(10 * time.Millisecond)
+			time.Sleep(10000000)
 		} else {
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(100000000)
 		}
 		nb++
 	}

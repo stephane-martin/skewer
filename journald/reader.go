@@ -107,7 +107,7 @@ func makeMapConverter(coding string, generator chan ulid.ULID) Converter {
 			}
 		}
 		return model.TcpUdpParsedMessage{
-			Uid:    <-s.generator,
+			Uid:    <-generator,
 			Parsed: EntryToSyslog(dest),
 		}
 	}

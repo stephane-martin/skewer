@@ -86,7 +86,7 @@ func (s *JournalService) Start(test bool) (infos []model.ListenerInfo, err error
 		var entry *model.TcpUdpParsedMessage
 		q := s.reader.Entries()
 
-		for q.Wait() {
+		for q.Wait(0) {
 			for {
 				entries = q.GetMany(1000)
 				if len(entries) == 0 {
