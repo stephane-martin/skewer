@@ -280,7 +280,6 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 		rawmsg = s.Pool.Get().(*model.RawUdpMessage)
 		rawmsg.Size, remote, err = conn.ReadFrom(rawmsg.Message[:])
 		if err != nil {
-			// todo: select more precise error
 			logger.Debug("Error reading UDP", "error", err)
 			s.Pool.Put(rawmsg)
 			break

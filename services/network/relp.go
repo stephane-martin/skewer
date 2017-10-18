@@ -751,16 +751,16 @@ Loop:
 			if len(splits) == 4 {
 				data = bytes.Trim(splits[3], " \r\n")
 			} else {
-				// TODO
+				logger.Warn("datalen is non-null, but no data is provided")
+				s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
+				return
 			}
 		}
 		switch command {
 		case "open":
 			if relpIsOpen {
 				logger.Warn("Received open command twice")
-				if s.metrics != nil {
-					s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
-				}
+				s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
 				return
 			}
 			answer := fmt.Sprintf("%d rsp %d 200 OK\n%s\n", txnr, len(data)+7, string(data))
@@ -770,9 +770,7 @@ Loop:
 		case "close":
 			if !relpIsOpen {
 				logger.Warn("Received close command before open")
-				if s.metrics != nil {
-					s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
-				}
+				s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
 				return
 			}
 			answer := fmt.Sprintf("%d rsp 0\n0 serverclose 0\n", txnr)
