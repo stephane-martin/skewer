@@ -45,11 +45,6 @@ type TcpUdpParsedMessage struct {
 	Parsed ParsedMessage `json:"parsed" msg:"parsed"`
 	Uid    [16]byte      `json:"uid" msg:"uid"`
 	ConfId [16]byte      `json:"conf_id" msg:"conf_id"`
-}
-
-// ffjson: skip
-type RelpParsedMessage struct {
-	Parsed ParsedMessage `json:"parsed" msg:"parsed"`
 	Txnr   int           `json:"txnr" msg:"txnr"`
 }
 

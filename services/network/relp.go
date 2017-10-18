@@ -368,7 +368,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 	s.AddConnection(conn)
 
 	rawMessagesChan := queue.NewRawTCPRing(s.QueueSize)
-	parsed_messages_chan := make(chan model.RelpParsedMessage)
+	parsed_messages_chan := queue.NewMessageQueue()
 	other_successes_chan := make(chan int)
 	other_fails_chan := make(chan int)
 
@@ -415,7 +415,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 		var raw *model.RawTcpMessage
 		var syslogMsg model.SyslogMessage
 		var err error
-		var parsedMsg model.RelpParsedMessage
+		var parsedMsg model.TcpUdpParsedMessage
 		decoder := utils.SelectDecoder(config.Encoding)
 
 		for {
@@ -425,7 +425,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 			}
 			syslogMsg, err = parser.Parse(raw.Message[:raw.Size], decoder, config.DontParseSD)
 			if err == nil {
-				parsedMsg = model.RelpParsedMessage{
+				parsedMsg = model.TcpUdpParsedMessage{
 					Parsed: model.ParsedMessage{
 						Fields:         syslogMsg,
 						Client:         raw.Client,
@@ -434,14 +434,14 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 					},
 					Txnr: raw.Txnr,
 				}
-				parsed_messages_chan <- parsedMsg
+				parsed_messages_chan.Put(parsedMsg)
 			} else {
 				s.metrics.ParsingErrorCounter.WithLabelValues(s.Protocol, client, config.Format).Inc()
 				logger.Warn("Parsing error", "message", raw.Message, "error", err)
 			}
 			s.Pool.Put(raw)
 		}
-		close(parsed_messages_chan)
+		parsed_messages_chan.Dispose()
 	}()
 
 	defer func() {
@@ -608,8 +608,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 			config.PartitionNumberFunc,
 			s.Logger,
 		)
-		var message model.RelpParsedMessage
-		var stmsg model.TcpUdpParsedMessage
+		var message *model.TcpUdpParsedMessage
 		var topic string
 		var partitionKey string
 		var partitionNumber int32
@@ -623,7 +622,39 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 		var nonf error
 
 	ForParsedChan:
-		for message = range parsed_messages_chan {
+		for parsed_messages_chan.Wait(0) {
+			message, err = parsed_messages_chan.Get()
+			if err != nil {
+				// should not happen
+				logger.Error("Fatal error getting messages from the parsed messages queue", "error", err)
+				s.StopAndWait()
+				return
+			}
+			if message == nil {
+				// should not happen
+				continue ForParsedChan
+			}
+
+			if !s.direct {
+				// send message to the Store
+				message.ConfId = config.ConfID
+				message.Uid = <-s.gen
+				f, nonf = s.reporter.Stash(*message)
+				if f == nil && nonf == nil {
+					other_successes_chan <- message.Txnr
+				} else if f != nil {
+					other_fails_chan <- message.Txnr
+					logger.Error("Fatal error pushing RELP message to the Store", "err", f)
+					s.StopAndWait()
+					return
+				} else {
+					other_fails_chan <- message.Txnr
+					logger.Warn("Non fatal error pushing RELP message to the Store", "err", nonf)
+				}
+				continue ForParsedChan
+			}
+
+			// don't send to the Store, talk to kafka directly
 			topic, errs = e.Topic(message.Parsed.Fields)
 			for _, err = range errs {
 				logger.Info("Error calculating topic", "error", err, "txnr", message.Txnr)
@@ -683,31 +714,12 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 				Metadata:  message.Txnr,
 			}
 
-			if s.test && s.direct {
+			if s.test {
 				// "fake" send messages to kafka
 				fmt.Fprintf(os.Stderr, "pkey: '%s' topic:'%s' txnr:'%d'\n", partitionKey, topic, message.Txnr)
 				fmt.Fprintln(os.Stderr, string(serialized))
 				fmt.Fprintln(os.Stderr)
 				other_successes_chan <- message.Txnr
-			} else if !s.direct {
-				// send messages to the Store
-				stmsg = model.TcpUdpParsedMessage{
-					Uid:    <-s.gen,
-					Parsed: message.Parsed,
-					ConfId: config.ConfID,
-				}
-				f, nonf = s.reporter.Stash(stmsg)
-				if f == nil && nonf == nil {
-					other_successes_chan <- message.Txnr
-				} else if f != nil {
-					other_fails_chan <- message.Txnr
-					logger.Error("Fatal error pushing RELP message to the Store", "err", f)
-					s.StopAndWait()
-					return
-				} else {
-					other_fails_chan <- message.Txnr
-					logger.Warn("Non fatal error pushing RELP message to the Store", "err", nonf)
-				}
 			} else {
 				// send messages to Kafka
 				producer.Input() <- kafkaMsg
