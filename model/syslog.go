@@ -39,19 +39,13 @@ type RawTcpMessage struct {
 	RawMessage
 	Message []byte
 	Size    int
+	Txnr    int
 }
 
 type RawUdpMessage struct {
 	RawMessage
 	Message [65536]byte
 	Size    int
-}
-
-type RawRelpMessage struct {
-	RawMessage
-	Message []byte
-	Size    int
-	Txnr    int
 }
 
 type Parser struct {

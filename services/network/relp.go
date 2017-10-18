@@ -26,6 +26,7 @@ import (
 	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/sys/capabilities"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/queue"
 )
 
 type RelpServerStatus int
@@ -349,7 +350,7 @@ func (s *RelpServiceImpl) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig
 	s.StreamingService.SetConf(sc, pc, queueSize, 132000)
 	s.kafkaConf = kc
 	s.BaseService.Pool = &sync.Pool{New: func() interface{} {
-		return &model.RawRelpMessage{Message: make([]byte, 132000, 132000)}
+		return &model.RawTcpMessage{Message: make([]byte, 132000, 132000)}
 	}}
 }
 
@@ -366,7 +367,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 	s := h.Server
 	s.AddConnection(conn)
 
-	rawMessagesChan := make(chan *model.RawRelpMessage)
+	rawMessagesChan := queue.NewRawTCPRing(s.QueueSize)
 	parsed_messages_chan := make(chan model.RelpParsedMessage)
 	other_successes_chan := make(chan int)
 	other_fails_chan := make(chan int)
@@ -411,13 +412,17 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 			return
 		}
 
-		var raw *model.RawRelpMessage
+		var raw *model.RawTcpMessage
 		var syslogMsg model.SyslogMessage
 		var err error
 		var parsedMsg model.RelpParsedMessage
 		decoder := utils.SelectDecoder(config.Encoding)
 
-		for raw = range rawMessagesChan {
+		for {
+			raw, err = rawMessagesChan.Get()
+			if err != nil {
+				break
+			}
 			syslogMsg, err = parser.Parse(raw.Message[:raw.Size], decoder, config.DontParseSD)
 			if err == nil {
 				parsedMsg = model.RelpParsedMessage{
@@ -441,7 +446,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 
 	defer func() {
 		// closing raw_messages_chan causes parsed_messages_chan to be closed too, because of the goroutine just above
-		close(rawMessagesChan)
+		rawMessagesChan.Dispose()
 		s.RemoveConnection(conn)
 		s.wg.Done()
 	}()
@@ -718,7 +723,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 	scanner := bufio.NewScanner(conn)
 	scanner.Split(RelpSplit)
 	scanner.Buffer(make([]byte, 0, 132000), 132000)
-	var rawmsg *model.RawRelpMessage
+	var rawmsg *model.RawTcpMessage
 Loop:
 	for scanner.Scan() {
 		if timeout > 0 {
@@ -768,7 +773,7 @@ Loop:
 				s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
 				return
 			}
-			rawmsg = s.Pool.Get().(*model.RawRelpMessage)
+			rawmsg = s.Pool.Get().(*model.RawTcpMessage)
 			rawmsg.Txnr = txnr
 			rawmsg.Client = client
 			rawmsg.LocalPort = local_port
@@ -780,7 +785,7 @@ Loop:
 			rawmsg.Size = len(data)
 			copy(rawmsg.Message, data)
 			s.metrics.IncomingMsgsCounter.WithLabelValues(s.Protocol, client, local_port_s, path).Inc()
-			rawMessagesChan <- rawmsg
+			rawMessagesChan.Put(rawmsg)
 		default:
 			logger.Warn("Unknown RELP command", "command", command)
 			if s.metrics != nil {
