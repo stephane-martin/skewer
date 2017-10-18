@@ -367,7 +367,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 	s := h.Server
 	s.AddConnection(conn)
 
-	rawMessagesChan := queue.NewRawTCPRing(s.QueueSize)
+	rawMessagesQueue := queue.NewRawTCPRing(s.QueueSize)
 	parsed_messages_chan := queue.NewMessageQueue()
 	other_successes_chan := make(chan int)
 	other_fails_chan := make(chan int)
@@ -419,7 +419,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 		decoder := utils.SelectDecoder(config.Encoding)
 
 		for {
-			raw, err = rawMessagesChan.Get()
+			raw, err = rawMessagesQueue.Get()
 			if err != nil {
 				break
 			}
@@ -446,7 +446,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 
 	defer func() {
 		// closing raw_messages_chan causes parsed_messages_chan to be closed too, because of the goroutine just above
-		rawMessagesChan.Dispose()
+		rawMessagesQueue.Dispose()
 		s.RemoveConnection(conn)
 		s.wg.Done()
 	}()
@@ -797,7 +797,7 @@ Loop:
 			rawmsg.Size = len(data)
 			copy(rawmsg.Message, data)
 			s.metrics.IncomingMsgsCounter.WithLabelValues(s.Protocol, client, local_port_s, path).Inc()
-			rawMessagesChan.Put(rawmsg)
+			rawMessagesQueue.Put(rawmsg)
 		default:
 			logger.Warn("Unknown RELP command", "command", command)
 			if s.metrics != nil {

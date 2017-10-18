@@ -2,11 +2,11 @@ package services
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/inconshreveable/log15"
 	dto "github.com/prometheus/client_model/go"
@@ -20,7 +20,6 @@ func Launch(typ NetworkServiceType, test bool, binderClient *binder.BinderClient
 	generator := utils.Generator(context.Background(), logger)
 
 	var command string
-	var args string
 	name := ReverseNetworkServiceMap[typ]
 	hasConf := false
 
@@ -47,8 +46,8 @@ func Launch(typ NetworkServiceType, test bool, binderClient *binder.BinderClient
 		default:
 		}
 
-		parts := strings.SplitN(scanner.Text(), " ", 2)
-		command = parts[0]
+		parts := bytes.SplitN(scanner.Bytes(), SP, 2)
+		command = string(parts[0])
 		switch command {
 		case "start":
 			if !hasConf {
@@ -89,9 +88,8 @@ func Launch(typ NetworkServiceType, test bool, binderClient *binder.BinderClient
 			// process stops right now.
 			return nil
 		case "conf":
-			args = parts[1]
 			c := conf.BaseConfig{}
-			err := json.Unmarshal([]byte(args), &c)
+			err := json.Unmarshal(parts[1], &c)
 			if err == nil {
 				globalConf = c
 				hasConf = true

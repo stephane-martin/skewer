@@ -205,7 +205,7 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 	var path string
 	var err error
 	s := h.Server
-	rawMessages := queue.NewRawUdpRing(s.QueueSize)
+	rawMessagesQueue := queue.NewRawUdpRing(s.QueueSize)
 
 	s.AddConnection(conn)
 
@@ -246,7 +246,7 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 		decoder := utils.SelectDecoder(config.Encoding)
 
 		for {
-			raw, err = rawMessages.Get()
+			raw, err = rawMessagesQueue.Get()
 			if err != nil {
 				break
 			}
@@ -299,9 +299,9 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 			rawmsg.Client = strings.Split(remote.String(), ":")[0]
 		}
 
-		rawMessages.Put(rawmsg)
+		rawMessagesQueue.Put(rawmsg)
 		s.metrics.IncomingMsgsCounter.WithLabelValues(s.Protocol, rawmsg.Client, localPortS, path).Inc()
 	}
-	rawMessages.Dispose()
+	rawMessagesQueue.Dispose()
 
 }

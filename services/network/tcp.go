@@ -155,7 +155,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 	s := h.Server
 	s.AddConnection(conn)
 
-	rawMessagesChan := queue.NewRawTCPRing(s.QueueSize)
+	rawMessagesQueue := queue.NewRawTCPRing(s.QueueSize)
 
 	defer func() {
 		s.RemoveConnection(conn)
@@ -206,7 +206,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 		decoder := utils.SelectDecoder(config.Encoding)
 
 		for {
-			raw, err = rawMessagesChan.Get()
+			raw, err = rawMessagesQueue.Get()
 			if err != nil {
 				break
 			}
@@ -268,11 +268,11 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 			continue
 		}
 		copy(rawmsg.Message, scanner.Bytes())
-		rawMessagesChan.Put(rawmsg)
+		rawMessagesQueue.Put(rawmsg)
 
 	}
 	logger.Info("End of TCP client connection", "error", scanner.Err())
-	rawMessagesChan.Dispose()
+	rawMessagesQueue.Dispose()
 }
 
 func LFTcpSplit(data []byte, atEOF bool) (int, []byte, error) {

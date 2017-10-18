@@ -2,12 +2,12 @@ package services
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -23,6 +23,8 @@ import (
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/queue"
 )
+
+var SP []byte = []byte(" ")
 
 // PluginController launches and controls the plugins services
 type PluginController struct {
@@ -249,13 +251,14 @@ func (s *PluginController) listen() chan InfosAndError {
 		// read JSON encoded messages that the plugin is going to write on stdout
 		scanner := bufio.NewScanner(s.stdout)
 		scanner.Split(utils.PluginSplit)
+		scanner.Buffer(make([]byte, 0, 132000), 132000)
 		command := ""
 		infos := []model.ListenerInfo{}
 		var m model.TcpUdpParsedMessage
 
 		for scanner.Scan() {
-			parts := strings.SplitN(scanner.Text(), " ", 2)
-			command = parts[0]
+			parts := bytes.SplitN(scanner.Bytes(), SP, 2)
+			command = string(parts[0])
 			switch command {
 			case "syslog":
 				// the plugin emitted a syslog message to be sent to the Store
@@ -274,7 +277,7 @@ func (s *PluginController) listen() chan InfosAndError {
 						return
 					} else {
 						m = model.TcpUdpParsedMessage{}
-						_, err := m.UnmarshalMsg([]byte(parts[1]))
+						_, err := m.UnmarshalMsg(parts[1])
 						if err == nil {
 							s.stasher.Stash(m)
 						} else {
@@ -339,7 +342,7 @@ func (s *PluginController) listen() chan InfosAndError {
 				// plugin child is shutting down, eventually the scanner will return normally, we just wait for that
 			case "starterror":
 				if len(parts) == 2 {
-					err := fmt.Errorf(parts[1])
+					err := fmt.Errorf(string(parts[1]))
 					once.Do(func() {
 						startErrorChan <- InfosAndError{
 							infos: nil,
@@ -350,7 +353,7 @@ func (s *PluginController) listen() chan InfosAndError {
 				}
 			case "conferror":
 				if len(parts) == 2 {
-					err := fmt.Errorf(parts[1])
+					err := fmt.Errorf(string(parts[1]))
 					once.Do(func() {
 						startErrorChan <- InfosAndError{
 							infos: nil,
