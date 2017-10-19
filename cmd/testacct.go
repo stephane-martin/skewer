@@ -11,16 +11,9 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 )
 
-// acctCmd represents the acct command
-var acctCmd = &cobra.Command{
-	Use:   "acct",
-	Short: "A brief description of your command",
-	Long: `A longer description that spans multiple lines and likely contains examples
-and usage of using your command. For example:
-
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
+var testacctCmd = &cobra.Command{
+	Use:   "testacct",
+	Short: "Follow the acct file and print updates",
 	Run: func(cmd *cobra.Command, args []string) {
 		f, err := os.Open(conf.AccountingPath)
 		if err != nil {
@@ -45,5 +38,5 @@ to quickly create a Cobra application.`,
 }
 
 func init() {
-	RootCmd.AddCommand(acctCmd)
+	RootCmd.AddCommand(testacctCmd)
 }
