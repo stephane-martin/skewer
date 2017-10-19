@@ -139,7 +139,7 @@ func (s *TcpServiceImpl) Stop() {
 
 func (s *TcpServiceImpl) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig, queueSize uint64, messageSize int) {
 	s.BaseService.Pool = &sync.Pool{New: func() interface{} {
-		return &model.RawTcpMessage{Message: make([]byte, messageSize, messageSize)}
+		return &model.RawTcpMessage{Message: make([]byte, messageSize)}
 	}}
 	s.StreamingService.SetConf(sc, pc, queueSize, messageSize)
 }

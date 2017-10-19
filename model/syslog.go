@@ -119,9 +119,7 @@ func Parse(m []byte, format string, decoder *encoding.Decoder, dont_parse_sd boo
 	default:
 		return sm, &UnknownFormatError{format}
 	}
-	if err != nil {
-		return sm, err
-	}
+	return sm, err
 	// special handling of JSON messages produced by go-audit
 	/*
 		if sm.Appname == "go-audit" {
@@ -138,7 +136,6 @@ func Parse(m []byte, format string, decoder *encoding.Decoder, dont_parse_sd boo
 			sm.Message = ""
 		}
 	*/
-	return sm, nil
 }
 
 func TopicNameIsValid(name string) bool {

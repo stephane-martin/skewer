@@ -25,7 +25,7 @@ import (
 	"github.com/tinylib/msgp/msgp"
 )
 
-var SP []byte = []byte(" ")
+var space = []byte(" ")
 
 // PluginController launches and controls the plugins services
 type PluginController struct {
@@ -73,6 +73,7 @@ func NewPluginController(typ NetworkServiceType, stasher *StorePlugin, r *consul
 	return s
 }
 
+// W encodes an writes a message to the controlled plugin via stdin
 func (s *PluginController) W(header string, message []byte) (err error) {
 	s.stdinMu.Lock()
 	if s.stdin != nil {
@@ -84,6 +85,7 @@ func (s *PluginController) W(header string, message []byte) (err error) {
 	return err
 }
 
+// Gather asks the controlled plugin to report its metrics
 func (s *PluginController) Gather() ([]*dto.MetricFamily, error) {
 	select {
 	case <-s.ShutdownChan:
@@ -91,31 +93,26 @@ func (s *PluginController) Gather() ([]*dto.MetricFamily, error) {
 	default:
 		s.startedMu.Lock()
 		defer s.startedMu.Unlock()
-		if s.started {
-			if s.W("gathermetrics", utils.NOW) != nil {
-				return []*dto.MetricFamily{}, nil
-			}
+		if !s.started {
+			return []*dto.MetricFamily{}, nil
+		}
+		if s.W("gathermetrics", utils.NOW) != nil {
+			return []*dto.MetricFamily{}, nil
+		}
 
-			select {
-			case <-time.After(2 * time.Second):
+		select {
+		case <-time.After(2 * time.Second):
+			return []*dto.MetricFamily{}, nil
+		case metrics, more := <-s.metricsChan:
+			if !more || metrics == nil {
 				return []*dto.MetricFamily{}, nil
-			case metrics, more := <-s.metricsChan:
-				if more {
-					if metrics != nil {
-						return metrics, nil
-					} else {
-						return []*dto.MetricFamily{}, nil
-					}
-				} else {
-					return []*dto.MetricFamily{}, nil
-				}
 			}
-		} else {
 			return []*dto.MetricFamily{}, nil
 		}
 	}
 }
 
+// Stop kindly asks the controlled plugin to stop activity
 func (s *PluginController) Stop() {
 	// in case the plugin was in fact never created...
 	s.createdMu.Lock()
@@ -138,6 +135,7 @@ func (s *PluginController) Stop() {
 	}
 }
 
+// Shutdown demands that the controlled plugin shutdowns now. After killTimeOut, it kills the plugin.
 func (s *PluginController) Shutdown(killTimeOut time.Duration) {
 	// in case the plugin was in fact never created...
 	s.createdMu.Lock()
@@ -160,7 +158,6 @@ func (s *PluginController) Shutdown(killTimeOut time.Duration) {
 			s.logger.Warn("Error writing shutdown to plugin stdin. Kill brutally.", "error", err, "type", name)
 			killTimeOut = time.Second
 		}
-
 		// wait for plugin process termination
 		if killTimeOut == 0 {
 			<-s.ShutdownChan
@@ -181,6 +178,8 @@ func (s *PluginController) Shutdown(killTimeOut time.Duration) {
 
 }
 
+// SetConf gives the current global configuration to the controller.
+// The controller will communicate the configuration to the controlled plugin at next start.
 func (s *PluginController) SetConf(c conf.BaseConfig) {
 	s.conf = c
 }
@@ -280,7 +279,7 @@ func (s *PluginController) listen() chan InfosAndError {
 		var m model.TcpUdpParsedMessage
 
 		for scanner.Scan() {
-			parts := bytes.SplitN(scanner.Bytes(), SP, 2)
+			parts := bytes.SplitN(scanner.Bytes(), space, 2)
 			command = string(parts[0])
 			switch command {
 			case "syslog":
@@ -298,16 +297,15 @@ func (s *PluginController) listen() chan InfosAndError {
 						})
 						kill = true
 						return
+					}
+					m = model.TcpUdpParsedMessage{}
+					_, err := m.UnmarshalMsg(parts[1])
+					if err == nil {
+						s.stasher.Stash(m)
 					} else {
-						m = model.TcpUdpParsedMessage{}
-						_, err := m.UnmarshalMsg(parts[1])
-						if err == nil {
-							s.stasher.Stash(m)
-						} else {
-							s.logger.Warn("Plugin sent a badly encoded log line", "error", err)
-							kill = true
-							return
-						}
+						s.logger.Warn("Plugin sent a badly encoded log line", "error", err)
+						kill = true
+						return
 					}
 				}
 			case "started":
@@ -451,12 +449,11 @@ func (s *PluginController) listen() chan InfosAndError {
 				kill = true
 			}
 		}
-		return
-
 	}()
 	return startErrorChan
 }
 
+// Start asks the controlled plugin to start the operations.
 func (s *PluginController) Start() ([]model.ListenerInfo, error) {
 	name := ReverseNetworkServiceMap[s.typ]
 	s.createdMu.Lock()
@@ -491,18 +488,18 @@ func (s *PluginController) Start() ([]model.ListenerInfo, error) {
 		}
 	}
 
-	if rerr == nil {
-		s.started = true
-		s.startedMu.Unlock()
-		s.createdMu.Unlock()
-		return infos, nil
-	} else {
+	if rerr != nil {
 		s.startedMu.Unlock()
 		s.createdMu.Unlock()
 		s.logger.Error("Start error", "error", rerr, "type", name)
 		s.Shutdown(3 * time.Second)
 		return nil, rerr
 	}
+
+	s.started = true
+	s.startedMu.Unlock()
+	s.createdMu.Unlock()
+	return infos, nil
 }
 
 func setupCmd(name string, binderHandle int, loggerHandle int, messagePipe *os.File, test bool) (*exec.Cmd, io.WriteCloser, io.ReadCloser, error) {
@@ -692,6 +689,7 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 
 }
 
+// StorePlugin is the specialized controller that takes care of the Store.
 type StorePlugin struct {
 	*PluginController
 	*queue.MessageQueue
@@ -730,6 +728,7 @@ func (s *StorePlugin) push() {
 	s.pushwg.Done()
 }
 
+// Shutdown stops definetely the Store.
 func (s *StorePlugin) Shutdown(killTimeOut time.Duration) {
 	s.MessageQueue.Dispose()                 // will make push() return
 	s.pushwg.Wait()                          // wait that push() returns
@@ -739,13 +738,14 @@ func (s *StorePlugin) Shutdown(killTimeOut time.Duration) {
 }
 
 // Stash stores the given message into the Store
-func (s *StorePlugin) Stash(m model.TcpUdpParsedMessage) (fatal error, nonfatal error) {
+func (s *StorePlugin) Stash(m model.TcpUdpParsedMessage) (fatal, nonfatal error) {
 	// this method is called very frequently, so we avoid to lock anything
 	// the MessageQueue ensures that we write the messages sequentially to the store child
 	s.MessageQueue.Put(m)
 	return nil, nil
 }
 
+// NewStorePlugin creates a new Store controller.
 func NewStorePlugin(loggerHandle int, l log15.Logger) *StorePlugin {
 	s := &StorePlugin{PluginController: NewPluginController(Store, nil, nil, 0, loggerHandle, l)}
 	s.MessageQueue = queue.NewMessageQueue()

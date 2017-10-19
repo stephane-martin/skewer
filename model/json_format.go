@@ -27,8 +27,14 @@ type jsonRsyslogMessage struct {
 func ParseJsonFormat(m []byte, decoder *encoding.Decoder) (msg SyslogMessage, rerr error) {
 	// we ignore decoder, JSON is always UTF-8
 	decoder = unicode.UTF8.NewDecoder()
+
+	var err error
+	m, err = decoder.Bytes(m)
+	if err != nil {
+		return msg, &InvalidEncodingError{Err: err}
+	}
 	sourceMsg := jsonRsyslogMessage{}
-	err := json.Unmarshal(m, &sourceMsg)
+	err = json.Unmarshal(m, &sourceMsg)
 	if err != nil {
 		return msg, &UnmarshalingJsonError{err}
 	}

@@ -151,11 +151,7 @@ func (p *ConcreteParser) Parse(rawMessage []byte, decoder *encoding.Decoder, don
 			return parsedMessage, err
 		}
 	}
-	parsedMessage, err = p.env.fromJsMessage(jsParsedMessage)
-	if err != nil {
-		return parsedMessage, err
-	}
-	return parsedMessage, nil
+	return p.env.fromJsMessage(jsParsedMessage)
 }
 
 func newEnv(filterFunc, topicFunc, topicTmpl, partitionKeyFunc, partitionKeyTmpl, partitionNumberFunc string, logger log15.Logger) *Environment {

@@ -290,12 +290,7 @@ func (s *MessageStore) StoreAllSyslogConfigs(c conf.BaseConfig) (err error) {
 		FilterFunc:    c.Accounting.FilterFunc,
 		ConfID:        c.Accounting.ConfID,
 	}
-	err = s.StoreSyslogConfig(accSyslogConf)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return s.StoreSyslogConfig(accSyslogConf)
 }
 
 func (s *MessageStore) StoreSyslogConfig(config conf.SyslogConfig) error {
@@ -634,14 +629,6 @@ func (s *MessageStore) retrieve(n int) (messages map[ulid.ULID]*model.TcpUdpPars
 
 func (s *MessageStore) ACK(uid ulid.ULID) {
 	s.ackQueue.Put(uid)
-}
-
-func ulidsToStrings(ulids []ulid.ULID) []string {
-	uids := make([]string, 0, len(ulids))
-	for _, ulid := range ulids {
-		uids = append(uids, ulid.String())
-	}
-	return uids
 }
 
 func (s *MessageStore) doACK(uids []ulid.ULID) {

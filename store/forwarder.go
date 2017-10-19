@@ -52,13 +52,12 @@ func NewForwarderMetrics() *forwarderMetrics {
 }
 
 type kafkaForwarder struct {
-	logger     log15.Logger
-	errorChan  chan struct{}
-	wg         *sync.WaitGroup
-	forwarding int32
-	test       bool
-	metrics    *forwarderMetrics
-	registry   *prometheus.Registry
+	logger    log15.Logger
+	errorChan chan struct{}
+	wg        *sync.WaitGroup
+	test      bool
+	metrics   *forwarderMetrics
+	registry  *prometheus.Registry
 }
 
 func NewForwarder(test bool, logger log15.Logger) (fwder Forwarder) {

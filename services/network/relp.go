@@ -350,7 +350,7 @@ func (s *RelpServiceImpl) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig
 	s.StreamingService.SetConf(sc, pc, queueSize, 132000)
 	s.kafkaConf = kc
 	s.BaseService.Pool = &sync.Pool{New: func() interface{} {
-		return &model.RawTcpMessage{Message: make([]byte, 132000, 132000)}
+		return &model.RawTcpMessage{Message: make([]byte, 132000)}
 	}}
 }
 
