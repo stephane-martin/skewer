@@ -368,7 +368,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 	s.AddConnection(conn)
 
 	rawMessagesQueue := queue.NewRawTCPRing(s.QueueSize)
-	parsed_messages_chan := queue.NewMessageQueue()
+	parsedMessagesQueue := queue.NewMessageQueue()
 	other_successes_chan := make(chan int)
 	other_fails_chan := make(chan int)
 
@@ -400,6 +400,18 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 		s.metrics.ClientConnectionCounter.WithLabelValues(s.Protocol, client, local_port_s, path).Inc()
 	}
 
+	immediateSuccess := func(txnr int) {
+		answer := fmt.Sprintf("%d rsp 6 200 OK\n", txnr)
+		conn.Write([]byte(answer))
+		s.metrics.RelpAnswersCounter.WithLabelValues("200", client).Inc()
+	}
+
+	immediateFailure := func(txnr int) {
+		answer := fmt.Sprintf("%d rsp 6 500 KO\n", txnr)
+		conn.Write([]byte(answer))
+		s.metrics.RelpAnswersCounter.WithLabelValues("500", client).Inc()
+	}
+
 	// pull messages from raw_messages_chan and push them to parsed_messages_chan
 	s.wg.Add(1)
 	go func() {
@@ -416,6 +428,8 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 		var syslogMsg model.SyslogMessage
 		var err error
 		var parsedMsg model.TcpUdpParsedMessage
+		var f error
+		var nonf error
 		decoder := utils.SelectDecoder(config.Encoding)
 
 		for {
@@ -434,14 +448,36 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 					},
 					Txnr: raw.Txnr,
 				}
-				parsed_messages_chan.Put(parsedMsg)
+				s.Pool.Put(raw)
+				if s.direct {
+					parsedMessagesQueue.Put(parsedMsg)
+				} else {
+					// send message to the Store
+					parsedMsg.ConfId = config.ConfID
+					parsedMsg.Uid = <-s.gen
+					f, nonf = s.reporter.Stash(parsedMsg)
+					if f == nil && nonf == nil {
+						immediateSuccess(parsedMsg.Txnr)
+						//other_successes_chan <- parsedMsg.Txnr
+					} else if f != nil {
+						immediateFailure(parsedMsg.Txnr)
+						//other_fails_chan <- parsedMsg.Txnr
+						logger.Error("Fatal error pushing RELP message to the Store", "err", f)
+						s.StopAndWait()
+						return
+					} else {
+						immediateFailure(parsedMsg.Txnr)
+						//other_fails_chan <- parsedMsg.Txnr
+						logger.Warn("Non fatal error pushing RELP message to the Store", "err", nonf)
+					}
+				}
 			} else {
 				s.metrics.ParsingErrorCounter.WithLabelValues(s.Protocol, client, config.Format).Inc()
 				logger.Warn("Parsing error", "message", raw.Message, "error", err)
+				s.Pool.Put(raw)
 			}
-			s.Pool.Put(raw)
 		}
-		parsed_messages_chan.Dispose()
+		parsedMessagesQueue.Dispose()
 	}()
 
 	defer func() {
@@ -453,41 +489,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 
 	var producer sarama.AsyncProducer
 
-	if s.test || !s.direct {
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
-
-			for {
-				if other_successes_chan == nil && other_fails_chan == nil {
-					return
-				}
-				select {
-				case other_txnr, more := <-other_successes_chan:
-					if more {
-						answer := fmt.Sprintf("%d rsp 6 200 OK\n", other_txnr)
-						conn.Write([]byte(answer))
-						if s.metrics != nil {
-							s.metrics.RelpAnswersCounter.WithLabelValues("200", client).Inc()
-						}
-					} else {
-						other_successes_chan = nil
-					}
-				case other_txnr, more := <-other_fails_chan:
-					if more {
-						answer := fmt.Sprintf("%d rsp 6 500 KO\n", other_txnr)
-						conn.Write([]byte(answer))
-						if s.metrics != nil {
-							s.metrics.RelpAnswersCounter.WithLabelValues("500", client).Inc()
-						}
-					} else {
-						other_fails_chan = nil
-					}
-				}
-			}
-
-		}()
-	} else {
+	if !s.test && s.direct {
 		producer, err = s.kafkaConf.GetAsyncProducer()
 		if err != nil {
 			if s.metrics != nil {
@@ -526,9 +528,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 						// forward the ACK to rsyslog
 						txnr := succ.Metadata.(int)
 						successes[txnr] = true
-						if s.metrics != nil {
-							s.metrics.KafkaAckNackCounter.WithLabelValues("ack", succ.Topic).Inc()
-						}
+						s.metrics.KafkaAckNackCounter.WithLabelValues("ack", succ.Topic).Inc()
 					} else {
 						successChan = nil
 					}
@@ -538,9 +538,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 						failures[txnr] = true
 						logger.Info("NACK from Kafka", "error", fail.Error(), "txnr", txnr, "topic", fail.Msg.Topic)
 						fatal = model.IsFatalKafkaError(fail.Err)
-						if s.metrics != nil {
-							s.metrics.KafkaAckNackCounter.WithLabelValues("nack", fail.Msg.Topic).Inc()
-						}
+						s.metrics.KafkaAckNackCounter.WithLabelValues("nack", fail.Msg.Topic).Inc()
 					} else {
 						failureChan = nil
 					}
@@ -564,19 +562,11 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 					if _, ok := successes[last_committed_txnr+1]; ok {
 						last_committed_txnr++
 						delete(successes, last_committed_txnr)
-						answer := fmt.Sprintf("%d rsp 6 200 OK\n", last_committed_txnr)
-						conn.Write([]byte(answer))
-						if s.metrics != nil {
-							s.metrics.RelpAnswersCounter.WithLabelValues("200", client).Inc()
-						}
+						immediateSuccess(last_committed_txnr)
 					} else if _, ok := failures[last_committed_txnr+1]; ok {
 						last_committed_txnr++
 						delete(failures, last_committed_txnr)
-						answer := fmt.Sprintf("%d rsp 6 500 KO\n", last_committed_txnr)
-						conn.Write([]byte(answer))
-						if s.metrics != nil {
-							s.metrics.RelpAnswersCounter.WithLabelValues("500", client).Inc()
-						}
+						immediateFailure(last_committed_txnr)
 					} else {
 						break
 					}
@@ -590,143 +580,144 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 		}()
 	}
 
-	// push parsed messages to Kafka
-	s.wg.Add(1)
-	go func() {
-		defer func() {
-			close(other_successes_chan)
-			close(other_fails_chan)
-			s.wg.Done()
-		}()
+	if s.direct {
+		// push parsed messages to Kafka
+		s.wg.Add(1)
+		go func() {
+			defer func() {
+				close(other_successes_chan)
+				close(other_fails_chan)
+				s.wg.Done()
+			}()
 
-		e := javascript.NewFilterEnvironment(
-			config.FilterFunc,
-			config.TopicFunc,
-			config.TopicTmpl,
-			config.PartitionFunc,
-			config.PartitionTmpl,
-			config.PartitionNumberFunc,
-			s.Logger,
-		)
-		var message *model.TcpUdpParsedMessage
-		var topic string
-		var partitionKey string
-		var partitionNumber int32
-		var errs []error
-		var err error
-		var filterResult javascript.FilterResult
-		var kafkaMsg *sarama.ProducerMessage
-		var serialized []byte
-		var reported time.Time
-		var f error
-		var nonf error
+			e := javascript.NewFilterEnvironment(
+				config.FilterFunc,
+				config.TopicFunc,
+				config.TopicTmpl,
+				config.PartitionFunc,
+				config.PartitionTmpl,
+				config.PartitionNumberFunc,
+				s.Logger,
+			)
+			var message *model.TcpUdpParsedMessage
+			var topic string
+			var partitionKey string
+			var partitionNumber int32
+			var errs []error
+			var err error
+			var filterResult javascript.FilterResult
+			var kafkaMsg *sarama.ProducerMessage
+			var serialized []byte
+			var reported time.Time
 
-	ForParsedChan:
-		for parsed_messages_chan.Wait(0) {
-			message, err = parsed_messages_chan.Get()
-			if err != nil {
-				// should not happen
-				logger.Error("Fatal error getting messages from the parsed messages queue", "error", err)
-				s.StopAndWait()
-				return
-			}
-			if message == nil {
-				// should not happen
-				continue ForParsedChan
-			}
-
-			if !s.direct {
-				// send message to the Store
-				message.ConfId = config.ConfID
-				message.Uid = <-s.gen
-				f, nonf = s.reporter.Stash(*message)
-				if f == nil && nonf == nil {
-					other_successes_chan <- message.Txnr
-				} else if f != nil {
-					other_fails_chan <- message.Txnr
-					logger.Error("Fatal error pushing RELP message to the Store", "err", f)
+		ForParsedChan:
+			for parsedMessagesQueue.Wait(0) {
+				message, err = parsedMessagesQueue.Get()
+				if err != nil {
+					// should not happen
+					logger.Error("Fatal error getting messages from the parsed messages queue", "error", err)
 					s.StopAndWait()
 					return
-				} else {
-					other_fails_chan <- message.Txnr
-					logger.Warn("Non fatal error pushing RELP message to the Store", "err", nonf)
 				}
-				continue ForParsedChan
-			}
+				if message == nil {
+					// should not happen
+					continue ForParsedChan
+				}
 
-			// don't send to the Store, talk to kafka directly
-			topic, errs = e.Topic(message.Parsed.Fields)
-			for _, err = range errs {
-				logger.Info("Error calculating topic", "error", err, "txnr", message.Txnr)
-			}
-			if len(topic) == 0 {
-				logger.Warn("Topic or PartitionKey could not be calculated", "txnr", message.Txnr)
-				other_fails_chan <- message.Txnr
-				continue ForParsedChan
-			}
-			partitionKey, errs = e.PartitionKey(message.Parsed.Fields)
-			for _, err = range errs {
-				logger.Info("Error calculating the partition key", "error", err, "txnr", message.Txnr)
-			}
-			partitionNumber, errs = e.PartitionNumber(message.Parsed.Fields)
-			for _, err = range errs {
-				logger.Info("Error calculating the partition number", "error", err, "txnr", message.Txnr)
-			}
+				// don't send to the Store, talk to kafka directly
+				topic, errs = e.Topic(message.Parsed.Fields)
+				for _, err = range errs {
+					logger.Info("Error calculating topic", "error", err, "txnr", message.Txnr)
+				}
+				if len(topic) == 0 {
+					logger.Warn("Topic or PartitionKey could not be calculated", "txnr", message.Txnr)
+					if s.test {
+						immediateFailure(message.Txnr)
+					} else {
+						other_fails_chan <- message.Txnr
+					}
+					continue ForParsedChan
+				}
+				partitionKey, errs = e.PartitionKey(message.Parsed.Fields)
+				for _, err = range errs {
+					logger.Info("Error calculating the partition key", "error", err, "txnr", message.Txnr)
+				}
+				partitionNumber, errs = e.PartitionNumber(message.Parsed.Fields)
+				for _, err = range errs {
+					logger.Info("Error calculating the partition number", "error", err, "txnr", message.Txnr)
+				}
 
-			filterResult, err = e.FilterMessage(&message.Parsed.Fields)
+				filterResult, err = e.FilterMessage(&message.Parsed.Fields)
 
-			switch filterResult {
-			case javascript.DROPPED:
-				other_successes_chan <- message.Txnr
-				s.metrics.MessageFilteringCounter.WithLabelValues("dropped", client).Inc()
-				continue ForParsedChan
-			case javascript.REJECTED:
-				other_fails_chan <- message.Txnr
-				s.metrics.MessageFilteringCounter.WithLabelValues("rejected", client).Inc()
-				continue ForParsedChan
-			case javascript.PASS:
-				s.metrics.MessageFilteringCounter.WithLabelValues("passing", client).Inc()
-			default:
-				other_fails_chan <- message.Txnr
-				logger.Warn("Error happened processing message", "txnr", message.Txnr, "error", err)
-				s.metrics.MessageFilteringCounter.WithLabelValues("unknown", client).Inc()
-				continue ForParsedChan
+				switch filterResult {
+				case javascript.DROPPED:
+					if s.test {
+						immediateSuccess(message.Txnr)
+					} else {
+						other_successes_chan <- message.Txnr
+					}
+					s.metrics.MessageFilteringCounter.WithLabelValues("dropped", client).Inc()
+					continue ForParsedChan
+				case javascript.REJECTED:
+					if s.test {
+						immediateFailure(message.Txnr)
+					} else {
+						other_fails_chan <- message.Txnr
+					}
+					s.metrics.MessageFilteringCounter.WithLabelValues("rejected", client).Inc()
+					continue ForParsedChan
+				case javascript.PASS:
+					s.metrics.MessageFilteringCounter.WithLabelValues("passing", client).Inc()
+				default:
+					if s.test {
+						immediateFailure(message.Txnr)
+					} else {
+						other_fails_chan <- message.Txnr
+					}
+					logger.Warn("Error happened processing message", "txnr", message.Txnr, "error", err)
+					s.metrics.MessageFilteringCounter.WithLabelValues("unknown", client).Inc()
+					continue ForParsedChan
+				}
+
+				reported = time.Unix(0, message.Parsed.Fields.TimeReportedNum).UTC()
+				message.Parsed.Fields.TimeGenerated = time.Unix(0, message.Parsed.Fields.TimeGeneratedNum).UTC().Format(time.RFC3339Nano)
+				message.Parsed.Fields.TimeReported = reported.Format(time.RFC3339Nano)
+
+				serialized, err = ffjson.Marshal(&message.Parsed)
+
+				if err != nil {
+					logger.Warn("Error generating Kafka message", "error", err, "txnr", message.Txnr)
+					if s.test {
+						immediateFailure(message.Txnr)
+					} else {
+						other_fails_chan <- message.Txnr
+					}
+					continue ForParsedChan
+				}
+
+				kafkaMsg = &sarama.ProducerMessage{
+					Key:       sarama.StringEncoder(partitionKey),
+					Partition: partitionNumber,
+					Value:     sarama.ByteEncoder(serialized),
+					Topic:     topic,
+					Timestamp: reported,
+					Metadata:  message.Txnr,
+				}
+
+				if s.test {
+					// "fake" send messages to kafka
+					fmt.Fprintf(os.Stderr, "pkey: '%s' topic:'%s' txnr:'%d'\n", partitionKey, topic, message.Txnr)
+					fmt.Fprintln(os.Stderr, string(serialized))
+					fmt.Fprintln(os.Stderr)
+					immediateSuccess(message.Txnr)
+				} else {
+					// send messages to Kafka
+					producer.Input() <- kafkaMsg
+				}
+				ffjson.Pool(serialized)
 			}
-
-			reported = time.Unix(0, message.Parsed.Fields.TimeReportedNum).UTC()
-			message.Parsed.Fields.TimeGenerated = time.Unix(0, message.Parsed.Fields.TimeGeneratedNum).UTC().Format(time.RFC3339Nano)
-			message.Parsed.Fields.TimeReported = reported.Format(time.RFC3339Nano)
-
-			serialized, err = ffjson.Marshal(&message.Parsed)
-
-			if err != nil {
-				logger.Warn("Error generating Kafka message", "error", err, "txnr", message.Txnr)
-				other_fails_chan <- message.Txnr
-				continue ForParsedChan
-			}
-
-			kafkaMsg = &sarama.ProducerMessage{
-				Key:       sarama.StringEncoder(partitionKey),
-				Partition: partitionNumber,
-				Value:     sarama.ByteEncoder(serialized),
-				Topic:     topic,
-				Timestamp: reported,
-				Metadata:  message.Txnr,
-			}
-
-			if s.test {
-				// "fake" send messages to kafka
-				fmt.Fprintf(os.Stderr, "pkey: '%s' topic:'%s' txnr:'%d'\n", partitionKey, topic, message.Txnr)
-				fmt.Fprintln(os.Stderr, string(serialized))
-				fmt.Fprintln(os.Stderr)
-				other_successes_chan <- message.Txnr
-			} else {
-				// send messages to Kafka
-				producer.Input() <- kafkaMsg
-			}
-			ffjson.Pool(serialized)
-		}
-	}()
+		}()
+	}
 
 	timeout := config.Timeout
 	if timeout > 0 {
