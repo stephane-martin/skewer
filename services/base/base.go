@@ -1,6 +1,7 @@
 package base
 
 import (
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -10,10 +11,6 @@ import (
 	"github.com/stephane-martin/skewer/sys/binder"
 )
 
-type Connection interface {
-	Close() error
-}
-
 type BaseService struct {
 	SyslogConfigs   []conf.SyslogConfig
 	ParserConfigs   []conf.ParserConfig
@@ -21,7 +18,7 @@ type BaseService struct {
 	Binder          *binder.BinderClient
 	UnixSocketPaths []string
 	Protocol        string
-	Connections     map[Connection]bool
+	Connections     map[io.Closer]bool
 	QueueSize       uint64
 
 	connMutex   *sync.Mutex
@@ -32,7 +29,7 @@ type BaseService struct {
 func (s *BaseService) Init() {
 	s.UnixSocketPaths = []string{}
 	s.connMutex = &sync.Mutex{}
-	s.Connections = map[Connection]bool{}
+	s.Connections = map[io.Closer]bool{}
 	s.statusMutex = &sync.Mutex{}
 }
 
@@ -50,13 +47,13 @@ func (s *BaseService) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig, qu
 	s.QueueSize = queueSize
 }
 
-func (s *BaseService) AddConnection(conn Connection) {
+func (s *BaseService) AddConnection(conn io.Closer) {
 	s.connMutex.Lock()
 	s.Connections[conn] = true
 	s.connMutex.Unlock()
 }
 
-func (s *BaseService) RemoveConnection(conn Connection) {
+func (s *BaseService) RemoveConnection(conn io.Closer) {
 	s.connMutex.Lock()
 	if _, ok := s.Connections[conn]; ok {
 		conn.Close()
@@ -75,13 +72,13 @@ func (s *BaseService) CloseConnections() {
 			os.Remove(path)
 		}
 	}
-	s.Connections = map[Connection]bool{}
+	s.Connections = map[io.Closer]bool{}
 	s.UnixSocketPaths = []string{}
 	s.connMutex.Unlock()
 }
 
 func (s *BaseService) ClearConnections() {
 	s.connMutex.Lock()
-	s.Connections = map[Connection]bool{}
+	s.Connections = map[io.Closer]bool{}
 	s.connMutex.Unlock()
 }
