@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/inconshreveable/log15"
@@ -22,6 +23,7 @@ type kafkaDestination struct {
 	fatal      chan struct{}
 	registry   *prometheus.Registry
 	ackCounter *prometheus.CounterVec
+	once       sync.Once
 }
 
 func NewKafkaDestination(ctx context.Context, bc conf.BaseConfig, logger log15.Logger) Destination {
@@ -71,7 +73,7 @@ func NewKafkaDestination(ctx context.Context, bc conf.BaseConfig, logger log15.L
 			d.fail <- m.Msg.Metadata.(ulid.ULID)
 			d.ackCounter.WithLabelValues("nack", m.Msg.Topic).Inc()
 			if model.IsFatalKafkaError(m.Err) {
-				close(d.fatal)
+				d.once.Do(func() { close(d.fatal) })
 			}
 		}
 		close(d.fail)
@@ -84,7 +86,7 @@ func (d *kafkaDestination) Gather() ([]*dto.MetricFamily, error) {
 	return d.registry.Gather()
 }
 
-func (d *kafkaDestination) Send(message *model.TcpUdpParsedMessage, partitionKey string, partitionNumber int32, topic string) error {
+func (d *kafkaDestination) Send(message *model.TcpUdpParsedMessage, partitionKey string, partitionNumber int32, topic string) (bool, error) {
 	reported := time.Unix(0, message.Parsed.Fields.TimeReportedNum).UTC()
 	message.Parsed.Fields.TimeGenerated = time.Unix(0, message.Parsed.Fields.TimeGeneratedNum).UTC().Format(time.RFC3339Nano)
 	message.Parsed.Fields.TimeReported = reported.Format(time.RFC3339Nano)
@@ -92,7 +94,7 @@ func (d *kafkaDestination) Send(message *model.TcpUdpParsedMessage, partitionKey
 	serialized, err := ffjson.Marshal(&message.Parsed)
 
 	if err != nil {
-		return err
+		return true, err
 	}
 
 	kafkaMsg := &sarama.ProducerMessage{
@@ -105,7 +107,7 @@ func (d *kafkaDestination) Send(message *model.TcpUdpParsedMessage, partitionKey
 	}
 	d.producer.Input() <- kafkaMsg
 	//ffjson.Pool(serialized)
-	return nil
+	return false, nil
 }
 
 func (d *kafkaDestination) Close() {

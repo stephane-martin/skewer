@@ -1,6 +1,7 @@
 package model
 
 import (
+	"bytes"
 	"fmt"
 	"time"
 )
@@ -81,4 +82,67 @@ func (m *SyslogMessage) String() string {
 
 func (m *SyslogMessage) Empty() bool {
 	return len(m.Message) == 0 && len(m.Structured) == 0 && len(m.Properties) == 0
+}
+
+func (m *SyslogMessage) Marshal5424() ([]byte, error) {
+	b := bytes.NewBuffer(nil)
+	fmt.Fprintf(b, "<%d>1 %s %s %s %s %s ",
+		m.Priority,
+		time.Unix(0, m.TimeReportedNum).Format(time.RFC3339Nano),
+		nilify(m.Hostname),
+		nilify(m.Appname),
+		nilify(m.Procid),
+		nilify(m.Msgid))
+
+	if len(m.Properties) == 0 {
+		fmt.Fprint(b, "-")
+	}
+	for sid := range m.Properties {
+		fmt.Fprintf(b, "[%s", sid)
+		for name, value := range m.Properties[sid] {
+			fmt.Fprintf(b, " %s=\"%s\"", name, escapeSDParam(value))
+		}
+		fmt.Fprintf(b, "]")
+	}
+
+	if len(m.Message) > 0 {
+		fmt.Fprint(b, " ")
+		b.Write([]byte(m.Message))
+	}
+	return b.Bytes(), nil
+}
+
+func nilify(x string) string {
+	if x == "" {
+		return "-"
+	}
+	return x
+}
+
+func escapeSDParam(s string) string {
+	escapeCount := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '\\', '"', ']':
+			escapeCount++
+		}
+	}
+	if escapeCount == 0 {
+		return s
+	}
+
+	t := make([]byte, len(s)+escapeCount)
+	j := 0
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; c {
+		case '\\', '"', ']':
+			t[j] = '\\'
+			t[j+1] = c
+			j += 2
+		default:
+			t[j] = s[i]
+			j++
+		}
+	}
+	return string(t)
 }

@@ -124,22 +124,25 @@ func (s *storeServiceImpl) doStart(test bool, mu *sync.Mutex) ([]model.ListenerI
 			}
 		}()
 	}
-	// create and start the kafka forwarder
+
+	// create and start the forwarder
 	var forwarderCtx context.Context
 	forwarderCtx, s.cancelForwarder = context.WithCancel(context.Background())
 	s.forwarder = store.NewForwarder(test, s.logger)
-	fwderFatalError := s.forwarder.Fatal()
 	s.forwarder.Forward(forwarderCtx, s.st, s.config)
 	s.status = true
 
 	go func() {
-		// monitor for kafka connection errors
+		done := forwarderCtx.Done()
+		shutdown := s.shutdownCtx.Done()
+		fwderFatalError := s.forwarder.Fatal()
+		// monitor for remote connection errors
 		select {
-		case <-forwarderCtx.Done():
+		case <-done:
 			// the main process has stopped the forwarder
 			// we don't need to monitor for errors anymore
 			return
-		case <-s.shutdownCtx.Done():
+		case <-shutdown:
 			// the Store was shutdown
 			return
 		case <-fwderFatalError:
@@ -152,6 +155,7 @@ func (s *storeServiceImpl) doStart(test bool, mu *sync.Mutex) ([]model.ListenerI
 			// instance because it received a SIGHUP).
 			// that's why we need the mutex stuff in Start(),
 			// Stop(), SetConfAndRestart() methods.
+			s.logger.Warn("The forwarder reported a connection error")
 			s.Stop()
 			select {
 			case <-s.shutdownCtx.Done():
@@ -159,7 +163,6 @@ func (s *storeServiceImpl) doStart(test bool, mu *sync.Mutex) ([]model.ListenerI
 			case <-time.After(10 * time.Second):
 				s.Start(test)
 			}
-
 		}
 	}()
 	return infos, nil

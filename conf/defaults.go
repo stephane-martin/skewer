@@ -7,13 +7,31 @@ import (
 	sarama "gopkg.in/Shopify/sarama.v1"
 )
 
+type defaultFunc func(v *viper.Viper, prefixed bool)
+
 func SetDefaults(v *viper.Viper) {
-	SetKafkaDefaults(v, true)
-	SetStoreDefaults(v, true)
-	SetJournaldDefaults(v, true)
-	SetMetricsDefaults(v, true)
-	SetAccountingDefaults(v, true)
-	SetMainDefaults(v, true)
+	funcs := []defaultFunc{
+		SetKafkaDefaults,
+		SetStoreDefaults,
+		SetJournaldDefaults,
+		SetMetricsDefaults,
+		SetAccountingDefaults,
+		SetMetricsDefaults,
+		SetUdpDestDefaults,
+		SetMainDefaults,
+	}
+	for _, f := range funcs {
+		f(v, true)
+	}
+}
+
+func SetUdpDestDefaults(v *viper.Viper, prefixed bool) {
+	prefix := ""
+	if prefixed {
+		prefix = "udp_destination."
+	}
+	v.SetDefault(prefix+"host", "127.0.0.1")
+	v.SetDefault(prefix+"port", 514)
 }
 
 func SetMainDefaults(v *viper.Viper, prefixed bool) {
@@ -24,6 +42,7 @@ func SetMainDefaults(v *viper.Viper, prefixed bool) {
 	v.SetDefault(prefix+"direct_relp", false)
 	v.SetDefault(prefix+"max_input_message_size", 65536)
 	v.SetDefault(prefix+"input_queue_size", 1024)
+	v.SetDefault(prefix+"destination", "kafka")
 }
 
 func SetAccountingDefaults(v *viper.Viper, prefixed bool) {

@@ -78,7 +78,7 @@ func (fwder *forwarderImpl) doForward(ctx context.Context, store Store, bc conf.
 	if fwder.test {
 		fwder.dest = nil
 	} else {
-		fwder.dest = NewDestination(ctx, Kafka, bc, fwder.logger)
+		fwder.dest = NewDestination(ctx, bc.Main.Dest, bc, fwder.logger)
 		if fwder.dest == nil {
 			return
 		}
@@ -93,6 +93,7 @@ func (fwder *forwarderImpl) doForward(ctx context.Context, store Store, bc conf.
 
 func (fwder *forwarderImpl) forwardMessages(ctx context.Context, store Store) {
 	defer func() {
+		// we close the destination only after we have stopped to forward messages
 		if fwder.dest != nil {
 			fwder.dest.Close()
 		}
@@ -188,10 +189,14 @@ ForOutputs:
 				)
 				store.ACK(uid)
 			} else {
-				err = fwder.dest.Send(message, partitionKey, partitionNumber, topic)
+				perm, err := fwder.dest.Send(message, partitionKey, partitionNumber, topic)
 				if err != nil {
-					fwder.logger.Warn("Error forwarding message", "error", err, "uid", message.Uid)
-					store.PermError(uid)
+					fwder.logger.Warn("Error forwarding message", "error", err, "uid", ulid.ULID(message.Uid).String())
+					if perm {
+						store.PermError(uid)
+					} else {
+						store.NACK(uid)
+					}
 					continue ForOutputs
 				}
 			}
@@ -225,7 +230,10 @@ func (fwder *forwarderImpl) listenResponses(store Store) {
 				failChan = nil
 			}
 		case <-fatalChan:
-			once.Do(func() { close(fwder.fatalChan) })
+			once.Do(func() {
+				close(fwder.fatalChan)
+			})
+			fatalChan = nil
 		}
 	}
 }

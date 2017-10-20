@@ -620,17 +620,6 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 	c.Syslog = append(c.Syslog, syslogConfs...)
 	c.Parsers = append(c.Parsers, parsersConf...)
 
-	if len(rawKafkaConf) > 0 {
-	}
-	if len(rawStoreConf) > 0 {
-	}
-	if len(rawJournalConf) > 0 {
-	}
-	if len(rawMetricsConf) > 0 {
-	}
-	if len(rawAccountingConf) > 0 {
-	}
-
 	return nil
 }
 
@@ -660,6 +649,15 @@ func (c *BaseConfig) Complete() (err error) {
 			}
 			parsersNames[name] = true
 		}
+	}
+
+	switch strings.TrimSpace(strings.ToLower(c.Main.Destination)) {
+	case "kafka":
+		c.Main.Dest = Kafka
+	case "udp":
+		c.Main.Dest = Udp
+	default:
+		return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown destination type: %s", c.Main.Destination)}
 	}
 
 	_, err = ParseVersion(c.Kafka.Version)

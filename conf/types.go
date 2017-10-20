@@ -6,6 +6,13 @@ import (
 	"github.com/oklog/ulid"
 )
 
+type DestinationType uint8
+
+const (
+	Kafka DestinationType = iota
+	Udp
+)
+
 type BaseConfig struct {
 	Syslog     []SyslogConfig   `mapstructure:"syslog" toml:"syslog" json:"syslog"`
 	Kafka      KafkaConfig      `mapstructure:"kafka" toml:"kafka" json:"kafka"`
@@ -15,12 +22,15 @@ type BaseConfig struct {
 	Metrics    MetricsConfig    `mapstructure:"metrics" toml:"metrics" json:"metrics"`
 	Accounting AccountingConfig `mapstructure:"accounting" toml:"accounting" json:"accounting"`
 	Main       MainConfig       `mapstructure:"main" toml:"main" json:"main"`
+	UdpDest    UdpDestConfig    `mapstructure:"udp_destination" toml:"udp_destination" json:"udp_destination"`
 }
 
 type MainConfig struct {
-	DirectRelp          bool   `mapstructure:"direct_relp" toml:"direct_relp" json:"direct_relp"`
-	InputQueueSize      uint64 `mapstructure:"input_queue_size" toml:"input_queue_size" json:"input_queue_size"`
-	MaxInputMessageSize int    `mapstructure:"max_input_message_size" toml:"max_input_message_size" json:"max_input_message_size"`
+	DirectRelp          bool            `mapstructure:"direct_relp" toml:"direct_relp" json:"direct_relp"`
+	InputQueueSize      uint64          `mapstructure:"input_queue_size" toml:"input_queue_size" json:"input_queue_size"`
+	MaxInputMessageSize int             `mapstructure:"max_input_message_size" toml:"max_input_message_size" json:"max_input_message_size"`
+	Destination         string          `mapstructure:"destination" toml:"destination" json:"destination"`
+	Dest                DestinationType `mapstructure:"-" toml:"-" json:"dest"`
 }
 
 type MetricsConfig struct {
@@ -76,6 +86,11 @@ type KafkaConfig struct {
 	CertFile                 string        `mapstructure:"cert_file" toml:"cert_file" json:"cert_file"`
 	Insecure                 bool          `mapstructure:"insecure" toml:"insecure" json:"insecure"`
 	Partitioner              string        `mapstructure:"partitioner" toml:"partitioner" json:"partitioner"`
+}
+
+type UdpDestConfig struct {
+	Host string `mapstructure:"host" toml:"host" json:"host"`
+	Port int    `mapstructure:"port" toml:"port" json:"port"`
 }
 
 type JournaldConfig struct {

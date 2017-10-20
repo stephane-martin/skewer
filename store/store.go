@@ -46,10 +46,10 @@ type MessageStore struct {
 	metrics  *storeMetrics
 	registry *prometheus.Registry
 
-	ready_mu     *sync.Mutex
+	readyMu      *sync.Mutex
 	availMsgCond *sync.Cond
-	failed_mu    *sync.Mutex
-	messages_mu  *sync.Mutex
+	failedMu     *sync.Mutex
+	msgsMu       *sync.Mutex
 
 	wg *sync.WaitGroup
 
@@ -101,10 +101,10 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 	store.nackQueue = queue.NewAckQueue()
 	store.permerrorsQueue = queue.NewAckQueue()
 
-	store.ready_mu = &sync.Mutex{}
-	store.availMsgCond = sync.NewCond(store.ready_mu)
-	store.failed_mu = &sync.Mutex{}
-	store.messages_mu = &sync.Mutex{}
+	store.readyMu = &sync.Mutex{}
+	store.availMsgCond = sync.NewCond(store.readyMu)
+	store.failedMu = &sync.Mutex{}
+	store.msgsMu = &sync.Mutex{}
 	store.wg = &sync.WaitGroup{}
 
 	store.closedChan = make(chan struct{})
@@ -204,9 +204,9 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 	store.wg.Add(1)
 	go func() {
 		doneChan := ctx.Done()
-		store.ready_mu.Lock()
+		store.readyMu.Lock()
 		defer func() {
-			store.ready_mu.Unlock()
+			store.readyMu.Unlock()
 			close(store.OutputsChan)
 			store.wg.Done()
 		}()
@@ -226,20 +226,8 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 					}
 				}
 			}
+			store.outputMsgs(doneChan, messages)
 
-			if len(messages) > 0 {
-				store.ready_mu.Unlock()
-				// loop on the available messages, but immediately stop if the context is canceled
-				for _, msg := range messages {
-					select {
-					case store.OutputsChan <- msg:
-					case <-doneChan:
-						store.ready_mu.Lock()
-						return
-					}
-				}
-				store.ready_mu.Lock()
-			}
 		}
 	}()
 
@@ -255,6 +243,21 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 	}()
 
 	return store, nil
+}
+
+func (s *MessageStore) outputMsgs(doneChan <-chan struct{}, messages map[ulid.ULID]*model.TcpUdpParsedMessage) {
+	if len(messages) == 0 {
+		return
+	}
+	s.readyMu.Unlock()
+	defer s.readyMu.Lock()
+	for _, msg := range messages {
+		select {
+		case s.OutputsChan <- msg:
+		case <-doneChan:
+			return
+		}
+	}
 }
 
 func (s *MessageStore) WaitFinished() {
@@ -389,7 +392,8 @@ func (s *MessageStore) ReadAllBadgers() (map[string]string, map[string]string, m
 
 func (s *MessageStore) resetFailures() {
 	// push back messages from "failed" to "ready"
-	s.failed_mu.Lock()
+	s.failedMu.Lock()
+	defer s.failedMu.Unlock()
 	for {
 		now := time.Now()
 		iter := s.failedDB.KeyValueIterator(1000)
@@ -413,20 +417,17 @@ func (s *MessageStore) resetFailures() {
 		if len(invalidUids) > 0 {
 			s.logger.Info("Found invalid entries in 'failed'", "number", len(invalidUids))
 			errs, err := s.failedDB.DeleteMany(invalidUids)
-			if s.metrics != nil {
-				s.metrics.BadgerGauge.WithLabelValues("failed").Sub(float64(len(invalidUids) - len(errs)))
-			}
+			s.metrics.BadgerGauge.WithLabelValues("failed").Sub(float64(len(invalidUids) - len(errs)))
 			if err != nil {
 				s.logger.Warn("Error deleting invalid entries", "error", err)
 			}
 		}
 
 		if len(uids) == 0 {
-			s.failed_mu.Unlock()
 			return
 		}
 
-		s.ready_mu.Lock()
+		s.readyMu.Lock()
 		readyBatch := map[ulid.ULID][]byte{}
 		for _, uid := range uids {
 			readyBatch[uid] = []byte("true")
@@ -457,8 +458,7 @@ func (s *MessageStore) resetFailures() {
 			s.availMsgCond.Signal()
 		}
 
-		s.ready_mu.Unlock()
-		s.failed_mu.Unlock()
+		s.readyMu.Unlock()
 	}
 }
 
@@ -492,14 +492,14 @@ func (s *MessageStore) ingest(queue []*model.TcpUdpParsedMessage) (int, error) {
 		return 0, nil
 	}
 
-	s.ready_mu.Lock()
-	s.messages_mu.Lock()
+	s.readyMu.Lock()
+	s.msgsMu.Lock()
 
 	errorMsgKeys, errMsg := s.messagesDB.AddMany(marshalledQueue)
 
 	if len(errorMsgKeys) == len(marshalledQueue) {
-		s.messages_mu.Unlock()
-		s.ready_mu.Unlock()
+		s.msgsMu.Unlock()
+		s.readyMu.Unlock()
 		return 0, errMsg
 	}
 
@@ -525,11 +525,11 @@ func (s *MessageStore) ingest(queue []*model.TcpUdpParsedMessage) (int, error) {
 		}
 	}
 
-	s.messages_mu.Unlock()
+	s.msgsMu.Unlock()
 	if ingested > 0 {
 		s.availMsgCond.Signal()
 	}
-	s.ready_mu.Unlock()
+	s.readyMu.Unlock()
 
 	if errMsg == nil {
 		errMsg = errReady
@@ -539,7 +539,8 @@ func (s *MessageStore) ingest(queue []*model.TcpUdpParsedMessage) (int, error) {
 }
 
 func (s *MessageStore) retrieve(n int) (messages map[ulid.ULID]*model.TcpUdpParsedMessage) {
-	s.messages_mu.Lock()
+	s.msgsMu.Lock()
+	defer s.msgsMu.Unlock()
 
 	messages = map[ulid.ULID]*model.TcpUdpParsedMessage{}
 
@@ -590,12 +591,11 @@ func (s *MessageStore) retrieve(n int) (messages map[ulid.ULID]*model.TcpUdpPars
 	}
 
 	if len(messages) == 0 {
-		s.messages_mu.Unlock()
 		return messages
 	}
 
 	sentBatch := map[ulid.ULID][]byte{}
-	for uid, _ := range messages {
+	for uid := range messages {
 		sentBatch[uid] = []byte("true")
 	}
 	errs, err := s.sentDB.AddMany(sentBatch)
@@ -623,7 +623,6 @@ func (s *MessageStore) retrieve(n int) (messages map[ulid.ULID]*model.TcpUdpPars
 	for _, uid := range errs {
 		delete(messages, uid)
 	}
-	s.messages_mu.Unlock()
 	return messages
 }
 
@@ -635,7 +634,8 @@ func (s *MessageStore) doACK(uids []ulid.ULID) {
 	if len(uids) == 0 {
 		return
 	}
-	s.messages_mu.Lock()
+	s.msgsMu.Lock()
+	defer s.msgsMu.Unlock()
 	errs, err := s.sentDB.DeleteMany(uids)
 	if err != nil {
 		s.logger.Warn("Error removing messages from the Sent DB", "error", err)
@@ -663,7 +663,6 @@ func (s *MessageStore) doACK(uids []ulid.ULID) {
 			s.metrics.BadgerGauge.WithLabelValues("messages").Sub(float64(len(uids) - len(errs)))
 		}
 	}
-	s.messages_mu.Unlock()
 }
 
 func (s *MessageStore) NACK(uid ulid.ULID) {
@@ -674,7 +673,8 @@ func (s *MessageStore) doNACK(uids []ulid.ULID) {
 	if len(uids) == 0 {
 		return
 	}
-	s.failed_mu.Lock()
+	s.failedMu.Lock()
+	defer s.failedMu.Unlock()
 	times := time.Now().Format(time.RFC3339)
 	failedBatch := map[ulid.ULID][]byte{}
 	for _, uid := range uids {
@@ -703,7 +703,6 @@ func (s *MessageStore) doNACK(uids []ulid.ULID) {
 			s.metrics.BadgerGauge.WithLabelValues("sent").Sub(float64(len(uids) - len(errs)))
 		}
 	}
-	s.failed_mu.Unlock()
 }
 
 func (s *MessageStore) PermError(uid ulid.ULID) {

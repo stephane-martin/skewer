@@ -32,7 +32,7 @@ type Forwarder interface {
 }
 
 type Destination interface {
-	Send(m *model.TcpUdpParsedMessage, partitionKey string, partitionNumber int32, topic string) error
+	Send(m *model.TcpUdpParsedMessage, partitionKey string, partitionNumber int32, topic string) (bool, error)
 	Successes() chan ulid.ULID
 	Failures() chan ulid.ULID
 	Fatal() chan struct{}
@@ -40,16 +40,12 @@ type Destination interface {
 	Gather() ([]*dto.MetricFamily, error)
 }
 
-type DestinationType uint8
-
-const (
-	Kafka DestinationType = iota
-)
-
-func NewDestination(ctx context.Context, typ DestinationType, bc conf.BaseConfig, logger log15.Logger) Destination {
+func NewDestination(ctx context.Context, typ conf.DestinationType, bc conf.BaseConfig, logger log15.Logger) Destination {
 	switch typ {
-	case Kafka:
+	case conf.Kafka:
 		return NewKafkaDestination(ctx, bc, logger)
+	case conf.Udp:
+		return NewUdpDestination(ctx, bc, logger)
 	default:
 		logger.Error("Unknown destination type", "type", typ)
 		return nil
