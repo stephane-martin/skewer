@@ -128,8 +128,8 @@ func (s *storeServiceImpl) doStart(test bool, mu *sync.Mutex) ([]model.ListenerI
 	var forwarderCtx context.Context
 	forwarderCtx, s.cancelForwarder = context.WithCancel(context.Background())
 	s.forwarder = store.NewForwarder(test, s.logger)
-	errorChan := s.forwarder.ErrorChan()
-	s.forwarder.Forward(forwarderCtx, s.st, s.config.Kafka)
+	fwderFatalError := s.forwarder.Fatal()
+	s.forwarder.Forward(forwarderCtx, s.st, s.config)
 	s.status = true
 
 	go func() {
@@ -142,14 +142,14 @@ func (s *storeServiceImpl) doStart(test bool, mu *sync.Mutex) ([]model.ListenerI
 		case <-s.shutdownCtx.Done():
 			// the Store was shutdown
 			return
-		case <-errorChan:
+		case <-fwderFatalError:
 			// when the kafka forwarder signals an error,
 			// the StoreService stops the forwarder,
 			// waits 10 seconds, and then restarts the
 			// forwarder.
 			// but at the same time the main process can
 			// decide to stop/start the StoreService (for
-			// instance because it received a SIHGUP).
+			// instance because it received a SIGHUP).
 			// that's why we need the mutex stuff in Start(),
 			// Stop(), SetConfAndRestart() methods.
 			s.Stop()

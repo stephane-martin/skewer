@@ -6,6 +6,7 @@ import "golang.org/x/sys/unix"
 
 var PledgeSupported bool = true
 
+//SetupPledge actually runs the pledge syscall based on the process name
 func SetupPledge(name string) (err error) {
 	switch name {
 	case "skewer-tcp", "skewer-udp", "skewer-relp", "skewer-conf", "skewer-accounting":
@@ -17,4 +18,3 @@ func SetupPledge(name string) (err error) {
 	}
 	return
 }
-
