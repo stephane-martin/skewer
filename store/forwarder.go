@@ -19,6 +19,8 @@ type forwarderMetrics struct {
 }
 */
 
+type storeCallback func(uid ulid.ULID)
+
 type forwarderImpl struct {
 	messageFilterCounter *prometheus.CounterVec
 	logger               log15.Logger
@@ -78,12 +80,22 @@ func (fwder *forwarderImpl) doForward(ctx context.Context, store Store, bc conf.
 	if fwder.test {
 		fwder.dest = nil
 	} else {
-		fwder.dest = NewDestination(ctx, bc.Main.Dest, bc, fwder.logger)
+		fwder.dest = NewDestination(ctx, bc.Main.Dest, bc, store.ACK, store.NACK, store.PermError, fwder.logger)
 		if fwder.dest == nil {
 			return
 		}
+
+		// listen for destination fatal errors
 		fwder.wg.Add(1)
-		go fwder.listenResponses(store)
+		go func() {
+			defer fwder.wg.Done()
+			select {
+			case <-ctx.Done():
+				return
+			case <-fwder.dest.Fatal():
+				close(fwder.fatalChan)
+			}
+		}()
 	}
 
 	fwder.wg.Add(1)
@@ -189,51 +201,11 @@ ForOutputs:
 				)
 				store.ACK(uid)
 			} else {
-				perm, err := fwder.dest.Send(message, partitionKey, partitionNumber, topic)
+				err := fwder.dest.Send(message, partitionKey, partitionNumber, topic)
 				if err != nil {
 					fwder.logger.Warn("Error forwarding message", "error", err, "uid", ulid.ULID(message.Uid).String())
-					if perm {
-						store.PermError(uid)
-					} else {
-						store.NACK(uid)
-					}
-					continue ForOutputs
 				}
 			}
-		}
-	}
-}
-
-func (fwder *forwarderImpl) listenResponses(store Store) {
-	defer fwder.wg.Done()
-
-	once := &sync.Once{}
-	succChan := fwder.dest.Successes()
-	failChan := fwder.dest.Failures()
-	fatalChan := fwder.dest.Fatal()
-
-	for {
-		if succChan == nil && failChan == nil {
-			return
-		}
-		select {
-		case succ, more := <-succChan:
-			if more {
-				store.ACK(succ)
-			} else {
-				succChan = nil
-			}
-		case fail, more := <-failChan:
-			if more {
-				store.NACK(fail)
-			} else {
-				failChan = nil
-			}
-		case <-fatalChan:
-			once.Do(func() {
-				close(fwder.fatalChan)
-			})
-			fatalChan = nil
 		}
 	}
 }

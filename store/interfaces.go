@@ -32,20 +32,18 @@ type Forwarder interface {
 }
 
 type Destination interface {
-	Send(m *model.TcpUdpParsedMessage, partitionKey string, partitionNumber int32, topic string) (bool, error)
-	Successes() chan ulid.ULID
-	Failures() chan ulid.ULID
+	Send(m *model.TcpUdpParsedMessage, partitionKey string, partitionNumber int32, topic string) error
 	Fatal() chan struct{}
 	Close()
 	Gather() ([]*dto.MetricFamily, error)
 }
 
-func NewDestination(ctx context.Context, typ conf.DestinationType, bc conf.BaseConfig, logger log15.Logger) Destination {
+func NewDestination(ctx context.Context, typ conf.DestinationType, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) Destination {
 	switch typ {
 	case conf.Kafka:
-		return NewKafkaDestination(ctx, bc, logger)
+		return NewKafkaDestination(ctx, bc, ack, nack, permerr, logger)
 	case conf.Udp:
-		return NewUdpDestination(ctx, bc, logger)
+		return NewUdpDestination(ctx, bc, ack, nack, permerr, logger)
 	default:
 		logger.Error("Unknown destination type", "type", typ)
 		return nil

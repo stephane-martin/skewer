@@ -49,7 +49,7 @@ type TcpUdpParsedMessage struct {
 	Txnr   int           `json:"txnr" msg:"txnr"`
 }
 
-var SyslogMessageFmt string = `Facility: %d
+var syslogMessageFmt string = `Facility: %d
 Severity: %d
 Version: %d
 TimeReported: %s
@@ -64,7 +64,7 @@ Properties: %s`
 
 func (m *SyslogMessage) String() string {
 	return fmt.Sprintf(
-		SyslogMessageFmt,
+		syslogMessageFmt,
 		m.Facility,
 		m.Severity,
 		m.Version,
@@ -80,15 +80,17 @@ func (m *SyslogMessage) String() string {
 	)
 }
 
+// Empty returns true if the message is empty
 func (m *SyslogMessage) Empty() bool {
 	return len(m.Message) == 0 && len(m.Structured) == 0 && len(m.Properties) == 0
 }
 
+// Marshal5424 formats the message as a RFC5424 line
 func (m *SyslogMessage) Marshal5424() ([]byte, error) {
 	b := bytes.NewBuffer(nil)
 	fmt.Fprintf(b, "<%d>1 %s %s %s %s %s ",
 		m.Priority,
-		time.Unix(0, m.TimeReportedNum).Format(time.RFC3339Nano),
+		time.Unix(0, m.TimeReportedNum).UTC().Format(time.RFC3339Nano),
 		nilify(m.Hostname),
 		nilify(m.Appname),
 		nilify(m.Procid),

@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	"github.com/inconshreveable/log15"
-	"github.com/oklog/ulid"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
@@ -16,23 +15,24 @@ import (
 
 type udpDestination struct {
 	logger   log15.Logger
-	succ     chan ulid.ULID
-	fail     chan ulid.ULID
 	fatal    chan struct{}
 	registry *prometheus.Registry
 	conn     *net.UDPConn
 	once     sync.Once
+	ack      storeCallback
+	nack     storeCallback
+	permerr  storeCallback
 }
 
-func NewUdpDestination(ctx context.Context, bc conf.BaseConfig, logger log15.Logger) Destination {
+func NewUdpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) Destination {
 	d := &udpDestination{
 		logger:   logger,
 		registry: prometheus.NewRegistry(),
+		ack:      ack,
+		nack:     nack,
+		permerr:  permerr,
 	}
 	//d.registry.MustRegister(d.ackCounter)
-	d.succ = make(chan ulid.ULID, 100)
-	d.fail = make(chan ulid.ULID, 100)
-	close(d.fail)
 	d.fatal = make(chan struct{})
 	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", bc.UdpDest.Host, bc.UdpDest.Port))
 	if err != nil {
@@ -52,32 +52,25 @@ func (d *udpDestination) Gather() ([]*dto.MetricFamily, error) {
 	return d.registry.Gather()
 }
 
-func (d *udpDestination) Send(message *model.TcpUdpParsedMessage, partitionKey string, partitionNumber int32, topic string) (bool, error) {
+func (d *udpDestination) Send(message *model.TcpUdpParsedMessage, partitionKey string, partitionNumber int32, topic string) error {
 	serial, err := message.Parsed.Fields.Marshal5424()
 	if err != nil {
-		return true, err
+		d.permerr(message.Uid)
+		return err
 	}
 	serial = append(serial, '\n')
 	_, err = d.conn.Write(serial)
 	if err != nil {
+		d.nack(message.Uid)
 		d.once.Do(func() { close(d.fatal) })
-		return false, err
+		return err
 	}
-	d.succ <- message.Uid
-	return false, nil
+	d.ack(message.Uid)
+	return nil
 }
 
 func (d *udpDestination) Close() {
 	d.conn.Close()
-	close(d.succ)
-}
-
-func (d *udpDestination) Successes() chan ulid.ULID {
-	return d.succ
-}
-
-func (d *udpDestination) Failures() chan ulid.ULID {
-	return d.fail
 }
 
 func (d *udpDestination) Fatal() chan struct{} {

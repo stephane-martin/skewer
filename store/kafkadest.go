@@ -18,18 +18,22 @@ import (
 type kafkaDestination struct {
 	producer   sarama.AsyncProducer
 	logger     log15.Logger
-	succ       chan ulid.ULID
-	fail       chan ulid.ULID
 	fatal      chan struct{}
 	registry   *prometheus.Registry
 	ackCounter *prometheus.CounterVec
 	once       sync.Once
+	ack        storeCallback
+	nack       storeCallback
+	permerr    storeCallback
 }
 
-func NewKafkaDestination(ctx context.Context, bc conf.BaseConfig, logger log15.Logger) Destination {
+func NewKafkaDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) Destination {
 	d := &kafkaDestination{
 		logger:   logger,
 		registry: prometheus.NewRegistry(),
+		ack:      ack,
+		nack:     nack,
+		permerr:  permerr,
 	}
 	d.ackCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -54,29 +58,25 @@ func NewKafkaDestination(ctx context.Context, bc conf.BaseConfig, logger log15.L
 		case <-time.After(2 * time.Second):
 		}
 	}
-	d.succ = make(chan ulid.ULID, 100)
-	d.fail = make(chan ulid.ULID, 100)
 	d.fatal = make(chan struct{})
 
 	go func() {
 		var m *sarama.ProducerMessage
 		for m = range d.producer.Successes() {
-			d.succ <- m.Metadata.(ulid.ULID)
+			d.ack(m.Metadata.(ulid.ULID))
 			d.ackCounter.WithLabelValues("ack", m.Topic).Inc()
 		}
-		close(d.succ)
 	}()
 
 	go func() {
 		var m *sarama.ProducerError
 		for m = range d.producer.Errors() {
-			d.fail <- m.Msg.Metadata.(ulid.ULID)
+			d.nack(m.Msg.Metadata.(ulid.ULID))
 			d.ackCounter.WithLabelValues("nack", m.Msg.Topic).Inc()
 			if model.IsFatalKafkaError(m.Err) {
 				d.once.Do(func() { close(d.fatal) })
 			}
 		}
-		close(d.fail)
 	}()
 
 	return d
@@ -86,7 +86,7 @@ func (d *kafkaDestination) Gather() ([]*dto.MetricFamily, error) {
 	return d.registry.Gather()
 }
 
-func (d *kafkaDestination) Send(message *model.TcpUdpParsedMessage, partitionKey string, partitionNumber int32, topic string) (bool, error) {
+func (d *kafkaDestination) Send(message *model.TcpUdpParsedMessage, partitionKey string, partitionNumber int32, topic string) error {
 	reported := time.Unix(0, message.Parsed.Fields.TimeReportedNum).UTC()
 	message.Parsed.Fields.TimeGenerated = time.Unix(0, message.Parsed.Fields.TimeGeneratedNum).UTC().Format(time.RFC3339Nano)
 	message.Parsed.Fields.TimeReported = reported.Format(time.RFC3339Nano)
@@ -94,7 +94,8 @@ func (d *kafkaDestination) Send(message *model.TcpUdpParsedMessage, partitionKey
 	serialized, err := ffjson.Marshal(&message.Parsed)
 
 	if err != nil {
-		return true, err
+		d.permerr(message.Uid)
+		return err
 	}
 
 	kafkaMsg := &sarama.ProducerMessage{
@@ -107,19 +108,11 @@ func (d *kafkaDestination) Send(message *model.TcpUdpParsedMessage, partitionKey
 	}
 	d.producer.Input() <- kafkaMsg
 	//ffjson.Pool(serialized)
-	return false, nil
+	return nil
 }
 
 func (d *kafkaDestination) Close() {
 	d.producer.AsyncClose()
-}
-
-func (d *kafkaDestination) Successes() chan ulid.ULID {
-	return d.succ
-}
-
-func (d *kafkaDestination) Failures() chan ulid.ULID {
-	return d.fail
 }
 
 func (d *kafkaDestination) Fatal() chan struct{} {
