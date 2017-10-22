@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"bytes"
 	"net"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,6 +23,7 @@ import (
 	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/queue"
+	"golang.org/x/text/encoding"
 )
 
 type TcpServerStatus int
@@ -65,12 +67,13 @@ func NewTcpMetrics() *tcpMetrics {
 
 type TcpServiceImpl struct {
 	StreamingService
-	status     TcpServerStatus
-	statusChan chan TcpServerStatus
-	reporter   *base.Reporter
-	generator  chan ulid.ULID
-	metrics    *tcpMetrics
-	registry   *prometheus.Registry
+	status           TcpServerStatus
+	statusChan       chan TcpServerStatus
+	reporter         *base.Reporter
+	generator        chan ulid.ULID
+	metrics          *tcpMetrics
+	registry         *prometheus.Registry
+	rawMessagesQueue *queue.RawTCPRing
 }
 
 func NewTcpService(reporter *base.Reporter, gen chan ulid.ULID, b *binder.BinderClient, l log15.Logger) *TcpServiceImpl {
@@ -90,10 +93,12 @@ func NewTcpService(reporter *base.Reporter, gen chan ulid.ULID, b *binder.Binder
 	return &s
 }
 
+// Gather asks the TCP service to report metrics
 func (s *TcpServiceImpl) Gather() ([]*dto.MetricFamily, error) {
 	return s.registry.Gather()
 }
 
+// Start makes the TCP service start
 func (s *TcpServiceImpl) Start(test bool) ([]model.ListenerInfo, error) {
 	s.LockStatus()
 	if s.status != TcpStopped {
@@ -101,6 +106,13 @@ func (s *TcpServiceImpl) Start(test bool) ([]model.ListenerInfo, error) {
 		return nil, errors.ServerNotStopped
 	}
 	s.statusChan = make(chan TcpServerStatus, 1)
+
+	// start the parsers
+	cpus := runtime.NumCPU()
+	for i := 0; i < cpus; i++ {
+		s.wg.Add(1)
+		go s.Parse()
+	}
 
 	// start listening on the required ports
 	infos := s.initTCPListeners()
@@ -116,10 +128,12 @@ func (s *TcpServiceImpl) Start(test bool) ([]model.ListenerInfo, error) {
 	return infos, nil
 }
 
+// Shutdown is just Stop for the TCP service
 func (s *TcpServiceImpl) Shutdown() {
 	s.Stop()
 }
 
+// Stop makes the TCP service stop
 func (s *TcpServiceImpl) Stop() {
 	s.LockStatus()
 	if s.status != TcpStarted {
@@ -127,7 +141,10 @@ func (s *TcpServiceImpl) Stop() {
 		return
 	}
 	s.resetTCPListeners() // close the listeners. This will make Listen to return and close all current connections.
-	s.wg.Wait()           // wait that all HandleConnection goroutines have ended
+	if s.rawMessagesQueue != nil {
+		s.rawMessagesQueue.Dispose()
+	}
+	s.wg.Wait() // wait that all goroutines have ended
 	s.Logger.Debug("TcpServer goroutines have ended")
 
 	s.status = TcpStopped
@@ -137,11 +154,81 @@ func (s *TcpServiceImpl) Stop() {
 	s.UnlockStatus()
 }
 
+// SetConf configures the TCP service
 func (s *TcpServiceImpl) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig, queueSize uint64, messageSize int) {
 	s.BaseService.Pool = &sync.Pool{New: func() interface{} {
 		return &model.RawTcpMessage{Message: make([]byte, messageSize)}
 	}}
 	s.StreamingService.SetConf(sc, pc, queueSize, messageSize)
+	s.rawMessagesQueue = queue.NewRawTCPRing(s.QueueSize)
+}
+
+// Parse fetch messages from the raw queue, parse them, and push them to be sent.
+func (s *TcpServiceImpl) Parse() {
+	defer s.wg.Done()
+
+	e := NewParsersEnv(s.ParserConfigs, s.Logger)
+
+	var syslogMsg model.SyslogMessage
+	var err, fatal, nonfatal error
+	var raw *model.RawTcpMessage
+	var decoder *encoding.Decoder
+	var parser Parser
+	var logger log15.Logger
+
+	for {
+		raw, err = s.rawMessagesQueue.Get()
+		if raw == nil || err != nil {
+			break
+		}
+
+		logger = s.Logger.New(
+			"protocol", s.Protocol,
+			"client", raw.Client,
+			"local_port", raw.LocalPort,
+			"unix_socket_path", raw.UnixSocketPath,
+			"format", raw.Format,
+		)
+
+		decoder = utils.SelectDecoder(raw.Encoding)
+		parser = e.GetParser(raw.Format)
+		if parser == nil {
+			logger.Crit("Unknown parser")
+			return
+		}
+
+		syslogMsg, err = parser.Parse(raw.Message[:raw.Size], decoder, raw.DontParseSD)
+		if err != nil {
+			s.Pool.Put(raw)
+			s.metrics.ParsingErrorCounter.WithLabelValues(s.Protocol, raw.Client, raw.Format).Inc()
+			logger.Info("Parsing error", "Message", raw.Message, "error", err)
+			continue
+		}
+		if syslogMsg.Empty() {
+			s.Pool.Put(raw)
+			continue
+		}
+
+		fatal, nonfatal = s.reporter.Stash(model.TcpUdpParsedMessage{
+			Parsed: model.ParsedMessage{
+				Fields:         syslogMsg,
+				Client:         raw.Client,
+				LocalPort:      raw.LocalPort,
+				UnixSocketPath: raw.UnixSocketPath,
+			},
+			Uid:    <-s.generator,
+			ConfId: raw.ConfID,
+		})
+
+		s.Pool.Put(raw)
+
+		if fatal != nil {
+			logger.Error("Fatal error stashing TCP message", "error", fatal)
+			// todo: shutdown
+		} else if nonfatal != nil {
+			logger.Warn("Non-fatal error stashing TCP message", "error", nonfatal)
+		}
+	}
 }
 
 type tcpHandler struct {
@@ -150,12 +237,8 @@ type tcpHandler struct {
 
 func (h tcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 
-	var local_port int
-
 	s := h.Server
 	s.AddConnection(conn)
-
-	rawMessagesQueue := queue.NewRawTCPRing(s.QueueSize)
 
 	defer func() {
 		s.RemoveConnection(conn)
@@ -165,171 +248,118 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 	client := ""
 	path := ""
 	remote := conn.RemoteAddr()
+	localPort := ""
+	var localPortInt int
 
 	if remote == nil {
 		client = "localhost"
-		local_port = 0
 		path = conn.LocalAddr().String()
 	} else {
 		client = strings.Split(remote.String(), ":")[0]
 		local := conn.LocalAddr()
 		if local != nil {
 			s := strings.Split(local.String(), ":")
-			local_port, _ = strconv.Atoi(s[len(s)-1])
+			localPortInt, _ = strconv.Atoi(s[len(s)-1])
+			if localPortInt > 0 {
+				localPort = strconv.FormatInt(int64(localPortInt), 10)
+			}
 		}
 	}
 	client = strings.TrimSpace(client)
 	path = strings.TrimSpace(path)
-	local_port_s := strconv.FormatInt(int64(local_port), 10)
 
-	logger := s.Logger.New("protocol", s.Protocol, "client", client, "local_port", local_port, "unix_socket_path", path, "format", config.Format)
+	logger := s.Logger.New("protocol", s.Protocol, "client", client, "local_port", localPort, "unix_socket_path", path, "format", config.Format)
 	logger.Info("New client")
-	if s.metrics != nil {
-		s.metrics.ClientConnectionCounter.WithLabelValues(s.Protocol, client, local_port_s, path).Inc()
-	}
-
-	// pull messages from raw_messages_chan, parse them and push them to the Store
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-
-		e := NewParsersEnv(s.ParserConfigs, s.Logger)
-		parser := e.GetParser(config.Format)
-		if parser == nil {
-			logger.Crit("Unknown parser")
-			return
-		}
-
-		var syslogMsg model.SyslogMessage
-		var err, fatal, nonfatal error
-		var raw *model.RawTcpMessage
-		decoder := utils.SelectDecoder(config.Encoding)
-
-		for {
-			raw, err = rawMessagesQueue.Get()
-			if err != nil {
-				break
-			}
-			syslogMsg, err = parser.Parse(raw.Message[:raw.Size], decoder, config.DontParseSD)
-
-			if err == nil {
-				fatal, nonfatal = s.reporter.Stash(model.TcpUdpParsedMessage{
-					Parsed: model.ParsedMessage{
-						Fields:         syslogMsg,
-						Client:         raw.Client,
-						LocalPort:      raw.LocalPort,
-						UnixSocketPath: raw.UnixSocketPath,
-					},
-					Uid:    <-s.generator,
-					ConfId: config.ConfID,
-				})
-				if fatal != nil {
-					logger.Error("Fatal error stashing TCP message", "error", fatal)
-					conn.Close()
-				} else if nonfatal != nil {
-					logger.Warn("Non-fatal error stashing TCP message", "error", nonfatal)
-				}
-			} else {
-				s.metrics.ParsingErrorCounter.WithLabelValues(s.Protocol, client, config.Format).Inc()
-				logger.Info("Parsing error", "Message", raw.Message, "error", err)
-			}
-			s.Pool.Put(raw)
-		}
-	}()
+	s.metrics.ClientConnectionCounter.WithLabelValues(s.Protocol, client, localPort, path).Inc()
 
 	timeout := config.Timeout
 	if timeout > 0 {
 		conn.SetReadDeadline(time.Now().Add(timeout))
 	}
 	scanner := bufio.NewScanner(conn)
+	scanner.Buffer(make([]byte, 0, s.MaxMessageSize), s.MaxMessageSize)
 	switch config.Format {
 	case "rfc5424", "rfc3164", "json", "auto":
 		scanner.Split(TcpSplit)
 	default:
-		scanner.Split(LFTcpSplit)
+		scanner.Split(lfTCPSplit)
 	}
 	var rawmsg *model.RawTcpMessage
-	scanner.Buffer(make([]byte, 0, s.MaxMessageSize), s.MaxMessageSize)
+	var buf []byte
 
 	for scanner.Scan() {
 		if timeout > 0 {
 			conn.SetReadDeadline(time.Now().Add(timeout))
 		}
-		if s.metrics != nil {
-			s.metrics.IncomingMsgsCounter.WithLabelValues(s.Protocol, client, local_port_s, path).Inc()
-		}
-		rawmsg = s.Pool.Get().(*model.RawTcpMessage)
-		rawmsg.Client = client
-		rawmsg.LocalPort = local_port
-		rawmsg.UnixSocketPath = path
-		rawmsg.Size = len(scanner.Bytes())
-		if rawmsg.Size == 0 {
-			s.Pool.Put(rawmsg)
+		buf = scanner.Bytes()
+		if len(buf) == 0 {
 			continue
 		}
-		copy(rawmsg.Message, scanner.Bytes())
-		rawMessagesQueue.Put(rawmsg)
-
+		s.metrics.IncomingMsgsCounter.WithLabelValues(s.Protocol, client, localPort, path).Inc()
+		rawmsg = s.Pool.Get().(*model.RawTcpMessage)
+		rawmsg.Client = client
+		rawmsg.LocalPort = localPortInt
+		rawmsg.UnixSocketPath = path
+		rawmsg.Size = len(buf)
+		rawmsg.ConfID = config.ConfID
+		rawmsg.DontParseSD = config.DontParseSD
+		rawmsg.Encoding = config.Encoding
+		rawmsg.Format = config.Format
+		copy(rawmsg.Message, buf)
+		s.rawMessagesQueue.Put(rawmsg)
 	}
 	logger.Info("End of TCP client connection", "error", scanner.Err())
-	rawMessagesQueue.Dispose()
 }
 
-func LFTcpSplit(data []byte, atEOF bool) (int, []byte, error) {
-	trimmed_data := bytes.TrimLeft(data, " \r\n")
-	if len(trimmed_data) == 0 {
+func lfTCPSplit(data []byte, atEOF bool) (int, []byte, error) {
+	trimmedData := bytes.TrimLeft(data, " \r\n")
+	if len(trimmedData) == 0 {
 		return 0, nil, nil
 	}
-	trimmed := len(data) - len(trimmed_data)
-	lf := bytes.IndexByte(trimmed_data, '\n')
-	if lf >= 0 {
-		token := bytes.Trim(trimmed_data[0:lf], " \r\n")
-		advance := trimmed + lf + 1
-		return advance, token, nil
-	} else {
-		// data does not contain a full syslog line
+	trimmed := len(data) - len(trimmedData)
+	lf := bytes.IndexByte(trimmedData, '\n')
+	if lf == 0 {
 		return 0, nil, nil
 	}
+	token := bytes.Trim(trimmedData[0:lf], " \r\n")
+	advance := trimmed + lf + 1
+	return advance, token, nil
 }
 
 func getline(data []byte, trimmed int) (int, []byte, error) {
 	lf := bytes.IndexByte(data, '\n')
-	if lf >= 0 {
-		token := bytes.Trim(data[0:lf], " \r\n")
-		return lf + trimmed + 1, token, nil
-	} else {
-		// data does not contain a full syslog line
+	if lf == 0 {
 		return 0, nil, nil
 	}
+	token := bytes.Trim(data[0:lf], " \r\n")
+	return lf + trimmed + 1, token, nil
 }
 
 func TcpSplit(data []byte, atEOF bool) (int, []byte, error) {
-	trimmed_data := bytes.TrimLeft(data, " \r\n")
-	if len(trimmed_data) == 0 {
+	trimmedData := bytes.TrimLeft(data, " \r\n")
+	if len(trimmedData) == 0 {
 		return 0, nil, nil
 	}
-	trimmed := len(data) - len(trimmed_data)
-	if trimmed_data[0] == byte('<') {
-		return getline(trimmed_data, trimmed)
-	} else {
-		// octet counting framing?
-		sp := bytes.IndexAny(trimmed_data, " \n")
-		if sp <= 0 {
-			return 0, nil, nil
-		}
-		datalen_s := bytes.Trim(trimmed_data[0:sp], " \r\n")
-		datalen, err := strconv.Atoi(string(datalen_s))
-		if err != nil {
-			// the first part is not a number, so back to LF
-			return getline(trimmed_data, trimmed)
-		}
-		advance := trimmed + sp + 1 + datalen
-		if len(data) >= advance {
-			token := bytes.Trim(trimmed_data[sp+1:sp+1+datalen], " \r\n")
-			return advance, token, nil
-		} else {
-			return 0, nil, nil
-		}
-
+	trimmed := len(data) - len(trimmedData)
+	if trimmedData[0] == byte('<') {
+		return getline(trimmedData, trimmed)
 	}
+	// octet counting framing?
+	sp := bytes.IndexAny(trimmedData, " \n")
+	if sp <= 0 {
+		return 0, nil, nil
+	}
+	datalenStr := bytes.Trim(trimmedData[0:sp], " \r\n")
+	datalen, err := strconv.Atoi(string(datalenStr))
+	if err != nil {
+		// the first part is not a number, so back to LF
+		return getline(trimmedData, trimmed)
+	}
+	advance := trimmed + sp + 1 + datalen
+	if len(data) < advance {
+		return 0, nil, nil
+	}
+	token := bytes.Trim(trimmedData[sp+1:sp+1+datalen], " \r\n")
+	return advance, token, nil
+
 }

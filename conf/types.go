@@ -6,6 +6,7 @@ import (
 	"github.com/oklog/ulid"
 )
 
+// DestinationType lists the possible kind of destinations where skewer can forward messages.
 type DestinationType uint8
 
 const (
@@ -13,6 +14,7 @@ const (
 	Udp
 )
 
+// BaseConfig is the root of all configuration parameters.
 type BaseConfig struct {
 	Syslog     []SyslogConfig   `mapstructure:"syslog" toml:"syslog" json:"syslog"`
 	Kafka      KafkaConfig      `mapstructure:"kafka" toml:"kafka" json:"kafka"`
@@ -23,8 +25,10 @@ type BaseConfig struct {
 	Accounting AccountingConfig `mapstructure:"accounting" toml:"accounting" json:"accounting"`
 	Main       MainConfig       `mapstructure:"main" toml:"main" json:"main"`
 	UdpDest    UdpDestConfig    `mapstructure:"udp_destination" toml:"udp_destination" json:"udp_destination"`
+	TcpDest    TcpDestConfig    `mapstructure:"tcp_destination" toml:"tcp_destination" json:"tcp_destination"`
 }
 
+// MainConfig lists general/global parameters.
 type MainConfig struct {
 	DirectRelp          bool            `mapstructure:"direct_relp" toml:"direct_relp" json:"direct_relp"`
 	InputQueueSize      uint64          `mapstructure:"input_queue_size" toml:"input_queue_size" json:"input_queue_size"`
@@ -89,8 +93,17 @@ type KafkaConfig struct {
 }
 
 type UdpDestConfig struct {
-	Host string `mapstructure:"host" toml:"host" json:"host"`
-	Port int    `mapstructure:"port" toml:"port" json:"port"`
+	Host   string        `mapstructure:"host" toml:"host" json:"host"`
+	Port   int           `mapstructure:"port" toml:"port" json:"port"`
+	Format string        `mapstructure:"format" toml:"format" json:"format"`
+	Rebind time.Duration `mapstructure:"rebind" toml:"rebind" json:"rebind"`
+}
+
+type TcpDestConfig struct {
+	Host   string        `mapstructure:"host" toml:"host" json:"host"`
+	Port   int           `mapstructure:"port" toml:"port" json:"port"`
+	Format string        `mapstructure:"format" toml:"format" json:"format"`
+	Rebind time.Duration `mapstructure:"rebind" toml:"rebind" json:"rebind"`
 }
 
 type JournaldConfig struct {

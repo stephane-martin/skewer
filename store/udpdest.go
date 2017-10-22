@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/inconshreveable/log15"
 	"github.com/prometheus/client_golang/prometheus"
@@ -19,6 +20,7 @@ type udpDestination struct {
 	registry *prometheus.Registry
 	conn     *net.UDPConn
 	once     sync.Once
+	format   string
 	ack      storeCallback
 	nack     storeCallback
 	permerr  storeCallback
@@ -31,18 +33,34 @@ func NewUdpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perme
 		ack:      ack,
 		nack:     nack,
 		permerr:  permerr,
+		format:   bc.UdpDest.Format,
 	}
+
 	//d.registry.MustRegister(d.ackCounter)
+
 	d.fatal = make(chan struct{})
 	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", bc.UdpDest.Host, bc.UdpDest.Port))
 	if err != nil {
 		logger.Error("Error resolving UDP address", "error", err)
 		return nil
 	}
+
 	d.conn, err = net.DialUDP("udp", nil, addr)
 	if err != nil {
 		logger.Error("Error dialing UDP", "error", err)
 		return nil
+	}
+
+	rebind := bc.UdpDest.Rebind
+	if rebind > 0 {
+		go func() {
+			select {
+			case <-ctx.Done():
+			case <-time.After(rebind):
+				logger.Info("UDP destination rebind period has expired", "rebind", rebind.String())
+				d.once.Do(func() { close(d.fatal) })
+			}
+		}()
 	}
 
 	return d
@@ -53,7 +71,7 @@ func (d *udpDestination) Gather() ([]*dto.MetricFamily, error) {
 }
 
 func (d *udpDestination) Send(message *model.TcpUdpParsedMessage, partitionKey string, partitionNumber int32, topic string) error {
-	serial, err := message.Parsed.Fields.Marshal5424()
+	serial, err := message.Parsed.Fields.MarshalAll(d.format)
 	if err != nil {
 		d.permerr(message.Uid)
 		return err

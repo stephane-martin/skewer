@@ -1,28 +1,14 @@
 package model
 
 import (
-	"encoding/json"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/pquerna/ffjson/ffjson"
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/unicode"
 )
-
-type jsonRsyslogMessage struct {
-	Message       string                       `json:"msg"`
-	TimeReported  string                       `json:"timereported"`
-	TimeGenerated string                       `json:"timegenerated"`
-	Hostname      string                       `json:"hostname"`
-	Priority      string                       `json:"pri"`
-	Appname       string                       `json:"app-name"`
-	Procid        string                       `json:"procid"`
-	Msgid         string                       `json:"msgid"`
-	Uuid          string                       `json:"uuid"`
-	Structured    string                       `json:"structured-data"`
-	Properties    map[string]map[string]string `json:"$!"`
-}
 
 func ParseJsonFormat(m []byte, decoder *encoding.Decoder) (msg SyslogMessage, rerr error) {
 	// we ignore decoder, JSON is always UTF-8
@@ -33,8 +19,8 @@ func ParseJsonFormat(m []byte, decoder *encoding.Decoder) (msg SyslogMessage, re
 	if err != nil {
 		return msg, &InvalidEncodingError{Err: err}
 	}
-	sourceMsg := jsonRsyslogMessage{}
-	err = json.Unmarshal(m, &sourceMsg)
+	sourceMsg := JsonRsyslogMessage{}
+	err = ffjson.Unmarshal(m, &sourceMsg)
 	if err != nil {
 		return msg, &UnmarshalingJsonError{err}
 	}

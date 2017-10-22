@@ -158,9 +158,9 @@ func parseTag(tag []byte) (appname []byte, procid []byte) {
 	if i >= 0 && len(tag) > (i+1) {
 		j := bytes.Index(tag, []byte("]"))
 		if j > i {
-			procid = tag[i+1 : j]
+			procid = tag[(i + 1):j]
 		} else {
-			procid = tag[i+1:]
+			procid = tag[(i + 1):]
 		}
 		if i > 0 {
 			appname = tag[0:i]

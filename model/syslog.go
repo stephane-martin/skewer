@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"unicode/utf8"
 
+	"github.com/oklog/ulid"
 	"golang.org/x/text/encoding"
 )
 
@@ -33,6 +34,10 @@ type RawMessage struct {
 	Client         string
 	LocalPort      int
 	UnixSocketPath string
+	Format         string
+	Encoding       string
+	DontParseSD    bool
+	ConfID         ulid.ULID
 }
 
 type RawTcpMessage struct {

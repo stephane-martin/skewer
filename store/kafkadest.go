@@ -107,7 +107,6 @@ func (d *kafkaDestination) Send(message *model.TcpUdpParsedMessage, partitionKey
 		Metadata:  message.Uid,
 	}
 	d.producer.Input() <- kafkaMsg
-	//ffjson.Pool(serialized)
 	return nil
 }
 

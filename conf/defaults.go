@@ -18,6 +18,7 @@ func SetDefaults(v *viper.Viper) {
 		SetAccountingDefaults,
 		SetMetricsDefaults,
 		SetUdpDestDefaults,
+		SetTcpDestDefaults,
 		SetMainDefaults,
 	}
 	for _, f := range funcs {
@@ -32,6 +33,17 @@ func SetUdpDestDefaults(v *viper.Viper, prefixed bool) {
 	}
 	v.SetDefault(prefix+"host", "127.0.0.1")
 	v.SetDefault(prefix+"port", 514)
+	v.SetDefault(prefix+"format", "rfc5424")
+}
+
+func SetTcpDestDefaults(v *viper.Viper, prefixed bool) {
+	prefix := ""
+	if prefixed {
+		prefix = "tcp_destination."
+	}
+	v.SetDefault(prefix+"host", "127.0.0.1")
+	v.SetDefault(prefix+"port", 514)
+	v.SetDefault(prefix+"format", "rfc5424")
 }
 
 func SetMainDefaults(v *viper.Viper, prefixed bool) {

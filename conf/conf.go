@@ -660,6 +660,13 @@ func (c *BaseConfig) Complete() (err error) {
 		return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown destination type: %s", c.Main.Destination)}
 	}
 
+	c.UdpDest.Format = strings.TrimSpace(strings.ToLower(c.UdpDest.Format))
+	switch c.UdpDest.Format {
+	case "rfc5424", "rfc3164", "json":
+	default:
+		return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown destination format type: %s", c.UdpDest.Format)}
+	}
+
 	_, err = ParseVersion(c.Kafka.Version)
 	if err != nil {
 		return ConfigurationCheckError{ErrString: "Kafka version can't be parsed", Err: err}
