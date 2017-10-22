@@ -27,8 +27,8 @@ type UnixListenerConf struct {
 
 type StreamingService struct {
 	base.BaseService
-	tcpListeners   []TCPListenerConf
-	unixListeners  []UnixListenerConf
+	TcpListeners   []TCPListenerConf
+	UnixListeners  []UnixListenerConf
 	acceptsWg      *sync.WaitGroup
 	handler        StreamHandler
 	wg             *sync.WaitGroup
@@ -37,8 +37,8 @@ type StreamingService struct {
 
 func (s *StreamingService) init() {
 	s.BaseService.Init()
-	s.tcpListeners = []TCPListenerConf{}
-	s.unixListeners = []UnixListenerConf{}
+	s.TcpListeners = []TCPListenerConf{}
+	s.UnixListeners = []UnixListenerConf{}
 	s.acceptsWg = &sync.WaitGroup{}
 	s.wg = &sync.WaitGroup{}
 }
@@ -46,8 +46,8 @@ func (s *StreamingService) init() {
 func (s *StreamingService) initTCPListeners() []model.ListenerInfo {
 	nb := 0
 	s.ClearConnections()
-	s.tcpListeners = []TCPListenerConf{}
-	s.unixListeners = []UnixListenerConf{}
+	s.TcpListeners = []TCPListenerConf{}
+	s.UnixListeners = []UnixListenerConf{}
 	//fmt.Println(s.SyslogConfigs)
 	for _, syslogConf := range s.SyslogConfigs {
 		if syslogConf.Protocol != s.Protocol {
@@ -64,7 +64,7 @@ func (s *StreamingService) initTCPListeners() []model.ListenerInfo {
 					Listener: l,
 					Conf:     syslogConf,
 				}
-				s.unixListeners = append(s.unixListeners, lc)
+				s.UnixListeners = append(s.UnixListeners, lc)
 				s.UnixSocketPaths = append(s.UnixSocketPaths, syslogConf.UnixSocketPath)
 			}
 		} else {
@@ -79,19 +79,19 @@ func (s *StreamingService) initTCPListeners() []model.ListenerInfo {
 					Listener: l,
 					Conf:     syslogConf,
 				}
-				s.tcpListeners = append(s.tcpListeners, lc)
+				s.TcpListeners = append(s.TcpListeners, lc)
 			}
 		}
 	}
 
 	infos := []model.ListenerInfo{}
-	for _, unixc := range s.unixListeners {
+	for _, unixc := range s.UnixListeners {
 		infos = append(infos, model.ListenerInfo{
 			Protocol:       unixc.Conf.Protocol,
 			UnixSocketPath: unixc.Conf.UnixSocketPath,
 		})
 	}
-	for _, tcpc := range s.tcpListeners {
+	for _, tcpc := range s.TcpListeners {
 		infos = append(infos, model.ListenerInfo{
 			BindAddr: tcpc.Conf.BindAddr,
 			Port:     tcpc.Conf.Port,
@@ -102,10 +102,10 @@ func (s *StreamingService) initTCPListeners() []model.ListenerInfo {
 }
 
 func (s *StreamingService) resetTCPListeners() {
-	for _, l := range s.tcpListeners {
+	for _, l := range s.TcpListeners {
 		l.Listener.Close()
 	}
-	for _, l := range s.unixListeners {
+	for _, l := range s.UnixListeners {
 		l.Listener.Close()
 	}
 }
@@ -198,12 +198,12 @@ func (s *StreamingService) Listen() {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		for _, lc := range s.tcpListeners {
+		for _, lc := range s.TcpListeners {
 			s.acceptsWg.Add(1)
 			s.wg.Add(1)
 			go s.AcceptTCP(lc)
 		}
-		for _, lc := range s.unixListeners {
+		for _, lc := range s.UnixListeners {
 			s.acceptsWg.Add(1)
 			s.wg.Add(1)
 			go s.AcceptUnix(lc)

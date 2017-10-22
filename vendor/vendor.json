@@ -81,10 +81,22 @@
 			"revisionTime": "2017-04-20T17:29:56Z"
 		},
 		{
+			"checksumSHA1": "bUxs+biYzs2J+mxcPrwhfvbugWw=",
+			"path": "github.com/cornelk/hashmap",
+			"revision": "be6a8af587de35541c6772ddfe498f13d4644050",
+			"revisionTime": "2017-09-18T09:44:03Z"
+		},
+		{
 			"checksumSHA1": "dvabztWVQX8f6oMLRyv4dLH+TGY=",
 			"path": "github.com/davecgh/go-spew/spew",
 			"revision": "346938d642f2ec3594ed81d874461961cd0faa76",
 			"revisionTime": "2016-10-29T20:57:26Z"
+		},
+		{
+			"checksumSHA1": "xqVDKHGnakGlcRhmWd1j9JYmfLc=",
+			"path": "github.com/dchest/siphash",
+			"revision": "4ebf1de738443ea7f45f02dc394c4df1942a126d",
+			"revisionTime": "2016-08-31T15:17:26Z"
 		},
 		{
 			"checksumSHA1": "Yy63LkjSlUK0e9PJg21H4QREebc=",

@@ -71,7 +71,7 @@ func (q *AckQueue) Has() bool {
 	return q.tail.next != nil
 }
 
-func (q *AckQueue) Wait(stopChan <-chan struct{}) bool {
+func (q *AckQueue) Wait() bool {
 	var nb uint64
 	for {
 		if q.Has() {

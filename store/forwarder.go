@@ -77,11 +77,14 @@ func (fwder *forwarderImpl) Forward(ctx context.Context, from Store, bc conf.Bas
 
 func (fwder *forwarderImpl) doForward(ctx context.Context, store Store, bc conf.BaseConfig) {
 	defer fwder.wg.Done()
+	var err error
 	if fwder.test {
 		fwder.dest = nil
 	} else {
-		fwder.dest = NewDestination(ctx, bc.Main.Dest, bc, store.ACK, store.NACK, store.PermError, fwder.logger)
-		if fwder.dest == nil {
+		fwder.dest, err = NewDestination(ctx, bc.Main.Dest, bc, store.ACK, store.NACK, store.PermError, fwder.logger)
+		if err != nil {
+			fwder.logger.Error("Error setting up the destination", "error", err)
+			close(fwder.fatalChan)
 			return
 		}
 

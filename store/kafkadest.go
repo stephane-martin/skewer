@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -27,7 +28,7 @@ type kafkaDestination struct {
 	permerr    storeCallback
 }
 
-func NewKafkaDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) Destination {
+func NewKafkaDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (Destination, error) {
 	d := &kafkaDestination{
 		logger:   logger,
 		registry: prometheus.NewRegistry(),
@@ -54,7 +55,7 @@ func NewKafkaDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, per
 		logger.Debug("Error getting a Kafka client", "error", err)
 		select {
 		case <-ctx.Done():
-			return nil
+			return nil, fmt.Errorf("Kafka destination aborted: %s", err.Error())
 		case <-time.After(2 * time.Second):
 		}
 	}
@@ -79,7 +80,7 @@ func NewKafkaDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, per
 		}
 	}()
 
-	return d
+	return d, nil
 }
 
 func (d *kafkaDestination) Gather() ([]*dto.MetricFamily, error) {

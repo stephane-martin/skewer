@@ -45,6 +45,7 @@ type RawTcpMessage struct {
 	Message []byte
 	Size    int
 	Txnr    int
+	ConnID  uintptr
 }
 
 type RawUdpMessage struct {

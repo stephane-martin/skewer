@@ -55,6 +55,7 @@ type TcpUdpParsedMessage struct {
 	Uid    [16]byte      `json:"uid" msg:"uid"`
 	ConfId [16]byte      `json:"conf_id" msg:"conf_id"`
 	Txnr   int           `json:"txnr" msg:"txnr"`
+	ConnID uintptr       `json:"-" msg:"-"`
 }
 
 // ffjson: noencoder

@@ -107,19 +107,18 @@ func (s *TcpServiceImpl) Start(test bool) ([]model.ListenerInfo, error) {
 	}
 	s.statusChan = make(chan TcpServerStatus, 1)
 
-	// start the parsers
-	cpus := runtime.NumCPU()
-	for i := 0; i < cpus; i++ {
-		s.wg.Add(1)
-		go s.Parse()
-	}
-
 	// start listening on the required ports
 	infos := s.initTCPListeners()
 	if len(infos) > 0 {
 		s.status = TcpStarted
 		s.Listen()
 		s.Logger.Info("Listening on TCP", "nb_services", len(infos))
+		// start the parsers
+		cpus := runtime.NumCPU()
+		for i := 0; i < cpus; i++ {
+			s.wg.Add(1)
+			go s.Parse()
+		}
 	} else {
 		s.Logger.Debug("TCP Server not started: no listener")
 		close(s.statusChan)

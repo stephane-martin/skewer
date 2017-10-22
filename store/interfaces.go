@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
@@ -38,14 +39,17 @@ type Destination interface {
 	Gather() ([]*dto.MetricFamily, error)
 }
 
-func NewDestination(ctx context.Context, typ conf.DestinationType, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) Destination {
+func NewDestination(ctx context.Context,
+	typ conf.DestinationType,
+	bc conf.BaseConfig,
+	ack, nack, permerr storeCallback,
+	logger log15.Logger) (Destination, error) {
 	switch typ {
 	case conf.Kafka:
 		return NewKafkaDestination(ctx, bc, ack, nack, permerr, logger)
 	case conf.Udp:
 		return NewUdpDestination(ctx, bc, ack, nack, permerr, logger)
 	default:
-		logger.Error("Unknown destination type", "type", typ)
-		return nil
+		return nil, fmt.Errorf("Unknown destination type: %d", typ)
 	}
 }

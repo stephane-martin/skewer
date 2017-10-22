@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"os"
 	"sync"
@@ -118,7 +117,9 @@ func (s *storeServiceImpl) doStart(test bool, mu *sync.Mutex) ([]model.ListenerI
 				} else if err == io.EOF || err == io.ErrClosedPipe || err == io.ErrUnexpectedEOF {
 					return
 				} else {
-					fmt.Fprintln(os.Stderr, "ZOOOOG", err)
+					s.logger.Error("Unexpected error reading from the Store pipe", "error", err)
+					go func() { s.Shutdown() }()
+					return
 				}
 
 			}

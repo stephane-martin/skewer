@@ -26,7 +26,7 @@ type udpDestination struct {
 	permerr  storeCallback
 }
 
-func NewUdpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) Destination {
+func NewUdpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (Destination, error) {
 	d := &udpDestination{
 		logger:   logger,
 		registry: prometheus.NewRegistry(),
@@ -42,13 +42,13 @@ func NewUdpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perme
 	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", bc.UdpDest.Host, bc.UdpDest.Port))
 	if err != nil {
 		logger.Error("Error resolving UDP address", "error", err)
-		return nil
+		return nil, err
 	}
 
 	d.conn, err = net.DialUDP("udp", nil, addr)
 	if err != nil {
 		logger.Error("Error dialing UDP", "error", err)
-		return nil
+		return nil, err
 	}
 
 	rebind := bc.UdpDest.Rebind
@@ -63,7 +63,7 @@ func NewUdpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perme
 		}()
 	}
 
-	return d
+	return d, nil
 }
 
 func (d *udpDestination) Gather() ([]*dto.MetricFamily, error) {
