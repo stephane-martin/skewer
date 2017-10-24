@@ -115,11 +115,10 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 	}
 	store.badger = kv
 
+	store.messagesDB = db.NewPartition(kv, []byte("messages"))
 	if len(cfg.Secret) > 0 {
 		store.messagesDB = db.NewEncryptedPartition(store.messagesDB, cfg.SecretB)
 		store.logger.Info("The badger store is encrypted")
-	} else {
-		store.messagesDB = db.NewPartition(kv, []byte("messages"))
 	}
 
 	store.readyDB = db.NewPartition(kv, []byte("ready"))
@@ -267,44 +266,28 @@ func (s *MessageStore) WaitFinished() {
 
 func (s *MessageStore) StoreAllSyslogConfigs(c conf.BaseConfig) (err error) {
 	for _, sysconf := range c.Syslog {
-		err = s.StoreSyslogConfig(sysconf)
+		err = s.StoreSyslogConfig(sysconf.ConfID, sysconf.FilterSubConfig)
 		if err != nil {
 			return err
 		}
 	}
 
-	journalSyslogConf := conf.SyslogConfig{
-		TopicTmpl:     c.Journald.TopicTmpl,
-		TopicFunc:     c.Journald.TopicFunc,
-		PartitionTmpl: c.Journald.PartitionTmpl,
-		PartitionFunc: c.Journald.PartitionFunc,
-		FilterFunc:    c.Journald.FilterFunc,
-		ConfID:        c.Journald.ConfID,
-	}
-	err = s.StoreSyslogConfig(journalSyslogConf)
+	err = s.StoreSyslogConfig(c.Journald.ConfID, c.Journald.FilterSubConfig)
 	if err != nil {
 		return err
 	}
 
-	accSyslogConf := conf.SyslogConfig{
-		TopicTmpl:     c.Accounting.TopicTmpl,
-		TopicFunc:     c.Accounting.TopicFunc,
-		PartitionTmpl: c.Accounting.PartitionTmpl,
-		PartitionFunc: c.Accounting.PartitionFunc,
-		FilterFunc:    c.Accounting.FilterFunc,
-		ConfID:        c.Accounting.ConfID,
-	}
-	return s.StoreSyslogConfig(accSyslogConf)
+	return s.StoreSyslogConfig(c.Accounting.ConfID, c.Accounting.FilterSubConfig)
 }
 
-func (s *MessageStore) StoreSyslogConfig(config conf.SyslogConfig) error {
+func (s *MessageStore) StoreSyslogConfig(confID ulid.ULID, config conf.FilterSubConfig) error {
 	data := config.Export()
-	exists, err := s.syslogConfigsDB.Exists(config.ConfID)
+	exists, err := s.syslogConfigsDB.Exists(confID)
 	if err != nil {
 		return err
 	}
 	if !exists {
-		err = s.syslogConfigsDB.Set(config.ConfID, data)
+		err = s.syslogConfigsDB.Set(confID, data)
 		if err != nil {
 			return err
 		}

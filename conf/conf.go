@@ -28,18 +28,19 @@ import (
 )
 
 func (source BaseConfig) Clone() BaseConfig {
+	//return source
 	return deriveCloneBaseConfig(source)
 }
 
 func newBaseConf() *BaseConfig {
 	brokers := []string{}
 	baseConf := BaseConfig{
-		Syslog:   []SyslogConfig{},
-		Kafka:    KafkaConfig{Brokers: brokers},
-		Store:    StoreConfig{},
-		Parsers:  []ParserConfig{},
-		Journald: JournaldConfig{},
-		Metrics:  MetricsConfig{},
+		Syslog:    []SyslogConfig{},
+		KafkaDest: KafkaDestConfig{Brokers: brokers},
+		Store:     StoreConfig{},
+		Parsers:   []ParserConfig{},
+		Journald:  JournaldConfig{},
+		Metrics:   MetricsConfig{},
 	}
 	return &baseConf
 }
@@ -142,34 +143,20 @@ func (l KafkaVersion) Greater(r KafkaVersion) bool {
 	return false
 }
 
-func (c *SyslogConfig) CalculateID() *SyslogConfig {
-	h := fnv.New128a().Sum(c.Export())
-	copy(c.ConfID[:], h)
-	return c
+func (c *FilterSubConfig) CalculateID() []byte {
+	return fnv.New128a().Sum(c.Export())
 }
 
-func (c *JournaldConfig) CalculateID() *JournaldConfig {
-	journalSyslogConf := &SyslogConfig{
-		TopicTmpl:     c.TopicTmpl,
-		TopicFunc:     c.TopicFunc,
-		PartitionTmpl: c.PartitionTmpl,
-		PartitionFunc: c.PartitionFunc,
-		FilterFunc:    c.FilterFunc,
-	}
-	c.ConfID = journalSyslogConf.CalculateID().ConfID
-	return c
+func (c *SyslogConfig) SetConfID() {
+	copy(c.ConfID[:], c.FilterSubConfig.Export())
 }
 
-func (c *AccountingConfig) CalculateID() *AccountingConfig {
-	accSyslogConf := &SyslogConfig{
-		TopicTmpl:     c.TopicTmpl,
-		TopicFunc:     c.TopicFunc,
-		PartitionTmpl: c.PartitionTmpl,
-		PartitionFunc: c.PartitionFunc,
-		FilterFunc:    c.FilterFunc,
-	}
-	c.ConfID = accSyslogConf.CalculateID().ConfID
-	return c
+func (c *JournaldConfig) SetConfID() {
+	copy(c.ConfID[:], c.FilterSubConfig.Export())
+}
+
+func (c *AccountingConfig) SetConfID() {
+	copy(c.ConfID[:], c.FilterSubConfig.Export())
 }
 
 func (c *SyslogConfig) GetClientAuthType() tls.ClientAuthType {
@@ -216,6 +203,11 @@ func (c *SyslogConfig) Export() []byte {
 	return b
 }
 
+func (c *FilterSubConfig) Export() []byte {
+	b, _ := json.Marshal(c)
+	return b
+}
+
 func ImportSyslogConfig(data []byte) (*SyslogConfig, error) {
 	c := SyslogConfig{}
 	err := json.Unmarshal(data, &c)
@@ -225,7 +217,7 @@ func ImportSyslogConfig(data []byte) (*SyslogConfig, error) {
 	return &c, nil
 }
 
-func (c *KafkaConfig) GetSaramaConfig() (*sarama.Config, error) {
+func (c *KafkaDestConfig) GetSaramaConfig() (*sarama.Config, error) {
 	s := sarama.NewConfig()
 	s.ClientID = c.ClientID
 	s.ChannelBufferSize = c.ChannelBufferSize
@@ -289,7 +281,7 @@ func (c *KafkaConfig) GetSaramaConfig() (*sarama.Config, error) {
 	return s, nil
 }
 
-func (c *KafkaConfig) GetAsyncProducer() (sarama.AsyncProducer, error) {
+func (c *KafkaDestConfig) GetAsyncProducer() (sarama.AsyncProducer, error) {
 	conf, err := c.GetSaramaConfig()
 	if err != nil {
 		return nil, err
@@ -301,7 +293,7 @@ func (c *KafkaConfig) GetAsyncProducer() (sarama.AsyncProducer, error) {
 	return nil, KafkaError{Err: err}
 }
 
-func (c *KafkaConfig) GetClient() (sarama.Client, error) {
+func (c *KafkaDestConfig) GetClient() (sarama.Client, error) {
 	conf, err := c.GetSaramaConfig()
 	if err != nil {
 		return nil, err
@@ -547,7 +539,7 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 		c.Journald = journalConf
 	}
 
-	kafkaConf := KafkaConfig{}
+	kafkaConf := KafkaDestConfig{}
 	if len(rawKafkaConf) > 0 {
 		vi = viper.New()
 		SetKafkaDefaults(vi, false)
@@ -558,7 +550,7 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 		if err != nil {
 			return err
 		}
-		c.Kafka = kafkaConf
+		c.KafkaDest = kafkaConf
 	}
 
 	storeConf := StoreConfig{}
@@ -659,43 +651,45 @@ func (c *BaseConfig) Complete() (err error) {
 	case "tcp":
 		c.Main.Dest = Tcp
 	default:
-		return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown destination type: %s", c.Main.Destination)}
+		return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown destination type: '%s'", c.Main.Destination)}
 	}
 
 	c.UdpDest.Format = strings.TrimSpace(strings.ToLower(c.UdpDest.Format))
 	switch c.UdpDest.Format {
 	case "rfc5424", "rfc3164", "json", "fulljson":
 	default:
-		return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown destination format type: %s", c.UdpDest.Format)}
+		return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown UDP destination format: '%s'", c.UdpDest.Format)}
 	}
 
 	c.TcpDest.Format = strings.TrimSpace(strings.ToLower(c.TcpDest.Format))
 	switch c.UdpDest.Format {
 	case "rfc5424", "rfc3164", "json", "fulljson":
 	default:
-		return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown destination format type: %s", c.TcpDest.Format)}
+		return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown TCP destination format type: '%s'", c.TcpDest.Format)}
 	}
 
-	c.Kafka.Format = strings.TrimSpace(strings.ToLower(c.Kafka.Format))
+	c.KafkaDest.Format = strings.TrimSpace(strings.ToLower(c.KafkaDest.Format))
 	switch c.UdpDest.Format {
 	case "rfc5424", "rfc3164", "json", "fulljson":
 	default:
-		return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown destination format type: %s", c.Kafka.Format)}
+		return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown kafka destination format: '%s'", c.KafkaDest.Format)}
 	}
 
-	_, err = ParseVersion(c.Kafka.Version)
+	_, err = ParseVersion(c.KafkaDest.Version)
 	if err != nil {
 		return ConfigurationCheckError{ErrString: "Kafka version can't be parsed", Err: err}
 	}
 
 	if len(c.Syslog) == 0 {
 		syslogConf := SyslogConfig{
-			Port:          2514,
-			BindAddr:      "127.0.0.1",
-			Format:        "rfc5424",
-			Protocol:      "relp",
-			TopicTmpl:     "rsyslog-{{.Appname}}",
-			PartitionTmpl: "mypk-{{.Hostname}}",
+			Port:     2514,
+			BindAddr: "127.0.0.1",
+			Format:   "rfc5424",
+			Protocol: "relp",
+			FilterSubConfig: FilterSubConfig{
+				TopicTmpl:     "rsyslog-{{.Appname}}",
+				PartitionTmpl: "mypk-{{.Hostname}}",
+			},
 		}
 		c.Syslog = []SyslogConfig{syslogConf}
 	}
@@ -801,13 +795,13 @@ func (c *BaseConfig) Complete() (err error) {
 	}
 
 	for i := range c.Syslog {
-		c.Syslog[i] = *c.Syslog[i].CalculateID()
+		c.Syslog[i].SetConfID()
 	}
-	c.Journald = *c.Journald.CalculateID()
-	c.Accounting = *c.Accounting.CalculateID()
-	c.Kafka.Partitioner = strings.TrimSpace(strings.ToLower(c.Kafka.Partitioner))
-	c.Kafka.Partitioner = strings.Replace(c.Kafka.Partitioner, "-", "", -1)
-	c.Kafka.Partitioner = strings.Replace(c.Kafka.Partitioner, "_", "", -1)
+	c.Journald.SetConfID()
+	c.Accounting.SetConfID()
+	c.KafkaDest.Partitioner = strings.TrimSpace(strings.ToLower(c.KafkaDest.Partitioner))
+	c.KafkaDest.Partitioner = strings.Replace(c.KafkaDest.Partitioner, "-", "", -1)
+	c.KafkaDest.Partitioner = strings.Replace(c.KafkaDest.Partitioner, "_", "", -1)
 
 	return nil
 }

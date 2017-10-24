@@ -52,7 +52,7 @@ func ConfigureAndStartService(s NetworkService, c conf.BaseConfig, test bool) ([
 		s.SetConf(c.Syslog, c.Parsers, c.Main.InputQueueSize)
 		return s.Start(test)
 	case *network.RelpService:
-		s.SetConf(c.Syslog, c.Parsers, c.Kafka, c.Main.DirectRelp, c.Main.InputQueueSize)
+		s.SetConf(c.Syslog, c.Parsers, c.KafkaDest, c.Main.DirectRelp, c.Main.InputQueueSize)
 		return s.Start(test)
 	case *linux.JournalService:
 		s.SetConf(c.Journald)

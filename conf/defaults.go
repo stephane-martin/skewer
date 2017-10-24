@@ -92,7 +92,7 @@ func SetJournaldDefaults(v *viper.Viper, prefixed bool) {
 func SetKafkaDefaults(v *viper.Viper, prefixed bool) {
 	var prefix string
 	if prefixed {
-		prefix = "kafka."
+		prefix = "kafka_destination."
 	}
 	v.SetDefault(prefix+"brokers", []string{"kafka1", "kafka2", "kafka3"})
 	v.SetDefault(prefix+"client_id", "skewer")

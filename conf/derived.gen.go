@@ -29,9 +29,6 @@ func deriveDeepCopy(dst, src *BaseConfig) {
 		}
 		copy(dst.Syslog, src.Syslog)
 	}
-	field := new(KafkaConfig)
-	deriveDeepCopy_(field, &src.Kafka)
-	dst.Kafka = *field
 	dst.Store = src.Store
 	if src.Parsers == nil {
 		dst.Parsers = nil
@@ -55,12 +52,18 @@ func deriveDeepCopy(dst, src *BaseConfig) {
 	dst.Metrics = src.Metrics
 	dst.Accounting = src.Accounting
 	dst.Main = src.Main
+	field := new(KafkaDestConfig)
+	deriveDeepCopy_(field, &src.KafkaDest)
+	dst.KafkaDest = *field
 	dst.UdpDest = src.UdpDest
 	dst.TcpDest = src.TcpDest
 }
 
 // deriveDeepCopy_ recursively copies the contents of src into dst.
-func deriveDeepCopy_(dst, src *KafkaConfig) {
+func deriveDeepCopy_(dst, src *KafkaDestConfig) {
+	dst.TlsBaseConfig = src.TlsBaseConfig
+	dst.BaseDestConfig = src.BaseDestConfig
+	dst.Insecure = src.Insecure
 	if src.Brokers == nil {
 		dst.Brokers = nil
 	} else {
@@ -100,12 +103,5 @@ func deriveDeepCopy_(dst, src *KafkaConfig) {
 	dst.FlushMessagesMax = src.FlushMessagesMax
 	dst.RetrySendMax = src.RetrySendMax
 	dst.RetrySendBackoff = src.RetrySendBackoff
-	dst.TLSEnabled = src.TLSEnabled
-	dst.CAFile = src.CAFile
-	dst.CAPath = src.CAPath
-	dst.KeyFile = src.KeyFile
-	dst.CertFile = src.CertFile
-	dst.Insecure = src.Insecure
 	dst.Partitioner = src.Partitioner
-	dst.Format = src.Format
 }

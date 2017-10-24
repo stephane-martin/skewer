@@ -35,7 +35,7 @@ func NewKafkaDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, per
 		ack:      ack,
 		nack:     nack,
 		permerr:  permerr,
-		format:   bc.Kafka.Format,
+		format:   bc.KafkaDest.Format,
 	}
 	d.ackCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -47,7 +47,7 @@ func NewKafkaDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, per
 	d.registry.MustRegister(d.ackCounter)
 	var err error
 	for {
-		d.producer, err = bc.Kafka.GetAsyncProducer()
+		d.producer, err = bc.KafkaDest.GetAsyncProducer()
 		if err == nil {
 			logger.Info("The forwarder got a Kafka producer")
 			break

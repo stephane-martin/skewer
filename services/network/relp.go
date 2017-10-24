@@ -264,7 +264,7 @@ type RelpService struct {
 	b         *binder.BinderClient
 	sc        []conf.SyslogConfig
 	pc        []conf.ParserConfig
-	kc        conf.KafkaConfig
+	kc        conf.KafkaDestConfig
 	wg        sync.WaitGroup
 	gen       chan ulid.ULID
 }
@@ -337,7 +337,7 @@ func (s *RelpService) Stop() {
 	s.wg.Wait()
 }
 
-func (s *RelpService) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig, kc conf.KafkaConfig, direct bool, queueSize uint64) {
+func (s *RelpService) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig, kc conf.KafkaDestConfig, direct bool, queueSize uint64) {
 	s.sc = sc
 	s.pc = pc
 	s.kc = kc
@@ -347,7 +347,7 @@ func (s *RelpService) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig, kc
 
 type RelpServiceImpl struct {
 	StreamingService
-	kafkaConf           conf.KafkaConfig
+	kafkaConf           conf.KafkaDestConfig
 	status              RelpServerStatus
 	StatusChan          chan RelpServerStatus
 	producer            sarama.AsyncProducer
@@ -529,7 +529,7 @@ func (s *RelpServiceImpl) doStop(final bool, wait bool) {
 	}
 }
 
-func (s *RelpServiceImpl) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig, kc conf.KafkaConfig, queueSize uint64) {
+func (s *RelpServiceImpl) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig, kc conf.KafkaDestConfig, queueSize uint64) {
 	s.StreamingService.SetConf(sc, pc, queueSize, 132000)
 	s.kafkaConf = kc
 	s.BaseService.Pool = &sync.Pool{New: func() interface{} {

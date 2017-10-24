@@ -6,13 +6,13 @@ import (
 )
 
 type EncryptedDB struct {
-	db     Partition
+	p      Partition
 	secret [32]byte
 }
 
 type encryptedIterator struct {
 	iter PartitionKeyValueIterator
-	db   *EncryptedDB
+	p    *EncryptedDB
 }
 
 func (i *encryptedIterator) Close() {
@@ -40,43 +40,43 @@ func (i *encryptedIterator) Value() []byte {
 	if encVal == nil {
 		return nil
 	}
-	decValue, err := sbox.Decrypt(encVal, i.db.secret)
+	decValue, err := sbox.Decrypt(encVal, i.p.secret)
 	if err != nil {
 		return nil
 	}
 	return decValue
 }
 
-func NewEncryptedPartition(db Partition, secret [32]byte) Partition {
-	return &EncryptedDB{db: db, secret: secret}
+func NewEncryptedPartition(p Partition, secret [32]byte) Partition {
+	return &EncryptedDB{p: p, secret: secret}
 }
 
 func (encDB *EncryptedDB) KeyIterator(prefetchSize int) PartitionKeyIterator {
-	return encDB.db.KeyIterator(prefetchSize)
+	return encDB.p.KeyIterator(prefetchSize)
 }
 
 func (encDB *EncryptedDB) KeyValueIterator(prefetchSize int) PartitionKeyValueIterator {
-	return &encryptedIterator{iter: encDB.db.KeyValueIterator(prefetchSize), db: encDB}
+	return &encryptedIterator{iter: encDB.p.KeyValueIterator(prefetchSize), p: encDB}
 }
 
 func (encDB *EncryptedDB) Exists(key ulid.ULID) (bool, error) {
-	return encDB.db.Exists(key)
+	return encDB.p.Exists(key)
 }
 
 func (encDB *EncryptedDB) ListKeys() []ulid.ULID {
-	return encDB.db.ListKeys()
+	return encDB.p.ListKeys()
 }
 
 func (encDB *EncryptedDB) Count() int {
-	return encDB.db.Count()
+	return encDB.p.Count()
 }
 
 func (encDB *EncryptedDB) Delete(key ulid.ULID) error {
-	return encDB.db.Delete(key)
+	return encDB.p.Delete(key)
 }
 
 func (encDB *EncryptedDB) DeleteMany(keys []ulid.ULID) ([]ulid.ULID, error) {
-	return encDB.db.DeleteMany(keys)
+	return encDB.p.DeleteMany(keys)
 }
 
 func (encDB *EncryptedDB) Set(key ulid.ULID, value []byte) error {
@@ -84,7 +84,7 @@ func (encDB *EncryptedDB) Set(key ulid.ULID, value []byte) error {
 	if err != nil {
 		return err
 	}
-	return encDB.db.Set(key, encValue)
+	return encDB.p.Set(key, encValue)
 }
 
 func (encDB *EncryptedDB) AddMany(m map[ulid.ULID][]byte) (errors []ulid.ULID, err error) {
@@ -100,7 +100,7 @@ func (encDB *EncryptedDB) AddMany(m map[ulid.ULID][]byte) (errors []ulid.ULID, e
 			encm[k] = encValue
 		}
 	}
-	otherErrors, otherErr := encDB.db.AddMany(encm)
+	otherErrors, otherErr := encDB.p.AddMany(encm)
 	errors = append(errors, otherErrors...)
 	if otherErr != nil {
 		err = otherErr
@@ -109,7 +109,7 @@ func (encDB *EncryptedDB) AddMany(m map[ulid.ULID][]byte) (errors []ulid.ULID, e
 }
 
 func (encDB *EncryptedDB) Get(key ulid.ULID) ([]byte, error) {
-	encVal, err := encDB.db.Get(key)
+	encVal, err := encDB.p.Get(key)
 	if err != nil {
 		return nil, err
 	}
