@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,7 +19,7 @@ type udpDestination struct {
 	logger   log15.Logger
 	fatal    chan struct{}
 	registry *prometheus.Registry
-	conn     *net.UDPConn
+	conn     net.Conn
 	once     sync.Once
 	format   string
 	ack      storeCallback
@@ -39,16 +40,32 @@ func NewUdpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perme
 	//d.registry.MustRegister(d.ackCounter)
 
 	d.fatal = make(chan struct{})
-	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", bc.UdpDest.Host, bc.UdpDest.Port))
-	if err != nil {
-		logger.Error("Error resolving UDP address", "error", err)
-		return nil, err
-	}
 
-	d.conn, err = net.DialUDP("udp", nil, addr)
-	if err != nil {
-		logger.Error("Error dialing UDP", "error", err)
-		return nil, err
+	path := strings.TrimSpace(bc.UdpDest.UnixSocketPath)
+	if len(path) == 0 {
+		addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", bc.UdpDest.Host, bc.UdpDest.Port))
+		if err != nil {
+			logger.Error("Error resolving UDP address", "error", err)
+			return nil, err
+		}
+
+		d.conn, err = net.DialUDP("udp", nil, addr)
+		if err != nil {
+			logger.Error("Error connecting on UDP", "error", err)
+			return nil, err
+		}
+	} else {
+		addr, err := net.ResolveUnixAddr("unixgram", path)
+		if err != nil {
+			logger.Error("Error resolving unix socket path", "error", err)
+			return nil, err
+		}
+
+		d.conn, err = net.DialUnix("unixgram", nil, addr)
+		if err != nil {
+			logger.Error("Error connecting to unix socket", "error", err)
+			return nil, err
+		}
 	}
 
 	rebind := bc.UdpDest.Rebind

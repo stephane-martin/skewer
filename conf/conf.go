@@ -656,6 +656,8 @@ func (c *BaseConfig) Complete() (err error) {
 		c.Main.Dest = Kafka
 	case "udp":
 		c.Main.Dest = Udp
+	case "tcp":
+		c.Main.Dest = Tcp
 	default:
 		return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown destination type: %s", c.Main.Destination)}
 	}

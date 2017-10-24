@@ -209,6 +209,7 @@ func (s *PluginController) listenpipe() {
 		message = model.TcpUdpParsedMessage{}
 		err = message.DecodeMsg(reader)
 		if err == nil {
+			// todo: handle errors
 			s.stasher.Stash(message)
 		} else if err == io.EOF || err == io.ErrClosedPipe || err == io.ErrUnexpectedEOF {
 			return

@@ -12,6 +12,7 @@ type DestinationType uint8
 const (
 	Kafka DestinationType = iota
 	Udp
+	Tcp
 )
 
 // BaseConfig is the root of all configuration parameters.
@@ -93,17 +94,20 @@ type KafkaConfig struct {
 }
 
 type UdpDestConfig struct {
-	Host   string        `mapstructure:"host" toml:"host" json:"host"`
-	Port   int           `mapstructure:"port" toml:"port" json:"port"`
-	Format string        `mapstructure:"format" toml:"format" json:"format"`
-	Rebind time.Duration `mapstructure:"rebind" toml:"rebind" json:"rebind"`
+	Host           string        `mapstructure:"host" toml:"host" json:"host"`
+	Port           int           `mapstructure:"port" toml:"port" json:"port"`
+	UnixSocketPath string        `mapstructure:"unix_socket_path" toml:"unix_socket_path" json:"unix_socket_path"`
+	Format         string        `mapstructure:"format" toml:"format" json:"format"`
+	Rebind         time.Duration `mapstructure:"rebind" toml:"rebind" json:"rebind"`
 }
 
 type TcpDestConfig struct {
-	Host   string        `mapstructure:"host" toml:"host" json:"host"`
-	Port   int           `mapstructure:"port" toml:"port" json:"port"`
-	Format string        `mapstructure:"format" toml:"format" json:"format"`
-	Rebind time.Duration `mapstructure:"rebind" toml:"rebind" json:"rebind"`
+	Host           string        `mapstructure:"host" toml:"host" json:"host"`
+	Port           int           `mapstructure:"port" toml:"port" json:"port"`
+	UnixSocketPath string        `mapstructure:"unix_socket_path" toml:"unix_socket_path" json:"unix_socket_path"`
+	Format         string        `mapstructure:"format" toml:"format" json:"format"`
+	Rebind         time.Duration `mapstructure:"rebind" toml:"rebind" json:"rebind"`
+	LineFraming    bool          `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
 }
 
 type JournaldConfig struct {
