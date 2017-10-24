@@ -15,13 +15,8 @@ type rawtcpnode struct {
 
 type rawtcpnodes []*rawtcpnode
 
-// RawTCPRing is a MPMC buffer that achieves threadsafety with CAS operations
-// only.  A put on full or get on empty call will block until an item
-// is put or retrieved.  Calling Dispose on the RawTCPRing will unblock
-// any blocked threads with an error.  This buffer is similar to the buffer
-// described here: http://www.1024cores.net/home/lock-free-algorithms/queues/bounded-mpmc-queue
-// with some minor additions.
-type RawTCPRing struct {
+// RawTcpRing is a thread-safe bounded queue that stores RawTcpMessage messages.
+type RawTcpRing struct {
 	_padding0      [8]uint64
 	queue          uint64
 	_padding1      [8]uint64
@@ -32,7 +27,7 @@ type RawTCPRing struct {
 	nodes          rawtcpnodes
 }
 
-func (rb *RawTCPRing) init(size uint64) {
+func (rb *RawTcpRing) init(size uint64) {
 	size = roundUp(size)
 	rb.nodes = make(rawtcpnodes, size)
 	for i := uint64(0); i < size; i++ {
@@ -44,7 +39,7 @@ func (rb *RawTCPRing) init(size uint64) {
 // Put adds the provided item to the queue.  If the queue is full, this
 // call will block until an item is added to the queue or Dispose is called
 // on the queue.  An error will be returned if the queue is disposed.
-func (rb *RawTCPRing) Put(item *model.RawTcpMessage) error {
+func (rb *RawTcpRing) Put(item *model.RawTcpMessage) error {
 	_, err := rb.put(item, false)
 	return err
 }
@@ -52,11 +47,11 @@ func (rb *RawTCPRing) Put(item *model.RawTcpMessage) error {
 // Offer adds the provided item to the queue if there is space.  If the queue
 // is full, this call will return false.  An error will be returned if the
 // queue is disposed.
-func (rb *RawTCPRing) Offer(item *model.RawTcpMessage) (bool, error) {
+func (rb *RawTcpRing) Offer(item *model.RawTcpMessage) (bool, error) {
 	return rb.put(item, true)
 }
 
-func (rb *RawTCPRing) put(item *model.RawTcpMessage, offer bool) (bool, error) {
+func (rb *RawTcpRing) put(item *model.RawTcpMessage, offer bool) (bool, error) {
 	var n *rawtcpnode
 	var nb uint64
 	pos := atomic.LoadUint64(&rb.queue)
@@ -104,7 +99,7 @@ L:
 // if the queue is empty.  This call will unblock when an item is added
 // to the queue or Dispose is called on the queue.  An error will be returned
 // if the queue is disposed.
-func (rb *RawTCPRing) Get() (*model.RawTcpMessage, error) {
+func (rb *RawTcpRing) Get() (*model.RawTcpMessage, error) {
 	return rb.Poll(0)
 }
 
@@ -113,7 +108,7 @@ func (rb *RawTCPRing) Get() (*model.RawTcpMessage, error) {
 // to the queue, Dispose is called on the queue, or the timeout is reached. An
 // error will be returned if the queue is disposed or a timeout occurs. A
 // non-positive timeout will block indefinitely.
-func (rb *RawTCPRing) Poll(timeout time.Duration) (*model.RawTcpMessage, error) {
+func (rb *RawTcpRing) Poll(timeout time.Duration) (*model.RawTcpMessage, error) {
 	var (
 		n     *rawtcpnode
 		pos   = atomic.LoadUint64(&rb.dequeue)
@@ -163,32 +158,32 @@ L:
 }
 
 // Len returns the number of items in the queue.
-func (rb *RawTCPRing) Len() uint64 {
+func (rb *RawTcpRing) Len() uint64 {
 	return atomic.LoadUint64(&rb.queue) - atomic.LoadUint64(&rb.dequeue)
 }
 
 // Cap returns the capacity of this ring buffer.
-func (rb *RawTCPRing) Cap() uint64 {
+func (rb *RawTcpRing) Cap() uint64 {
 	return uint64(len(rb.nodes))
 }
 
 // Dispose will dispose of this queue and free any blocked threads
 // in the Put and/or Get methods.  Calling those methods on a disposed
 // queue will return an error.
-func (rb *RawTCPRing) Dispose() {
+func (rb *RawTcpRing) Dispose() {
 	atomic.CompareAndSwapUint64(&rb.disposed, 0, 1)
 }
 
 // IsDisposed will return a bool indicating if this queue has been
 // disposed.
-func (rb *RawTCPRing) IsDisposed() bool {
+func (rb *RawTcpRing) IsDisposed() bool {
 	return atomic.LoadUint64(&rb.disposed) == 1
 }
 
 // NewRingBuffer will allocate, initialize, and return a ring buffer
 // with the specified size.
-func NewRawTCPRing(size uint64) *RawTCPRing {
-	rb := &RawTCPRing{}
+func NewRawTcpRing(size uint64) *RawTcpRing {
+	rb := &RawTcpRing{}
 	rb.init(size)
 	return rb
 }

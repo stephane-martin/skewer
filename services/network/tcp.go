@@ -73,7 +73,7 @@ type TcpServiceImpl struct {
 	generator        chan ulid.ULID
 	metrics          *tcpMetrics
 	registry         *prometheus.Registry
-	rawMessagesQueue *queue.RawTCPRing
+	rawMessagesQueue *queue.RawTcpRing
 }
 
 func NewTcpService(reporter *base.Reporter, gen chan ulid.ULID, b *binder.BinderClient, l log15.Logger) *TcpServiceImpl {
@@ -159,7 +159,7 @@ func (s *TcpServiceImpl) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig,
 		return &model.RawTcpMessage{Message: make([]byte, messageSize)}
 	}}
 	s.StreamingService.SetConf(sc, pc, queueSize, messageSize)
-	s.rawMessagesQueue = queue.NewRawTCPRing(s.QueueSize)
+	s.rawMessagesQueue = queue.NewRawTcpRing(s.QueueSize)
 }
 
 // Parse fetch messages from the raw queue, parse them, and push them to be sent.

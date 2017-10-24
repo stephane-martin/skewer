@@ -14,7 +14,7 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
-	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/db"
 	"github.com/stephane-martin/skewer/utils/queue"
 )
 
@@ -36,12 +36,12 @@ func NewStoreMetrics() *storeMetrics {
 
 type MessageStore struct {
 	badger          *badger.KV
-	messagesDB      utils.Partition
-	readyDB         utils.Partition
-	sentDB          utils.Partition
-	failedDB        utils.Partition
-	permerrorsDB    utils.Partition
-	syslogConfigsDB utils.Partition
+	messagesDB      db.Partition
+	readyDB         db.Partition
+	sentDB          db.Partition
+	failedDB        db.Partition
+	permerrorsDB    db.Partition
+	syslogConfigsDB db.Partition
 
 	metrics  *storeMetrics
 	registry *prometheus.Registry
@@ -115,17 +115,18 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 	}
 	store.badger = kv
 
-	store.messagesDB = utils.NewPartition(kv, []byte("messages"))
 	if len(cfg.Secret) > 0 {
-		store.messagesDB = utils.NewEncryptedPartition(store.messagesDB, cfg.SecretB)
+		store.messagesDB = db.NewEncryptedPartition(store.messagesDB, cfg.SecretB)
 		store.logger.Info("The badger store is encrypted")
+	} else {
+		store.messagesDB = db.NewPartition(kv, []byte("messages"))
 	}
 
-	store.readyDB = utils.NewPartition(kv, []byte("ready"))
-	store.sentDB = utils.NewPartition(kv, []byte("sent"))
-	store.failedDB = utils.NewPartition(kv, []byte("failed"))
-	store.permerrorsDB = utils.NewPartition(kv, []byte("permerrors"))
-	store.syslogConfigsDB = utils.NewPartition(kv, []byte("configs"))
+	store.readyDB = db.NewPartition(kv, []byte("ready"))
+	store.sentDB = db.NewPartition(kv, []byte("sent"))
+	store.failedDB = db.NewPartition(kv, []byte("failed"))
+	store.permerrorsDB = db.NewPartition(kv, []byte("permerrors"))
+	store.syslogConfigsDB = db.NewPartition(kv, []byte("configs"))
 
 	// only once, push back messages from previous run that may have been stuck in the sent queue
 	store.resetStuckInSent()

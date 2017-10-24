@@ -357,7 +357,7 @@ type RelpServiceImpl struct {
 	reporter            *base.Reporter
 	direct              bool
 	gen                 chan ulid.ULID
-	rawMessagesQueue    *queue.RawTCPRing
+	rawMessagesQueue    *queue.RawTcpRing
 	parsedMessagesQueue *queue.MessageQueue
 	parsewg             sync.WaitGroup
 	configs             map[ulid.ULID]conf.SyslogConfig
@@ -424,7 +424,7 @@ func (s *RelpServiceImpl) Start(test bool) ([]model.ListenerInfo, error) {
 	s.Logger.Info("Listening on RELP", "nb_services", len(infos))
 
 	s.parsedMessagesQueue = queue.NewMessageQueue()
-	s.rawMessagesQueue = queue.NewRawTCPRing(s.QueueSize)
+	s.rawMessagesQueue = queue.NewRawTcpRing(s.QueueSize)
 	s.configs = map[ulid.ULID]conf.SyslogConfig{}
 
 	for _, l := range s.UnixListeners {
