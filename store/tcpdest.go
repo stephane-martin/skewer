@@ -94,28 +94,25 @@ func (d *tcpDestination) Gather() ([]*dto.MetricFamily, error) {
 	return d.registry.Gather()
 }
 
-func (d *tcpDestination) w(b []byte) (err error) {
-	_, err = d.conn.Write(b)
-	return err
-}
-
 func (d *tcpDestination) Send(message *model.TcpUdpParsedMessage, partitionKey string, partitionNumber int32, topic string) error {
-	serial, err := message.Parsed.Fields.MarshalAll(d.format)
+	serial, err := message.MarshalAll(d.format)
 	if err != nil {
 		d.permerr(message.Uid)
 		return err
 	}
 	if !d.lineFraming {
-		err = utils.Chain(
-			func() error { return d.w([]byte(strconv.FormatInt(int64(len(serial)), 10))) },
-			func() error { return d.w(sp) },
-			func() error { return d.w(serial) },
-			func() error { return d.w(endl) },
+		err = utils.ChainWrites(
+			d.conn,
+			[]byte(strconv.FormatInt(int64(len(serial)), 10)),
+			sp,
+			serial,
+			endl,
 		)
 	} else {
-		err = utils.Chain(
-			func() error { return d.w(serial) },
-			func() error { return d.w(endl) },
+		err = utils.ChainWrites(
+			d.conn,
+			serial,
+			endl,
 		)
 	}
 

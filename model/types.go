@@ -110,6 +110,21 @@ func (m *SyslogMessage) Empty() bool {
 	return len(m.Message) == 0 && len(m.Structured) == 0 && len(m.Properties) == 0
 }
 
+func (m *TcpUdpParsedMessage) MarshalAll(frmt string) ([]byte, error) {
+	switch frmt {
+	case "rfc5424":
+		return m.Parsed.Fields.Marshal5424()
+	case "rfc3164":
+		return m.Parsed.Fields.Marshal3164()
+	case "json":
+		return ffjson.Marshal(&m.Parsed.Fields)
+	case "fulljson":
+		return ffjson.Marshal(m)
+	default:
+		return nil, fmt.Errorf("MarshalAll: unknown format '%s'", frmt)
+	}
+}
+
 // MarshalAll formats the message in the given format
 func (m *SyslogMessage) MarshalAll(frmt string) ([]byte, error) {
 	switch frmt {

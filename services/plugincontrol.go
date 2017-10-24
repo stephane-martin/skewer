@@ -26,6 +26,16 @@ import (
 )
 
 var space = []byte(" ")
+var START = []byte("start")
+var STARTED = []byte("started")
+var STOP = []byte("stop")
+var STOPPED = []byte("stopped")
+var CONF = []byte("conf")
+var CONFERROR = []byte("conferror")
+var SHUTDOWN = []byte("shutdown")
+var STARTERROR = []byte("starterror")
+var GATHER = []byte("gathermetrics")
+var METRICS = []byte("metrics")
 
 // PluginController launches and controls the plugins services
 type PluginController struct {
@@ -74,7 +84,7 @@ func NewPluginController(typ NetworkServiceType, stasher *StorePlugin, r *consul
 }
 
 // W encodes an writes a message to the controlled plugin via stdin
-func (s *PluginController) W(header string, message []byte) (err error) {
+func (s *PluginController) W(header []byte, message []byte) (err error) {
 	s.stdinMu.Lock()
 	if s.stdin != nil {
 		err = utils.W(s.stdin, header, message)
@@ -96,7 +106,7 @@ func (s *PluginController) Gather() ([]*dto.MetricFamily, error) {
 		if !s.started {
 			return []*dto.MetricFamily{}, nil
 		}
-		if s.W("gathermetrics", utils.NOW) != nil {
+		if s.W(GATHER, utils.NOW) != nil {
 			return []*dto.MetricFamily{}, nil
 		}
 
@@ -126,7 +136,7 @@ func (s *PluginController) Stop() {
 	case <-s.ShutdownChan:
 	case <-s.StopChan:
 	default:
-		err := s.W("stop", utils.NOW)
+		err := s.W(STOP, utils.NOW)
 		if err != nil {
 			s.logger.Warn("Error writing stop to plugin stdin", "error", err)
 		} else {
@@ -153,7 +163,7 @@ func (s *PluginController) Shutdown(killTimeOut time.Duration) {
 	default:
 		// ask to shutdown
 		s.logger.Debug("Controller is asked to shutdown", "type", name)
-		err := s.W("shutdown", utils.NOW)
+		err := s.W(SHUTDOWN, utils.NOW)
 		if err != nil {
 			s.logger.Warn("Error writing shutdown to plugin stdin. Kill brutally.", "error", err, "type", name)
 			killTimeOut = time.Second
@@ -473,9 +483,9 @@ func (s *PluginController) Start() ([]model.ListenerInfo, error) {
 
 	cb, _ := json.Marshal(s.conf)
 
-	rerr := s.W("conf", cb)
+	rerr := s.W(CONF, cb)
 	if rerr == nil {
-		rerr = s.W("start", utils.NOW)
+		rerr = s.W(START, utils.NOW)
 	}
 	infos := []model.ListenerInfo{}
 	if rerr == nil {

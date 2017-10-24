@@ -91,6 +91,7 @@ type KafkaConfig struct {
 	CertFile                 string        `mapstructure:"cert_file" toml:"cert_file" json:"cert_file"`
 	Insecure                 bool          `mapstructure:"insecure" toml:"insecure" json:"insecure"`
 	Partitioner              string        `mapstructure:"partitioner" toml:"partitioner" json:"partitioner"`
+	Format                   string        `mapstructure:"format" toml:"format" json:"format"`
 }
 
 type UdpDestConfig struct {

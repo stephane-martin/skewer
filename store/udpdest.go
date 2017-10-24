@@ -13,6 +13,7 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/utils"
 )
 
 type udpDestination struct {
@@ -88,13 +89,16 @@ func (d *udpDestination) Gather() ([]*dto.MetricFamily, error) {
 }
 
 func (d *udpDestination) Send(message *model.TcpUdpParsedMessage, partitionKey string, partitionNumber int32, topic string) error {
-	serial, err := message.Parsed.Fields.MarshalAll(d.format)
+	serial, err := message.MarshalAll(d.format)
 	if err != nil {
 		d.permerr(message.Uid)
 		return err
 	}
-	serial = append(serial, '\n')
-	_, err = d.conn.Write(serial)
+	err = utils.ChainWrites(
+		d.conn,
+		serial,
+		endl,
+	)
 	if err != nil {
 		d.nack(message.Uid)
 		d.once.Do(func() { close(d.fatal) })

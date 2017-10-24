@@ -9,16 +9,13 @@ import (
 var NOW []byte = []byte("now")
 var SP []byte = []byte(" ")
 
-func ret(n int, e error) error {
-	return e
-}
-
-func W(dest io.Writer, header string, message []byte) (err error) {
-	return Chain(
-		func() error { return ret(fmt.Fprintf(dest, "%010d ", len(header)+len(message)+1)) },
-		func() error { return ret(io.WriteString(dest, header)) },
-		func() error { return ret(dest.Write(SP)) },
-		func() error { return ret(dest.Write(message)) },
+func W(dest io.Writer, header []byte, message []byte) (err error) {
+	return ChainWrites(
+		dest,
+		[]byte(fmt.Sprintf("%010d ", len(header)+len(message)+1)),
+		[]byte(header),
+		SP,
+		message,
 	)
 }
 

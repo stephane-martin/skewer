@@ -37,7 +37,7 @@ func NewConfigurationService(childLoggerHandle int, l log15.Logger) *Configurati
 	return c
 }
 
-func (c *ConfigurationService) W(header string, message []byte) (err error) {
+func (c *ConfigurationService) W(header []byte, message []byte) (err error) {
 	c.mu.Lock()
 	if c.stdin != nil {
 		err = utils.W(c.stdin, header, message)
@@ -57,7 +57,7 @@ func (c *ConfigurationService) SetConsulParams(params consul.ConnParams) {
 }
 
 func (c *ConfigurationService) Stop() {
-	err := c.W("stop", utils.NOW)
+	err := c.W([]byte("stop"), utils.NOW)
 	if err == nil {
 		for range c.output {
 
@@ -68,7 +68,7 @@ func (c *ConfigurationService) Stop() {
 }
 
 func (c *ConfigurationService) Reload() {
-	err := c.W("reload", utils.NOW)
+	err := c.W([]byte("reload"), utils.NOW)
 	if err != nil {
 		c.logger.Warn("Error asking the configuration plugin to reload", "error", err)
 	}
@@ -219,11 +219,11 @@ func (c *ConfigurationService) Start() error {
 
 	cparams, _ := json.Marshal(c.params)
 
-	err = c.W("confdir", []byte(c.confdir))
+	err = c.W([]byte("confdir"), []byte(c.confdir))
 	if err == nil {
-		err = c.W("consulparams", cparams)
+		err = c.W([]byte("consulparams"), cparams)
 		if err == nil {
-			err = c.W("start", utils.NOW)
+			err = c.W([]byte("start"), utils.NOW)
 			if err == nil {
 				err = <-startedChan
 			}
@@ -246,7 +246,7 @@ func writeNewConf(ctx context.Context, updated chan *conf.BaseConfig, logger log
 			if more {
 				confb, err := json.Marshal(newconf)
 				if err == nil {
-					utils.W(os.Stdout, "newconf", confb)
+					utils.W(os.Stdout, []byte("newconf"), confb)
 				} else {
 					logger.Warn("Error serializing new configuration", "error", err)
 				}
@@ -267,8 +267,8 @@ func start(confdir string, params consul.ConnParams, logger log15.Logger) (conte
 	if err == nil {
 		confb, err := json.Marshal(gconf)
 		if err == nil {
-			utils.W(os.Stdout, "started", utils.NOW)
-			utils.W(os.Stdout, "newconf", confb)
+			utils.W(os.Stdout, []byte("started"), utils.NOW)
+			utils.W(os.Stdout, []byte("newconf"), confb)
 			go writeNewConf(ctx, updated, logger)
 		} else {
 			cancel()
@@ -299,7 +299,7 @@ func LaunchConfProvider(logger log15.Logger) error {
 			var err error
 			cancel, err = start(confdir, params, logger)
 			if err != nil {
-				utils.W(os.Stdout, "starterror", []byte(err.Error()))
+				utils.W(os.Stdout, []byte("starterror"), []byte(err.Error()))
 				return err
 			}
 
@@ -310,7 +310,7 @@ func LaunchConfProvider(logger log15.Logger) error {
 					cancel()
 				}
 				cancel = newcancel
-				utils.W(os.Stdout, "reloaded", utils.NOW)
+				utils.W(os.Stdout, []byte("reloaded"), utils.NOW)
 			} else {
 				logger.Warn("Error reloading configuration", "error", err)
 			}

@@ -15,9 +15,11 @@ var stdoutLock sync.Mutex
 
 // SUCC = "SUCCESS" as byte array.
 var SUCC = []byte("SUCCESS")
+var SYSLOG = []byte("syslog")
+var INFOS = []byte("infos")
 
 // Wout writes a message to the controller via stdout
-func Wout(header string, m []byte) (err error) {
+func Wout(header []byte, m []byte) (err error) {
 	stdoutLock.Lock()
 	err = utils.W(os.Stdout, header, m)
 	stdoutLock.Unlock()
@@ -80,7 +82,7 @@ func (s *Reporter) Stash(m model.TcpUdpParsedMessage) (fatal, nonfatal error) {
 			s.logger.Warn("A syslog message could not be serialized", "type", s.name, "error", err)
 			return nil, err
 		}
-		err = Wout("syslog", b)
+		err = Wout(SYSLOG, b)
 		if err != nil {
 			s.logger.Crit("Could not write message to upstream. There was message loss", "error", err, "type", s.name)
 			return err, nil
@@ -98,5 +100,5 @@ func (s *Reporter) Report(infos []model.ListenerInfo) error {
 	if err != nil {
 		return err
 	}
-	return Wout("infos", b)
+	return Wout(INFOS, b)
 }

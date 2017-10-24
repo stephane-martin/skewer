@@ -117,6 +117,7 @@ func SetKafkaDefaults(v *viper.Viper, prefixed bool) {
 	v.SetDefault(prefix+"retry_send_max", 3)
 	v.SetDefault(prefix+"retry_send_backoff", "100ms")
 	v.SetDefault(prefix+"partitioner", "hash")
+	v.SetDefault(prefix+"format", "fulljson")
 }
 
 func SetStoreDefaults(v *viper.Viper, prefixed bool) {

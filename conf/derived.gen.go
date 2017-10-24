@@ -107,4 +107,5 @@ func deriveDeepCopy_(dst, src *KafkaConfig) {
 	dst.CertFile = src.CertFile
 	dst.Insecure = src.Insecure
 	dst.Partitioner = src.Partitioner
+	dst.Format = src.Format
 }

@@ -8,7 +8,6 @@ import (
 
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
-	"github.com/pquerna/ffjson/ffjson"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
@@ -26,6 +25,7 @@ type kafkaDestination struct {
 	ack        storeCallback
 	nack       storeCallback
 	permerr    storeCallback
+	format     string
 }
 
 func NewKafkaDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (Destination, error) {
@@ -35,6 +35,7 @@ func NewKafkaDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, per
 		ack:      ack,
 		nack:     nack,
 		permerr:  permerr,
+		format:   bc.Kafka.Format,
 	}
 	d.ackCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -92,7 +93,7 @@ func (d *kafkaDestination) Send(message *model.TcpUdpParsedMessage, partitionKey
 	message.Parsed.Fields.TimeGenerated = time.Unix(0, message.Parsed.Fields.TimeGeneratedNum).UTC().Format(time.RFC3339Nano)
 	message.Parsed.Fields.TimeReported = reported.Format(time.RFC3339Nano)
 
-	serialized, err := ffjson.Marshal(&message.Parsed)
+	serialized, err := message.MarshalAll(d.format)
 
 	if err != nil {
 		d.permerr(message.Uid)

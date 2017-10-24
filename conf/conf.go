@@ -664,9 +664,23 @@ func (c *BaseConfig) Complete() (err error) {
 
 	c.UdpDest.Format = strings.TrimSpace(strings.ToLower(c.UdpDest.Format))
 	switch c.UdpDest.Format {
-	case "rfc5424", "rfc3164", "json":
+	case "rfc5424", "rfc3164", "json", "fulljson":
 	default:
 		return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown destination format type: %s", c.UdpDest.Format)}
+	}
+
+	c.TcpDest.Format = strings.TrimSpace(strings.ToLower(c.TcpDest.Format))
+	switch c.UdpDest.Format {
+	case "rfc5424", "rfc3164", "json", "fulljson":
+	default:
+		return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown destination format type: %s", c.TcpDest.Format)}
+	}
+
+	c.Kafka.Format = strings.TrimSpace(strings.ToLower(c.Kafka.Format))
+	switch c.UdpDest.Format {
+	case "rfc5424", "rfc3164", "json", "fulljson":
+	default:
+		return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown destination format type: %s", c.Kafka.Format)}
 	}
 
 	_, err = ParseVersion(c.Kafka.Version)
