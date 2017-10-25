@@ -71,7 +71,7 @@ type JsonRsyslogMessage struct {
 	Uuid          string `json:"uuid"`
 	Structured    string `json:"structured-data"`
 
-	Properties map[string]map[string]string `json:"$!"`
+	Properties map[string]interface{} `json:"$!"`
 }
 
 var syslogMessageFmt string = `Facility: %d

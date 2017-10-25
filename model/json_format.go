@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -91,7 +92,11 @@ func ParseJsonFormat(m []byte, decoder *encoding.Decoder) (msg SyslogMessage, re
 	}
 
 	if len(sourceMsg.Properties) > 0 {
-		msg.Properties = sourceMsg.Properties
+		msg.Properties = map[string]map[string]string{}
+		msg.Properties["rsyslog"] = map[string]string{}
+		for k, v := range sourceMsg.Properties {
+			msg.Properties["rsyslog"][strings.TrimSpace(k)] = strings.TrimSpace(fmt.Sprintf("%v", v))
+		}
 	}
 
 	return msg, nil

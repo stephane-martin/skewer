@@ -509,7 +509,7 @@ func Serve() error {
 	}
 
 	stopRELP := func() {
-		relpServicePlugin.Shutdown(3 * time.Second)
+		relpServicePlugin.Shutdown(10 * time.Second)
 	}
 
 	stopAccounting := func() {

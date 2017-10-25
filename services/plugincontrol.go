@@ -444,7 +444,7 @@ func (s *PluginController) listen() chan InfosAndError {
 			// Let's wait that the shutdown channel has been closed before executing the defer()
 			<-s.ShutdownChan
 		} else {
-			s.logger.Debug("Plugin scanner error", "type", name, "error", err)
+			s.logger.Info("Plugin scanner error", "type", name, "error", err)
 			// plugin has sent an invalid message that could not be interpreted by scanner
 			once.Do(func() {
 				startErrorChan <- InfosAndError{
@@ -453,10 +453,9 @@ func (s *PluginController) listen() chan InfosAndError {
 				}
 				close(startErrorChan)
 			})
-			if err == io.EOF || err == io.ErrClosedPipe || err == io.ErrUnexpectedEOF {
+			if err == io.EOF || err == io.ErrClosedPipe || err == io.ErrUnexpectedEOF || err == os.ErrClosed {
 				<-s.ShutdownChan
 			} else {
-				s.logger.Error("Plugin scanner error", "type", name, "error", err)
 				kill = true
 			}
 		}

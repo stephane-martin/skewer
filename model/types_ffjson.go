@@ -834,7 +834,7 @@ handle_Structured:
 
 handle_Properties:
 
-	/* handler: j.Properties type=map[string]map[string]string kind=map quoted=false*/
+	/* handler: j.Properties type=map[string]interface {} kind=map quoted=false*/
 
 	{
 
@@ -848,7 +848,7 @@ handle_Properties:
 			j.Properties = nil
 		} else {
 
-			j.Properties = make(map[string]map[string]string, 0)
+			j.Properties = make(map[string]interface{}, 0)
 
 			wantVal := true
 
@@ -856,7 +856,7 @@ handle_Properties:
 
 				var k string
 
-				var tmpJProperties map[string]string
+				var tmpJProperties interface{}
 
 				tok = fs.Scan()
 				if tok == fflib.FFTok_error {
@@ -905,103 +905,18 @@ handle_Properties:
 				}
 
 				tok = fs.Scan()
-				/* handler: tmpJProperties type=map[string]string kind=map quoted=false*/
+				/* handler: tmpJProperties type=interface {} kind=interface quoted=false*/
 
 				{
-
-					{
-						if tok != fflib.FFTok_left_bracket && tok != fflib.FFTok_null {
-							return fs.WrapErr(fmt.Errorf("cannot unmarshal %s into Go value for ", tok))
-						}
+					/* Falling back. type=interface {} kind=interface */
+					tbuf, err := fs.CaptureField(tok)
+					if err != nil {
+						return fs.WrapErr(err)
 					}
 
-					if tok == fflib.FFTok_null {
-						tmpJProperties = nil
-					} else {
-
-						tmpJProperties = make(map[string]string, 0)
-
-						wantVal := true
-
-						for {
-
-							var k string
-
-							var tmpTmpJProperties string
-
-							tok = fs.Scan()
-							if tok == fflib.FFTok_error {
-								goto tokerror
-							}
-							if tok == fflib.FFTok_right_bracket {
-								break
-							}
-
-							if tok == fflib.FFTok_comma {
-								if wantVal == true {
-									// TODO(pquerna): this isn't an ideal error message, this handles
-									// things like [,,,] as an array value.
-									return fs.WrapErr(fmt.Errorf("wanted value token, but got token: %v", tok))
-								}
-								continue
-							} else {
-								wantVal = true
-							}
-
-							/* handler: k type=string kind=string quoted=false*/
-
-							{
-
-								{
-									if tok != fflib.FFTok_string && tok != fflib.FFTok_null {
-										return fs.WrapErr(fmt.Errorf("cannot unmarshal %s into Go value for string", tok))
-									}
-								}
-
-								if tok == fflib.FFTok_null {
-
-								} else {
-
-									outBuf := fs.Output.Bytes()
-
-									k = string(string(outBuf))
-
-								}
-							}
-
-							// Expect ':' after key
-							tok = fs.Scan()
-							if tok != fflib.FFTok_colon {
-								return fs.WrapErr(fmt.Errorf("wanted colon token, but got token: %v", tok))
-							}
-
-							tok = fs.Scan()
-							/* handler: tmpTmpJProperties type=string kind=string quoted=false*/
-
-							{
-
-								{
-									if tok != fflib.FFTok_string && tok != fflib.FFTok_null {
-										return fs.WrapErr(fmt.Errorf("cannot unmarshal %s into Go value for string", tok))
-									}
-								}
-
-								if tok == fflib.FFTok_null {
-
-								} else {
-
-									outBuf := fs.Output.Bytes()
-
-									tmpTmpJProperties = string(string(outBuf))
-
-								}
-							}
-
-							tmpJProperties[k] = tmpTmpJProperties
-
-							wantVal = false
-						}
-
+					err = json.Unmarshal(tbuf, &tmpJProperties)
+					if err != nil {
+						return fs.WrapErr(err)
 					}
 				}
 
