@@ -76,7 +76,13 @@ func (fwder *forwarderImpl) Forward(ctx context.Context, from Store, bc conf.Bas
 }
 
 func (fwder *forwarderImpl) doForward(ctx context.Context, store Store, bc conf.BaseConfig) {
-	defer fwder.wg.Done()
+	defer func() {
+		// we close the destination only after we have stopped to forward messages
+		if fwder.dest != nil {
+			fwder.dest.Close()
+		}
+		fwder.wg.Done()
+	}()
 	var err error
 	if fwder.test {
 		fwder.dest = nil
@@ -100,21 +106,10 @@ func (fwder *forwarderImpl) doForward(ctx context.Context, store Store, bc conf.
 			}
 		}()
 	}
-
-	fwder.wg.Add(1)
-	go fwder.forwardMessages(ctx, store)
-
+	fwder.forwardMessages(ctx, store)
 }
 
 func (fwder *forwarderImpl) forwardMessages(ctx context.Context, store Store) {
-	defer func() {
-		// we close the destination only after we have stopped to forward messages
-		if fwder.dest != nil {
-			fwder.dest.Close()
-		}
-		fwder.wg.Done()
-	}()
-
 	jsenvs := map[ulid.ULID]*javascript.Environment{}
 	done := ctx.Done()
 	var more bool

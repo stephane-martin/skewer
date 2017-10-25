@@ -19,7 +19,6 @@ import (
 
 var sp = []byte(" ")
 var endl = []byte("\n")
-var one = []byte{}
 
 type tcpDestination struct {
 	logger      log15.Logger
@@ -107,17 +106,6 @@ func (d *tcpDestination) Send(message *model.TcpUdpParsedMessage, partitionKey s
 	serial, err := message.MarshalAll(d.format)
 	if err != nil {
 		d.permerr(message.Uid)
-		return err
-	}
-	d.conn.SetReadDeadline(time.Now())
-	_, err = d.conn.Read(one)
-	if err != nil {
-		d.nack(message.Uid)
-		if d.previous != nil {
-			d.nack(d.previous.Uid)
-			d.previous = nil
-		}
-		d.once.Do(func() { close(d.fatal) })
 		return err
 	}
 	if d.lineFraming {

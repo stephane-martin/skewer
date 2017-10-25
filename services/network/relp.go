@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"runtime"
@@ -77,7 +78,7 @@ func (f *ackForwarder) NextToCommit(connID uintptr) int {
 		if h.Len() == 0 {
 			return -1
 		}
-		var minimum int = -1
+		var minimum = int(-1)
 		for kv := range h.Iter() {
 			if kv.Value != nil && *(*bool)(kv.Value) {
 				if minimum == -1 {
@@ -124,16 +125,13 @@ func (f *ackForwarder) RemoveConn(connID uintptr) {
 		f.fail.Del(connID)
 	}
 	if ptr, ok := f.comm.GetUintKey(connID); ok && ptr != nil {
-		f.fail.Set(connID, nil)
+		f.comm.Set(connID, nil)
 		f.comm.Del(connID)
 	}
 }
 
 func (f *ackForwarder) RemoveAll() {
 	for kv := range f.succ.Iter() {
-		f.RemoveConn(kv.Key.(uintptr))
-	}
-	for kv := range f.fail.Iter() {
 		f.RemoveConn(kv.Key.(uintptr))
 	}
 }
@@ -665,17 +663,16 @@ func (s *RelpServiceImpl) handleResponses(conn net.Conn, connID uintptr, client 
 
 	successes := map[int]bool{}
 	failures := map[int]bool{}
+	var err error
 
-	immediateSuccess := func(txnr int) {
-		answer := fmt.Sprintf("%d rsp 6 200 OK\n", txnr)
-		conn.Write([]byte(answer))
-		s.metrics.RelpAnswersCounter.WithLabelValues("200", client).Inc()
+	writeSuccess := func(txnr int) (err error) {
+		_, err = fmt.Fprintf(conn, "%d rsp 6 200 OK\n", txnr)
+		return err
 	}
 
-	immediateFailure := func(txnr int) {
-		answer := fmt.Sprintf("%d rsp 6 500 KO\n", txnr)
-		conn.Write([]byte(answer))
-		s.metrics.RelpAnswersCounter.WithLabelValues("500", client).Inc()
+	writeFailure := func(txnr int) (err error) {
+		_, err = fmt.Fprintf(conn, "%d rsp 6 500 KO\n", txnr)
+		return err
 	}
 
 	for s.forwarder.Wait(connID) {
@@ -698,15 +695,31 @@ func (s *RelpServiceImpl) handleResponses(conn net.Conn, connID uintptr, client 
 				break Cooking
 			}
 			if successes[next] {
-				immediateSuccess(next)
-				delete(successes, next)
-				s.forwarder.Committed(connID, next)
+				err = writeSuccess(next)
+				if err == nil {
+					delete(successes, next)
+					s.metrics.RelpAnswersCounter.WithLabelValues("200", client).Inc()
+				}
 			} else if failures[next] {
-				immediateFailure(next)
-				delete(failures, next)
-				s.forwarder.Committed(connID, next)
+				err = writeFailure(next)
+				if err == nil {
+					delete(failures, next)
+					s.metrics.RelpAnswersCounter.WithLabelValues("500", client).Inc()
+				}
 			} else {
 				break Cooking
+			}
+
+			if err == nil {
+				s.forwarder.Committed(connID, next)
+			} else if err == io.EOF {
+				// client is gone
+				return
+			} else if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
+				s.Logger.Info("Timeout error writing RELP response to client", "error", err)
+			} else {
+				s.Logger.Warn("Unexpected error writing RELP response to client", "error", err)
+				return
 			}
 		}
 	}
@@ -849,8 +862,10 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 	s := h.Server
 	s.AddConnection(conn)
 	connID := s.forwarder.AddConn()
+	scanner := bufio.NewScanner(conn)
 
 	defer func() {
+		logger.Info("Scanning the RELP stream has ended", "error", scanner.Err())
 		s.forwarder.RemoveConn(connID)
 		s.RemoveConnection(conn)
 		s.wg.Done()
@@ -904,11 +919,10 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 	if timeout > 0 {
 		conn.SetReadDeadline(time.Now().Add(timeout))
 	}
-	scanner := bufio.NewScanner(conn)
 	scanner.Split(RelpSplit)
 	scanner.Buffer(make([]byte, 0, 132000), 132000)
 	var rawmsg *model.RawTcpMessage
-	var previous int = -1
+	var previous = int(-1)
 
 Loop:
 	for scanner.Scan() {
@@ -919,7 +933,7 @@ Loop:
 		splits := bytes.SplitN(line, []byte(" "), 4)
 		txnr, _ := strconv.Atoi(string(splits[0]))
 		if txnr <= previous {
-			logger.Warn("TXNR did not increase")
+			logger.Warn("TXNR did not increase", "previous", previous, "current", txnr)
 			s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
 			return
 		}
@@ -931,7 +945,7 @@ Loop:
 			if len(splits) == 4 {
 				data = bytes.Trim(splits[3], " \r\n")
 			} else {
-				logger.Warn("datalen is non-null, but no data is provided")
+				logger.Warn("datalen is non-null, but no data is provided", "datalen", datalen)
 				s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
 				return
 			}
@@ -943,8 +957,7 @@ Loop:
 				s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
 				return
 			}
-			answer := fmt.Sprintf("%d rsp %d 200 OK\n%s\n", txnr, len(data)+7, string(data))
-			conn.Write([]byte(answer))
+			fmt.Fprintf(conn, "%d rsp %d 200 OK\n%s\n", txnr, len(data)+7, string(data))
 			relpIsOpen = true
 			logger.Info("Received 'open' command")
 		case "close":
@@ -953,11 +966,9 @@ Loop:
 				s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
 				return
 			}
-			answer := fmt.Sprintf("%d rsp 0\n0 serverclose 0\n", txnr)
-			conn.Write([]byte(answer))
-			conn.Close()
-			relpIsOpen = false
+			fmt.Fprintf(conn, "%d rsp 0\n0 serverclose 0\n", txnr)
 			logger.Info("Received 'close' command")
+			return
 		case "syslog":
 			if !relpIsOpen {
 				logger.Warn("Received syslog command before open")
@@ -989,7 +1000,6 @@ Loop:
 			return
 		}
 	}
-	logger.Info("Scanning the RELP stream has ended", "error", scanner.Err())
 }
 
 func splitSpaceOrLF(r rune) bool {
