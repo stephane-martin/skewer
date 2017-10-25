@@ -44,6 +44,9 @@ func SetTcpDestDefaults(v *viper.Viper, prefixed bool) {
 	v.SetDefault(prefix+"host", "127.0.0.1")
 	v.SetDefault(prefix+"port", 514)
 	v.SetDefault(prefix+"format", "rfc5424")
+	v.SetDefault(prefix+"delimiter", 10)
+	v.SetDefault(prefix+"keepalive", true)
+	v.SetDefault(prefix+"keepalive_period", "75s")
 }
 
 func SetMainDefaults(v *viper.Viper, prefixed bool) {

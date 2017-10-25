@@ -650,6 +650,8 @@ func (c *BaseConfig) Complete() (err error) {
 		c.Main.Dest = Udp
 	case "tcp":
 		c.Main.Dest = Tcp
+	case "relp":
+		c.Main.Dest = Relp
 	default:
 		return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown destination type: '%s'", c.Main.Destination)}
 	}
@@ -726,7 +728,7 @@ func (c *BaseConfig) Complete() (err error) {
 			c.Syslog[i].PartitionTmpl = "mypk-{{.Hostname}}"
 		}
 		if syslogConf.KeepAlivePeriod == 0 {
-			c.Syslog[i].KeepAlivePeriod = 30 * time.Second
+			c.Syslog[i].KeepAlivePeriod = 75 * time.Second
 		}
 		if syslogConf.Timeout == 0 {
 			c.Syslog[i].Timeout = time.Minute

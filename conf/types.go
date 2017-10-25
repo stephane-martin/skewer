@@ -13,6 +13,7 @@ const (
 	Kafka DestinationType = iota
 	Udp
 	Tcp
+	Relp
 )
 
 // BaseConfig is the root of all configuration parameters.
@@ -108,7 +109,10 @@ type UdpDestConfig struct {
 
 type TcpDestConfig struct {
 	TcpUdpRelpDestBaseConfig `mapstructure:",squash"`
-	LineFraming              bool `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
+	LineFraming              bool          `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
+	FrameDelimiter           uint8         `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
+	KeepAlive                bool          `mapstructure:"keepalive" toml:"keepalive" json:"keepalive"`
+	KeepAlivePeriod          time.Duration `mapstructure:"keepalive_period" toml:"keepalive_period" json:"keepalive_period"`
 }
 
 type FilterSubConfig struct {
