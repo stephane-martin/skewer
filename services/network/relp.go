@@ -3,6 +3,7 @@ package network
 import (
 	"bufio"
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
@@ -14,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Workiva/go-datastructures/trie/ctrie"
 	"github.com/oklog/ulid"
 	"github.com/pquerna/ffjson/ffjson"
 	"github.com/prometheus/client_golang/prometheus"
@@ -48,7 +50,6 @@ type ackForwarder struct {
 	succ sync.Map
 	fail sync.Map
 	comm sync.Map
-	mu   sync.Mutex
 	next uintptr
 }
 
@@ -56,34 +57,48 @@ func newAckForwarder() *ackForwarder {
 	return &ackForwarder{}
 }
 
+func txnr2bytes(txnr int) []byte {
+	bs := make([]byte, 8)
+	ux := uint64(txnr) << 1
+	if txnr < 0 {
+		ux = ^ux
+	}
+	binary.LittleEndian.PutUint64(bs, ux)
+	return bs
+}
+
+func bytes2txnr(b []byte) int {
+	ux := binary.LittleEndian.Uint64(b)
+	x := int64(ux >> 1)
+	if ux&1 != 0 {
+		x = ^x
+	}
+	return int(x)
+}
+
 func (f *ackForwarder) Received(connID uintptr, txnr int) {
-	if m, ok := f.comm.Load(connID); ok {
-		f.mu.Lock()
-		m.(map[int]bool)[txnr] = true
-		f.mu.Unlock()
+	if c, ok := f.comm.Load(connID); ok {
+		c.(*ctrie.Ctrie).Insert(txnr2bytes(txnr), true)
 	}
 }
 
 func (f *ackForwarder) Committed(connID uintptr, txnr int) {
-	if m, ok := f.comm.Load(connID); ok {
-		f.mu.Lock()
-		delete(m.(map[int]bool), txnr)
-		f.mu.Unlock()
+	if c, ok := f.comm.Load(connID); ok {
+		c.(*ctrie.Ctrie).Remove(txnr2bytes(txnr))
 	}
 }
 
 func (f *ackForwarder) NextToCommit(connID uintptr) int {
-	if m, ok := f.comm.Load(connID); ok {
-		f.mu.Lock()
+	if c, ok := f.comm.Load(connID); ok {
 		var minimum = int(-1)
-		for k := range m.(map[int]bool) {
+		for entry := range c.(*ctrie.Ctrie).Iterator(nil) {
+			txnr := bytes2txnr(entry.Key)
 			if minimum == -1 {
-				minimum = k
-			} else if k < minimum {
-				minimum = k
+				minimum = txnr
+			} else if txnr < minimum {
+				minimum = txnr
 			}
 		}
-		f.mu.Unlock()
 		return minimum
 	}
 	return -1
@@ -125,10 +140,9 @@ func (f *ackForwarder) GetFail(connID uintptr) int {
 
 func (f *ackForwarder) AddConn() uintptr {
 	connID := atomic.AddUintptr(&f.next, 1)
-
 	f.succ.Store(connID, queue.NewIntQueue())
 	f.fail.Store(connID, queue.NewIntQueue())
-	f.comm.Store(connID, map[int]bool{})
+	f.comm.Store(connID, ctrie.New(nil))
 	return connID
 }
 

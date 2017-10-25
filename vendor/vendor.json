@@ -45,6 +45,144 @@
 			"revisionTime": "2017-04-10T19:29:09Z"
 		},
 		{
+			"checksumSHA1": "O2+wTB8KwlcXF3gfU+Ya4e+JGz0=",
+			"path": "github.com/Workiva/go-datastructures",
+			"revision": "e740680cc77dafd9615b25918b39f4a0ef5ab955",
+			"revisionTime": "2017-09-08T14:47:16Z"
+		},
+		{
+			"checksumSHA1": "Q453QV0zDeaVNbARfrphlmc5+s4=",
+			"path": "github.com/Workiva/go-datastructures/augmentedtree",
+			"revision": "e740680cc77dafd9615b25918b39f4a0ef5ab955",
+			"revisionTime": "2017-09-08T14:47:16Z"
+		},
+		{
+			"checksumSHA1": "buHKXvqsZw1OS2+libHd3PQwNow=",
+			"path": "github.com/Workiva/go-datastructures/bitarray",
+			"revision": "e740680cc77dafd9615b25918b39f4a0ef5ab955",
+			"revisionTime": "2017-09-08T14:47:16Z"
+		},
+		{
+			"checksumSHA1": "QoFa1mSGgX90NhYjw5PyvtQhWy4=",
+			"path": "github.com/Workiva/go-datastructures/btree/palm",
+			"revision": "e740680cc77dafd9615b25918b39f4a0ef5ab955",
+			"revisionTime": "2017-09-08T14:47:16Z"
+		},
+		{
+			"checksumSHA1": "mmIqigkeOrA0j947KkidpONFDeA=",
+			"path": "github.com/Workiva/go-datastructures/btree/plus",
+			"revision": "e740680cc77dafd9615b25918b39f4a0ef5ab955",
+			"revisionTime": "2017-09-08T14:47:16Z"
+		},
+		{
+			"checksumSHA1": "fAHqHWI6DrQ0pJisGD+x6taaLqg=",
+			"path": "github.com/Workiva/go-datastructures/common",
+			"revision": "e740680cc77dafd9615b25918b39f4a0ef5ab955",
+			"revisionTime": "2017-09-08T14:47:16Z"
+		},
+		{
+			"checksumSHA1": "skcSzi0SIvAleIgsB25p42Fr/xc=",
+			"path": "github.com/Workiva/go-datastructures/fibheap",
+			"revision": "e740680cc77dafd9615b25918b39f4a0ef5ab955",
+			"revisionTime": "2017-09-08T14:47:16Z"
+		},
+		{
+			"checksumSHA1": "hiCq1o/L6XBo3K5I9iyKPg4VSDI=",
+			"path": "github.com/Workiva/go-datastructures/futures",
+			"revision": "e740680cc77dafd9615b25918b39f4a0ef5ab955",
+			"revisionTime": "2017-09-08T14:47:16Z"
+		},
+		{
+			"checksumSHA1": "VbTzOZVwhuWnaZ8jK1wVFYFasY4=",
+			"path": "github.com/Workiva/go-datastructures/hashmap/fastinteger",
+			"revision": "e740680cc77dafd9615b25918b39f4a0ef5ab955",
+			"revisionTime": "2017-09-08T14:47:16Z"
+		},
+		{
+			"checksumSHA1": "FgKyRoBOmwBVK3ym8VjogNVUtFg=",
+			"path": "github.com/Workiva/go-datastructures/list",
+			"revision": "e740680cc77dafd9615b25918b39f4a0ef5ab955",
+			"revisionTime": "2017-09-08T14:47:16Z"
+		},
+		{
+			"checksumSHA1": "0zTrIXZBGXZ3UMSnqmQ6Etym3SA=",
+			"path": "github.com/Workiva/go-datastructures/numerics/optimization",
+			"revision": "e740680cc77dafd9615b25918b39f4a0ef5ab955",
+			"revisionTime": "2017-09-08T14:47:16Z"
+		},
+		{
+			"checksumSHA1": "Qu5hs3+PGBg5ZNT6jJ8NDUO8dIM=",
+			"path": "github.com/Workiva/go-datastructures/queue",
+			"revision": "e740680cc77dafd9615b25918b39f4a0ef5ab955",
+			"revisionTime": "2017-09-08T14:47:16Z"
+		},
+		{
+			"checksumSHA1": "pIq4okdGV+zqNQZXcLL51StU2ig=",
+			"path": "github.com/Workiva/go-datastructures/rangetree",
+			"revision": "e740680cc77dafd9615b25918b39f4a0ef5ab955",
+			"revisionTime": "2017-09-08T14:47:16Z"
+		},
+		{
+			"checksumSHA1": "5/gEtDxuA1Otu1tq5RTJjtmz96c=",
+			"path": "github.com/Workiva/go-datastructures/rangetree/skiplist",
+			"revision": "e740680cc77dafd9615b25918b39f4a0ef5ab955",
+			"revisionTime": "2017-09-08T14:47:16Z"
+		},
+		{
+			"checksumSHA1": "kFlxdPDKIxuaVHdam0JpvW0C8+A=",
+			"path": "github.com/Workiva/go-datastructures/set",
+			"revision": "e740680cc77dafd9615b25918b39f4a0ef5ab955",
+			"revisionTime": "2017-09-08T14:47:16Z"
+		},
+		{
+			"checksumSHA1": "EzLZjv1FfqFCwdGw5x0mpKcoImc=",
+			"path": "github.com/Workiva/go-datastructures/slice",
+			"revision": "e740680cc77dafd9615b25918b39f4a0ef5ab955",
+			"revisionTime": "2017-09-08T14:47:16Z"
+		},
+		{
+			"checksumSHA1": "ht8xmApMsyzbf86kfQmllRhBX/o=",
+			"path": "github.com/Workiva/go-datastructures/slice/skip",
+			"revision": "e740680cc77dafd9615b25918b39f4a0ef5ab955",
+			"revisionTime": "2017-09-08T14:47:16Z"
+		},
+		{
+			"checksumSHA1": "yF87wmXlWS5vetkYj/D2Q+IWWoc=",
+			"path": "github.com/Workiva/go-datastructures/sort",
+			"revision": "e740680cc77dafd9615b25918b39f4a0ef5ab955",
+			"revisionTime": "2017-09-08T14:47:16Z"
+		},
+		{
+			"checksumSHA1": "bnc5NNRBAz1+hlTMCc/M+1si8Pc=",
+			"path": "github.com/Workiva/go-datastructures/threadsafe/err",
+			"revision": "e740680cc77dafd9615b25918b39f4a0ef5ab955",
+			"revisionTime": "2017-09-08T14:47:16Z"
+		},
+		{
+			"checksumSHA1": "ilkzfJ7kEvPkj2eFccL37ob+WAk=",
+			"path": "github.com/Workiva/go-datastructures/tree/avl",
+			"revision": "e740680cc77dafd9615b25918b39f4a0ef5ab955",
+			"revisionTime": "2017-09-08T14:47:16Z"
+		},
+		{
+			"checksumSHA1": "iqOVauyKsqn3kzAdpaMR8Rh4XOU=",
+			"path": "github.com/Workiva/go-datastructures/trie/ctrie",
+			"revision": "e740680cc77dafd9615b25918b39f4a0ef5ab955",
+			"revisionTime": "2017-09-08T14:47:16Z"
+		},
+		{
+			"checksumSHA1": "1IMoTe2k5fGCL7vDU7qXfnJK0zc=",
+			"path": "github.com/Workiva/go-datastructures/trie/xfast",
+			"revision": "e740680cc77dafd9615b25918b39f4a0ef5ab955",
+			"revisionTime": "2017-09-08T14:47:16Z"
+		},
+		{
+			"checksumSHA1": "n3n6aOqXmPiNmcWHKVnyTmJOLbo=",
+			"path": "github.com/Workiva/go-datastructures/trie/yfast",
+			"revision": "e740680cc77dafd9615b25918b39f4a0ef5ab955",
+			"revisionTime": "2017-09-08T14:47:16Z"
+		},
+		{
 			"checksumSHA1": "mEPx03tDisj6nvPDxzIeb1gt4xg=",
 			"path": "github.com/armon/consul-api",
 			"revision": "dcfedd50ed5334f96adee43fc88518a4f095e15c",
@@ -79,12 +217,6 @@
 			"path": "github.com/coreos/pkg/dlopen",
 			"revision": "8dbaa491b063ed47e2474b5363de0c0db91cf9f2",
 			"revisionTime": "2017-04-20T17:29:56Z"
-		},
-		{
-			"checksumSHA1": "bUxs+biYzs2J+mxcPrwhfvbugWw=",
-			"path": "github.com/cornelk/hashmap",
-			"revision": "be6a8af587de35541c6772ddfe498f13d4644050",
-			"revisionTime": "2017-09-18T09:44:03Z"
 		},
 		{
 			"checksumSHA1": "dvabztWVQX8f6oMLRyv4dLH+TGY=",
