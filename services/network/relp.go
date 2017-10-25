@@ -863,6 +863,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 	s.AddConnection(conn)
 	connID := s.forwarder.AddConn()
 	scanner := bufio.NewScanner(conn)
+	logger := s.Logger
 
 	defer func() {
 		logger.Info("Scanning the RELP stream has ended", "error", scanner.Err())
@@ -894,7 +895,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 	path = strings.TrimSpace(path)
 	localPortStr := strconv.FormatInt(int64(localPort), 10)
 
-	logger := s.Logger.New("protocol", s.Protocol, "client", client, "local_port", localPort, "unix_socket_path", path, "format", config.Format)
+	logger = logger.New("protocol", s.Protocol, "client", client, "local_port", localPort, "unix_socket_path", path, "format", config.Format)
 	logger.Info("New client connection")
 	s.metrics.ClientConnectionCounter.WithLabelValues(s.Protocol, client, localPortStr, path).Inc()
 
