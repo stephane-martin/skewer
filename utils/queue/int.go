@@ -50,6 +50,17 @@ func (q *IntQueue) Get() (int, error) {
 	return -1, nil
 }
 
+func (q *IntQueue) Peek() (int, error) {
+	if q.Disposed() {
+		return -1, ErrDisposed
+	}
+	next := q.tail.next
+	if next != nil {
+		return next.uid, nil
+	}
+	return -1, nil
+}
+
 func (q *IntQueue) Put(uid int) error {
 	if q.Disposed() {
 		return ErrDisposed

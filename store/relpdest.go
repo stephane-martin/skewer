@@ -130,12 +130,12 @@ func NewRelpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perm
 		}
 	}()
 
-	go d.getanswers()
+	go d.handleRspAnswers()
 
 	return d, nil
 }
 
-func (d *relpDestination) getanswers() {
+func (d *relpDestination) handleRspAnswers() {
 	for {
 		txnr, retcode, _, err := d.scan()
 		if err != nil {
@@ -145,13 +145,13 @@ func (d *relpDestination) getanswers() {
 		d.answers <- true
 		uid, ok := d.txnr2msgid.Load(txnr)
 		if ok {
+			d.txnr2msgid.Delete(txnr)
+			<-d.window
 			if retcode == 200 {
 				d.ack(uid.([16]byte))
 			} else {
 				d.nack(uid.([16]byte))
 			}
-			<-d.window
-			d.txnr2msgid.Delete(txnr)
 		}
 	}
 }

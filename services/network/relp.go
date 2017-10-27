@@ -15,7 +15,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Workiva/go-datastructures/trie/ctrie"
 	"github.com/oklog/ulid"
 	"github.com/pquerna/ffjson/ffjson"
 	"github.com/prometheus/client_golang/prometheus"
@@ -79,28 +78,23 @@ func bytes2txnr(b []byte) int {
 
 func (f *ackForwarder) Received(connID uintptr, txnr int) {
 	if c, ok := f.comm.Load(connID); ok {
-		c.(*ctrie.Ctrie).Insert(txnr2bytes(txnr), true)
+		c.(*queue.IntQueue).Put(txnr)
 	}
 }
 
-func (f *ackForwarder) Committed(connID uintptr, txnr int) {
+func (f *ackForwarder) Commit(connID uintptr) {
 	if c, ok := f.comm.Load(connID); ok {
-		c.(*ctrie.Ctrie).Remove(txnr2bytes(txnr))
+		c.(*queue.IntQueue).Get()
 	}
 }
 
 func (f *ackForwarder) NextToCommit(connID uintptr) int {
 	if c, ok := f.comm.Load(connID); ok {
-		var minimum = int(-1)
-		for entry := range c.(*ctrie.Ctrie).Iterator(nil) {
-			txnr := bytes2txnr(entry.Key)
-			if minimum == -1 {
-				minimum = txnr
-			} else if txnr < minimum {
-				minimum = txnr
-			}
+		next, err := c.(*queue.IntQueue).Peek()
+		if err != nil {
+			return -1
 		}
-		return minimum
+		return next
 	}
 	return -1
 }
@@ -143,7 +137,7 @@ func (f *ackForwarder) AddConn() uintptr {
 	connID := atomic.AddUintptr(&f.next, 1)
 	f.succ.Store(connID, queue.NewIntQueue())
 	f.fail.Store(connID, queue.NewIntQueue())
-	f.comm.Store(connID, ctrie.New(nil))
+	f.comm.Store(connID, queue.NewIntQueue())
 	return connID
 }
 
@@ -732,7 +726,7 @@ func (s *RelpServiceImpl) handleResponses(conn net.Conn, connID uintptr, client 
 			}
 
 			if err == nil {
-				s.forwarder.Committed(connID, next)
+				s.forwarder.Commit(connID)
 			} else if err == io.EOF {
 				// client is gone
 				return
