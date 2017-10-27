@@ -82,9 +82,8 @@ to post bugs and ask questions.
 
 ## Building
 
-
+-   On Linux systemd headers and libseccomp headers are needed
 -	Go Dependencies are vendored.
--	Uses `cgo` at least on Linux.
 -	On linux you will need to install libsystemd header files (needed to
 	query journald)
 -	You can `go get github.com/stephane-martin/skewer` or `git clone ...` and

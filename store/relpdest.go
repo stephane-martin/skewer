@@ -24,33 +24,33 @@ var OPEN = []byte("relp_version=0\nrelp_software=skewer\ncommands=syslog")
 var endl = []byte("\n")
 
 type relpDestination struct {
-	logger     log15.Logger
-	fatal      chan struct{}
-	registry   *prometheus.Registry
-	conn       net.Conn
-	scanner    *bufio.Scanner
-	once       sync.Once
-	format     string
-	ack        storeCallback
-	nack       storeCallback
-	permerr    storeCallback
-	curtxnr    uint64
-	txnr2msgid sync.Map
-	window     chan bool
-	answers    chan bool
+	logger      log15.Logger
+	fatal       chan struct{}
+	registry    *prometheus.Registry
+	conn        net.Conn
+	scanner     *bufio.Scanner
+	once        sync.Once
+	format      string
+	ack         storeCallback
+	nack        storeCallback
+	permerr     storeCallback
+	curtxnr     uint64
+	txnr2msgid  sync.Map
+	window      chan bool
+	relpTimeout time.Duration
 }
 
 func NewRelpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (dest Destination, err error) {
 
 	d := &relpDestination{
-		logger:   logger,
-		registry: prometheus.NewRegistry(),
-		ack:      ack,
-		nack:     nack,
-		permerr:  permerr,
-		format:   bc.RelpDest.Format,
-		window:   make(chan bool, bc.RelpDest.WindowSize),
-		answers:  make(chan bool),
+		logger:      logger,
+		registry:    prometheus.NewRegistry(),
+		ack:         ack,
+		nack:        nack,
+		permerr:     permerr,
+		format:      bc.RelpDest.Format,
+		window:      make(chan bool, bc.RelpDest.WindowSize),
+		relpTimeout: bc.RelpDest.RelpTimeout,
 	}
 
 	defer func() {
@@ -117,19 +117,6 @@ func NewRelpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perm
 		}()
 	}
 
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(bc.RelpDest.RelpTimeout):
-				d.once.Do(func() { close(d.fatal) })
-				return
-			case <-d.answers:
-			}
-		}
-	}()
-
 	go d.handleRspAnswers()
 
 	return d, nil
@@ -137,12 +124,13 @@ func NewRelpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perm
 
 func (d *relpDestination) handleRspAnswers() {
 	for {
+		d.conn.SetReadDeadline(time.Now().Add(d.relpTimeout))
 		txnr, retcode, _, err := d.scan()
 		if err != nil {
+			d.logger.Info("RELP destination read error", "error", err)
 			d.once.Do(func() { close(d.fatal) })
 			return
 		}
-		d.answers <- true
 		uid, ok := d.txnr2msgid.Load(txnr)
 		if ok {
 			d.txnr2msgid.Delete(txnr)
@@ -228,6 +216,8 @@ func (d *relpDestination) Send(message *model.TcpUdpParsedMessage, partitionKey 
 
 func (d *relpDestination) Close() {
 	d.wclose()
+	d.conn.SetReadDeadline(time.Now().Add(time.Second))
+	d.scan()
 	d.conn.Close()
 }
 

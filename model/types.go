@@ -171,7 +171,7 @@ func (m *SyslogMessage) Marshal5424() (res []byte, err error) {
 	b := bytes.NewBuffer(nil)
 	fmt.Fprintf(b, "<%d>1 %s %s %s %s %s ",
 		m.Priority,
-		time.Unix(0, m.TimeReportedNum).UTC().Format(time.RFC3339Nano),
+		time.Unix(0, m.TimeReportedNum).UTC().Format(time.RFC3339),
 		nilify(m.Hostname),
 		nilify(m.Appname),
 		nilify(m.Procid),
