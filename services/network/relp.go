@@ -36,6 +36,7 @@ import (
 
 var tr = true
 var fa = false
+var sp = []byte(" ")
 
 type RelpServerStatus int
 
@@ -946,19 +947,14 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 	if timeout > 0 {
 		conn.SetReadDeadline(time.Now().Add(timeout))
 	}
-	scanner.Split(RelpSplit)
+	scanner.Split(utils.RelpSplit)
 	scanner.Buffer(make([]byte, 0, 132000), 132000)
 	var rawmsg *model.RawTcpMessage
 	var previous = int(-1)
 
 Loop:
 	for scanner.Scan() {
-		//logger.Debug("Scan!")
-		if timeout > 0 {
-			conn.SetReadDeadline(time.Now().Add(timeout))
-		}
-		line := scanner.Bytes()
-		splits := bytes.SplitN(line, []byte(" "), 4)
+		splits := bytes.SplitN(scanner.Bytes(), sp, 4)
 		txnr, _ := strconv.Atoi(string(splits[0]))
 		if txnr <= previous {
 			logger.Warn("TXNR did not increase", "previous", previous, "current", txnr)
@@ -1028,53 +1024,9 @@ Loop:
 			s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
 			return
 		}
-	}
-}
+		if timeout > 0 {
+			conn.SetReadDeadline(time.Now().Add(timeout))
+		}
 
-func splitSpaceOrLF(r rune) bool {
-	return r == ' ' || r == '\n' || r == '\r'
-}
-
-// RelpSplit is used to extract RELP lines from the incoming TCP stream
-func RelpSplit(data []byte, atEOF bool) (int, []byte, error) {
-	trimmedData := bytes.TrimLeft(data, " \r\n")
-	if len(trimmedData) == 0 {
-		return 0, nil, nil
 	}
-	splits := bytes.FieldsFunc(trimmedData, splitSpaceOrLF)
-	l := len(splits)
-	if l < 3 {
-		// Request more data
-		return 0, nil, nil
-	}
-
-	txnrStr := string(splits[0])
-	command := string(splits[1])
-	datalenStr := string(splits[2])
-	tokenStr := txnrStr + " " + command + " " + datalenStr
-	advance := len(data) - len(trimmedData) + len(tokenStr) + 1
-
-	if l == 3 && (len(data) < advance) {
-		// datalen field is not complete, request more data
-		return 0, nil, nil
-	}
-
-	_, err := strconv.Atoi(txnrStr)
-	if err != nil {
-		return 0, nil, err
-	}
-	datalen, err := strconv.Atoi(datalenStr)
-	if err != nil {
-		return 0, nil, err
-	}
-	if datalen == 0 {
-		return advance, []byte(tokenStr), nil
-	}
-	advance += datalen + 1
-	if len(data) >= advance {
-		token := bytes.Trim(data[:advance], " \r\n")
-		return advance, token, nil
-	}
-	// Request more data
-	return 0, nil, nil
 }

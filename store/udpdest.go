@@ -13,7 +13,6 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
-	"github.com/stephane-martin/skewer/utils"
 )
 
 type udpDestination struct {
@@ -94,11 +93,7 @@ func (d *udpDestination) Send(message *model.TcpUdpParsedMessage, partitionKey s
 		d.permerr(message.Uid)
 		return err
 	}
-	err = utils.ChainWrites(
-		d.conn,
-		serial,
-		endl,
-	)
+	_, err = d.conn.Write(serial)
 	if err != nil {
 		d.nack(message.Uid)
 		d.once.Do(func() { close(d.fatal) })

@@ -19,11 +19,27 @@ func SetDefaults(v *viper.Viper) {
 		SetMetricsDefaults,
 		SetUdpDestDefaults,
 		SetTcpDestDefaults,
+		SetRelpDestDefaults,
 		SetMainDefaults,
 	}
 	for _, f := range funcs {
 		f(v, true)
 	}
+}
+
+func SetRelpDestDefaults(v *viper.Viper, prefixed bool) {
+	prefix := ""
+	if prefixed {
+		prefix = "relp_destination."
+	}
+	v.SetDefault(prefix+"host", "127.0.0.1")
+	v.SetDefault(prefix+"port", 1515)
+	v.SetDefault(prefix+"format", "rfc5424")
+	v.SetDefault(prefix+"keepalive", true)
+	v.SetDefault(prefix+"keepalive_period", "75s")
+	v.SetDefault(prefix+"window_size", 128)
+	v.SetDefault(prefix+"connection_timeout", "10s")
+	v.SetDefault(prefix+"relp_timeout", "90s")
 }
 
 func SetUdpDestDefaults(v *viper.Viper, prefixed bool) {
@@ -32,7 +48,7 @@ func SetUdpDestDefaults(v *viper.Viper, prefixed bool) {
 		prefix = "udp_destination."
 	}
 	v.SetDefault(prefix+"host", "127.0.0.1")
-	v.SetDefault(prefix+"port", 514)
+	v.SetDefault(prefix+"port", 1514)
 	v.SetDefault(prefix+"format", "rfc5424")
 }
 
@@ -42,7 +58,7 @@ func SetTcpDestDefaults(v *viper.Viper, prefixed bool) {
 		prefix = "tcp_destination."
 	}
 	v.SetDefault(prefix+"host", "127.0.0.1")
-	v.SetDefault(prefix+"port", 514)
+	v.SetDefault(prefix+"port", 1514)
 	v.SetDefault(prefix+"format", "rfc5424")
 	v.SetDefault(prefix+"delimiter", 10)
 	v.SetDefault(prefix+"keepalive", true)

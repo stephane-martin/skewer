@@ -28,6 +28,7 @@ type BaseConfig struct {
 	KafkaDest  KafkaDestConfig  `mapstructure:"kafka_destination" toml:"kafka_destination" json:"kafka_destination"`
 	UdpDest    UdpDestConfig    `mapstructure:"udp_destination" toml:"udp_destination" json:"udp_destination"`
 	TcpDest    TcpDestConfig    `mapstructure:"tcp_destination" toml:"tcp_destination" json:"tcp_destination"`
+	RelpDest   RelpDestConfig   `mapstructure:"relp_destination" toml:"relp_destination" json:"relp_destination"`
 }
 
 // MainConfig lists general/global parameters.
@@ -105,6 +106,15 @@ type TcpUdpRelpDestBaseConfig struct {
 
 type UdpDestConfig struct {
 	TcpUdpRelpDestBaseConfig `mapstructure:",squash"`
+}
+
+type RelpDestConfig struct {
+	TcpUdpRelpDestBaseConfig `mapstructure:",squash"`
+	KeepAlive                bool          `mapstructure:"keepalive" toml:"keepalive" json:"keepalive"`
+	KeepAlivePeriod          time.Duration `mapstructure:"keepalive_period" toml:"keepalive_period" json:"keepalive_period"`
+	WindowSize               int           `mapstructure:"window_size" toml:"window_size" json:"window_size"`
+	ConnTimeout              time.Duration `mapstructure:"connection_timeout" toml:"connection_timeout" json:"connection_timeout"`
+	RelpTimeout              time.Duration `mapstructure:"relp_timeout" toml:"relp_timeout" json:"relp_timeout"`
 }
 
 type TcpDestConfig struct {

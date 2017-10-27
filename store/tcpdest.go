@@ -18,7 +18,6 @@ import (
 )
 
 var sp = []byte(" ")
-var endl = []byte("\n")
 
 type tcpDestination struct {
 	logger      log15.Logger
@@ -35,7 +34,7 @@ type tcpDestination struct {
 	previous    *model.TcpUdpParsedMessage
 }
 
-func NewTcpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (Destination, error) {
+func NewTcpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (dest Destination, err error) {
 	d := &tcpDestination{
 		logger:      logger,
 		registry:    prometheus.NewRegistry(),
@@ -46,6 +45,12 @@ func NewTcpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perme
 		lineFraming: bc.TcpDest.LineFraming,
 		delimiter:   []byte{bc.TcpDest.FrameDelimiter},
 	}
+
+	defer func() {
+		if d.conn != nil && err != nil {
+			d.conn.Close()
+		}
+	}()
 
 	//d.registry.MustRegister(d.ackCounter)
 
@@ -98,10 +103,6 @@ func NewTcpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perme
 	return d, nil
 }
 
-func (d *tcpDestination) Gather() ([]*dto.MetricFamily, error) {
-	return d.registry.Gather()
-}
-
 func (d *tcpDestination) Send(message *model.TcpUdpParsedMessage, partitionKey string, partitionNumber int32, topic string) error {
 	serial, err := message.MarshalAll(d.format)
 	if err != nil {
@@ -109,11 +110,7 @@ func (d *tcpDestination) Send(message *model.TcpUdpParsedMessage, partitionKey s
 		return err
 	}
 	if d.lineFraming {
-		err = utils.ChainWrites(
-			d.conn,
-			serial,
-			d.delimiter,
-		)
+		err = utils.ChainWrites(d.conn, serial, d.delimiter)
 	} else {
 		err = utils.ChainWrites(
 			d.conn,
@@ -145,4 +142,8 @@ func (d *tcpDestination) Close() {
 
 func (d *tcpDestination) Fatal() chan struct{} {
 	return d.fatal
+}
+
+func (d *tcpDestination) Gather() ([]*dto.MetricFamily, error) {
+	return d.registry.Gather()
 }

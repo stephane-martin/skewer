@@ -57,6 +57,7 @@ func deriveDeepCopy(dst, src *BaseConfig) {
 	dst.KafkaDest = *field
 	dst.UdpDest = src.UdpDest
 	dst.TcpDest = src.TcpDest
+	dst.RelpDest = src.RelpDest
 }
 
 // deriveDeepCopy_ recursively copies the contents of src into dst.

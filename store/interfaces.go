@@ -51,6 +51,8 @@ func NewDestination(ctx context.Context,
 		return NewUdpDestination(ctx, bc, ack, nack, permerr, logger)
 	case conf.Tcp:
 		return NewTcpDestination(ctx, bc, ack, nack, permerr, logger)
+	case conf.Relp:
+		return NewRelpDestination(ctx, bc, ack, nack, permerr, logger)
 	default:
 		return nil, fmt.Errorf("Unknown destination type: %d", typ)
 	}
