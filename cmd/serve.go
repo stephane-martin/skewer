@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -41,6 +42,11 @@ connects to Kafka, and forwards messages to Kafka.`,
 	},
 }
 
+type spair struct {
+	child  int
+	parent int
+}
+
 var testFlag bool
 var syslogFlag bool
 var loglevelFlag string
@@ -53,6 +59,8 @@ var uidFlag string
 var gidFlag string
 var dumpableFlag bool
 var profile bool
+var handles []string
+var handlesMap map[string]int
 
 func init() {
 	RootCmd.AddCommand(serveCmd)
@@ -68,6 +76,26 @@ func init() {
 	serveCmd.Flags().StringVar(&gidFlag, "gid", "", "Switch to this group ID (when launched as root)")
 	serveCmd.Flags().BoolVar(&dumpableFlag, "dumpable", false, "if set, the skewer process will be traceable/dumpable")
 	serveCmd.Flags().BoolVar(&profile, "profile", false, "if set, profile memory")
+
+	handles = []string{
+		"CHILD_BINDER",
+		"TCP_BINDER",
+		"UDP_BINDER",
+		"RELP_BINDER",
+		"CHILD_LOGGER",
+		"TCP_LOGGER",
+		"UDP_LOGGER",
+		"RELP_LOGGER",
+		"JOURNAL_LOGGER",
+		"CONFIG_LOGGER",
+		"STORE_LOGGER",
+		"ACCT_LOGGER",
+	}
+
+	handlesMap = map[string]int{}
+	for i, h := range handles {
+		handlesMap[h] = i + 3
+	}
 }
 
 func runserve() {
@@ -174,17 +202,15 @@ func runserve() {
 	rootlogger := logging.SetLogging(loglevelFlag, logjsonFlag, syslogFlag, logfilenameFlag)
 	logger := rootlogger.New("proc", "parent")
 
-	handlesToClose := []int{}
-
-	mustSocketPair := func(typ int) (int, int) {
+	mustSocketPair := func(typ int) spair {
 		a, b, err := sys.SocketPair(typ)
 		if err != nil {
 			logger.Crit("SocketPair() error", "error", err)
 			os.Exit(-1)
 		}
-		handlesToClose = append(handlesToClose, a)
-		return a, b
+		return spair{child: a, parent: b}
 	}
+
 	getLoggerConn := func(handle int) net.Conn {
 		loggerConn, _ := net.FileConn(os.NewFile(uintptr(handle), "logger"))
 		loggerConn.(*net.UnixConn).SetReadBuffer(65536)
@@ -202,45 +228,32 @@ func runserve() {
 		os.Exit(-1)
 	}
 
-	binderChildHandle, binderParentHandle := mustSocketPair(syscall.SOCK_STREAM)
-	binderTcpHandle, binderParentTcpHandle := mustSocketPair(syscall.SOCK_STREAM)
-	binderUdpHandle, binderParentUdpHandle := mustSocketPair(syscall.SOCK_STREAM)
-	binderRelpHandle, binderParentRelpHandle := mustSocketPair(syscall.SOCK_STREAM)
+	binderSockets := map[string]spair{}
+	loggerSockets := map[string]spair{}
 
-	err = binder.Binder([]int{binderParentHandle, binderParentTcpHandle, binderParentUdpHandle, binderParentRelpHandle}, logger) // returns immediately
+	for _, h := range handles {
+		if strings.HasSuffix(h, "_BINDER") {
+			binderSockets[h] = mustSocketPair(syscall.SOCK_STREAM)
+		} else {
+			loggerSockets[h] = mustSocketPair(syscall.SOCK_DGRAM)
+		}
+	}
+
+	binderParents := []int{}
+	for _, s := range binderSockets {
+		binderParents = append(binderParents, s.parent)
+	}
+	err = binder.Binder(binderParents, logger) // returns immediately
 	if err != nil {
 		logger.Crit("Error setting the root binder", "error", err)
 		os.Exit(-1)
 	}
 
-	loggerChildHandle, loggerParentHandle := mustSocketPair(syscall.SOCK_DGRAM)
-	loggerChildConn := getLoggerConn(loggerParentHandle)
-
-	loggerTcpHandle, loggerParentTcpHandle := mustSocketPair(syscall.SOCK_DGRAM)
-	loggerTcpConn := getLoggerConn(loggerParentTcpHandle)
-
-	loggerUdpHandle, loggerParentUdpHandle := mustSocketPair(syscall.SOCK_DGRAM)
-	loggerUdpConn := getLoggerConn(loggerParentUdpHandle)
-
-	loggerRelpHandle, loggerParentRelpHandle := mustSocketPair(syscall.SOCK_DGRAM)
-	loggerRelpConn := getLoggerConn(loggerParentRelpHandle)
-
-	loggerJournalHandle, loggerParentJournalHandle := mustSocketPair(syscall.SOCK_DGRAM)
-	loggerJournalConn := getLoggerConn(loggerParentJournalHandle)
-
-	loggerConfigurationHandle, loggerParentConfigurationHandle := mustSocketPair(syscall.SOCK_DGRAM)
-	loggerConfigurationConn := getLoggerConn(loggerParentConfigurationHandle)
-
-	loggerStoreHandle, loggerParentStoreHandle := mustSocketPair(syscall.SOCK_DGRAM)
-	loggerStoreConn := getLoggerConn(loggerParentStoreHandle)
-
-	loggerAcctHandle, loggerParentAcctHandle := mustSocketPair(syscall.SOCK_DGRAM)
-	loggerAcctConn := getLoggerConn(loggerParentAcctHandle)
-
-	logging.LogReceiver(context.Background(), rootlogger, []net.Conn{
-		loggerChildConn, loggerTcpConn, loggerUdpConn, loggerRelpConn, loggerJournalConn, loggerConfigurationConn, loggerStoreConn,
-		loggerAcctConn,
-	})
+	remoteLoggerConn := []net.Conn{}
+	for _, s := range loggerSockets {
+		remoteLoggerConn = append(remoteLoggerConn, getLoggerConn(s.parent))
+	}
+	logging.LogReceiver(context.Background(), rootlogger, remoteLoggerConn)
 
 	logger.Debug("Target user", "uid", numuid, "gid", numgid)
 
@@ -251,27 +264,23 @@ func runserve() {
 		os.Exit(-1)
 	}
 
+	extraFiles := []*os.File{}
+	for _, h := range handles {
+		if strings.HasSuffix(h, "_BINDER") {
+			extraFiles = append(extraFiles, os.NewFile(uintptr(binderSockets[h].child), h))
+		} else {
+			extraFiles = append(extraFiles, os.NewFile(uintptr(loggerSockets[h].child), h))
+		}
+	}
+
 	childProcess := exec.Cmd{
-		Args:   os.Args,
-		Path:   exe,
-		Stdin:  nil,
-		Stdout: os.Stdout,
-		Stderr: os.Stderr,
-		ExtraFiles: []*os.File{
-			os.NewFile(uintptr(binderChildHandle), "child_binder_file"),
-			os.NewFile(uintptr(binderTcpHandle), "tcp_binder_file"),
-			os.NewFile(uintptr(binderUdpHandle), "udp_binder_file"),
-			os.NewFile(uintptr(binderRelpHandle), "relp_binder_file"),
-			os.NewFile(uintptr(loggerChildHandle), "child_logger_file"),
-			os.NewFile(uintptr(loggerTcpHandle), "tcp_logger_file"),
-			os.NewFile(uintptr(loggerUdpHandle), "udp_logger_file"),
-			os.NewFile(uintptr(loggerRelpHandle), "relp_logger_file"),
-			os.NewFile(uintptr(loggerJournalHandle), "journal_logger_file"),
-			os.NewFile(uintptr(loggerConfigurationHandle), "config_logger_file"),
-			os.NewFile(uintptr(loggerStoreHandle), "store_logger_file"),
-			os.NewFile(uintptr(loggerAcctHandle), "acct_logger_file"),
-		},
-		Env: []string{"SKEWER_CHILD=TRUE", "PATH=/bin:/usr/bin"},
+		Args:       os.Args,
+		Path:       exe,
+		Stdin:      nil,
+		Stdout:     os.Stdout,
+		Stderr:     os.Stderr,
+		ExtraFiles: extraFiles,
+		Env:        []string{"SKEWER_CHILD=TRUE", "PATH=/bin:/usr/bin"},
 	}
 	if os.Getuid() != numuid {
 		childProcess.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uint32(numuid), Gid: uint32(numgid)}}
@@ -281,8 +290,13 @@ func runserve() {
 		logger.Crit("Error starting child", "error", err)
 		os.Exit(-1)
 	}
-	for _, handle := range handlesToClose {
-		syscall.Close(handle)
+
+	for _, h := range handles {
+		if strings.HasSuffix(h, "_BINDER") {
+			syscall.Close(binderSockets[h].child)
+		} else {
+			syscall.Close(loggerSockets[h].child)
+		}
 	}
 
 	sig_chan := make(chan os.Signal, 10)
@@ -312,9 +326,9 @@ func Serve() error {
 	defer shutdown()
 	var logger log15.Logger
 
-	binderFile := os.NewFile(3, "binder")
+	binderFile := os.NewFile(uintptr(handlesMap["CHILD_BINDER"]), "binder")
 
-	loggerConn, _ := net.FileConn(os.NewFile(7, "logger"))
+	loggerConn, _ := net.FileConn(os.NewFile(uintptr(handlesMap["CHILD_LOGGER"]), "logger"))
 	loggerConn.(*net.UnixConn).SetReadBuffer(65536)
 	loggerConn.(*net.UnixConn).SetWriteBuffer(65536)
 	loggerCtx, cancelLogger := context.WithCancel(context.Background())
@@ -346,7 +360,7 @@ func Serve() error {
 		Prefix:     consulPrefix,
 	}
 
-	confSvc := services.NewConfigurationService(12, logger)
+	confSvc := services.NewConfigurationService(handlesMap["CONFIG_LOGGER"], logger)
 	startConfSvc := func() chan *conf.BaseConfig {
 		confSvc.SetConfDir(configDirName)
 		confSvc.SetConsulParams(params)
@@ -380,7 +394,7 @@ func Serve() error {
 	metricsServer := &metrics.MetricsServer{}
 
 	// setup the Store
-	st := services.NewStorePlugin(13, logger)
+	st := services.NewStorePlugin(handlesMap["STORE_LOGGER"], logger)
 	st.SetConf(*c)
 	err = st.Create(testFlag, dumpableFlag, storeDirname, "", "")
 	if err != nil {
@@ -398,11 +412,34 @@ func Serve() error {
 	sig_chan := make(chan os.Signal, 10)
 	signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 
-	relpServicePlugin := services.NewPluginController(services.RELP, st, consulRegistry, 6, 10, logger)
-	tcpServicePlugin := services.NewPluginController(services.TCP, st, consulRegistry, 4, 8, logger)
-	udpServicePlugin := services.NewPluginController(services.UDP, st, consulRegistry, 5, 9, logger)
-	journalServicePlugin := services.NewPluginController(services.Journal, st, consulRegistry, 0, 11, logger)
-	accountingServicePlugin := services.NewPluginController(services.Accounting, st, consulRegistry, 0, 14, logger)
+	relpServicePlugin := services.NewPluginController(
+		services.RELP, st, consulRegistry,
+		handlesMap["RELP_BINDER"], handlesMap["RELP_LOGGER"],
+		logger,
+	)
+
+	tcpServicePlugin := services.NewPluginController(
+		services.TCP, st, consulRegistry,
+		handlesMap["TCP_BINDER"], handlesMap["TCP_LOGGER"],
+		logger,
+	)
+
+	udpServicePlugin := services.NewPluginController(
+		services.UDP, st, consulRegistry,
+		handlesMap["UDP_BINDER"], handlesMap["UDP_LOGGER"],
+		logger,
+	)
+
+	journalServicePlugin := services.NewPluginController(
+		services.Journal, st, consulRegistry,
+		0, handlesMap["JOURNAL_LOGGER"],
+		logger,
+	)
+	accountingServicePlugin := services.NewPluginController(
+		services.Accounting, st, consulRegistry,
+		0, handlesMap["ACCT_LOGGER"],
+		logger,
+	)
 
 	startAccounting := func(curconf *conf.BaseConfig) {
 		if curconf.Accounting.Enabled {
