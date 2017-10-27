@@ -139,6 +139,8 @@ func (d *relpDestination) handleRspAnswers() {
 				d.ack(uid.([16]byte))
 			} else {
 				d.nack(uid.([16]byte))
+				d.logger.Info("RELP server returned a non-200 code", "code", retcode)
+				d.once.Do(func() { close(d.fatal) })
 			}
 		}
 	}
@@ -219,6 +221,11 @@ func (d *relpDestination) Close() {
 	d.conn.SetReadDeadline(time.Now().Add(time.Second))
 	d.scan()
 	d.conn.Close()
+	// NACK all pending messages
+	d.txnr2msgid.Range(func(k interface{}, v interface{}) bool {
+		d.nack(v.([16]byte))
+		return true
+	})
 }
 
 func (d *relpDestination) Fatal() chan struct{} {
