@@ -105,7 +105,7 @@ func (s *AccountingService) Start(test bool) (infos []model.ListenerInfo, err er
 			} else {
 				acct = accounting.MakeAcct(buf, tick)
 				uid = <-s.generator
-				s.stasher.Stash(model.TcpUdpParsedMessage{
+				s.stasher.Stash(model.FullMessage{
 					ConfId: s.Conf.ConfID,
 					Uid:    uid,
 					Parsed: model.ParsedMessage{

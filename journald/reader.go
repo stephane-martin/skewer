@@ -29,7 +29,7 @@ type reader struct {
 	generator    chan ulid.ULID
 }
 
-type Converter func(map[string]string) model.TcpUdpParsedMessage
+type Converter func(map[string]string) model.FullMessage
 
 func EntryToSyslog(entry map[string]string) model.ParsedMessage {
 	m := model.SyslogMessage{}
@@ -93,7 +93,7 @@ func EntryToSyslog(entry map[string]string) model.ParsedMessage {
 
 func makeMapConverter(coding string, generator chan ulid.ULID) Converter {
 	decoder := utils.SelectDecoder(coding)
-	return func(m map[string]string) model.TcpUdpParsedMessage {
+	return func(m map[string]string) model.FullMessage {
 		dest := make(map[string]string)
 		var k, k2, v, v2 string
 		var err error
@@ -106,7 +106,7 @@ func makeMapConverter(coding string, generator chan ulid.ULID) Converter {
 				}
 			}
 		}
-		return model.TcpUdpParsedMessage{
+		return model.FullMessage{
 			Uid:    <-generator,
 			Parsed: EntryToSyslog(dest),
 		}

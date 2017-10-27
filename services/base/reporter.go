@@ -45,7 +45,7 @@ func NewReporter(name string, l log15.Logger, pipe *os.File) *Reporter {
 }
 
 func (s *Reporter) pushqueue() {
-	var m *model.TcpUdpParsedMessage
+	var m *model.FullMessage
 	var b []byte
 	var err error
 
@@ -74,7 +74,7 @@ func (s *Reporter) Stop() {
 }
 
 // Stash reports one syslog message to the controller.
-func (s *Reporter) Stash(m model.TcpUdpParsedMessage) (fatal, nonfatal error) {
+func (s *Reporter) Stash(m model.FullMessage) (fatal, nonfatal error) {
 	if s.queue == nil {
 		b, err := m.MarshalMsg(nil)
 		if err != nil {

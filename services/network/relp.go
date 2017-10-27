@@ -544,7 +544,7 @@ func (s *RelpServiceImpl) Parse() {
 	var raw *model.RawTcpMessage
 	var parser Parser
 	var syslogMsg model.SyslogMessage
-	var parsedMsg model.TcpUdpParsedMessage
+	var parsedMsg model.FullMessage
 	var err, f, nonf error
 	var decoder *encoding.Decoder
 	var logger log15.Logger
@@ -589,7 +589,7 @@ func (s *RelpServiceImpl) Parse() {
 			continue
 		}
 
-		parsedMsg = model.TcpUdpParsedMessage{
+		parsedMsg = model.FullMessage{
 			Parsed: model.ParsedMessage{
 				Fields:         syslogMsg,
 				Client:         raw.Client,
@@ -748,7 +748,7 @@ func (s *RelpServiceImpl) push2kafka() {
 	envs := map[ulid.ULID]*javascript.Environment{}
 	var e *javascript.Environment
 	var haveEnv bool
-	var message *model.TcpUdpParsedMessage
+	var message *model.FullMessage
 	var topic string
 	var partitionKey string
 	var partitionNumber int32

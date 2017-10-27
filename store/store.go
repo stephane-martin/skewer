@@ -64,14 +64,14 @@ type MessageStore struct {
 	nackQueue       *queue.AckQueue
 	permerrorsQueue *queue.AckQueue
 
-	OutputsChan chan *model.TcpUdpParsedMessage
+	OutputsChan chan *model.FullMessage
 }
 
 func (s *MessageStore) Gather() ([]*dto.MetricFamily, error) {
 	return s.registry.Gather()
 }
 
-func (s *MessageStore) Outputs() chan *model.TcpUdpParsedMessage {
+func (s *MessageStore) Outputs() chan *model.FullMessage {
 	return s.OutputsChan
 }
 
@@ -199,7 +199,7 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 		}
 	}()
 
-	store.OutputsChan = make(chan *model.TcpUdpParsedMessage)
+	store.OutputsChan = make(chan *model.FullMessage)
 
 	store.wg.Add(1)
 	go func() {
@@ -210,7 +210,7 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 			close(store.OutputsChan)
 			store.wg.Done()
 		}()
-		var messages map[ulid.ULID]*model.TcpUdpParsedMessage
+		var messages map[ulid.ULID]*model.FullMessage
 		for {
 		wait_messages:
 			for {
@@ -245,7 +245,7 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 	return store, nil
 }
 
-func (s *MessageStore) outputMsgs(doneChan <-chan struct{}, messages map[ulid.ULID]*model.TcpUdpParsedMessage) {
+func (s *MessageStore) outputMsgs(doneChan <-chan struct{}, messages map[ulid.ULID]*model.FullMessage) {
 	if len(messages) == 0 {
 		return
 	}
@@ -446,12 +446,12 @@ func (s *MessageStore) resetFailures() {
 	}
 }
 
-func (s *MessageStore) Stash(m model.TcpUdpParsedMessage) (fatal error, nonfatal error) {
+func (s *MessageStore) Stash(m model.FullMessage) (fatal error, nonfatal error) {
 	s.toStashQueue.Put(m)
 	return nil, nil
 }
 
-func (s *MessageStore) ingest(queue []*model.TcpUdpParsedMessage) (int, error) {
+func (s *MessageStore) ingest(queue []*model.FullMessage) (int, error) {
 	// we avoid "defer" as a performance optim
 
 	if len(queue) == 0 {
@@ -522,22 +522,22 @@ func (s *MessageStore) ingest(queue []*model.TcpUdpParsedMessage) (int, error) {
 	return ingested, errMsg
 }
 
-func (s *MessageStore) retrieve(n int) (messages map[ulid.ULID]*model.TcpUdpParsedMessage) {
+func (s *MessageStore) retrieve(n int) (messages map[ulid.ULID]*model.FullMessage) {
 	s.msgsMu.Lock()
 	defer s.msgsMu.Unlock()
 
-	messages = map[ulid.ULID]*model.TcpUdpParsedMessage{}
+	messages = map[ulid.ULID]*model.FullMessage{}
 
 	iter := s.readyDB.KeyIterator(n)
 	var fetched int = 0
 	invalidEntries := []ulid.ULID{}
-	var message *model.TcpUdpParsedMessage
+	var message *model.FullMessage
 	for iter.Rewind(); iter.Valid() && fetched < n; iter.Next() {
 		uid := iter.Key()
 		message_b, err := s.messagesDB.Get(uid)
 		if err == nil {
 			if len(message_b) > 0 {
-				message = &model.TcpUdpParsedMessage{}
+				message = &model.FullMessage{}
 				_, err := message.UnmarshalMsg(message_b)
 				if err == nil {
 					messages[uid] = message

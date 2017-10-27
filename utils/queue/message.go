@@ -13,7 +13,7 @@ import (
 
 type messageNode struct {
 	next *messageNode
-	msg  *model.TcpUdpParsedMessage
+	msg  *model.FullMessage
 }
 
 type MessageQueue struct {
@@ -71,7 +71,7 @@ func (q *MessageQueue) Wait(timeout time.Duration) bool {
 	}
 }
 
-func (q *MessageQueue) Get() (*model.TcpUdpParsedMessage, error) {
+func (q *MessageQueue) Get() (*model.FullMessage, error) {
 	tail := q.tail
 	next := tail.next
 	if next != nil {
@@ -88,7 +88,7 @@ func (q *MessageQueue) Get() (*model.TcpUdpParsedMessage, error) {
 	}
 }
 
-func (q *MessageQueue) Put(m model.TcpUdpParsedMessage) error {
+func (q *MessageQueue) Put(m model.FullMessage) error {
 	if q.Disposed() {
 		return ErrDisposed
 	}
@@ -101,10 +101,10 @@ func (q *MessageQueue) Put(m model.TcpUdpParsedMessage) error {
 	return nil
 }
 
-func (q *MessageQueue) GetMany(max int) []*model.TcpUdpParsedMessage {
-	var elt *model.TcpUdpParsedMessage
+func (q *MessageQueue) GetMany(max int) []*model.FullMessage {
+	var elt *model.FullMessage
 	var err error
-	res := make([]*model.TcpUdpParsedMessage, 0, max)
+	res := make([]*model.FullMessage, 0, max)
 	for {
 		elt, err = q.Get()
 		if elt == nil || err != nil {

@@ -31,7 +31,7 @@ type tcpDestination struct {
 	permerr     storeCallback
 	lineFraming bool
 	delimiter   []byte
-	previous    *model.TcpUdpParsedMessage
+	previous    *model.FullMessage
 }
 
 func NewTcpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (dest Destination, err error) {
@@ -103,7 +103,7 @@ func NewTcpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perme
 	return d, nil
 }
 
-func (d *tcpDestination) Send(message *model.TcpUdpParsedMessage, partitionKey string, partitionNumber int32, topic string) error {
+func (d *tcpDestination) Send(message *model.FullMessage, partitionKey string, partitionNumber int32, topic string) error {
 	serial, err := message.MarshalAll(d.format)
 	if err != nil {
 		d.permerr(message.Uid)

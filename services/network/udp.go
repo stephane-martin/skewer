@@ -146,7 +146,7 @@ func (s *UdpServiceImpl) Parse() {
 			continue
 		}
 
-		fatal, nonfatal = s.stasher.Stash(model.TcpUdpParsedMessage{
+		fatal, nonfatal = s.stasher.Stash(model.FullMessage{
 			Parsed: model.ParsedMessage{
 				Fields:         syslogMsg,
 				Client:         raw.Client,

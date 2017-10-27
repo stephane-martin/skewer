@@ -88,7 +88,7 @@ func (d *kafkaDestination) Gather() ([]*dto.MetricFamily, error) {
 	return d.registry.Gather()
 }
 
-func (d *kafkaDestination) Send(message *model.TcpUdpParsedMessage, partitionKey string, partitionNumber int32, topic string) error {
+func (d *kafkaDestination) Send(message *model.FullMessage, partitionKey string, partitionNumber int32, topic string) error {
 	reported := time.Unix(0, message.Parsed.Fields.TimeReportedNum).UTC()
 	message.Parsed.Fields.TimeGenerated = time.Unix(0, message.Parsed.Fields.TimeGeneratedNum).UTC().Format(time.RFC3339Nano)
 	message.Parsed.Fields.TimeReported = reported.Format(time.RFC3339Nano)

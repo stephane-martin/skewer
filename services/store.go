@@ -108,9 +108,9 @@ func (s *storeServiceImpl) doStart(test bool, mu *sync.Mutex) ([]model.ListenerI
 		go func() {
 			defer s.ingestwg.Done()
 			var err error
-			var message model.TcpUdpParsedMessage
+			var message model.FullMessage
 			for {
-				message = model.TcpUdpParsedMessage{}
+				message = model.FullMessage{}
 				err = message.DecodeMsg(s.reader)
 				if err == nil {
 					s.st.Stash(message)

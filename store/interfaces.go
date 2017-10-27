@@ -12,8 +12,8 @@ import (
 )
 
 type Store interface {
-	Stash(m model.TcpUdpParsedMessage) (error, error)
-	Outputs() chan *model.TcpUdpParsedMessage
+	Stash(m model.FullMessage) (error, error)
+	Outputs() chan *model.FullMessage
 	ACK(uid ulid.ULID)
 	NACK(uid ulid.ULID)
 	PermError(uid ulid.ULID)
@@ -33,7 +33,7 @@ type Forwarder interface {
 }
 
 type Destination interface {
-	Send(m *model.TcpUdpParsedMessage, partitionKey string, partitionNumber int32, topic string) error
+	Send(m *model.FullMessage, partitionKey string, partitionNumber int32, topic string) error
 	Fatal() chan struct{}
 	Close()
 	Gather() ([]*dto.MetricFamily, error)

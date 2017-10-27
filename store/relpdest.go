@@ -195,7 +195,7 @@ func (d *relpDestination) wsyslog(serialized []byte) (uint64, error) {
 	return d.w("syslog", serialized)
 }
 
-func (d *relpDestination) Send(message *model.TcpUdpParsedMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *relpDestination) Send(message *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
 	var txnr uint64
 	var serialized []byte
 	serialized, err = message.MarshalAll(d.format)

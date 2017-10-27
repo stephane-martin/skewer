@@ -113,7 +113,7 @@ func (fwder *forwarderImpl) forwardMessages(ctx context.Context, store Store) {
 	jsenvs := map[ulid.ULID]*javascript.Environment{}
 	done := ctx.Done()
 	var more bool
-	var message *model.TcpUdpParsedMessage
+	var message *model.FullMessage
 	var topic string
 	var partitionKey string
 	var partitionNumber int32

@@ -50,7 +50,7 @@ type ParsedMessage struct {
 }
 
 // ffjson: skip
-type TcpUdpParsedMessage struct {
+type FullMessage struct {
 	Parsed ParsedMessage `json:"parsed" msg:"parsed"`
 	Uid    [16]byte      `json:"uid" msg:"uid"`
 	ConfId [16]byte      `json:"conf_id" msg:"conf_id"`
@@ -110,7 +110,7 @@ func (m *SyslogMessage) Empty() bool {
 	return len(m.Message) == 0 && len(m.Structured) == 0 && len(m.Properties) == 0
 }
 
-func (m *TcpUdpParsedMessage) MarshalAll(frmt string) ([]byte, error) {
+func (m *FullMessage) MarshalAll(frmt string) ([]byte, error) {
 	switch frmt {
 	case "rfc5424":
 		return m.Parsed.Fields.Marshal5424()

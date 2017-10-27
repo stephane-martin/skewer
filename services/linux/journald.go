@@ -82,7 +82,7 @@ func (s *JournalService) Start(test bool) (infos []model.ListenerInfo, err error
 	go func() {
 		defer s.wgroup.Done()
 
-		var m *model.TcpUdpParsedMessage
+		var m *model.FullMessage
 		var err error
 		q := s.reader.Entries()
 

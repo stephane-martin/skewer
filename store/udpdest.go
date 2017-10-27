@@ -87,7 +87,7 @@ func (d *udpDestination) Gather() ([]*dto.MetricFamily, error) {
 	return d.registry.Gather()
 }
 
-func (d *udpDestination) Send(message *model.TcpUdpParsedMessage, partitionKey string, partitionNumber int32, topic string) error {
+func (d *udpDestination) Send(message *model.FullMessage, partitionKey string, partitionNumber int32, topic string) error {
 	serial, err := message.MarshalAll(d.format)
 	if err != nil {
 		d.permerr(message.Uid)

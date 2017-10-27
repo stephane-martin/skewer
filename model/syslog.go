@@ -15,7 +15,7 @@ func (m *SyslogMessage) Equals(other *SyslogMessage) bool {
 }
 
 type Stasher interface {
-	Stash(m *TcpUdpParsedMessage) (error, error)
+	Stash(m *FullMessage) (error, error)
 }
 
 type Reporter interface {

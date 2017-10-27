@@ -214,9 +214,9 @@ func (s *PluginController) listenpipe() {
 	}
 	reader := msgp.NewReader(s.pipe)
 	var err error
-	var message model.TcpUdpParsedMessage
+	var message model.FullMessage
 	for {
-		message = model.TcpUdpParsedMessage{}
+		message = model.FullMessage{}
 		err = message.DecodeMsg(reader)
 		if err == nil {
 			// todo: handle errors
@@ -287,7 +287,7 @@ func (s *PluginController) listen() chan InfosAndError {
 		scanner.Buffer(make([]byte, 0, 132000), 132000)
 		command := ""
 		infos := []model.ListenerInfo{}
-		var m model.TcpUdpParsedMessage
+		var m model.FullMessage
 
 		for scanner.Scan() {
 			parts := bytes.SplitN(scanner.Bytes(), space, 2)
@@ -309,7 +309,7 @@ func (s *PluginController) listen() chan InfosAndError {
 						kill = true
 						return
 					}
-					m = model.TcpUdpParsedMessage{}
+					m = model.FullMessage{}
 					_, err := m.UnmarshalMsg(parts[1])
 					if err == nil {
 						s.stasher.Stash(m)
@@ -707,8 +707,8 @@ type StorePlugin struct {
 }
 
 func (s *StorePlugin) pushqueue() {
-	var messages []*model.TcpUdpParsedMessage
-	var message *model.TcpUdpParsedMessage
+	var messages []*model.FullMessage
+	var message *model.FullMessage
 	var messageb []byte
 	var err error
 	for {
@@ -748,7 +748,7 @@ func (s *StorePlugin) Shutdown(killTimeOut time.Duration) {
 }
 
 // Stash stores the given message into the Store
-func (s *StorePlugin) Stash(m model.TcpUdpParsedMessage) (fatal, nonfatal error) {
+func (s *StorePlugin) Stash(m model.FullMessage) (fatal, nonfatal error) {
 	// this method is called very frequently, so we avoid to lock anything
 	// the MessageQueue ensures that we write the messages sequentially to the store child
 	s.MessageQueue.Put(m)

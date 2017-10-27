@@ -208,7 +208,7 @@ func (s *TcpServiceImpl) Parse() {
 			continue
 		}
 
-		fatal, nonfatal = s.reporter.Stash(model.TcpUdpParsedMessage{
+		fatal, nonfatal = s.reporter.Stash(model.FullMessage{
 			Parsed: model.ParsedMessage{
 				Fields:         syslogMsg,
 				Client:         raw.Client,
