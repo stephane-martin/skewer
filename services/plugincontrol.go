@@ -147,7 +147,7 @@ func (s *PluginController) Stop() {
 
 // Shutdown demands that the controlled plugin shutdowns now. After killTimeOut, it kills the plugin.
 func (s *PluginController) Shutdown(killTimeOut time.Duration) {
-	// in case the plugin was in fact never created...
+	// in case the plugin process was in fact never created...
 	s.createdMu.Lock()
 	if !s.created {
 		s.createdMu.Unlock()

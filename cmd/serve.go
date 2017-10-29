@@ -98,6 +98,35 @@ func init() {
 	}
 }
 
+func getSocketPair(typ int) (spair, error) {
+	a, b, err := sys.SocketPair(typ)
+	if err != nil {
+		return spair{}, fmt.Errorf("socketpair error: %s", err)
+	}
+	return spair{child: a, parent: b}, nil
+}
+
+func getLoggerConn(handle int) net.Conn {
+	loggerConn, _ := net.FileConn(os.NewFile(uintptr(handle), "logger"))
+	loggerConn.(*net.UnixConn).SetReadBuffer(65536)
+	loggerConn.(*net.UnixConn).SetWriteBuffer(65536)
+	return loggerConn
+}
+
+func executeChild() (err error) {
+	ch := NewServeChild()
+	err = ch.Init()
+	if err != nil {
+		return fmt.Errorf("Fatal error initializing Serve: %s", err)
+	}
+	defer ch.Cleanup()
+	err = ch.Serve()
+	if err != nil {
+		return fmt.Errorf("Fatal error executing Serve: %s", err)
+	}
+	return nil
+}
+
 func runserve() {
 
 	if !dumpableFlag {
@@ -114,18 +143,11 @@ func runserve() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(-1)
 		}
-		ch := NewServeChild()
-		err = ch.Init()
+		err = executeChild()
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Fatal error in initialization", err)
+			fmt.Fprintln(os.Stderr, err)
 			os.Exit(-1)
 		}
-		err = ch.Serve()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "Fatal error in Serve():", err)
-			os.Exit(-1)
-		}
-		ch.Cleanup()
 		return
 	}
 
@@ -156,18 +178,11 @@ func runserve() {
 				fmt.Fprintln(os.Stderr, err)
 				os.Exit(-1)
 			}
-			ch := NewServeChild()
-			err = ch.Init()
+			err = executeChild()
 			if err != nil {
-				fmt.Fprintln(os.Stderr, "Fatal error in initialization", err)
+				fmt.Fprintln(os.Stderr, err)
 				os.Exit(-1)
 			}
-			err = ch.Serve()
-			if err != nil {
-				fmt.Fprintln(os.Stderr, "Fatal error in Serve()", err)
-				os.Exit(-1)
-			}
-			ch.Cleanup()
 			return
 		}
 	}
@@ -216,22 +231,6 @@ func runserve() {
 	rootlogger := logging.SetLogging(loglevelFlag, logjsonFlag, syslogFlag, logfilenameFlag)
 	logger := rootlogger.New("proc", "parent")
 
-	mustSocketPair := func(typ int) spair {
-		a, b, err := sys.SocketPair(typ)
-		if err != nil {
-			logger.Crit("SocketPair() error", "error", err)
-			os.Exit(-1)
-		}
-		return spair{child: a, parent: b}
-	}
-
-	getLoggerConn := func(handle int) net.Conn {
-		loggerConn, _ := net.FileConn(os.NewFile(uintptr(handle), "logger"))
-		loggerConn.(*net.UnixConn).SetReadBuffer(65536)
-		loggerConn.(*net.UnixConn).SetWriteBuffer(65536)
-		return loggerConn
-	}
-
 	numuid, numgid, err := sys.LookupUid(uidFlag, gidFlag)
 	if err != nil {
 		logger.Crit("Error looking up uid", "error", err, "uid", uidFlag, "gid", gidFlag)
@@ -247,9 +246,13 @@ func runserve() {
 
 	for _, h := range handles {
 		if strings.HasSuffix(h, "_BINDER") {
-			binderSockets[h] = mustSocketPair(syscall.SOCK_STREAM)
+			binderSockets[h], err = getSocketPair(syscall.SOCK_STREAM)
 		} else {
-			loggerSockets[h] = mustSocketPair(syscall.SOCK_DGRAM)
+			loggerSockets[h], err = getSocketPair(syscall.SOCK_DGRAM)
+		}
+		if err != nil {
+			logger.Crit("Can't create the required socketpairs", "error", err)
+			os.Exit(-1)
 		}
 	}
 
@@ -382,6 +385,7 @@ func (ch *ServeChild) Init() error {
 }
 
 func (ch *ServeChild) Cleanup() {
+	ch.ShutdownControllers()
 	ch.cancelLogger()
 	ch.shutdown()
 	ch.globalCancel()
@@ -435,6 +439,11 @@ func (ch *ServeChild) SetupStore() error {
 	if err != nil {
 		return fmt.Errorf("Can't create the message Store: %s", err)
 	}
+	go func() {
+		<-ch.store.ShutdownChan
+		ch.logger.Info("Store has shutdown: aborting all operations")
+		ch.shutdown()
+	}()
 	_, err = ch.store.Start()
 	if err != nil {
 		return fmt.Errorf("Can't start the forwarder: %s", err)
@@ -710,6 +719,7 @@ func (ch *ServeChild) ShutdownControllers() {
 }
 
 func (ch *ServeChild) Serve() error {
+	// todo: better cleanup in case of errors
 	ch.logger.Debug("Serve() runs under user", "uid", os.Getuid(), "gid", os.Getgid())
 	if capabilities.CapabilitiesSupported {
 		ch.logger.Debug("Capabilities", "caps", capabilities.GetCaps())
@@ -717,8 +727,6 @@ func (ch *ServeChild) Serve() error {
 
 	sig_chan := make(chan os.Signal, 10)
 	signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
-
-	defer ch.ShutdownControllers()
 
 	err := ch.StartControllers()
 	if err != nil {
@@ -740,7 +748,6 @@ func (ch *ServeChild) Serve() error {
 
 	ch.logger.Debug("Main loop is starting")
 	for {
-		fmt.Fprintln(os.Stderr, "main loop")
 		select {
 		case <-ch.shutdownCtx.Done():
 			ch.logger.Info("Shutting down")
@@ -749,17 +756,10 @@ func (ch *ServeChild) Serve() error {
 		}
 
 		select {
-		case <-ch.store.ShutdownChan:
-			ch.logger.Crit("Abnormal shutdown of the Store: aborting all operations")
-			ch.shutdown()
-		default:
-		}
-
-		select {
 		case <-ch.shutdownCtx.Done():
-		case <-ch.store.ShutdownChan:
-		case newConf, more := <-ch.confChan:
-			if more {
+			// just loop
+		case newConf := <-ch.confChan:
+			if newConf != nil {
 				newConf.Store = ch.conf.Store
 				ch.conf = newConf
 				err := ch.Reload()
@@ -769,19 +769,12 @@ func (ch *ServeChild) Serve() error {
 				}
 			} else {
 				ch.logger.Debug("Configuration channel is closed")
-				// newConfChannel has been closed ?!
-				select {
-				case <-ch.shutdownCtx.Done():
-					// this is normal, we are shutting down
-				default:
-					// not normal
-					ch.logger.Crit("Abnormal shutdown of configuration service: aborting all operations")
-					ch.shutdown()
-				}
+				ch.shutdown()
 			}
 
 		case sig := <-sig_chan:
-			if sig == syscall.SIGHUP {
+			switch sig {
+			case syscall.SIGHUP:
 				signal.Stop(sig_chan)
 				signal.Ignore(syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
 				select {
@@ -792,15 +785,14 @@ func (ch *ServeChild) Serve() error {
 					sig_chan = make(chan os.Signal, 10)
 					signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 				}
-
-			} else if sig == syscall.SIGTERM || sig == syscall.SIGINT {
+			case syscall.SIGTERM, syscall.SIGINT:
 				signal.Stop(sig_chan)
 				signal.Ignore(syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
 				sig_chan = nil
 				ch.logger.Info("Termination signal received", "signal", sig)
 				ch.shutdown()
-			} else {
-				ch.logger.Warn("Unknown signal received", "signal", sig)
+			default:
+				ch.logger.Info("Unknown signal received", "signal", sig)
 			}
 
 		}
