@@ -17,7 +17,7 @@ import (
 	"github.com/stephane-martin/skewer/services/errors"
 	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/utils"
-	"github.com/stephane-martin/skewer/utils/queue"
+	"github.com/stephane-martin/skewer/utils/queue/udp"
 	"golang.org/x/text/encoding"
 )
 
@@ -39,7 +39,7 @@ type UdpServiceImpl struct {
 	registry   *prometheus.Registry
 	wg         *sync.WaitGroup
 
-	rawMessagesQueue *queue.RawUdpRing
+	rawMessagesQueue *udp.Ring
 }
 
 type PacketHandler interface {
@@ -97,7 +97,7 @@ func (s *UdpServiceImpl) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig,
 		return &model.RawUdpMessage{}
 	}}
 	s.BaseService.SetConf(sc, pc, queueSize)
-	s.rawMessagesQueue = queue.NewRawUdpRing(s.QueueSize)
+	s.rawMessagesQueue = udp.NewRing(s.QueueSize)
 }
 
 // Parse fetch messages from the raw queue, parse them, and push them to be sent.

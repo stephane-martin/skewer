@@ -1,6 +1,6 @@
-package queue
+package utils
 
-func roundUp(v uint64) uint64 {
+func RoundUp(v uint64) uint64 {
 	v--
 	v |= v >> 1
 	v |= v >> 2

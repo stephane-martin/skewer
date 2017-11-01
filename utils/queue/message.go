@@ -9,6 +9,7 @@ import (
 	"unsafe"
 
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/utils"
 )
 
 type messageNode struct {
@@ -82,7 +83,7 @@ func (q *MessageQueue) Get() (*model.FullMessage, error) {
 		q.pool.Put(tail)
 		return next.msg, nil
 	} else if q.Disposed() {
-		return nil, ErrDisposed
+		return nil, utils.ErrDisposed
 	} else {
 		return nil, nil
 	}
@@ -90,7 +91,7 @@ func (q *MessageQueue) Get() (*model.FullMessage, error) {
 
 func (q *MessageQueue) Put(m model.FullMessage) error {
 	if q.Disposed() {
-		return ErrDisposed
+		return utils.ErrDisposed
 	}
 	n := q.pool.Get().(*messageNode)
 	n.msg = &m

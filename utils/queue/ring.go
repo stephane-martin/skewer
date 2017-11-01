@@ -5,18 +5,21 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/stephane-martin/skewer/model"
+	"github.com/cheekybits/genny/generic"
+	"github.com/stephane-martin/skewer/utils"
 )
 
-type rawtcpnode struct {
+type Data generic.Type
+
+type node struct {
 	position uint64
-	data     *model.RawTcpMessage
+	data     *Data
 }
 
-type rawtcpnodes []*rawtcpnode
+type nodes []*node
 
-// RawTcpRing is a thread-safe bounded queue that stores RawTcpMessage messages.
-type RawTcpRing struct {
+// Ring is a thread-safe bounded queue that stores Data messages.
+type Ring struct {
 	_padding0      [8]uint64
 	queue          uint64
 	_padding1      [8]uint64
@@ -24,14 +27,14 @@ type RawTcpRing struct {
 	_padding2      [8]uint64
 	mask, disposed uint64
 	_padding3      [8]uint64
-	nodes          rawtcpnodes
+	nodes          nodes
 }
 
-func (rb *RawTcpRing) init(size uint64) {
-	size = roundUp(size)
-	rb.nodes = make(rawtcpnodes, size)
+func (rb *Ring) init(size uint64) {
+	size = utils.RoundUp(size)
+	rb.nodes = make(nodes, size)
 	for i := uint64(0); i < size; i++ {
-		rb.nodes[i] = &rawtcpnode{position: i}
+		rb.nodes[i] = &node{position: i}
 	}
 	rb.mask = size - 1 // so we don't have to do this with every put/get operation
 }
@@ -39,7 +42,7 @@ func (rb *RawTcpRing) init(size uint64) {
 // Put adds the provided item to the queue.  If the queue is full, this
 // call will block until an item is added to the queue or Dispose is called
 // on the queue.  An error will be returned if the queue is disposed.
-func (rb *RawTcpRing) Put(item *model.RawTcpMessage) error {
+func (rb *Ring) Put(item *Data) error {
 	_, err := rb.put(item, false)
 	return err
 }
@@ -47,18 +50,18 @@ func (rb *RawTcpRing) Put(item *model.RawTcpMessage) error {
 // Offer adds the provided item to the queue if there is space.  If the queue
 // is full, this call will return false.  An error will be returned if the
 // queue is disposed.
-func (rb *RawTcpRing) Offer(item *model.RawTcpMessage) (bool, error) {
+func (rb *Ring) Offer(item *Data) (bool, error) {
 	return rb.put(item, true)
 }
 
-func (rb *RawTcpRing) put(item *model.RawTcpMessage, offer bool) (bool, error) {
-	var n *rawtcpnode
+func (rb *Ring) put(item *Data, offer bool) (bool, error) {
+	var n *node
 	var nb uint64
 	pos := atomic.LoadUint64(&rb.queue)
 L:
 	for {
 		if atomic.LoadUint64(&rb.disposed) == 1 {
-			return false, ErrDisposed
+			return false, utils.ErrDisposed
 		}
 
 		n = rb.nodes[pos&rb.mask]
@@ -99,7 +102,7 @@ L:
 // if the queue is empty.  This call will unblock when an item is added
 // to the queue or Dispose is called on the queue.  An error will be returned
 // if the queue is disposed.
-func (rb *RawTcpRing) Get() (*model.RawTcpMessage, error) {
+func (rb *Ring) Get() (*Data, error) {
 	return rb.Poll(0)
 }
 
@@ -108,9 +111,9 @@ func (rb *RawTcpRing) Get() (*model.RawTcpMessage, error) {
 // to the queue, Dispose is called on the queue, or the timeout is reached. An
 // error will be returned if the queue is disposed or a timeout occurs. A
 // non-positive timeout will block indefinitely.
-func (rb *RawTcpRing) Poll(timeout time.Duration) (*model.RawTcpMessage, error) {
+func (rb *Ring) Poll(timeout time.Duration) (*Data, error) {
 	var (
-		n     *rawtcpnode
+		n     *node
 		pos   = atomic.LoadUint64(&rb.dequeue)
 		start time.Time
 		nb    uint64
@@ -134,10 +137,10 @@ L:
 		}
 
 		if timeout > 0 && time.Since(start) >= timeout {
-			return nil, ErrTimeout
+			return nil, utils.ErrTimeout
 		}
 		if atomic.LoadUint64(&rb.disposed) == 1 {
-			return nil, ErrDisposed
+			return nil, utils.ErrDisposed
 		}
 
 		if nb < 22 {
@@ -158,32 +161,32 @@ L:
 }
 
 // Len returns the number of items in the queue.
-func (rb *RawTcpRing) Len() uint64 {
+func (rb *Ring) Len() uint64 {
 	return atomic.LoadUint64(&rb.queue) - atomic.LoadUint64(&rb.dequeue)
 }
 
 // Cap returns the capacity of this ring buffer.
-func (rb *RawTcpRing) Cap() uint64 {
+func (rb *Ring) Cap() uint64 {
 	return uint64(len(rb.nodes))
 }
 
 // Dispose will dispose of this queue and free any blocked threads
 // in the Put and/or Get methods.  Calling those methods on a disposed
 // queue will return an error.
-func (rb *RawTcpRing) Dispose() {
+func (rb *Ring) Dispose() {
 	atomic.CompareAndSwapUint64(&rb.disposed, 0, 1)
 }
 
 // IsDisposed will return a bool indicating if this queue has been
 // disposed.
-func (rb *RawTcpRing) IsDisposed() bool {
+func (rb *Ring) IsDisposed() bool {
 	return atomic.LoadUint64(&rb.disposed) == 1
 }
 
-// NewRingBuffer will allocate, initialize, and return a ring buffer
+// NewRing will allocate, initialize, and return a ring buffer
 // with the specified size.
-func NewRawTcpRing(size uint64) *RawTcpRing {
-	rb := &RawTcpRing{}
+func NewRing(size uint64) *Ring {
+	rb := &Ring{}
 	rb.init(size)
 	return rb
 }

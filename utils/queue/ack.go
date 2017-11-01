@@ -8,9 +8,8 @@ import (
 	"unsafe"
 
 	"github.com/oklog/ulid"
+	"github.com/stephane-martin/skewer/utils"
 )
-
-var empty ulid.ULID
 
 type ackNode struct {
 	next *ackNode
@@ -51,9 +50,9 @@ func (q *AckQueue) Get() (ulid.ULID, error) {
 		q.pool.Put(tail)
 		return next.uid, nil
 	} else if q.Disposed() {
-		return empty, ErrDisposed
+		return utils.EmptyUid, utils.ErrDisposed
 	}
-	return empty, nil
+	return utils.EmptyUid, nil
 }
 
 func (q *AckQueue) Put(uid ulid.ULID) error {
@@ -61,7 +60,7 @@ func (q *AckQueue) Put(uid ulid.ULID) error {
 	n.uid = uid
 	n.next = nil
 	if q.Disposed() {
-		return ErrDisposed
+		return utils.ErrDisposed
 	}
 	(*ackNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.head)), unsafe.Pointer(n))).next = n
 	return nil
@@ -128,7 +127,7 @@ func (q *AckQueue) GetMany(max int) []ulid.ULID {
 	res := make([]ulid.ULID, 0, max)
 	for {
 		elt, err = q.Get()
-		if elt == empty || err != nil {
+		if elt == utils.EmptyUid || err != nil {
 			break
 		}
 		res = append(res, elt)

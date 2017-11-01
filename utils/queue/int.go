@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"github.com/stephane-martin/skewer/utils"
 )
 
 type intNode struct {
@@ -38,7 +40,7 @@ func (q *IntQueue) Dispose() {
 
 func (q *IntQueue) Get() (int, error) {
 	if q.Disposed() {
-		return -1, ErrDisposed
+		return -1, utils.ErrDisposed
 	}
 	tail := q.tail
 	next := tail.next
@@ -52,7 +54,7 @@ func (q *IntQueue) Get() (int, error) {
 
 func (q *IntQueue) Peek() (int, error) {
 	if q.Disposed() {
-		return -1, ErrDisposed
+		return -1, utils.ErrDisposed
 	}
 	next := q.tail.next
 	if next != nil {
@@ -63,7 +65,7 @@ func (q *IntQueue) Peek() (int, error) {
 
 func (q *IntQueue) Put(uid int) error {
 	if q.Disposed() {
-		return ErrDisposed
+		return utils.ErrDisposed
 	}
 	n := q.pool.Get().(*intNode)
 	n.uid = uid

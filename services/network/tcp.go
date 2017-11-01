@@ -22,7 +22,7 @@ import (
 	"github.com/stephane-martin/skewer/services/errors"
 	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/utils"
-	"github.com/stephane-martin/skewer/utils/queue"
+	"github.com/stephane-martin/skewer/utils/queue/tcp"
 	"golang.org/x/text/encoding"
 )
 
@@ -73,7 +73,7 @@ type TcpServiceImpl struct {
 	generator        chan ulid.ULID
 	metrics          *tcpMetrics
 	registry         *prometheus.Registry
-	rawMessagesQueue *queue.RawTcpRing
+	rawMessagesQueue *tcp.Ring
 }
 
 func NewTcpService(reporter *base.Reporter, gen chan ulid.ULID, b *binder.BinderClient, l log15.Logger) *TcpServiceImpl {
@@ -159,7 +159,7 @@ func (s *TcpServiceImpl) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig,
 		return &model.RawTcpMessage{Message: make([]byte, messageSize)}
 	}}
 	s.StreamingService.SetConf(sc, pc, queueSize, messageSize)
-	s.rawMessagesQueue = queue.NewRawTcpRing(s.QueueSize)
+	s.rawMessagesQueue = tcp.NewRing(s.QueueSize)
 }
 
 // Parse fetch messages from the raw queue, parse them, and push them to be sent.
