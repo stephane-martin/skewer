@@ -201,6 +201,12 @@
 			"revisionTime": "2016-09-24T22:28:19Z"
 		},
 		{
+			"checksumSHA1": "PYXuf7wvcj492uWhjvmXlyyQUYc=",
+			"path": "github.com/cheekybits/genny/generic",
+			"revision": "9127e812e1e9e501ce899a18121d316ecb52e4ba",
+			"revisionTime": "2017-03-28T20:00:08Z"
+		},
+		{
 			"checksumSHA1": "BJXHEdzHxRPmVnt6GFaPpwgns2c=",
 			"path": "github.com/coreos/go-etcd/etcd",
 			"revision": "003851be7bb0694fe3cc457a49529a19388ee7cf",
