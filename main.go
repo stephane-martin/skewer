@@ -294,6 +294,7 @@ func execParent(logger log15.Logger) {
 	if err != nil {
 		cleanup("Error parsing flags", err, logger, nil)
 	}
+	logger.Debug("Executing command", "command", name, "args", strings.Join(os.Args, " "))
 	if name == "serve" {
 		executeParent()
 	} else {
@@ -303,10 +304,11 @@ func execParent(logger log15.Logger) {
 }
 
 func parseCobraFlags() (string, error) {
-	c, f, err := cmd.ServeCmd.Find(os.Args[1:])
+	c, f, err := cmd.RootCmd.Find(os.Args[1:])
 	if err != nil {
 		return "", err
 	}
+	c.ResetFlags()
 	return c.Name(), c.ParseFlags(f)
 }
 
