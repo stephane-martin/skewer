@@ -26,9 +26,16 @@ type MessageQueue struct {
 
 func NewMessageQueue() *MessageQueue {
 	stub := &messageNode{}
-	return &MessageQueue{head: stub, tail: stub, disposed: 0, pool: &sync.Pool{New: func() interface{} {
-		return &messageNode{}
-	}}}
+	return &MessageQueue{
+		disposed: 0,
+		head:     stub,
+		tail:     stub,
+		pool: &sync.Pool{
+			New: func() interface{} {
+				return &messageNode{}
+			},
+		},
+	}
 }
 
 func (q *MessageQueue) Disposed() bool {
