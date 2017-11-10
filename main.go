@@ -15,6 +15,7 @@ import (
 
 	"github.com/inconshreveable/log15"
 	"github.com/kardianos/osext"
+	"github.com/spf13/pflag"
 	"github.com/stephane-martin/skewer/cmd"
 	"github.com/stephane-martin/skewer/services"
 	"github.com/stephane-martin/skewer/sys"
@@ -148,7 +149,7 @@ func execChild(logger log15.Logger) {
 	}
 
 	_, err = parseCobraFlags()
-	if err != nil {
+	if err != nil && err != pflag.ErrHelp {
 		cleanup("Error parsing flags", err, logger, nil)
 	}
 
@@ -291,11 +292,11 @@ func execParent(logger log15.Logger) {
 	}
 
 	name, err := parseCobraFlags()
-	if err != nil {
+	if err != nil && err != pflag.ErrHelp {
 		cleanup("Error parsing flags", err, logger, nil)
 	}
 	logger.Debug("Executing command", "command", name, "args", strings.Join(os.Args, " "))
-	if name == "serve" {
+	if name == "serve" && err != pflag.ErrHelp {
 		executeParent()
 	} else {
 		cmd.Execute()
@@ -306,9 +307,9 @@ func execParent(logger log15.Logger) {
 func parseCobraFlags() (string, error) {
 	c, f, err := cmd.RootCmd.Find(os.Args[1:])
 	if err != nil {
-		return "", err
+		return c.Name(), err
 	}
-	c.ResetFlags()
+	c, f, err = c.Find(os.Args[1:])
 	return c.Name(), c.ParseFlags(f)
 }
 
@@ -317,7 +318,7 @@ func fixLinuxParentPrivileges(logger log15.Logger) {
 		// under Linux, re-exec ourself immediately with fewer privileges
 		runtime.LockOSThread()
 		_, err := parseCobraFlags()
-		if err != nil {
+		if err != nil && err != pflag.ErrHelp {
 			cleanup("Error parsing flags", err, logger, nil)
 		}
 		need_fix, err := capabilities.NeedFixLinuxPrivileges(cmd.UidFlag, cmd.GidFlag)
