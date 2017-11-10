@@ -137,6 +137,7 @@ func (ch *ServeChild) Init() error {
 	if err != nil {
 		return err
 	}
+	ch.SetupMetrics()
 	err = ch.SetupStore()
 	if err != nil {
 		return err
