@@ -219,7 +219,6 @@ func (s *PluginController) listenpipe() {
 		message = model.FullMessage{}
 		err = message.DecodeMsg(reader)
 		if err == nil {
-			// todo: handle errors
 			s.stasher.Stash(message)
 		} else if err == io.EOF || err == io.ErrClosedPipe || err == io.ErrUnexpectedEOF {
 			return
@@ -748,11 +747,10 @@ func (s *StorePlugin) Shutdown(killTimeOut time.Duration) {
 }
 
 // Stash stores the given message into the Store
-func (s *StorePlugin) Stash(m model.FullMessage) (fatal, nonfatal error) {
+func (s *StorePlugin) Stash(m model.FullMessage) {
 	// this method is called very frequently, so we avoid to lock anything
 	// the MessageQueue ensures that we write the messages sequentially to the store child
 	s.MessageQueue.Put(m)
-	return nil, nil
 }
 
 // NewStorePlugin creates a new Store controller.
