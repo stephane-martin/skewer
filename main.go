@@ -169,7 +169,7 @@ func executeParent() {
 		}
 	*/
 
-	rootlogger := logging.SetLogging(cmd.LoglevelFlag, cmd.LogjsonFlag, cmd.SyslogFlag, cmd.LogfilenameFlag)
+	rootlogger := logging.SetLogging(nil, cmd.LoglevelFlag, cmd.LogjsonFlag, cmd.SyslogFlag, cmd.LogfilenameFlag)
 	logger := rootlogger.New("proc", "parent")
 
 	if !cmd.DumpableFlag {
@@ -264,14 +264,24 @@ func executeParent() {
 	go func() {
 		for sig := range sig_chan {
 			logger.Debug("parent received signal", "signal", sig)
-			if sig == syscall.SIGTERM {
+			switch sig {
+			case syscall.SIGTERM:
 				once.Do(func() { childProcess.Process.Signal(sig) })
-			} else if sig == syscall.SIGHUP {
+				return
+			case syscall.SIGHUP:
+				// reload configuration
 				childProcess.Process.Signal(sig)
+			case syscall.SIGUSR1:
+				// log rotation
+				logging.SetLogging(rootlogger, cmd.LoglevelFlag, cmd.LogjsonFlag, cmd.SyslogFlag, cmd.LogfilenameFlag)
+				logging.SetLogging(logger, cmd.LoglevelFlag, cmd.LogjsonFlag, cmd.SyslogFlag, cmd.LogfilenameFlag)
+				logger.Info("log rotation")
+			default:
+				logger.Info("Unsupported signal", "signal", sig)
 			}
 		}
 	}()
-	signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT)
+	signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT, syscall.SIGUSR1)
 	logger.Debug("PIDs", "parent", os.Getpid(), "child", childProcess.Process.Pid)
 
 	childProcess.Process.Wait()
