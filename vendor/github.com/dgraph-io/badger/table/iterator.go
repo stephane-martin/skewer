@@ -83,7 +83,7 @@ func (itr *blockIterator) Seek(key []byte, whence int) {
 	var done bool
 	for itr.Init(); itr.Valid(); itr.Next() {
 		k := itr.Key()
-		if bytes.Compare(k, key) >= 0 {
+		if y.CompareKeys(k, key) >= 0 {
 			// We are done as k is >= key.
 			done = true
 			break
@@ -110,7 +110,8 @@ func (itr *blockIterator) SeekToLast() {
 // parseKV would allocate a new byte slice for key and for value.
 func (itr *blockIterator) parseKV(h header) {
 	if cap(itr.key) < int(h.plen+h.klen) {
-		itr.key = make([]byte, 2*(h.plen+h.klen))
+		sz := int(h.plen) + int(h.klen) // Convert to int before adding to avoid uint16 overflow.
+		itr.key = make([]byte, 2*sz)
 	}
 	itr.key = itr.key[:h.plen+h.klen]
 	copy(itr.key, itr.baseKey[:h.plen])
@@ -169,7 +170,7 @@ func (itr *blockIterator) Prev() {
 	itr.pos = itr.last.prev
 
 	var h header
-	y.AssertTruef(itr.pos >= 0 && itr.pos < uint32(len(itr.data)), "%d %d", itr.pos, len(itr.data))
+	y.AssertTruef(itr.pos < uint32(len(itr.data)), "%d %d", itr.pos, len(itr.data))
 	itr.pos += uint32(h.Decode(itr.data[itr.pos:]))
 	itr.parseKV(h)
 	itr.last = h
@@ -281,7 +282,7 @@ func (itr *Iterator) seekFrom(key []byte, whence int) {
 
 	idx := sort.Search(len(itr.t.blockIndex), func(idx int) bool {
 		ko := itr.t.blockIndex[idx]
-		return bytes.Compare(ko.key, key) > 0
+		return y.CompareKeys(ko.key, key) > 0
 	})
 	if idx == 0 {
 		// The smallest key in our table is already strictly > key. We can return that.
@@ -386,7 +387,7 @@ func (itr *Iterator) Key() []byte {
 
 // Value follows the y.Iterator interface
 func (itr *Iterator) Value() (ret y.ValueStruct) {
-	ret.DecodeEntireSlice(itr.bi.Value())
+	ret.Decode(itr.bi.Value())
 	return
 }
 
@@ -483,12 +484,12 @@ func (s *ConcatIterator) Seek(key []byte) {
 	var idx int
 	if !s.reversed {
 		idx = sort.Search(len(s.tables), func(i int) bool {
-			return bytes.Compare(s.tables[i].Biggest(), key) >= 0
+			return y.CompareKeys(s.tables[i].Biggest(), key) >= 0
 		})
 	} else {
 		n := len(s.tables)
 		idx = n - 1 - sort.Search(n, func(i int) bool {
-			return bytes.Compare(s.tables[n-1-i].Smallest(), key) <= 0
+			return y.CompareKeys(s.tables[n-1-i].Smallest(), key) <= 0
 		})
 	}
 	if idx >= len(s.tables) || idx < 0 {

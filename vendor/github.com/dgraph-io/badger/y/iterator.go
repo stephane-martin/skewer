@@ -27,49 +27,63 @@ import (
 // ValueStruct represents the value info that can be associated with a key, but also the internal
 // Meta field.
 type ValueStruct struct {
-	Value      []byte
-	Meta       byte
-	UserMeta   byte
-	CASCounter uint64
+	Meta      byte
+	UserMeta  byte
+	ExpiresAt uint64
+	Value     []byte
+
+	Version uint64 // This field is not serialized. Only for internal usage.
 }
 
-// MakeValueStruct is the most convenient way for unit tests to make a ValueStruct.  (Also, the
-// code will break if we add another field.)
-func MakeValueStruct(value []byte, meta byte, userMeta byte, casCounter uint64) ValueStruct {
-	return ValueStruct{Value: value, Meta: meta, UserMeta: userMeta, CASCounter: casCounter}
+func sizeVarint(x uint64) (n int) {
+	for {
+		n++
+		x >>= 7
+		if x == 0 {
+			break
+		}
+	}
+	return n
 }
 
 // EncodedSize is the size of the ValueStruct when encoded
-func (v *ValueStruct) EncodedSize() int {
-	return len(v.Value) + valueValueOffset
+func (v *ValueStruct) EncodedSize() uint16 {
+	sz := len(v.Value) + 2 // meta, usermeta.
+	if v.ExpiresAt == 0 {
+		return uint16(sz + 1)
+	}
+
+	enc := sizeVarint(v.ExpiresAt)
+	return uint16(sz + enc)
 }
 
-// ValueStructSerializedSize converts a value size to the full serialized size of value + metadata.
-func ValueStructSerializedSize(size uint16) int {
-	return int(size) + valueValueOffset
-}
-
-const (
-	valueMetaOffset     = 0
-	valueUserMetaOffset = valueMetaOffset + MetaSize
-	valueCasOffset      = valueUserMetaOffset + UserMetaSize
-	valueValueOffset    = valueCasOffset + CasSize
-)
-
-// DecodeEntireSlice uses the length of the slice to infer the length of the Value field.
-func (v *ValueStruct) DecodeEntireSlice(b []byte) {
-	v.Value = b[valueValueOffset:]
-	v.Meta = b[valueMetaOffset]
-	v.UserMeta = b[valueUserMetaOffset]
-	v.CASCounter = binary.BigEndian.Uint64(b[valueCasOffset : valueCasOffset+CasSize])
+// Decode uses the length of the slice to infer the length of the Value field.
+func (v *ValueStruct) Decode(b []byte) {
+	v.Meta = b[0]
+	v.UserMeta = b[1]
+	var sz int
+	v.ExpiresAt, sz = binary.Uvarint(b[2:])
+	v.Value = b[2+sz:]
 }
 
 // Encode expects a slice of length at least v.EncodedSize().
 func (v *ValueStruct) Encode(b []byte) {
-	b[valueMetaOffset] = v.Meta
-	b[valueUserMetaOffset] = v.UserMeta
-	binary.BigEndian.PutUint64(b[valueCasOffset:valueCasOffset+CasSize], v.CASCounter)
-	copy(b[valueValueOffset:valueValueOffset+len(v.Value)], v.Value)
+	b[0] = v.Meta
+	b[1] = v.UserMeta
+	sz := binary.PutUvarint(b[2:], v.ExpiresAt)
+	copy(b[2+sz:], v.Value)
+}
+
+// EncodeTo should be kept in sync with the Encode function above. The reason
+// this function exists is to avoid creating byte arrays per key-value pair in
+// table/builder.go.
+func (v *ValueStruct) EncodeTo(buf *bytes.Buffer) {
+	buf.WriteByte(v.Meta)
+	buf.WriteByte(v.UserMeta)
+	var enc [binary.MaxVarintLen64]byte
+	sz := binary.PutUvarint(enc[:], v.ExpiresAt)
+	buf.Write(enc[:sz])
+	buf.Write(v.Value)
 }
 
 // Iterator is an interface for a basic iterator.
@@ -105,7 +119,7 @@ func (eh *elemHeap) Pop() interface{} {
 	return x
 }
 func (eh elemHeap) Less(i, j int) bool {
-	cmp := bytes.Compare(eh[i].itr.Key(), eh[j].itr.Key())
+	cmp := CompareKeys(eh[i].itr.Key(), eh[j].itr.Key())
 	if cmp < 0 {
 		return !eh[i].reversed
 	}

@@ -237,13 +237,19 @@
 			"revisionTime": "2016-08-31T15:17:26Z"
 		},
 		{
-			"checksumSHA1": "p5/Hbu4OlJtysLx7ZzXRJGOAsyg=",
+			"checksumSHA1": "Hbewj5pxlOqsaVSMQWEgQC36ZvY=",
 			"path": "github.com/dgraph-io/badger",
-			"revision": "68f31e454ccd12dc861a13841675397ce298a3f5",
-			"revisionTime": "2017-10-26T11:34:12Z",
+			"revision": "89689ef36cae26ae094cb5ea79b7400d839f2d68",
+			"revisionTime": "2017-11-06T05:19:43Z",
 			"tree": true,
-			"version": "v0.8.1",
-			"versionExact": "v0.8.1"
+			"version": "v1.0.1",
+			"versionExact": "v1.0.1"
+		},
+		{
+			"checksumSHA1": "FCHRnXIurWk5RfGtQWiFE60XVK4=",
+			"path": "github.com/dgryski/go-farm",
+			"revision": "e2d0fe22b456fa0a35cd883ba355ecfcf1881490",
+			"revisionTime": "2017-05-02T03:43:17Z"
 		},
 		{
 			"checksumSHA1": "S+FGkbnggonu1yt282X/FoM4vuo=",

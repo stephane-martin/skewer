@@ -223,6 +223,7 @@ func (s *TcpServiceImpl) Parse() {
 
 		if fatal != nil {
 			logger.Error("Fatal error stashing TCP message", "error", fatal)
+
 			// todo: shutdown
 		} else if nonfatal != nil {
 			logger.Warn("Non-fatal error stashing TCP message", "error", nonfatal)

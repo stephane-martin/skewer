@@ -11,8 +11,8 @@
 		{
 			"env":
 			{
-				"GOPATH": "/home/stef/dev/golang/skewer",
-				"GOROOT": "/usr/lib/go-1.8"
+				"GOPATH": "/Users/stef/Documents/Seafile/dev/golang/skewer",
+				//"GOROOT": "/usr/local/Cellar/go/1.9.2"
 			}
 		}
 	}

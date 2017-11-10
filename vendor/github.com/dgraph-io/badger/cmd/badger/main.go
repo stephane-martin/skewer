@@ -1,11 +1,11 @@
 /*
- * Copyright (C) 2017 Dgraph Labs, Inc. and Contributors
+ * Copyright 2017 Dgraph Labs, Inc. and Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *    http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,15 +14,10 @@
  * limitations under the License.
  */
 
-// Use protos/gen.sh to generate .pb.go files.
-syntax = "proto3";
+package main
 
-package protos;
+import "github.com/dgraph-io/badger/cmd/badger/cmd"
 
-message KVPair {
-        bytes key = 1;
-        bytes value = 2;
-        bytes  userMeta = 3;
-        uint64 version = 4;
-        uint64 expires_at = 5;
+func main() {
+	cmd.Execute()
 }

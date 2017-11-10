@@ -35,7 +35,7 @@ func NewStoreMetrics() *storeMetrics {
 }
 
 type MessageStore struct {
-	badger          *badger.KV
+	badger          *badger.DB
 	messagesDB      db.Partition
 	readyDB         db.Partition
 	sentDB          db.Partition
@@ -116,7 +116,7 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 
 	store.closedChan = make(chan struct{})
 
-	kv, err := badger.NewKV(&badgerOpts)
+	kv, err := badger.Open(badgerOpts)
 	if err != nil {
 		return nil, err
 	}
@@ -289,24 +289,22 @@ func (s *MessageStore) StoreAllSyslogConfigs(c conf.BaseConfig) (err error) {
 
 func (s *MessageStore) StoreSyslogConfig(confID ulid.ULID, config conf.FilterSubConfig) error {
 	data := config.Export()
-	exists, err := s.syslogConfigsDB.Exists(confID)
+	exists, err := s.syslogConfigsDB.Exists(confID, nil)
 	if err != nil {
 		return err
 	}
 	if !exists {
-		err = s.syslogConfigsDB.Set(confID, data)
+		err = s.syslogConfigsDB.Set(confID, data, nil)
 		if err != nil {
 			return err
 		}
-		if s.metrics != nil {
-			s.metrics.BadgerGauge.WithLabelValues("syslogconf").Inc()
-		}
+		s.metrics.BadgerGauge.WithLabelValues("syslogconf").Inc()
 	}
 	return nil
 }
 
 func (s *MessageStore) GetSyslogConfig(confID ulid.ULID) (*conf.SyslogConfig, error) {
-	data, err := s.syslogConfigsDB.Get(confID)
+	data, err := s.syslogConfigsDB.Get(confID, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -322,12 +320,12 @@ func (s *MessageStore) GetSyslogConfig(confID ulid.ULID) (*conf.SyslogConfig, er
 
 func (s *MessageStore) initGauge() {
 	if s.metrics != nil {
-		s.metrics.BadgerGauge.WithLabelValues("messages").Set(float64(s.messagesDB.Count()))
-		s.metrics.BadgerGauge.WithLabelValues("ready").Set(float64(s.readyDB.Count()))
-		s.metrics.BadgerGauge.WithLabelValues("sent").Set(float64(s.sentDB.Count()))
-		s.metrics.BadgerGauge.WithLabelValues("failed").Set(float64(s.failedDB.Count()))
-		s.metrics.BadgerGauge.WithLabelValues("permerrors").Set(float64(s.permerrorsDB.Count()))
-		s.metrics.BadgerGauge.WithLabelValues("syslogconf").Set(float64(s.syslogConfigsDB.Count()))
+		s.metrics.BadgerGauge.WithLabelValues("messages").Set(float64(s.messagesDB.Count(nil)))
+		s.metrics.BadgerGauge.WithLabelValues("ready").Set(float64(s.readyDB.Count(nil)))
+		s.metrics.BadgerGauge.WithLabelValues("sent").Set(float64(s.sentDB.Count(nil)))
+		s.metrics.BadgerGauge.WithLabelValues("failed").Set(float64(s.failedDB.Count(nil)))
+		s.metrics.BadgerGauge.WithLabelValues("permerrors").Set(float64(s.permerrorsDB.Count(nil)))
+		s.metrics.BadgerGauge.WithLabelValues("syslogconf").Set(float64(s.syslogConfigsDB.Count(nil)))
 	}
 }
 
@@ -341,40 +339,67 @@ func (s *MessageStore) closeBadgers() {
 
 func (s *MessageStore) pruneOrphaned() {
 	// find if we have some old full messages
-
-	uids := s.messagesDB.ListKeys()
+	var err error
+	var have bool
+	txn := s.badger.NewTransaction(true)
+	defer txn.Discard()
+	uids := s.messagesDB.ListKeys(txn)
 
 	// check if the corresponding uid exists in "ready" or "failed" or "permerrors"
 	orphaned_uids := []ulid.ULID{}
 	for _, uid := range uids {
-		e1, err1 := s.readyDB.Exists(uid)
-		if err1 == nil && !e1 {
-			e2, err2 := s.failedDB.Exists(uid)
-			if err2 == nil && !e2 {
-				e3, err3 := s.permerrorsDB.Exists(uid)
-				if err3 == nil && !e3 {
-					orphaned_uids = append(orphaned_uids, uid)
-				}
-			}
+		have, err = s.readyDB.Exists(uid, txn)
+		if err != nil {
+			return
 		}
+		if have {
+			continue
+		}
+		have, err = s.failedDB.Exists(uid, txn)
+		if err != nil {
+			return
+		}
+		if have {
+			continue
+		}
+		have, err = s.permerrorsDB.Exists(uid, txn)
+		if err != nil {
+			return
+		}
+		if have {
+			continue
+		}
+		orphaned_uids = append(orphaned_uids, uid)
 	}
 
 	// if no match, delete the message
 	for _, uid := range orphaned_uids {
-		s.messagesDB.Delete(uid)
+		err = s.messagesDB.Delete(uid, txn)
+		if err != nil {
+			return
+		}
 	}
+	txn.Commit(nil)
 }
 
 func (s *MessageStore) resetStuckInSent() {
 	// push back to "Ready" the messages that were sent out of the Store in the
 	// last execution of skewer, but never were ACKed or NACKed
-	uids := s.sentDB.ListKeys()
+	txn := s.badger.NewTransaction(true)
+	defer txn.Discard()
+	uids := s.sentDB.ListKeys(txn)
 	s.logger.Debug("Pushing back stuck messages from Sent to Ready", "nb_messages", len(uids))
-	s.sentDB.DeleteMany(uids)
-	for _, uid := range uids {
-		s.readyDB.Set(uid, []byte("true"))
+	err := s.sentDB.DeleteMany(uids, txn)
+	if err != nil {
+		return
 	}
-
+	for _, uid := range uids {
+		err = s.readyDB.Set(uid, []byte("true"), txn)
+		if err != nil {
+			return
+		}
+	}
+	txn.Commit(nil)
 }
 
 func (s *MessageStore) ReadAllBadgers() (map[string]string, map[string]string, map[string]string) {
@@ -386,10 +411,12 @@ func (s *MessageStore) resetFailures() {
 	s.failedMu.Lock()
 	defer s.failedMu.Unlock()
 	for {
+		txn := s.badger.NewTransaction(true)
 		now := time.Now()
-		iter := s.failedDB.KeyValueIterator(1000)
+		iter := s.failedDB.KeyValueIterator(1000, txn)
 		uids := []ulid.ULID{}
 		invalidUids := []ulid.ULID{}
+
 		for iter.Rewind(); iter.Valid(); iter.Next() {
 			uid := iter.Key()
 			time_s := string(iter.Value())
@@ -407,14 +434,18 @@ func (s *MessageStore) resetFailures() {
 
 		if len(invalidUids) > 0 {
 			s.logger.Info("Found invalid entries in 'failed'", "number", len(invalidUids))
-			errs, err := s.failedDB.DeleteMany(invalidUids)
-			s.metrics.BadgerGauge.WithLabelValues("failed").Sub(float64(len(invalidUids) - len(errs)))
+			err := s.failedDB.DeleteMany(invalidUids, txn)
 			if err != nil {
 				s.logger.Warn("Error deleting invalid entries", "error", err)
+				txn.Discard()
+				return
 			}
 		}
 
 		if len(uids) == 0 {
+			if txn.Commit(nil) == nil {
+				s.metrics.BadgerGauge.WithLabelValues("failed").Sub(float64(len(invalidUids)))
+			}
 			return
 		}
 
@@ -423,33 +454,34 @@ func (s *MessageStore) resetFailures() {
 		for _, uid := range uids {
 			readyBatch[uid] = []byte("true")
 		}
-		errs, err := s.readyDB.AddMany(readyBatch)
+		err := s.readyDB.AddMany(readyBatch, txn)
 		if err != nil {
 			s.logger.Warn("Error pushing entries from failed queue to ready queue", "error", err)
-		}
-		if s.metrics != nil {
-			s.metrics.BadgerGauge.WithLabelValues("ready").Add(float64(len(readyBatch) - len(errs)))
+			s.readyMu.Unlock()
+			txn.Discard()
+			return
 		}
 
-		if len(errs) < len(readyBatch) {
-			for _, uid := range errs {
-				delete(readyBatch, uid)
-			}
-			failedBatch := make([]ulid.ULID, 0, len(readyBatch))
-			for uid := range readyBatch {
-				failedBatch = append(failedBatch, uid)
-			}
-			errs, err = s.failedDB.DeleteMany(failedBatch)
-			if err != nil {
-				s.logger.Warn("Error deleting entries from failed queue", "error", err)
-			}
-			if s.metrics != nil {
-				s.metrics.BadgerGauge.WithLabelValues("failed").Sub(float64(len(failedBatch) - len(errs)))
-			}
-			s.availMsgCond.Signal()
+		err = s.failedDB.DeleteMany(uids, txn)
+		if err != nil {
+			s.logger.Warn("Error deleting entries from failed queue", "error", err)
+			s.readyMu.Unlock()
+			txn.Discard()
+			return
 		}
 
 		s.readyMu.Unlock()
+
+		err = txn.Commit(nil)
+		if err == nil {
+			s.availMsgCond.Signal()
+			s.metrics.BadgerGauge.WithLabelValues("failed").Sub(float64(len(invalidUids)))
+			s.metrics.BadgerGauge.WithLabelValues("ready").Add(float64(len(uids)))
+			s.metrics.BadgerGauge.WithLabelValues("failed").Sub(float64(len(uids)))
+		} else {
+			s.logger.Warn("Error commiting resetFailures", "error", err)
+		}
+
 	}
 }
 
@@ -459,8 +491,6 @@ func (s *MessageStore) Stash(m model.FullMessage) (fatal error, nonfatal error) 
 }
 
 func (s *MessageStore) ingest(queue []*model.FullMessage) (int, error) {
-	// we avoid "defer" as a performance optim
-
 	if len(queue) == 0 {
 		return 0, nil
 	}
@@ -475,7 +505,7 @@ func (s *MessageStore) ingest(queue []*model.FullMessage) (int, error) {
 				marshalledQueue[m.Uid] = b
 			}
 		} else {
-			s.logger.Warn("The store discarded a message that could not be marshaled", "error", err)
+			s.logger.Warn("Discarded a message that could not be marshaled", "error", err)
 		}
 	}
 
@@ -485,48 +515,48 @@ func (s *MessageStore) ingest(queue []*model.FullMessage) (int, error) {
 
 	s.readyMu.Lock()
 	s.msgsMu.Lock()
+	txn := s.badger.NewTransaction(true)
 
-	errorMsgKeys, errMsg := s.messagesDB.AddMany(marshalledQueue)
+	defer func() {
+		txn.Discard()
+	}()
 
-	if len(errorMsgKeys) == len(marshalledQueue) {
+	err := s.messagesDB.AddMany(marshalledQueue, txn)
+	if err != nil {
 		s.msgsMu.Unlock()
 		s.readyMu.Unlock()
-		return 0, errMsg
-	}
-
-	s.metrics.BadgerGauge.WithLabelValues("messages").Add(float64(len(marshalledQueue) - len(errorMsgKeys)))
-
-	for _, k := range errorMsgKeys {
-		delete(marshalledQueue, k)
+		s.logger.Warn("Error adding ingested message to the messages queue", "error", err)
+		return 0, err
 	}
 
 	for k := range marshalledQueue {
 		marshalledQueue[k] = []byte("true")
 	}
 
-	errReadyKeys, errReady := s.readyDB.AddMany(marshalledQueue)
-	ingested := len(marshalledQueue) - len(errReadyKeys)
-	if s.metrics != nil {
-		s.metrics.BadgerGauge.WithLabelValues("ready").Add(float64(ingested))
-	}
-	if len(errReadyKeys) > 0 {
-		s.messagesDB.DeleteMany(errReadyKeys)
-		if s.metrics != nil {
-			s.metrics.BadgerGauge.WithLabelValues("messages").Sub(float64(len(errReadyKeys)))
-		}
+	err = s.readyDB.AddMany(marshalledQueue, txn)
+	if err != nil {
+		s.msgsMu.Unlock()
+		s.readyMu.Unlock()
+		s.logger.Warn("Error adding ingested message to the ready queue", "error", err)
+		return 0, err
 	}
 
+	err = txn.Commit(nil)
 	s.msgsMu.Unlock()
-	if ingested > 0 {
-		s.availMsgCond.Signal()
-	}
 	s.readyMu.Unlock()
 
-	if errMsg == nil {
-		errMsg = errReady
+	if err == nil {
+		s.availMsgCond.Signal()
+		s.metrics.BadgerGauge.WithLabelValues("messages").Add(float64(len(marshalledQueue)))
+		s.metrics.BadgerGauge.WithLabelValues("ready").Add(float64(len(marshalledQueue)))
+		return len(marshalledQueue), nil
+	} else if err == badger.ErrConflict {
+		// retry
+		return s.ingest(queue)
+	} else {
+		return 0, err
 	}
 
-	return ingested, errMsg
 }
 
 func (s *MessageStore) ReleaseMsg(msg *model.FullMessage) {
@@ -535,17 +565,21 @@ func (s *MessageStore) ReleaseMsg(msg *model.FullMessage) {
 
 func (s *MessageStore) retrieve(n int) (messages map[ulid.ULID]*model.FullMessage) {
 	s.msgsMu.Lock()
-	defer s.msgsMu.Unlock()
+	txn := s.badger.NewTransaction(true)
+	defer func() {
+		txn.Discard()
+	}()
 
 	messages = map[ulid.ULID]*model.FullMessage{}
 
-	iter := s.readyDB.KeyIterator(n)
+	iter := s.readyDB.KeyIterator(n, txn)
 	var fetched int = 0
 	invalidEntries := []ulid.ULID{}
 	var message *model.FullMessage
+
 	for iter.Rewind(); iter.Valid() && fetched < n; iter.Next() {
 		uid := iter.Key()
-		message_b, err := s.messagesDB.Get(uid)
+		message_b, err := s.messagesDB.Get(uid, txn)
 		if err == nil {
 			if len(message_b) > 0 {
 				message = s.pool.Get().(*model.FullMessage)
@@ -563,62 +597,76 @@ func (s *MessageStore) retrieve(n int) (messages map[ulid.ULID]*model.FullMessag
 			}
 		} else {
 			s.logger.Warn("Error getting message content from message queue", "uid", uid, "error", err)
+			iter.Close()
+			s.msgsMu.Unlock()
+			return map[ulid.ULID]*model.FullMessage{}
 		}
 	}
 	iter.Close()
 
 	if len(invalidEntries) > 0 {
 		s.logger.Info("Found invalid entries", "number", len(invalidEntries))
-		errs, err := s.readyDB.DeleteMany(invalidEntries)
-		if s.metrics != nil {
-			s.metrics.BadgerGauge.WithLabelValues("ready").Sub(float64(len(invalidEntries) - len(errs)))
-		}
+		err := s.readyDB.DeleteMany(invalidEntries, txn)
 		if err != nil {
 			s.logger.Warn("Error deleting invalid entries from 'ready' queue", "error", err)
+			s.msgsMu.Unlock()
+			return map[ulid.ULID]*model.FullMessage{}
 		}
-		errs, err = s.messagesDB.DeleteMany(invalidEntries)
+		err = s.messagesDB.DeleteMany(invalidEntries, txn)
 		if err != nil {
 			s.logger.Warn("Error deleting invalid entries from 'messages' queue", "error", err)
-		}
-		if s.metrics != nil {
-			s.metrics.BadgerGauge.WithLabelValues("messages").Sub(float64(len(invalidEntries) - len(errs)))
+			s.msgsMu.Unlock()
+			return map[ulid.ULID]*model.FullMessage{}
 		}
 	}
 
 	if len(messages) == 0 {
-		return messages
+		err := txn.Commit(nil)
+		s.msgsMu.Unlock()
+		if err == nil {
+			s.metrics.BadgerGauge.WithLabelValues("ready").Sub(float64(len(invalidEntries)))
+			s.metrics.BadgerGauge.WithLabelValues("messages").Sub(float64(len(invalidEntries)))
+		}
+		return map[ulid.ULID]*model.FullMessage{}
 	}
 
 	sentBatch := map[ulid.ULID][]byte{}
 	for uid := range messages {
 		sentBatch[uid] = []byte("true")
 	}
-	errs, err := s.sentDB.AddMany(sentBatch)
-	if s.metrics != nil {
-		s.metrics.BadgerGauge.WithLabelValues("sent").Add(float64(len(sentBatch) - len(errs)))
-	}
+	err := s.sentDB.AddMany(sentBatch, txn)
 	if err != nil {
 		s.logger.Warn("Error copying messages to the 'sent' queue", "error", err)
-	}
-	for _, errKey := range errs {
-		delete(sentBatch, errKey)
+		s.msgsMu.Unlock()
+		return map[ulid.ULID]*model.FullMessage{}
 	}
 	readyBatch := make([]ulid.ULID, 0, len(sentBatch))
 	for k := range sentBatch {
 		readyBatch = append(readyBatch, k)
 	}
-	errs, err = s.readyDB.DeleteMany(readyBatch)
-	if s.metrics != nil {
-		s.metrics.BadgerGauge.WithLabelValues("ready").Sub(float64(len(readyBatch) - len(errs)))
-	}
+	err = s.readyDB.DeleteMany(readyBatch, txn)
 	if err != nil {
 		s.logger.Warn("Error deleting messages from the 'ready' queue", "error", err)
+		s.msgsMu.Unlock()
+		return map[ulid.ULID]*model.FullMessage{}
 	}
 
-	for _, uid := range errs {
-		delete(messages, uid)
+	err = txn.Commit(nil)
+	s.msgsMu.Unlock()
+	if err == nil {
+		s.metrics.BadgerGauge.WithLabelValues("ready").Sub(float64(len(invalidEntries)))
+		s.metrics.BadgerGauge.WithLabelValues("messages").Sub(float64(len(invalidEntries)))
+		s.metrics.BadgerGauge.WithLabelValues("sent").Add(float64(len(sentBatch)))
+		s.metrics.BadgerGauge.WithLabelValues("ready").Sub(float64(len(readyBatch)))
+		return messages
+	} else if err == badger.ErrConflict {
+		// retry
+		return s.retrieve(n)
+	} else {
+		s.logger.Warn("Error committing to badger in retrieve", "error", err)
+		return map[ulid.ULID]*model.FullMessage{}
 	}
-	return messages
+
 }
 
 func (s *MessageStore) ACK(uid ulid.ULID) {
@@ -629,34 +677,44 @@ func (s *MessageStore) doACK(uids []ulid.ULID) {
 	if len(uids) == 0 {
 		return
 	}
+
 	s.msgsMu.Lock()
-	defer s.msgsMu.Unlock()
-	errs, err := s.sentDB.DeleteMany(uids)
+	txn := s.badger.NewTransaction(true)
+
+	defer func() {
+		txn.Discard()
+	}()
+
+	err := s.sentDB.DeleteMany(uids, txn)
 	if err != nil {
 		s.logger.Warn("Error removing messages from the Sent DB", "error", err)
+		s.msgsMu.Unlock()
+		return
 	}
-	if len(errs) < len(uids) {
-		if s.metrics != nil {
-			s.metrics.BadgerGauge.WithLabelValues("sent").Sub(float64(len(uids) - len(errs)))
-		}
-		uids_map := map[ulid.ULID]bool{}
-		for _, uid := range uids {
-			uids_map[uid] = true
-		}
-		for _, uid := range errs {
-			delete(uids_map, uid)
-		}
-		uids = make([]ulid.ULID, 0, len(uids_map))
-		for uid := range uids_map {
-			uids = append(uids, uid)
-		}
-		errs, err := s.messagesDB.DeleteMany(uids)
-		if err != nil {
-			s.logger.Warn("Error removing message content from DB", "error", err)
-		}
-		if s.metrics != nil {
-			s.metrics.BadgerGauge.WithLabelValues("messages").Sub(float64(len(uids) - len(errs)))
-		}
+	uids_map := map[ulid.ULID]bool{}
+	for _, uid := range uids {
+		uids_map[uid] = true
+	}
+	uids = make([]ulid.ULID, 0, len(uids_map))
+	for uid := range uids_map {
+		uids = append(uids, uid)
+	}
+	err = s.messagesDB.DeleteMany(uids, txn)
+	if err != nil {
+		s.logger.Warn("Error removing message content from DB", "error", err)
+		s.msgsMu.Unlock()
+		return
+	}
+	err = txn.Commit(nil)
+	s.msgsMu.Unlock()
+	if err == nil {
+		s.metrics.BadgerGauge.WithLabelValues("sent").Sub(float64(len(uids)))
+		s.metrics.BadgerGauge.WithLabelValues("messages").Sub(float64(len(uids)))
+	} else if err == badger.ErrConflict {
+		// retry
+		s.doACK(uids)
+	} else {
+		s.logger.Warn("Error commiting ACKs", "error", err)
 	}
 }
 
@@ -668,35 +726,45 @@ func (s *MessageStore) doNACK(uids []ulid.ULID) {
 	if len(uids) == 0 {
 		return
 	}
+
 	s.failedMu.Lock()
-	defer s.failedMu.Unlock()
+	txn := s.badger.NewTransaction(true)
+
+	defer func() {
+		txn.Discard()
+	}()
+
 	times := time.Now().Format(time.RFC3339)
 	failedBatch := map[ulid.ULID][]byte{}
 	for _, uid := range uids {
 		failedBatch[uid] = []byte(times)
 	}
-	errs, err := s.failedDB.AddMany(failedBatch)
+	err := s.failedDB.AddMany(failedBatch, txn)
 	if err != nil {
 		s.logger.Warn("Error copying messages to the Failed DB", "error", err)
+		s.failedMu.Unlock()
+		return
 	}
-	if len(errs) < len(failedBatch) {
-		if s.metrics != nil {
-			s.metrics.BadgerGauge.WithLabelValues("failed").Add(float64(len(failedBatch) - len(errs)))
-		}
-		for _, uid := range errs {
-			delete(failedBatch, uid)
-		}
-		uids = make([]ulid.ULID, 0, len(failedBatch))
-		for uid := range failedBatch {
-			uids = append(uids, uid)
-		}
-		errs, err := s.sentDB.DeleteMany(uids)
-		if err != nil {
-			s.logger.Warn("Error removing messages from the Sent DB", "error", err)
-		}
-		if s.metrics != nil {
-			s.metrics.BadgerGauge.WithLabelValues("sent").Sub(float64(len(uids) - len(errs)))
-		}
+	uids = make([]ulid.ULID, 0, len(failedBatch))
+	for uid := range failedBatch {
+		uids = append(uids, uid)
+	}
+	err = s.sentDB.DeleteMany(uids, txn)
+	if err != nil {
+		s.logger.Warn("Error removing messages from the Sent DB", "error", err)
+		s.failedMu.Unlock()
+		return
+	}
+	err = txn.Commit(nil)
+	s.failedMu.Unlock()
+	if err == nil {
+		s.metrics.BadgerGauge.WithLabelValues("sent").Sub(float64(len(uids)))
+		s.metrics.BadgerGauge.WithLabelValues("failed").Add(float64(len(failedBatch)))
+	} else if err == badger.ErrConflict {
+		// retry
+		s.doNACK(uids)
+	} else {
+		s.logger.Warn("Error commiting NACKs", "error", err)
 	}
 }
 
@@ -713,28 +781,31 @@ func (s *MessageStore) doPermanentError(uids []ulid.ULID) {
 	for _, uid := range uids {
 		permBatch[uid] = []byte(times)
 	}
-	errs, err := s.permerrorsDB.AddMany(permBatch)
+	txn := s.badger.NewTransaction(true)
+	defer txn.Discard()
+	err := s.permerrorsDB.AddMany(permBatch, txn)
 	if err != nil {
 		s.logger.Warn("Error copying messages to the PermErrors DB", "error", err)
+		return
 	}
-	if len(errs) < len(permBatch) {
-		if s.metrics != nil {
-			s.metrics.BadgerGauge.WithLabelValues("permerrors").Add(float64(len(permBatch) - len(errs)))
-		}
-		for _, uid := range errs {
-			delete(permBatch, uid)
-		}
-		uids = make([]ulid.ULID, 0, len(permBatch))
-		for uid := range permBatch {
-			uids = append(uids, uid)
-		}
-		errs, err := s.sentDB.DeleteMany(uids)
-		if err != nil {
-			s.logger.Warn("Error removing messages from the Sent DB", "error", err)
-		}
-		if s.metrics != nil {
-			s.metrics.BadgerGauge.WithLabelValues("sent").Sub(float64(len(uids) - len(errs)))
-		}
+	uids = make([]ulid.ULID, 0, len(permBatch))
+	for uid := range permBatch {
+		uids = append(uids, uid)
+	}
+	err = s.sentDB.DeleteMany(uids, txn)
+	if err != nil {
+		s.logger.Warn("Error removing messages from the Sent DB", "error", err)
+		return
+	}
+	err = txn.Commit(nil)
+	if err == nil {
+		s.metrics.BadgerGauge.WithLabelValues("permerrors").Add(float64(len(permBatch)))
+		s.metrics.BadgerGauge.WithLabelValues("sent").Sub(float64(len(uids)))
+	} else if err == badger.ErrConflict {
+		// retry
+		s.doPermanentError(uids)
+	} else {
+		s.logger.Warn("Error commiting PermErrors", "error", err)
 	}
 
 }

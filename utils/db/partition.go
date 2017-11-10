@@ -6,91 +6,155 @@ import (
 )
 
 type partitionImpl struct {
-	parent *badger.KV
+	parent *badger.DB
 	prefix []byte
 }
 
-func (p *partitionImpl) Get(key ulid.ULID) ([]byte, error) {
-	val := []byte{}
-	item := &badger.KVItem{}
-	err := p.parent.Get(append(p.prefix, key[:]...), item)
+func (p *partitionImpl) Get(key ulid.ULID, txn *badger.Txn) ([]byte, error) {
+	if txn == nil {
+		txn = p.parent.NewTransaction(false)
+		defer txn.Discard()
+	}
+	item, err := txn.Get(append(p.prefix, key[:]...))
 	if err != nil {
 		return nil, err
 	}
 	if item == nil {
 		return nil, nil
 	}
-	err = item.Value(func(v []byte) error {
-		val = append(val, v...)
-		return nil
-	})
+	val, err := item.Value()
 	if err != nil {
 		return nil, err
 	}
 	return val, nil
 }
 
-func (p *partitionImpl) Set(key ulid.ULID, value []byte) error {
-	return p.parent.Set(append(p.prefix, key[:]...), value, byte(0))
+func (p *partitionImpl) Set(key ulid.ULID, value []byte, txn *badger.Txn) (err error) {
+	n := false
+	if txn == nil {
+		txn = p.parent.NewTransaction(true)
+		n = true
+		defer txn.Discard()
+	}
+	err = txn.Set(append(p.prefix, key[:]...), value)
+	if err != nil {
+		txn.Discard()
+	} else if n {
+		err = txn.Commit(nil)
+		if err == badger.ErrConflict {
+			// retry
+			return p.Set(key, value, nil)
+		} else if err != nil {
+			return err
+		}
+	}
+	return
 }
 
-func (p *partitionImpl) AddMany(m map[ulid.ULID][]byte) (errors []ulid.ULID, err error) {
-	errors = []ulid.ULID{}
+func (p *partitionImpl) AddMany(m map[ulid.ULID][]byte, txn *badger.Txn) (err error) {
 	if len(m) == 0 {
 		return
 	}
-	entries := make([]*badger.Entry, 0, len(m))
+	n := false
+	if txn == nil {
+		txn = p.parent.NewTransaction(true)
+		n = true
+		defer txn.Discard()
+	}
 	for k, v := range m {
-		entries = badger.EntriesSet(entries, append(p.prefix, k[:]...), v)
+		err = txn.Set(append(p.prefix, k[:]...), v)
+		if err != nil {
+			txn.Discard()
+			return
+		}
 	}
-	err = p.parent.BatchSet(entries)
-	if err == nil {
-		return
-	}
-	for _, entry := range entries {
-		if entry.Error != nil {
-			var uid ulid.ULID
-			copy(uid[:], entry.Key[len(p.prefix):])
-			errors = append(errors, uid)
+	if n {
+		err = txn.Commit(nil)
+		if err == badger.ErrConflict {
+			// retry
+			return p.AddMany(m, nil)
+		} else if err != nil {
+			return err
 		}
 	}
 	return
 }
 
-func (p *partitionImpl) Exists(key ulid.ULID) (bool, error) {
-	return p.parent.Exists(append(p.prefix, key[:]...))
+func (p *partitionImpl) Exists(key ulid.ULID, txn *badger.Txn) (bool, error) {
+	if txn == nil {
+		txn = p.parent.NewTransaction(false)
+		defer txn.Discard()
+	}
+	_, err := txn.Get(append(p.prefix, key[:]...))
+	if err == nil {
+		return true, nil
+	} else if err == badger.ErrKeyNotFound {
+		return false, nil
+	} else {
+		return false, err
+	}
 }
 
-func (p *partitionImpl) Delete(key ulid.ULID) error {
-	return p.parent.Delete(append(p.prefix, key[:]...))
+func (p *partitionImpl) Delete(key ulid.ULID, txn *badger.Txn) (err error) {
+	n := false
+	if txn == nil {
+		txn = p.parent.NewTransaction(true)
+		n = true
+		defer txn.Discard()
+	}
+
+	err = txn.Delete(append(p.prefix, key[:]...))
+	if err != nil {
+		txn.Discard()
+	} else if n {
+		err = txn.Commit(nil)
+		if err == badger.ErrConflict {
+			// retry
+			return p.Delete(key, nil)
+		} else if err != nil {
+			return err
+		}
+	}
+	return
 }
 
-func (p *partitionImpl) DeleteMany(keys []ulid.ULID) (errors []ulid.ULID, err error) {
-	errors = []ulid.ULID{}
+func (p *partitionImpl) DeleteMany(keys []ulid.ULID, txn *badger.Txn) (err error) {
 	if len(keys) == 0 {
 		return
 	}
-	entries := make([]*badger.Entry, 0, len(keys))
+	n := false
+	if txn == nil {
+		txn = p.parent.NewTransaction(true)
+		n = true
+		defer txn.Discard()
+	}
+
 	for _, key := range keys {
-		entries = badger.EntriesDelete(entries, append(p.prefix, key[:]...))
+		err = txn.Delete(append(p.prefix, key[:]...))
+		if err != nil {
+			txn.Discard()
+			return
+		}
 	}
-	err = p.parent.BatchSet(entries)
-	if err == nil {
-		return
-	}
-	for _, entry := range entries {
-		if entry.Error != nil {
-			var uid ulid.ULID
-			copy(uid[:], entry.Key[len(p.prefix):])
-			errors = append(errors, uid)
+	if n {
+		err = txn.Commit(nil)
+		if err == badger.ErrConflict {
+			// retry
+			return p.DeleteMany(keys, nil)
+		} else if err != nil {
+			return err
 		}
 	}
 	return
 }
 
-func (p *partitionImpl) ListKeys() []ulid.ULID {
+func (p *partitionImpl) ListKeys(txn *badger.Txn) []ulid.ULID {
+	if txn == nil {
+		txn = p.parent.NewTransaction(false)
+		defer txn.Discard()
+	}
 	l := []ulid.ULID{}
-	iter := p.KeyIterator(1000)
+	iter := p.KeyIterator(1000, txn)
 	for iter.Rewind(); iter.Valid(); iter.Next() {
 		l = append(l, iter.Key())
 	}
@@ -98,9 +162,13 @@ func (p *partitionImpl) ListKeys() []ulid.ULID {
 	return l
 }
 
-func (p *partitionImpl) Count() int {
+func (p *partitionImpl) Count(txn *badger.Txn) int {
+	if txn == nil {
+		txn = p.parent.NewTransaction(false)
+		defer txn.Discard()
+	}
 	var l int
-	iter := p.KeyIterator(1000)
+	iter := p.KeyIterator(1000, txn)
 	for iter.Rewind(); iter.Valid(); iter.Next() {
 		l++
 	}
@@ -108,33 +176,48 @@ func (p *partitionImpl) Count() int {
 	return l
 }
 
-func (p *partitionImpl) KeyIterator(prefetchSize int) PartitionKeyIterator {
+func (p *partitionImpl) KeyIterator(prefetchSize int, txn *badger.Txn) PartitionKeyIterator {
+	n := false
+	if txn == nil {
+		txn = p.parent.NewTransaction(false)
+		n = true
+	}
 	opts := badger.IteratorOptions{
 		PrefetchValues: false,
 		PrefetchSize:   prefetchSize,
-		Reverse:        false,
 	}
-	iter := p.parent.NewIterator(opts)
-	return &partitionIterImpl{partition: p, iterator: iter}
+	iter := txn.NewIterator(opts)
+	//iter := p.parent.NewIterator(opts)
+	return &partitionIterImpl{partition: p, iterator: iter, txn: txn, n: n}
 }
 
-func (p *partitionImpl) KeyValueIterator(prefetchSize int) PartitionKeyValueIterator {
+func (p *partitionImpl) KeyValueIterator(prefetchSize int, txn *badger.Txn) PartitionKeyValueIterator {
+	n := false
+	if txn == nil {
+		txn = p.parent.NewTransaction(false)
+		n = true
+	}
 	opts := badger.IteratorOptions{
 		PrefetchValues: true,
 		PrefetchSize:   prefetchSize,
-		Reverse:        false,
 	}
-	iter := p.parent.NewIterator(opts)
-	return &partitionIterImpl{partition: p, iterator: iter}
+	iter := txn.NewIterator(opts)
+	//iter := p.parent.NewIterator(opts)
+	return &partitionIterImpl{partition: p, iterator: iter, txn: txn, n: n}
 }
 
 type partitionIterImpl struct {
 	partition *partitionImpl
 	iterator  *badger.Iterator
+	txn       *badger.Txn
+	n         bool
 }
 
 func (i *partitionIterImpl) Close() {
 	i.iterator.Close()
+	if i.n {
+		i.txn.Discard()
+	}
 }
 
 func (i *partitionIterImpl) Rewind() {
@@ -165,19 +248,18 @@ func (i *partitionIterImpl) Key() (uid ulid.ULID) {
 }
 
 func (i *partitionIterImpl) Value() []byte {
-	val := []byte{}
 	item := i.iterator.Item()
 	if item == nil {
 		return nil
 	} else {
-		item.Value(func(v []byte) error {
-			val = append(val, v...)
+		val, err := item.Value()
+		if err != nil {
 			return nil
-		})
+		}
 		return val
 	}
 }
 
-func NewPartition(parent *badger.KV, prefix []byte) Partition {
+func NewPartition(parent *badger.DB, prefix []byte) Partition {
 	return &partitionImpl{parent: parent, prefix: prefix}
 }
