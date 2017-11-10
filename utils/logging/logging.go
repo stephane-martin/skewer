@@ -13,8 +13,10 @@ const timeKey = "t"
 const lvlKey = "lvl"
 const msgKey = "msg"
 
-func SetLogging(level string, logJson bool, logSyslog bool, filename string) log15.Logger {
-	logger := log15.New()
+func SetLogging(logger log15.Logger, level string, logJson bool, logSyslog bool, filename string) log15.Logger {
+	if logger == nil {
+		logger = log15.New()
+	}
 	log_handlers := []log15.Handler{}
 	var formatter log15.Format
 	if logJson {
