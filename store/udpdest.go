@@ -25,9 +25,10 @@ type udpDestination struct {
 	ack      storeCallback
 	nack     storeCallback
 	permerr  storeCallback
+	encoder  model.Encoder
 }
 
-func NewUdpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (Destination, error) {
+func NewUdpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (dest Destination, err error) {
 	d := &udpDestination{
 		logger:   logger,
 		registry: prometheus.NewRegistry(),
@@ -38,6 +39,12 @@ func NewUdpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perme
 	}
 
 	//d.registry.MustRegister(d.ackCounter)
+
+	defer func() {
+		if d.conn != nil && err != nil {
+			d.conn.Close()
+		}
+	}()
 
 	d.fatal = make(chan struct{})
 
@@ -68,6 +75,11 @@ func NewUdpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perme
 		}
 	}
 
+	d.encoder, err = model.NewEncoder(d.conn, d.format)
+	if err != nil {
+		return nil, err
+	}
+
 	rebind := bc.UdpDest.Rebind
 	if rebind > 0 {
 		go func() {
@@ -87,20 +99,17 @@ func (d *udpDestination) Gather() ([]*dto.MetricFamily, error) {
 	return d.registry.Gather()
 }
 
-func (d *udpDestination) Send(message *model.FullMessage, partitionKey string, partitionNumber int32, topic string) error {
-	serial, err := message.MarshalAll(d.format)
-	if err != nil {
+func (d *udpDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+	err = d.encoder.Encode(&message)
+	if err == nil {
+		d.ack(message.Uid)
+	} else if model.IsEncodingError(err) {
 		d.permerr(message.Uid)
-		return err
-	}
-	_, err = d.conn.Write(serial)
-	if err != nil {
+	} else {
 		d.nack(message.Uid)
 		d.once.Do(func() { close(d.fatal) })
-		return err
 	}
-	d.ack(message.Uid)
-	return nil
+	return
 }
 
 func (d *udpDestination) Close() {

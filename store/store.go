@@ -65,6 +65,7 @@ type MessageStore struct {
 	permerrorsQueue *queue.AckQueue
 
 	OutputsChan chan *model.FullMessage
+	pool        *sync.Pool
 }
 
 func (s *MessageStore) Gather() ([]*dto.MetricFamily, error) {
@@ -95,6 +96,12 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, l log15.Logger) (Store,
 	store := &MessageStore{metrics: NewStoreMetrics(), registry: prometheus.NewRegistry()}
 	store.registry.MustRegister(store.metrics.BadgerGauge)
 	store.logger = l.New("class", "MessageStore")
+
+	store.pool = &sync.Pool{
+		New: func() interface{} {
+			return &model.FullMessage{}
+		},
+	}
 
 	store.toStashQueue = queue.NewMessageQueue()
 	store.ackQueue = queue.NewAckQueue()
@@ -522,6 +529,10 @@ func (s *MessageStore) ingest(queue []*model.FullMessage) (int, error) {
 	return ingested, errMsg
 }
 
+func (s *MessageStore) ReleaseMsg(msg *model.FullMessage) {
+	s.pool.Put(msg)
+}
+
 func (s *MessageStore) retrieve(n int) (messages map[ulid.ULID]*model.FullMessage) {
 	s.msgsMu.Lock()
 	defer s.msgsMu.Unlock()
@@ -537,7 +548,7 @@ func (s *MessageStore) retrieve(n int) (messages map[ulid.ULID]*model.FullMessag
 		message_b, err := s.messagesDB.Get(uid)
 		if err == nil {
 			if len(message_b) > 0 {
-				message = &model.FullMessage{}
+				message = s.pool.Get().(*model.FullMessage)
 				_, err := message.UnmarshalMsg(message_b)
 				if err == nil {
 					messages[uid] = message

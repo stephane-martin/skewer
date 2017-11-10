@@ -23,6 +23,7 @@ type Store interface {
 	StoreAllSyslogConfigs(c conf.BaseConfig) error
 	ReadAllBadgers() (map[string]string, map[string]string, map[string]string)
 	Gather() ([]*dto.MetricFamily, error)
+	ReleaseMsg(msg *model.FullMessage)
 }
 
 type Forwarder interface {
@@ -33,7 +34,7 @@ type Forwarder interface {
 }
 
 type Destination interface {
-	Send(m *model.FullMessage, partitionKey string, partitionNumber int32, topic string) error
+	Send(m model.FullMessage, partitionKey string, partitionNumber int32, topic string) error
 	Fatal() chan struct{}
 	Close()
 	Gather() ([]*dto.MetricFamily, error)
@@ -53,6 +54,8 @@ func NewDestination(ctx context.Context,
 		return NewTcpDestination(ctx, bc, ack, nack, permerr, logger)
 	case conf.Relp:
 		return NewRelpDestination(ctx, bc, ack, nack, permerr, logger)
+	case conf.File:
+		return NewFileDestination(ctx, bc, ack, nack, permerr, logger)
 	default:
 		return nil, fmt.Errorf("Unknown destination type: %d", typ)
 	}

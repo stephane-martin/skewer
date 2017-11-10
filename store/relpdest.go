@@ -38,6 +38,7 @@ type relpDestination struct {
 	txnr2msgid  sync.Map
 	window      chan bool
 	relpTimeout time.Duration
+	encoder     model.Encoder
 }
 
 func NewRelpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (dest Destination, err error) {
@@ -84,6 +85,11 @@ func NewRelpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perm
 			logger.Error("Error connecting to unix socket", "error", err)
 			return nil, err
 		}
+	}
+
+	d.encoder, err = model.NewEncoder(d.conn, d.format)
+	if err != nil {
+		return nil, err
 	}
 
 	d.scanner = bufio.NewScanner(d.conn)
@@ -174,18 +180,13 @@ func (d *relpDestination) scan() (txnr uint64, retcode int, data []byte, err err
 	return
 }
 
-func (d *relpDestination) w(command string, b []byte) (uint64, error) {
-	txnr := atomic.AddUint64(&d.curtxnr, 1)
-	header := fmt.Sprintf("%d %s %d", txnr, command, len(b))
-	if len(b) > 0 {
-		return txnr, utils.ChainWrites(d.conn, []byte(header), sp, b, endl)
-	}
-	return txnr, utils.ChainWrites(d.conn, []byte(header), endl)
+func (d *relpDestination) w(command string, v interface{}) (txnr uint64, err error) {
+	txnr = atomic.AddUint64(&d.curtxnr, 1)
+	return txnr, model.FrameEncode(d.encoder, endl, txnr, sp, command, sp, v)
 }
 
 func (d *relpDestination) wopen() (err error) {
-	header := fmt.Sprintf("0 open %d", len(OPEN))
-	return utils.ChainWrites(d.conn, []byte(header), sp, OPEN, endl)
+	return model.ChainEncode(d.encoder, int(0), sp, "open", sp, len(OPEN), sp, OPEN, endl)
 }
 
 func (d *relpDestination) wclose() (err error) {
@@ -193,27 +194,19 @@ func (d *relpDestination) wclose() (err error) {
 	return
 }
 
-func (d *relpDestination) wsyslog(serialized []byte) (uint64, error) {
-	return d.w("syslog", serialized)
-}
-
-func (d *relpDestination) Send(message *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *relpDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
 	var txnr uint64
-	var serialized []byte
-	serialized, err = message.MarshalAll(d.format)
-	if err != nil {
+	txnr, err = d.w("syslog", &message)
+	if err == nil {
+		d.window <- true
+		d.txnr2msgid.Store(txnr, message.Uid)
+	} else if model.IsEncodingError(err) {
 		d.permerr(message.Uid)
-		return
-	}
-	txnr, err = d.wsyslog(serialized)
-	if err != nil {
+	} else {
 		d.nack(message.Uid)
 		d.once.Do(func() { close(d.fatal) })
-		return
 	}
-	d.window <- true
-	d.txnr2msgid.Store(txnr, message.Uid)
-	return nil
+	return
 }
 
 func (d *relpDestination) Close() {

@@ -109,20 +109,94 @@ func (fwder *forwarderImpl) doForward(ctx context.Context, store Store, bc conf.
 	fwder.forwardMessages(ctx, store)
 }
 
+func (fwder *forwarderImpl) forwardMessage(message *model.FullMessage, jsenvs map[ulid.ULID]*javascript.Environment, store Store) {
+	var errs []error
+	var err error
+	var topic, partitionKey string
+	var partitionNumber int32
+	var filterResult javascript.FilterResult
+
+	env, ok := jsenvs[message.ConfId]
+	if !ok {
+		// create the environement for the javascript virtual machine
+		config, err := store.GetSyslogConfig(message.ConfId)
+		if err != nil {
+			fwder.logger.Warn("Could not find the stored configuration for a message", "confId", message.ConfId, "msgId", message.Uid)
+			store.PermError(message.Uid)
+			return
+		}
+		jsenvs[message.ConfId] = javascript.NewFilterEnvironment(
+			config.FilterFunc,
+			config.TopicFunc,
+			config.TopicTmpl,
+			config.PartitionFunc,
+			config.PartitionTmpl,
+			config.PartitionNumberFunc,
+			fwder.logger,
+		)
+		env = jsenvs[message.ConfId]
+	}
+
+	topic, errs = env.Topic(message.Parsed.Fields)
+	for _, err = range errs {
+		fwder.logger.Info("Error calculating topic", "error", err, "uid", message.Uid)
+	}
+	if len(topic) == 0 {
+		topic = "default-topic"
+	}
+	partitionKey, errs = env.PartitionKey(message.Parsed.Fields)
+	for _, err := range errs {
+		fwder.logger.Info("Error calculating the partition key", "error", err, "uid", message.Uid)
+	}
+	partitionNumber, errs = env.PartitionNumber(message.Parsed.Fields)
+	for _, err := range errs {
+		fwder.logger.Info("Error calculating the partition number", "error", err, "uid", message.Uid)
+	}
+
+	filterResult, err = env.FilterMessage(&message.Parsed.Fields)
+
+	switch filterResult {
+	case javascript.DROPPED:
+		store.ACK(message.Uid)
+		fwder.messageFilterCounter.WithLabelValues("dropped", message.Parsed.Client).Inc()
+		return
+	case javascript.REJECTED:
+		fwder.messageFilterCounter.WithLabelValues("rejected", message.Parsed.Client).Inc()
+		store.NACK(message.Uid)
+		return
+	case javascript.PASS:
+		fwder.messageFilterCounter.WithLabelValues("passing", message.Parsed.Client).Inc()
+	default:
+		store.PermError(message.Uid)
+		fwder.logger.Warn("Error happened processing message", "uid", message.Uid, "error", err)
+		fwder.messageFilterCounter.WithLabelValues("unknown", message.Parsed.Client).Inc()
+		return
+	}
+
+	if fwder.dest == nil {
+		fwder.logger.Debug(
+			"New message to be forwarded",
+			"pkey", partitionKey,
+			"topic", topic,
+			"msgid", ulid.ULID(message.Uid).String(),
+			"msg", message.Parsed.Fields.String(),
+		)
+		store.ACK(message.Uid)
+	} else {
+		err := fwder.dest.Send(*message, partitionKey, partitionNumber, topic)
+		if err != nil {
+			fwder.logger.Warn("Error forwarding message", "error", err, "uid", ulid.ULID(message.Uid).String())
+		}
+	}
+
+}
+
 func (fwder *forwarderImpl) forwardMessages(ctx context.Context, store Store) {
 	jsenvs := map[ulid.ULID]*javascript.Environment{}
 	done := ctx.Done()
 	var more bool
 	var message *model.FullMessage
-	var topic string
-	var partitionKey string
-	var partitionNumber int32
-	var errs []error
-	var err error
-	var filterResult javascript.FilterResult
-	var uid ulid.ULID
 
-ForOutputs:
 	for {
 		select {
 		case <-done:
@@ -131,78 +205,9 @@ ForOutputs:
 			if !more {
 				return
 			}
-			uid = message.Uid
-			env, ok := jsenvs[message.ConfId]
-			if !ok {
-				// create the environement for the javascript virtual machine
-				config, err := store.GetSyslogConfig(message.ConfId)
-				if err != nil {
-					fwder.logger.Warn("Could not find the stored configuration for a message", "confId", message.ConfId, "msgId", message.Uid)
-					store.PermError(uid)
-					continue ForOutputs
-				}
-				jsenvs[message.ConfId] = javascript.NewFilterEnvironment(
-					config.FilterFunc,
-					config.TopicFunc,
-					config.TopicTmpl,
-					config.PartitionFunc,
-					config.PartitionTmpl,
-					config.PartitionNumberFunc,
-					fwder.logger,
-				)
-				env = jsenvs[message.ConfId]
-			}
-
-			topic, errs = env.Topic(message.Parsed.Fields)
-			for _, err = range errs {
-				fwder.logger.Info("Error calculating topic", "error", err, "uid", message.Uid)
-			}
-			if len(topic) == 0 {
-				topic = "default-topic"
-			}
-			partitionKey, errs = env.PartitionKey(message.Parsed.Fields)
-			for _, err := range errs {
-				fwder.logger.Info("Error calculating the partition key", "error", err, "uid", message.Uid)
-			}
-			partitionNumber, errs = env.PartitionNumber(message.Parsed.Fields)
-			for _, err := range errs {
-				fwder.logger.Info("Error calculating the partition number", "error", err, "uid", message.Uid)
-			}
-
-			filterResult, err = env.FilterMessage(&message.Parsed.Fields)
-
-			switch filterResult {
-			case javascript.DROPPED:
-				store.ACK(uid)
-				fwder.messageFilterCounter.WithLabelValues("dropped", message.Parsed.Client).Inc()
-				continue ForOutputs
-			case javascript.REJECTED:
-				fwder.messageFilterCounter.WithLabelValues("rejected", message.Parsed.Client).Inc()
-				store.NACK(uid)
-				continue ForOutputs
-			case javascript.PASS:
-				fwder.messageFilterCounter.WithLabelValues("passing", message.Parsed.Client).Inc()
-			default:
-				store.PermError(uid)
-				fwder.logger.Warn("Error happened processing message", "uid", message.Uid, "error", err)
-				fwder.messageFilterCounter.WithLabelValues("unknown", message.Parsed.Client).Inc()
-				continue ForOutputs
-			}
-
-			if fwder.dest == nil {
-				fwder.logger.Debug(
-					"New message to be forwarded",
-					"pkey", partitionKey,
-					"topic", topic,
-					"msgid", ulid.ULID(message.Uid).String(),
-					"msg", message.Parsed.Fields.String(),
-				)
-				store.ACK(uid)
-			} else {
-				err := fwder.dest.Send(message, partitionKey, partitionNumber, topic)
-				if err != nil {
-					fwder.logger.Warn("Error forwarding message", "error", err, "uid", ulid.ULID(message.Uid).String())
-				}
+			if message != nil {
+				fwder.forwardMessage(message, jsenvs, store)
+				store.ReleaseMsg(message)
 			}
 		}
 	}

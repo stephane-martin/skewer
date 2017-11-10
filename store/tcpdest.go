@@ -4,20 +4,20 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/inconshreveable/log15"
+	"github.com/oklog/ulid"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
-	"github.com/stephane-martin/skewer/utils"
 )
 
 var sp = []byte(" ")
+var zero ulid.ULID
 
 type tcpDestination struct {
 	logger      log15.Logger
@@ -31,7 +31,8 @@ type tcpDestination struct {
 	permerr     storeCallback
 	lineFraming bool
 	delimiter   []byte
-	previous    *model.FullMessage
+	previousUid ulid.ULID
+	encoder     model.Encoder
 }
 
 func NewTcpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (dest Destination, err error) {
@@ -88,6 +89,11 @@ func NewTcpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perme
 		}
 	}
 
+	d.encoder, err = model.NewEncoder(d.conn, d.format)
+	if err != nil {
+		return nil, err
+	}
+
 	rebind := bc.TcpDest.Rebind
 	if rebind > 0 {
 		go func() {
@@ -103,37 +109,29 @@ func NewTcpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perme
 	return d, nil
 }
 
-func (d *tcpDestination) Send(message *model.FullMessage, partitionKey string, partitionNumber int32, topic string) error {
-	serial, err := message.MarshalAll(d.format)
-	if err != nil {
-		d.permerr(message.Uid)
-		return err
-	}
+func (d *tcpDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
 	if d.lineFraming {
-		err = utils.ChainWrites(d.conn, serial, d.delimiter)
+		err = model.ChainEncode(d.encoder, &message, d.delimiter)
 	} else {
-		err = utils.ChainWrites(
-			d.conn,
-			[]byte(strconv.FormatInt(int64(len(serial)), 10)),
-			sp,
-			serial,
-		)
+		err = model.FrameEncode(d.encoder, nil, &message)
 	}
 	if err == nil {
-		if d.previous != nil {
-			d.ack(d.previous.Uid)
+		if d.previousUid != zero {
+			d.ack(d.previousUid)
 		}
-		d.previous = message
+		d.previousUid = message.Uid
+	} else if model.IsEncodingError(err) {
+		d.permerr(message.Uid)
 	} else {
+		// error writing to d.conn
 		d.nack(message.Uid)
-		if d.previous != nil {
-			d.nack(d.previous.Uid)
-			d.previous = nil
+		if d.previousUid != zero {
+			d.nack(d.previousUid)
+			d.previousUid = zero
 		}
 		d.once.Do(func() { close(d.fatal) })
-		return err
 	}
-	return nil
+	return
 }
 
 func (d *tcpDestination) Close() {
