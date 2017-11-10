@@ -173,7 +173,7 @@ func parseTag(tag []byte) (appname []byte, procid []byte) {
 
 func isHostname(s []byte) bool {
 	for _, r := range string(s) {
-		if (!uni.IsLetter(r)) && (!uni.IsNumber(r)) && r != '.' && r != ':' {
+		if (!uni.IsLetter(r)) && (!uni.IsNumber(r)) && r != '.' && r != ':' && r != '-' && r != '_' {
 			return false
 		}
 	}
