@@ -14,6 +14,7 @@ const (
 	Udp
 	Tcp
 	Relp
+	File
 )
 
 // BaseConfig is the root of all configuration parameters.
@@ -29,6 +30,7 @@ type BaseConfig struct {
 	UdpDest    UdpDestConfig    `mapstructure:"udp_destination" toml:"udp_destination" json:"udp_destination"`
 	TcpDest    TcpDestConfig    `mapstructure:"tcp_destination" toml:"tcp_destination" json:"tcp_destination"`
 	RelpDest   RelpDestConfig   `mapstructure:"relp_destination" toml:"relp_destination" json:"relp_destination"`
+	FileDest   FileDestConfig   `mapstructure:"file_destination" toml:"file_destination" json:"file_destination"`
 }
 
 // MainConfig lists general/global parameters.
@@ -123,6 +125,17 @@ type TcpDestConfig struct {
 	FrameDelimiter           uint8         `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
 	KeepAlive                bool          `mapstructure:"keepalive" toml:"keepalive" json:"keepalive"`
 	KeepAlivePeriod          time.Duration `mapstructure:"keepalive_period" toml:"keepalive_period" json:"keepalive_period"`
+}
+
+type FileDestConfig struct {
+	BaseDestConfig  `mapstructure:",squash"`
+	Filename        string        `mapstructure:"filename" toml:"filename" json:"filename"`
+	Sync            bool          `mapstructure:"sync" toml:"sync" json:"sync"`
+	SyncPeriod      time.Duration `mapstructure:"sync_period" toml:"sync_period" json:"sync_period"`
+	OpenFilesCache  uint64        `mapstructure:"open_files_cache" toml:"open_files_cache" json:"open_files_cache"`
+	OpenFileTimeout time.Duration `mapstructure:"open_file_timeout" toml:"open_file_timeout" json:"open_file_timeout"`
+	Gzip            bool          `mapstructure:"gzip" toml:"gzip" json:"gzip"`
+	GzipLevel       int           `mapstructure:"gzip_level" toml:"gzip_level" json:"gzip_level"`
 }
 
 type FilterSubConfig struct {

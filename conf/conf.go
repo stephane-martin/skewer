@@ -652,6 +652,8 @@ func (c *BaseConfig) Complete() (err error) {
 		c.Main.Dest = Tcp
 	case "relp":
 		c.Main.Dest = Relp
+	case "file":
+		c.Main.Dest = File
 	default:
 		return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown destination type: '%s'", c.Main.Destination)}
 	}

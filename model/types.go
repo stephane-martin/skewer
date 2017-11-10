@@ -3,13 +3,12 @@ package model
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/pquerna/ffjson/ffjson"
-	"github.com/stephane-martin/skewer/utils"
 )
 
 //go:generate msgp
@@ -93,8 +92,8 @@ func (m *SyslogMessage) String() string {
 		m.Facility,
 		m.Severity,
 		m.Version,
-		time.Unix(0, m.TimeReportedNum).UTC().Format(time.RFC3339),
-		time.Unix(0, m.TimeGeneratedNum).UTC().Format(time.RFC3339),
+		m.GetTimeReported().Format(time.RFC3339Nano),
+		m.GetTimeGenerated().Format(time.RFC3339Nano),
 		m.Hostname,
 		m.Appname,
 		m.Procid,
@@ -105,43 +104,52 @@ func (m *SyslogMessage) String() string {
 	)
 }
 
+func (m SyslogMessage) GetTimeReported() time.Time {
+	return time.Unix(0, m.TimeReportedNum).UTC()
+}
+
+func (m SyslogMessage) GetTimeGenerated() time.Time {
+	return time.Unix(0, m.TimeGeneratedNum).UTC()
+}
+
+func (m SyslogMessage) Date() string {
+	return m.GetTimeReported().Format("2006-01-02")
+}
+
 // Empty returns true if the message is empty
 func (m *SyslogMessage) Empty() bool {
 	return len(m.Message) == 0 && len(m.Structured) == 0 && len(m.Properties) == 0
 }
 
-func (m *FullMessage) MarshalAll(frmt string) ([]byte, error) {
+func (m *FullMessage) MarshalAll(frmt string) (b []byte, err error) {
+	buf := bytes.NewBuffer(nil)
+	err = m.Encode(buf, frmt)
+	if err == nil {
+		b = buf.Bytes()
+	}
+	return
+}
+
+func (m *FullMessage) Encode(b io.Writer, frmt string) error {
 	switch frmt {
 	case "rfc5424":
-		return m.Parsed.Fields.Marshal5424()
+		return m.Parsed.Fields.Encode5424(b)
 	case "rfc3164":
-		return m.Parsed.Fields.Marshal3164()
+		return m.Parsed.Fields.Encode3164(b)
 	case "json":
-		return ffjson.Marshal(&m.Parsed.Fields)
+		m.Parsed.Fields.TimeReported = m.Parsed.Fields.GetTimeReported().Format(time.RFC3339Nano)
+		m.Parsed.Fields.TimeGenerated = m.Parsed.Fields.GetTimeGenerated().Format(time.RFC3339Nano)
+		return ffjson.NewEncoder(b).Encode(&m.Parsed.Fields)
 	case "fulljson":
-		return ffjson.Marshal(m)
+		m.Parsed.Fields.TimeReported = m.Parsed.Fields.GetTimeReported().Format(time.RFC3339Nano)
+		m.Parsed.Fields.TimeGenerated = m.Parsed.Fields.GetTimeGenerated().Format(time.RFC3339Nano)
+		return ffjson.NewEncoder(b).Encode(&m)
 	default:
-		return nil, fmt.Errorf("MarshalAll: unknown format '%s'", frmt)
+		return fmt.Errorf("MarshalAll: unknown format '%s'", frmt)
 	}
 }
 
-// MarshalAll formats the message in the given format
-func (m *SyslogMessage) MarshalAll(frmt string) ([]byte, error) {
-	switch frmt {
-	case "rfc5424":
-		return m.Marshal5424()
-	case "rfc3164":
-		return m.Marshal3164()
-	case "json":
-		return ffjson.Marshal(m)
-	default:
-		return nil, fmt.Errorf("MarshalAll: unknown format '%s'", frmt)
-	}
-}
-
-// Marshal3164 formats the message as a RFC3164 line
-func (m *SyslogMessage) Marshal3164() ([]byte, error) {
-	b := bytes.NewBuffer(nil)
+func (m *SyslogMessage) Encode3164(b io.Writer) (err error) {
 	procid := strings.TrimSpace(m.Procid)
 	if len(procid) > 0 {
 		procid = fmt.Sprintf("[%s]", procid)
@@ -150,153 +158,76 @@ func (m *SyslogMessage) Marshal3164() ([]byte, error) {
 	if len(hostname) == 0 {
 		hostname, _ = os.Hostname()
 	}
-	fmt.Fprintf(
+	_, err = fmt.Fprintf(
 		b, "<%d>%s %s %s%s: %s",
 		m.Priority,
-		time.Unix(0, m.TimeReportedNum).UTC().Format("Jan _2 15:04:05"),
+		m.GetTimeReported().Format("Jan _2 15:04:05"),
 		hostname,
 		m.Appname,
 		procid,
 		m.Message,
 	)
-	return b.Bytes(), nil
+	return err
 }
 
-// Marshal5424 formats the message as a RFC5424 line
-func (m *SyslogMessage) Marshal5424() (res []byte, err error) {
+func (m *SyslogMessage) Encode5424(b io.Writer) (err error) {
 	err = m.validRfc5424()
+
 	if err != nil {
-		return nil, err
+		return err
 	}
-	b := bytes.NewBuffer(nil)
-	fmt.Fprintf(b, "<%d>1 %s %s %s %s %s ",
+
+	_, err = fmt.Fprintf(
+		b,
+		"<%d>1 %s %s %s %s %s ",
 		m.Priority,
-		time.Unix(0, m.TimeReportedNum).UTC().Format(time.RFC3339),
+		m.GetTimeReported().Format(time.RFC3339),
 		nilify(m.Hostname),
 		nilify(m.Appname),
 		nilify(m.Procid),
-		nilify(m.Msgid))
+		nilify(m.Msgid),
+	)
+
+	if err != nil {
+		return err
+	}
 
 	if len(m.Properties) == 0 {
-		fmt.Fprint(b, "-")
+		_, err = fmt.Fprint(b, "-")
+		if err != nil {
+			return err
+		}
 	}
+
 	for sid := range m.Properties {
-		fmt.Fprintf(b, "[%s", sid)
+		_, err = fmt.Fprintf(b, "[%s", sid)
+		if err != nil {
+			return err
+		}
 		for name, value := range m.Properties[sid] {
 			if len(name) > 32 {
 				name = name[:32]
 			}
-			fmt.Fprintf(b, " %s=\"%s\"", name, escapeSDParam(value))
+			_, err = fmt.Fprintf(b, " %s=\"%s\"", name, escapeSDParam(value))
+			if err != nil {
+				return err
+			}
 		}
-		fmt.Fprintf(b, "]")
+		_, err = fmt.Fprintf(b, "]")
+		if err != nil {
+			return err
+		}
 	}
 
 	if len(m.Message) > 0 {
-		fmt.Fprint(b, " ")
-		b.Write([]byte(m.Message))
-	}
-	res = b.Bytes()
-	return
-}
-
-func (m *SyslogMessage) validRfc5424() error {
-	if !utils.PrintableUsASCII(m.Hostname) {
-		return invalid5424("Hostname", m.Hostname)
-	}
-	if len(m.Hostname) > 255 {
-		return invalid5424("Hostname", m.Hostname)
-	}
-	if !utils.PrintableUsASCII(m.Appname) {
-		return invalid5424("Appname", m.Appname)
-	}
-	if len(m.Appname) > 48 {
-		return invalid5424("Appname", m.Appname)
-	}
-	if !utils.PrintableUsASCII(m.Procid) {
-		return invalid5424("Procid", m.Procid)
-	}
-	if len(m.Procid) > 128 {
-		return invalid5424("Procid", m.Procid)
-	}
-	if !utils.PrintableUsASCII(m.Msgid) {
-		return invalid5424("Msgid", m.Msgid)
-	}
-	if len(m.Msgid) > 32 {
-		return invalid5424("Msgid", m.Msgid)
-	}
-
-	for sid := range m.Properties {
-		if !validName(sid) {
-			return invalid5424("StructuredData/ID", sid)
+		_, err = fmt.Fprint(b, " ")
+		if err != nil {
+			return err
 		}
-		for param, value := range m.Properties[sid] {
-			if !validName(param) {
-				return invalid5424("StructuredData/Name", param)
-			}
-			if !utf8.ValidString(value) {
-				return invalid5424("StructuredData/Value", value)
-			}
+		_, err = b.Write([]byte(m.Message))
+		if err != nil {
+			return err
 		}
 	}
 	return nil
-}
-
-func nilify(x string) string {
-	if x == "" {
-		return "-"
-	}
-	return x
-}
-
-func escapeSDParam(s string) string {
-	escapeCount := 0
-	for i := 0; i < len(s); i++ {
-		switch s[i] {
-		case '\\', '"', ']':
-			escapeCount++
-		}
-	}
-	if escapeCount == 0 {
-		return s
-	}
-
-	t := make([]byte, len(s)+escapeCount)
-	j := 0
-	for i := 0; i < len(s); i++ {
-		switch c := s[i]; c {
-		case '\\', '"', ']':
-			t[j] = '\\'
-			t[j+1] = c
-			j += 2
-		default:
-			t[j] = s[i]
-			j++
-		}
-	}
-	return string(t)
-}
-
-func validName(s string) bool {
-	for _, ch := range s {
-		if ch < 33 || ch > 126 {
-			return false
-		}
-		if ch == '=' || ch == ']' || ch == '"' {
-			return false
-		}
-	}
-	return true
-}
-
-type ErrInvalid5424 struct {
-	Property string
-	Value    interface{}
-}
-
-func (e ErrInvalid5424) Error() string {
-	return fmt.Sprintf("Message cannot be RFC5424 serialized: %s is invalid ('%v')", e.Property, e.Value)
-}
-
-func invalid5424(property string, value interface{}) error {
-	return ErrInvalid5424{Property: property, Value: value}
 }

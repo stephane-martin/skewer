@@ -20,6 +20,7 @@ func SetDefaults(v *viper.Viper) {
 		SetUdpDestDefaults,
 		SetTcpDestDefaults,
 		SetRelpDestDefaults,
+		SetFileDestDefaults,
 		SetMainDefaults,
 	}
 	for _, f := range funcs {
@@ -40,6 +41,21 @@ func SetRelpDestDefaults(v *viper.Viper, prefixed bool) {
 	v.SetDefault(prefix+"window_size", 128)
 	v.SetDefault(prefix+"connection_timeout", "10s")
 	v.SetDefault(prefix+"relp_timeout", "90s")
+}
+
+func SetFileDestDefaults(v *viper.Viper, prefixed bool) {
+	prefix := ""
+	if prefixed {
+		prefix = "file_destination."
+	}
+	v.SetDefault(prefix+"filename", "/var/log/skewer/{{.Fields.Date}}/{{.Fields.Appname}}.log")
+	v.SetDefault(prefix+"sync", false)
+	v.SetDefault(prefix+"sync_period", "1s")
+	v.SetDefault(prefix+"open_files_cache", 128)
+	v.SetDefault(prefix+"open_file_timeout", "10m")
+	v.SetDefault(prefix+"gzip", false)
+	v.SetDefault(prefix+"gzip_level", 5)
+	v.SetDefault(prefix+"format", "file")
 }
 
 func SetUdpDestDefaults(v *viper.Viper, prefixed bool) {

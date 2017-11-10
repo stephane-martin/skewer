@@ -58,6 +58,7 @@ func deriveDeepCopy(dst, src *BaseConfig) {
 	dst.UdpDest = src.UdpDest
 	dst.TcpDest = src.TcpDest
 	dst.RelpDest = src.RelpDest
+	dst.FileDest = src.FileDest
 }
 
 // deriveDeepCopy_ recursively copies the contents of src into dst.
