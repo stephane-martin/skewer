@@ -410,6 +410,7 @@ func (s *MessageStore) resetFailures() {
 	// push back messages from "failed" to "ready"
 	s.failedMu.Lock()
 	defer s.failedMu.Unlock()
+
 	for {
 		txn := s.badger.NewTransaction(true)
 		now := time.Now()
@@ -481,8 +482,18 @@ func (s *MessageStore) resetFailures() {
 		} else {
 			s.logger.Warn("Error commiting resetFailures", "error", err)
 		}
-
 	}
+
+	err := s.badger.PurgeOlderVersions()
+	if err == nil {
+		err = s.badger.RunValueLogGC(0.5)
+		if err != nil {
+			s.logger.Warn("Error garbage collecting badger", "error", err)
+		}
+	} else {
+		s.logger.Warn("Error purging badger", "error", err)
+	}
+
 }
 
 func (s *MessageStore) Stash(m model.FullMessage) (fatal error, nonfatal error) {
