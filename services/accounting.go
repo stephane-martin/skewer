@@ -1,6 +1,7 @@
 package services
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -105,11 +106,30 @@ func (s *AccountingService) makeMessage(buf []byte, tick int64, hostname string)
 	return &msg
 }
 
+var ErrTruncated error = errors.New("File has been truncated")
+
 func (s *AccountingService) readFile(f *os.File, tick int64, hostname string, size int) (err error) {
+	var offset int64
+	var fsize int64
+	var infos os.FileInfo
 	buf := make([]byte, accounting.Ssize)
 	for {
 		_, err = io.ReadAtLeast(f, buf, size)
 		if err == io.EOF || err == io.ErrUnexpectedEOF {
+			// check if file has been truncated
+			offset, err = f.Seek(0, 1)
+			if err != nil {
+				return err
+			}
+			infos, err = f.Stat()
+			if err != nil {
+				return err
+			}
+			fsize = infos.Size()
+			if offset > fsize {
+				s.logger.Info("Accounting file has been truncated", "offset", offset, "filesize", fsize)
+				return ErrTruncated
+			}
 			return nil
 		} else if err != nil {
 			return fmt.Errorf("Unexpected error while reading the accounting file: %s", err)
@@ -131,10 +151,18 @@ func (s *AccountingService) doStart(watcher *fsnotify.Watcher, hostname string, 
 		return
 	}
 
+Read:
 	// fetch content from the acct file
 	for {
-		err := s.readFile(f, tick, hostname, accounting.Ssize)
-		if err != nil {
+		err = s.readFile(f, tick, hostname, accounting.Ssize)
+		if err == ErrTruncated {
+			_, err = f.Seek(0, 0)
+			if err != nil {
+				s.logger.Error("Error when seeking to the beginning of the accounting file", "error", err)
+				return
+			}
+			continue Read
+		} else if err != nil {
 			s.logger.Error(err.Error())
 			watcher.Close()
 			return
@@ -151,20 +179,20 @@ func (s *AccountingService) doStart(watcher *fsnotify.Watcher, hostname string, 
 					break WaitWrite
 				case fsnotify.Rename:
 					// accounting file rotation
-					s.logger.Info("Accounting file rotation")
+					s.logger.Info("Accounting file has been renamed (rotation?)", "notifypath", ev.Name)
 					time.Sleep(3 * time.Second)
 					f2, err := os.Open(s.Conf.Path)
 					if err == nil {
-						s.logger.Info("Accounting file has been reopened")
+						s.logger.Info("Accounting file has been reopened", "path", s.Conf.Path)
 					} else {
-						s.logger.Error("Error reopening accounting file", "error", err)
+						s.logger.Error("Error reopening accounting file", "error", err, "path", s.Conf.Path)
 						return
 					}
 					s.wgroup.Add(1)
 					go s.doStart(watcher, hostname, f2, tick)
 					return
 				case fsnotify.Remove:
-					s.logger.Error("Accounting file has been removed ?!")
+					s.logger.Error("Accounting file has been removed ?!", "notifypath", ev.Name)
 					watcher.Close()
 					return
 				default:
