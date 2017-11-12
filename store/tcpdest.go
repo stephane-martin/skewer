@@ -45,6 +45,7 @@ func NewTcpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perme
 		format:      bc.TcpDest.Format,
 		lineFraming: bc.TcpDest.LineFraming,
 		delimiter:   []byte{bc.TcpDest.FrameDelimiter},
+		fatal:       make(chan struct{}),
 	}
 
 	defer func() {
@@ -54,8 +55,6 @@ func NewTcpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perme
 	}()
 
 	//d.registry.MustRegister(d.ackCounter)
-
-	d.fatal = make(chan struct{})
 
 	path := strings.TrimSpace(bc.TcpDest.UnixSocketPath)
 	if len(path) == 0 {

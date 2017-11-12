@@ -21,6 +21,7 @@ func SetDefaults(v *viper.Viper) {
 		SetTcpDestDefaults,
 		SetRelpDestDefaults,
 		SetFileDestDefaults,
+		SetStderrDestDefaults,
 		SetMainDefaults,
 	}
 	for _, f := range funcs {
@@ -56,6 +57,14 @@ func SetFileDestDefaults(v *viper.Viper, prefixed bool) {
 	v.SetDefault(prefix+"gzip", false)
 	v.SetDefault(prefix+"gzip_level", 5)
 	v.SetDefault(prefix+"format", "file")
+}
+
+func SetStderrDestDefaults(v *viper.Viper, prefixed bool) {
+	prefix := ""
+	if prefixed {
+		prefix = "stderr_destination."
+	}
+	v.SetDefault(prefix+"format", "fulljson")
 }
 
 func SetUdpDestDefaults(v *viper.Viper, prefixed bool) {

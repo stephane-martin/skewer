@@ -654,6 +654,8 @@ func (c *BaseConfig) Complete() (err error) {
 		c.Main.Dest = Relp
 	case "file":
 		c.Main.Dest = File
+	case "stderr":
+		c.Main.Dest = Stderr
 	default:
 		return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown destination type: '%s'", c.Main.Destination)}
 	}
@@ -662,25 +664,22 @@ func (c *BaseConfig) Complete() (err error) {
 	c.TcpDest.Format = strings.TrimSpace(strings.ToLower(c.TcpDest.Format))
 	c.RelpDest.Format = strings.TrimSpace(strings.ToLower(c.RelpDest.Format))
 	c.KafkaDest.Format = strings.TrimSpace(strings.ToLower(c.KafkaDest.Format))
-	switch c.UdpDest.Format {
-	case "rfc5424", "rfc3164", "json", "fulljson":
-	default:
-		return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown UDP destination format: '%s'", c.UdpDest.Format)}
-	}
-	switch c.TcpDest.Format {
-	case "rfc5424", "rfc3164", "json", "fulljson":
-	default:
-		return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown TCP destination format type: '%s'", c.TcpDest.Format)}
-	}
-	switch c.KafkaDest.Format {
-	case "rfc5424", "rfc3164", "json", "fulljson":
-	default:
-		return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown Kafka destination format: '%s'", c.KafkaDest.Format)}
-	}
-	switch c.RelpDest.Format {
-	case "rfc5424", "rfc3164", "json", "fulljson":
-	default:
-		return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown RELP destination format: '%s'", c.RelpDest.Format)}
+	c.FileDest.Format = strings.TrimSpace(strings.ToLower(c.FileDest.Format))
+	c.StderrDest.Format = strings.TrimSpace(strings.ToLower(c.StderrDest.Format))
+
+	for _, frmt := range []string{
+		c.UdpDest.Format,
+		c.TcpDest.Format,
+		c.RelpDest.Format,
+		c.KafkaDest.Format,
+		c.FileDest.Format,
+		c.StderrDest.Format,
+	} {
+		switch frmt {
+		case "rfc5424", "rfc3164", "json", "fulljson":
+		default:
+			return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown destination format: '%s'", frmt)}
+		}
 	}
 
 	_, err = ParseVersion(c.KafkaDest.Version)

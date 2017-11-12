@@ -36,6 +36,7 @@ func NewUdpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perme
 		nack:     nack,
 		permerr:  permerr,
 		format:   bc.UdpDest.Format,
+		fatal:    make(chan struct{}),
 	}
 
 	//d.registry.MustRegister(d.ackCounter)
@@ -45,8 +46,6 @@ func NewUdpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perme
 			d.conn.Close()
 		}
 	}()
-
-	d.fatal = make(chan struct{})
 
 	path := strings.TrimSpace(bc.UdpDest.UnixSocketPath)
 	if len(path) == 0 {

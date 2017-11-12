@@ -40,11 +40,13 @@ type Destination interface {
 	Gather() ([]*dto.MetricFamily, error)
 }
 
-func NewDestination(ctx context.Context,
+func NewDestination(
+	ctx context.Context,
 	typ conf.DestinationType,
 	bc conf.BaseConfig,
 	ack, nack, permerr storeCallback,
 	logger log15.Logger) (Destination, error) {
+
 	switch typ {
 	case conf.Kafka:
 		return NewKafkaDestination(ctx, bc, ack, nack, permerr, logger)
@@ -56,6 +58,8 @@ func NewDestination(ctx context.Context,
 		return NewRelpDestination(ctx, bc, ack, nack, permerr, logger)
 	case conf.File:
 		return NewFileDestination(ctx, bc, ack, nack, permerr, logger)
+	case conf.Stderr:
+		return NewStderrDestination(ctx, bc, ack, nack, permerr, logger)
 	default:
 		return nil, fmt.Errorf("Unknown destination type: %d", typ)
 	}

@@ -145,6 +145,7 @@ func NewFileDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perm
 		nack:     nack,
 		permerr:  permerr,
 		format:   bc.FileDest.Format,
+		fatal:    make(chan struct{}),
 		files:    newOpenedFiles(ctx, bc.FileDest.OpenFileTimeout, bc.FileDest.OpenFilesCache, logger),
 	}
 	d.filenameTmpl, err = template.New("filename").Parse(bc.FileDest.Filename)

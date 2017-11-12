@@ -15,6 +15,7 @@ const (
 	Tcp
 	Relp
 	File
+	Stderr
 )
 
 // BaseConfig is the root of all configuration parameters.
@@ -31,6 +32,7 @@ type BaseConfig struct {
 	TcpDest    TcpDestConfig    `mapstructure:"tcp_destination" toml:"tcp_destination" json:"tcp_destination"`
 	RelpDest   RelpDestConfig   `mapstructure:"relp_destination" toml:"relp_destination" json:"relp_destination"`
 	FileDest   FileDestConfig   `mapstructure:"file_destination" toml:"file_destination" json:"file_destination"`
+	StderrDest StderrDestConfig `mapstructure:"stderr_destination" toml:"stderr_destination" json:"stderr_destination"`
 }
 
 // MainConfig lists general/global parameters.
@@ -136,6 +138,10 @@ type FileDestConfig struct {
 	OpenFileTimeout time.Duration `mapstructure:"open_file_timeout" toml:"open_file_timeout" json:"open_file_timeout"`
 	Gzip            bool          `mapstructure:"gzip" toml:"gzip" json:"gzip"`
 	GzipLevel       int           `mapstructure:"gzip_level" toml:"gzip_level" json:"gzip_level"`
+}
+
+type StderrDestConfig struct {
+	BaseDestConfig `mapstructure:",squash"`
 }
 
 type FilterSubConfig struct {

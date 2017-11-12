@@ -52,6 +52,7 @@ func NewRelpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perm
 		format:      bc.RelpDest.Format,
 		window:      make(chan bool, bc.RelpDest.WindowSize),
 		relpTimeout: bc.RelpDest.RelpTimeout,
+		fatal:       make(chan struct{}),
 	}
 
 	defer func() {
@@ -61,8 +62,6 @@ func NewRelpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perm
 	}()
 
 	//d.registry.MustRegister(d.ackCounter)
-
-	d.fatal = make(chan struct{})
 
 	path := strings.TrimSpace(bc.RelpDest.UnixSocketPath)
 	if len(path) == 0 {

@@ -36,6 +36,7 @@ func NewKafkaDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, per
 		nack:     nack,
 		permerr:  permerr,
 		format:   bc.KafkaDest.Format,
+		fatal:    make(chan struct{}),
 	}
 	d.ackCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -60,7 +61,6 @@ func NewKafkaDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, per
 		case <-time.After(2 * time.Second):
 		}
 	}
-	d.fatal = make(chan struct{})
 
 	go func() {
 		var m *sarama.ProducerMessage
