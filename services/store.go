@@ -95,7 +95,7 @@ func (s *storeServiceImpl) doStart(test bool, mu *sync.Mutex) ([]model.ListenerI
 		var err error
 		s.test = test
 
-		s.st, err = store.NewStore(s.shutdownCtx, s.config.Store, s.config.Main.Dest, s.logger)
+		s.st, err = store.NewStore(s.shutdownCtx, s.config.Store, s.config.Main.Destinations, s.logger)
 		if err != nil {
 			return infos, err
 		}
@@ -127,7 +127,7 @@ func (s *storeServiceImpl) doStart(test bool, mu *sync.Mutex) ([]model.ListenerI
 	}
 
 	// refresh destinations
-	s.st.SetDestinations(s.config.Main.Dest)
+	s.st.SetDestinations(s.config.Main.Destinations)
 
 	// create and start the forwarder
 	var forwarderCtx context.Context

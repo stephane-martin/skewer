@@ -20,19 +20,25 @@ import (
 )
 
 type Destinations struct {
-	d atomic.Value
+	d uint64
 }
 
-func (dests *Destinations) Store(ds []conf.DestinationType) {
-	dests.d.Store(ds)
+func (dests *Destinations) Store(ds conf.DestinationType) {
+	atomic.StoreUint64(&dests.d, uint64(ds))
 }
 
-func (dests *Destinations) Load() []conf.DestinationType {
-	ds := dests.d.Load()
-	if ds == nil {
-		return nil
+func (dests *Destinations) Load() (res []conf.DestinationType) {
+	ds := atomic.LoadUint64(&dests.d)
+	if ds == 0 {
+		return []conf.DestinationType{conf.Stderr}
 	}
-	return ds.([]conf.DestinationType)
+	res = make([]conf.DestinationType, 0, len(conf.Destinations))
+	for _, dtype := range conf.Destinations {
+		if ds&uint64(dtype) != 0 {
+			res = append(res, dtype)
+		}
+	}
+	return res
 }
 
 type storeMetrics struct {
@@ -84,7 +90,7 @@ func (b *Backend) GetPartition(qtype QueueType, dtype conf.DestinationType) db.P
 	return (b.Partitions[qtype])[dtype]
 }
 
-func NewBackend(parent *badger.DB, secret string, secretb [32]byte) *Backend {
+func NewBackend(parent *badger.DB, haveSecret bool, secretb [32]byte) *Backend {
 	b := Backend{}
 	b.Partitions = map[QueueType](map[conf.DestinationType]db.Partition){}
 	for qtype := range Queues {
@@ -93,7 +99,7 @@ func NewBackend(parent *badger.DB, secret string, secretb [32]byte) *Backend {
 			(b.Partitions[qtype])[dtype] = db.NewPartition(parent, getPartitionPrefix(qtype, dtype))
 		}
 	}
-	if len(secret) > 0 {
+	if haveSecret {
 		for _, dtype := range conf.Destinations {
 			b.Partitions[Messages][dtype] = db.NewEncryptedPartition(b.Partitions[Messages][dtype], secretb)
 		}
@@ -146,11 +152,11 @@ func (s *MessageStore) Destinations() []conf.DestinationType {
 	return s.dests.Load()
 }
 
-func (s *MessageStore) SetDestinations(dests []conf.DestinationType) {
+func (s *MessageStore) SetDestinations(dests conf.DestinationType) {
 	s.dests.Store(dests)
 }
 
-func NewStore(ctx context.Context, cfg conf.StoreConfig, dests []conf.DestinationType, l log15.Logger) (*MessageStore, error) {
+func NewStore(ctx context.Context, cfg conf.StoreConfig, dests conf.DestinationType, l log15.Logger) (*MessageStore, error) {
 	badgerOpts := badger.DefaultOptions
 	badgerOpts.Dir = cfg.Dirname
 	badgerOpts.ValueDir = cfg.Dirname
@@ -195,9 +201,16 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, dests []conf.Destinatio
 		return nil, err
 	}
 	store.badger = kv
-	store.backend = NewBackend(kv, cfg.Secret, cfg.SecretB)
 
-	if len(cfg.Secret) > 0 {
+	var secretb [32]byte
+	if len(cfg.Secret) == 0 {
+		store.backend = NewBackend(kv, false, secretb)
+	} else {
+		secretb, err = cfg.GetSecretB()
+		if err != nil {
+			return nil, err
+		}
+		store.backend = NewBackend(kv, true, secretb)
 		store.logger.Info("The badger store is encrypted")
 	}
 

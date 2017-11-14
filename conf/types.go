@@ -1,21 +1,22 @@
 package conf
 
 import (
+	"encoding/base64"
 	"time"
 
 	"github.com/oklog/ulid"
 )
 
 // DestinationType lists the possible kind of destinations where skewer can forward messages.
-type DestinationType uint8
+type DestinationType uint64
 
 const (
-	Kafka DestinationType = iota
-	Udp
-	Tcp
-	Relp
-	File
-	Stderr
+	Kafka  DestinationType = 1
+	Udp                    = 2
+	Tcp                    = 4
+	Relp                   = 8
+	File                   = 16
+	Stderr                 = 32
 )
 
 var Destinations = map[string]DestinationType{
@@ -55,12 +56,11 @@ type BaseConfig struct {
 
 // MainConfig lists general/global parameters.
 type MainConfig struct {
-	DirectRelp          bool   `mapstructure:"direct_relp" toml:"direct_relp" json:"direct_relp"`
-	InputQueueSize      uint64 `mapstructure:"input_queue_size" toml:"input_queue_size" json:"input_queue_size"`
-	MaxInputMessageSize int    `mapstructure:"max_input_message_size" toml:"max_input_message_size" json:"max_input_message_size"`
-	Destination         string `mapstructure:"destination" toml:"destination" json:"destination"`
-	// TODO: eliminate array
-	Dest []DestinationType `mapstructure:"-" toml:"-" json:"dest"`
+	DirectRelp          bool            `mapstructure:"direct_relp" toml:"direct_relp" json:"direct_relp"`
+	InputQueueSize      uint64          `mapstructure:"input_queue_size" toml:"input_queue_size" json:"input_queue_size"`
+	MaxInputMessageSize int             `mapstructure:"max_input_message_size" toml:"max_input_message_size" json:"max_input_message_size"`
+	Destination         string          `mapstructure:"destination" toml:"destination" json:"destination"`
+	Destinations        DestinationType `mapstructure:"-" toml:"-" json:"dest"`
 }
 
 type MetricsConfig struct {
@@ -83,8 +83,23 @@ type StoreConfig struct {
 	Maxsize int64  `mapstructure:"max_size" toml:"max_size" json:"max_size"`
 	FSync   bool   `mapstructure:"fsync" toml:"fsync" json:"fsync"`
 	Secret  string `mapstructure:"secret" toml:"-" json:"secret"`
-	// todo: eliminate secretb
-	SecretB [32]byte `mapstructure:"-" toml:"-" json:"secretb"`
+}
+
+func (s *StoreConfig) GetSecretB() (secretb [32]byte, err error) {
+	if len(s.Secret) == 0 {
+		return
+	}
+	var n int
+	t := make([]byte, base64.URLEncoding.DecodedLen(len(s.Secret)))
+	n, err = base64.URLEncoding.Decode(t, []byte(s.Secret))
+	if err != nil {
+		return secretb, ConfigurationCheckError{ErrString: "Error decoding store secret", Err: err}
+	}
+	if n < 32 {
+		return secretb, ConfigurationCheckError{ErrString: "Store secret is too short"}
+	}
+	copy(secretb[:], t[:32])
+	return secretb, nil
 }
 
 type BaseDestConfig struct {

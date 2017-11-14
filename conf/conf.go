@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -645,17 +644,16 @@ func (c *BaseConfig) Complete() (err error) {
 
 	c.Main.Destination = strings.TrimSpace(strings.ToLower(c.Main.Destination))
 	dests := strings.Split(c.Main.Destination, ",")
-	c.Main.Dest = []DestinationType{}
 	for _, dest := range dests {
 		d, ok := Destinations[dest]
 		if ok {
-			c.Main.Dest = append(c.Main.Dest, d)
+			c.Main.Destinations = c.Main.Destinations | d
 		} else {
 			return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown destination type: '%s'", dest)}
 		}
 	}
-	if len(c.Main.Dest) == 0 {
-		c.Main.Dest = append(c.Main.Dest, Stderr)
+	if c.Main.Destinations == 0 {
+		c.Main.Destinations = Stderr
 	}
 
 	c.UdpDest.Format = strings.TrimSpace(strings.ToLower(c.UdpDest.Format))
@@ -788,15 +786,10 @@ func (c *BaseConfig) Complete() (err error) {
 
 	c.Store.Secret = strings.TrimSpace(c.Store.Secret)
 	if len(c.Store.Secret) > 0 {
-		s := make([]byte, base64.URLEncoding.DecodedLen(len(c.Store.Secret)))
-		n, err := base64.URLEncoding.Decode(s, []byte(c.Store.Secret))
+		_, err := c.Store.GetSecretB()
 		if err != nil {
-			return ConfigurationCheckError{ErrString: "Error decoding store secret", Err: err}
+			return err
 		}
-		if n < 32 {
-			return ConfigurationCheckError{ErrString: "Store secret is too short"}
-		}
-		copy(c.Store.SecretB[:], s[:32])
 	}
 
 	for i := range c.Syslog {
