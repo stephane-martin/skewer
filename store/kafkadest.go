@@ -40,7 +40,7 @@ func NewKafkaDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, per
 	}
 	d.ackCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "skw_dest_kafka_ack_total",
+			Name: "skw_kafkadest_ack_total",
 			Help: "number of kafka acknowledgments",
 		},
 		[]string{"status", "topic"},

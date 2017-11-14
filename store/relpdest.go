@@ -34,6 +34,7 @@ type relpDestination struct {
 	ack         storeCallback
 	nack        storeCallback
 	permerr     storeCallback
+	ackCounter  *prometheus.CounterVec
 	curtxnr     uint64
 	txnr2msgid  sync.Map
 	window      chan bool
@@ -55,13 +56,20 @@ func NewRelpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perm
 		fatal:       make(chan struct{}),
 	}
 
+	d.ackCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "skw_relpdest_ack_total",
+			Help: "number of RELP acknowledgments",
+		},
+		[]string{"status"},
+	)
+	d.registry.MustRegister(d.ackCounter)
+
 	defer func() {
 		if d.conn != nil && err != nil {
 			d.conn.Close()
 		}
 	}()
-
-	//d.registry.MustRegister(d.ackCounter)
 
 	path := strings.TrimSpace(bc.RelpDest.UnixSocketPath)
 	if len(path) == 0 {
@@ -142,8 +150,10 @@ func (d *relpDestination) handleRspAnswers() {
 			<-d.window
 			if retcode == 200 {
 				d.ack(uid.([16]byte), conf.Relp)
+				d.ackCounter.WithLabelValues("ack").Inc()
 			} else {
 				d.nack(uid.([16]byte), conf.Relp)
+				d.ackCounter.WithLabelValues("nack").Inc()
 				d.logger.Info("RELP server returned a non-200 code", "code", retcode)
 				d.once.Do(func() { close(d.fatal) })
 			}

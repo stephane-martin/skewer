@@ -3,10 +3,12 @@ package metrics
 //go:generate goderive .
 
 import (
+	"bytes"
 	"fmt"
 	"net/http"
 	"strings"
 
+	"github.com/inconshreveable/log15"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/stephane-martin/skewer/conf"
@@ -23,16 +25,36 @@ func (m *MetricsServer) Stop() {
 	}
 }
 
-func (m *MetricsServer) NewConf(c conf.MetricsConfig, gatherers ...prometheus.Gatherer) {
+type Logger struct {
+	log15.Logger
+}
+
+func (l Logger) Println(v ...interface{}) {
+	buf := bytes.NewBuffer(nil)
+	fmt.Fprintln(buf, v...)
+	l.Debug(buf.String())
+}
+
+func (m *MetricsServer) NewConf(c conf.MetricsConfig, logger log15.Logger, gatherers ...prometheus.Gatherer) {
 	m.Stop()
 	var nonNilGatherers prometheus.Gatherers = deriveFilterGatherers(func(g prometheus.Gatherer) bool { return g != nil }, gatherers)
+	logger.Debug("Number of metric gatherers", "nb", len(nonNilGatherers))
 
 	if strings.TrimSpace(c.Path) == "" {
 		c.Path = "/metrics"
 	}
 	if c.Port > 0 {
 		mux := http.NewServeMux()
-		mux.Handle(c.Path, promhttp.HandlerFor(nonNilGatherers, promhttp.HandlerOpts{}))
+		mux.Handle(
+			c.Path,
+			promhttp.HandlerFor(
+				nonNilGatherers,
+				promhttp.HandlerOpts{
+					ErrorLog:      Logger{Logger: logger},
+					ErrorHandling: promhttp.HTTPErrorOnError,
+				},
+			),
+		)
 		m.server = &http.Server{
 			Addr:    fmt.Sprintf("127.0.0.1:%d", c.Port),
 			Handler: mux,

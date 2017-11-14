@@ -137,13 +137,13 @@ func (ch *ServeChild) Init() error {
 	if err != nil {
 		return err
 	}
-	ch.SetupMetrics()
 	err = ch.SetupStore()
 	if err != nil {
 		return err
 	}
 	ch.controllers = map[services.NetworkServiceType]*services.PluginController{}
 	ch.SetupControllers()
+	ch.SetupMetrics(ch.logger)
 	return nil
 }
 
@@ -438,14 +438,15 @@ func (ch *ServeChild) Reload() error {
 	wg.Wait()
 
 	// restart the HTTP metrics server
-	ch.SetupMetrics()
+	ch.SetupMetrics(ch.logger)
 	return nil
 }
 
-func (ch *ServeChild) SetupMetrics() {
+func (ch *ServeChild) SetupMetrics(logger log15.Logger) {
 	ch.metricsServer = &metrics.MetricsServer{}
 	ch.metricsServer.NewConf(
 		ch.conf.Metrics,
+		logger,
 		ch.controllers[services.Journal],
 		ch.controllers[services.RELP],
 		ch.controllers[services.TCP],

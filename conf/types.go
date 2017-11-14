@@ -30,6 +30,15 @@ var Destinations = map[string]DestinationType{
 	"stderr": Stderr,
 }
 
+var DestinationNames = map[DestinationType]string{
+	Kafka:  "kafka",
+	Udp:    "udp",
+	Tcp:    "tcp",
+	Relp:   "relp",
+	File:   "file",
+	Stderr: "stderr",
+}
+
 var RDestinations = map[DestinationType]byte{
 	Kafka:  'k',
 	Udp:    'u',

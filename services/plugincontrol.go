@@ -117,7 +117,7 @@ func (s *PluginController) Gather() ([]*dto.MetricFamily, error) {
 			if !more || metrics == nil {
 				return []*dto.MetricFamily{}, nil
 			}
-			return []*dto.MetricFamily{}, nil
+			return metrics, nil
 		}
 	}
 }

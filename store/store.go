@@ -43,16 +43,24 @@ func (dests *Destinations) Load() (res []conf.DestinationType) {
 
 type storeMetrics struct {
 	BadgerGauge *prometheus.GaugeVec
+	AckCounter  *prometheus.CounterVec
 }
 
 func NewStoreMetrics() *storeMetrics {
 	m := storeMetrics{}
 	m.BadgerGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "skw_badger_entries_gauge",
+			Name: "skw_store_entries_gauge",
 			Help: "number of messages stored in the badger database",
 		},
-		[]string{"partition"},
+		[]string{"queue", "destination"},
+	)
+	m.AckCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "skw_store_acks_total",
+			Help: "number of ACKs received by the store",
+		},
+		[]string{"status", "destination"},
 	)
 	return &m
 }
@@ -169,7 +177,7 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, dests conf.DestinationT
 	}
 
 	store := &MessageStore{metrics: NewStoreMetrics(), registry: prometheus.NewRegistry()}
-	store.registry.MustRegister(store.metrics.BadgerGauge)
+	store.registry.MustRegister(store.metrics.BadgerGauge, store.metrics.AckCounter)
 	store.logger = l.New("class", "MessageStore")
 	store.dests = &Destinations{}
 	store.dests.Store(dests)
@@ -394,7 +402,7 @@ func (s *MessageStore) StoreSyslogConfig(confID ulid.ULID, config conf.FilterSub
 		if err != nil {
 			return err
 		}
-		s.metrics.BadgerGauge.WithLabelValues("syslogconf").Inc()
+		s.metrics.BadgerGauge.WithLabelValues("syslogconf", "").Inc()
 	}
 	return nil
 }
@@ -415,17 +423,14 @@ func (s *MessageStore) GetSyslogConfig(confID ulid.ULID) (*conf.SyslogConfig, er
 }
 
 func (s *MessageStore) initGauge() {
-	/*
-		if s.metrics != nil {
-			s.metrics.BadgerGauge.WithLabelValues("messages").Set(float64(s.messagesDB.Count(nil)))
-			s.metrics.BadgerGauge.WithLabelValues("ready").Set(float64(s.readyDB.Count(nil)))
-			s.metrics.BadgerGauge.WithLabelValues("sent").Set(float64(s.sentDB.Count(nil)))
-			s.metrics.BadgerGauge.WithLabelValues("failed").Set(float64(s.failedDB.Count(nil)))
-			s.metrics.BadgerGauge.WithLabelValues("permerrors").Set(float64(s.permerrorsDB.Count(nil)))
-			s.metrics.BadgerGauge.WithLabelValues("syslogconf").Set(float64(s.syslogConfigsDB.Count(nil)))
-		}
-	*/
-	// TODO
+	s.metrics.BadgerGauge.WithLabelValues("syslogconf", "").Set(float64(s.syslogConfigsDB.Count(nil)))
+	for dname, dtype := range conf.Destinations {
+		s.metrics.BadgerGauge.WithLabelValues("messages", dname).Set(float64(s.backend.GetPartition(Messages, dtype).Count(nil)))
+		s.metrics.BadgerGauge.WithLabelValues("ready", dname).Set(float64(s.backend.GetPartition(Ready, dtype).Count(nil)))
+		s.metrics.BadgerGauge.WithLabelValues("sent", dname).Set(float64(s.backend.GetPartition(Sent, dtype).Count(nil)))
+		s.metrics.BadgerGauge.WithLabelValues("failed", dname).Set(float64(s.backend.GetPartition(Failed, dtype).Count(nil)))
+		s.metrics.BadgerGauge.WithLabelValues("permerrors", dname).Set(float64(s.backend.GetPartition(PermErrors, dtype).Count(nil)))
+	}
 }
 
 func (s *MessageStore) closeBadgers() {
@@ -613,7 +618,7 @@ func (s *MessageStore) resetFailuresByDest(dest conf.DestinationType) (err error
 			if len(invalidUids) > 0 {
 				err = txn.Commit(nil)
 				if err == nil {
-					s.metrics.BadgerGauge.WithLabelValues("failed").Sub(float64(len(invalidUids)))
+					s.metrics.BadgerGauge.WithLabelValues("failed", conf.DestinationNames[dest]).Sub(float64(len(invalidUids)))
 				}
 				return err
 			}
@@ -646,9 +651,9 @@ func (s *MessageStore) resetFailuresByDest(dest conf.DestinationType) (err error
 		if err == nil {
 			cond.Signal()
 			lok.Unlock()
-			s.metrics.BadgerGauge.WithLabelValues("failed").Sub(float64(len(invalidUids)))
-			s.metrics.BadgerGauge.WithLabelValues("ready").Add(float64(len(uids)))
-			s.metrics.BadgerGauge.WithLabelValues("failed").Sub(float64(len(uids)))
+			s.metrics.BadgerGauge.WithLabelValues("failed", conf.DestinationNames[dest]).Sub(float64(len(invalidUids)))
+			s.metrics.BadgerGauge.WithLabelValues("ready", conf.DestinationNames[dest]).Add(float64(len(uids)))
+			s.metrics.BadgerGauge.WithLabelValues("failed", conf.DestinationNames[dest]).Sub(float64(len(uids)))
 		} else {
 			s.logger.Warn("Error commiting resetFailures", "error", err)
 			lok.Unlock()
@@ -662,10 +667,10 @@ func (s *MessageStore) PurgeBadger() {
 	if err == nil {
 		err = s.badger.RunValueLogGC(0.5)
 		if err != nil {
-			s.logger.Warn("Error garbage collecting badger", "error", err)
+			s.logger.Info("Error garbage collecting badger", "error", err)
 		}
 	} else {
-		s.logger.Warn("Error purging badger", "error", err)
+		s.logger.Info("Error purging badger", "error", err)
 	}
 }
 
@@ -743,8 +748,11 @@ func (s *MessageStore) ingest(queue []*model.FullMessage) (n int, err error) {
 	if err == nil {
 		for _, dest := range dests {
 			s.availConditions[dest].Signal()
+			s.metrics.BadgerGauge.WithLabelValues("messages", conf.DestinationNames[dest]).Add(float64(len(marshalledQueue)))
+			s.metrics.BadgerGauge.WithLabelValues("ready", conf.DestinationNames[dest]).Add(float64(len(marshalledQueue)))
 		}
 		unlock()
+
 		return len(marshalledQueue), nil
 	} else if err == badger.ErrConflict {
 		unlock()
@@ -818,8 +826,8 @@ func (s *MessageStore) retrieve(n int, dest conf.DestinationType) (messages map[
 		if len(invalidEntries) > 0 {
 			err := txn.Commit(nil)
 			if err == nil {
-				s.metrics.BadgerGauge.WithLabelValues("ready").Sub(float64(len(invalidEntries)))
-				s.metrics.BadgerGauge.WithLabelValues("messages").Sub(float64(len(invalidEntries)))
+				s.metrics.BadgerGauge.WithLabelValues("ready", conf.DestinationNames[dest]).Sub(float64(len(invalidEntries)))
+				s.metrics.BadgerGauge.WithLabelValues("messages", conf.DestinationNames[dest]).Sub(float64(len(invalidEntries)))
 			}
 		}
 		return map[ulid.ULID]*model.FullMessage{}
@@ -846,10 +854,10 @@ func (s *MessageStore) retrieve(n int, dest conf.DestinationType) (messages map[
 
 	err = txn.Commit(nil)
 	if err == nil {
-		s.metrics.BadgerGauge.WithLabelValues("ready").Sub(float64(len(invalidEntries)))
-		s.metrics.BadgerGauge.WithLabelValues("messages").Sub(float64(len(invalidEntries)))
-		s.metrics.BadgerGauge.WithLabelValues("sent").Add(float64(len(sentBatch)))
-		s.metrics.BadgerGauge.WithLabelValues("ready").Sub(float64(len(readyBatch)))
+		s.metrics.BadgerGauge.WithLabelValues("ready", conf.DestinationNames[dest]).Sub(float64(len(invalidEntries)))
+		s.metrics.BadgerGauge.WithLabelValues("messages", conf.DestinationNames[dest]).Sub(float64(len(invalidEntries)))
+		s.metrics.BadgerGauge.WithLabelValues("sent", conf.DestinationNames[dest]).Add(float64(len(sentBatch)))
+		s.metrics.BadgerGauge.WithLabelValues("ready", conf.DestinationNames[dest]).Sub(float64(len(readyBatch)))
 		return messages
 	} else if err == badger.ErrConflict {
 		// retry
@@ -874,6 +882,7 @@ func sortAck(acks []queue.UidDest) (res map[conf.DestinationType]([]ulid.ULID)) 
 }
 
 func (s *MessageStore) ACK(uid ulid.ULID, dest conf.DestinationType) {
+	s.metrics.AckCounter.WithLabelValues("ack", conf.DestinationNames[dest]).Inc()
 	s.ackQueue.Put(uid, dest)
 }
 
@@ -930,8 +939,8 @@ func (s *MessageStore) ackByDest(uids []ulid.ULID, dtype conf.DestinationType) {
 	}
 	err = txn.Commit(nil)
 	if err == nil {
-		s.metrics.BadgerGauge.WithLabelValues("sent").Sub(float64(len(uids)))
-		s.metrics.BadgerGauge.WithLabelValues("messages").Sub(float64(len(uids)))
+		s.metrics.BadgerGauge.WithLabelValues("sent", conf.DestinationNames[dtype]).Sub(float64(len(uids)))
+		s.metrics.BadgerGauge.WithLabelValues("messages", conf.DestinationNames[dtype]).Sub(float64(len(uids)))
 	} else if err == badger.ErrConflict {
 		// retry
 		s.ackByDest(uids, dtype)
@@ -941,6 +950,7 @@ func (s *MessageStore) ackByDest(uids []ulid.ULID, dtype conf.DestinationType) {
 }
 
 func (s *MessageStore) NACK(uid ulid.ULID, dest conf.DestinationType) {
+	s.metrics.AckCounter.WithLabelValues("nack", conf.DestinationNames[dest]).Inc()
 	s.nackQueue.Put(uid, dest)
 }
 
@@ -976,8 +986,8 @@ func (s *MessageStore) nackByDest(uids []ulid.ULID, dest conf.DestinationType) {
 	}
 	err = txn.Commit(nil)
 	if err == nil {
-		s.metrics.BadgerGauge.WithLabelValues("sent").Sub(float64(len(uids)))
-		s.metrics.BadgerGauge.WithLabelValues("failed").Add(float64(len(failedBatch)))
+		s.metrics.BadgerGauge.WithLabelValues("sent", conf.DestinationNames[dest]).Sub(float64(len(uids)))
+		s.metrics.BadgerGauge.WithLabelValues("failed", conf.DestinationNames[dest]).Add(float64(len(failedBatch)))
 	} else if err == badger.ErrConflict {
 		// retry
 		s.nackByDest(uids, dest)
@@ -987,6 +997,7 @@ func (s *MessageStore) nackByDest(uids []ulid.ULID, dest conf.DestinationType) {
 }
 
 func (s *MessageStore) PermError(uid ulid.ULID, dest conf.DestinationType) {
+	s.metrics.AckCounter.WithLabelValues("permerror", conf.DestinationNames[dest]).Inc()
 	s.permerrorsQueue.Put(uid, dest)
 }
 
@@ -1019,8 +1030,8 @@ func (s *MessageStore) permErrorByDest(uids []ulid.ULID, dest conf.DestinationTy
 	}
 	err = txn.Commit(nil)
 	if err == nil {
-		s.metrics.BadgerGauge.WithLabelValues("permerrors").Add(float64(len(permBatch)))
-		s.metrics.BadgerGauge.WithLabelValues("sent").Sub(float64(len(uids)))
+		s.metrics.BadgerGauge.WithLabelValues("permerrors", conf.DestinationNames[dest]).Add(float64(len(permBatch)))
+		s.metrics.BadgerGauge.WithLabelValues("sent", conf.DestinationNames[dest]).Sub(float64(len(uids)))
 	} else if err == badger.ErrConflict {
 		// retry
 		s.permErrorByDest(uids, dest)

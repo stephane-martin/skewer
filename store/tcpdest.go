@@ -54,8 +54,6 @@ func NewTcpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perme
 		}
 	}()
 
-	//d.registry.MustRegister(d.ackCounter)
-
 	path := strings.TrimSpace(bc.TcpDest.UnixSocketPath)
 	if len(path) == 0 {
 		addr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:%d", bc.TcpDest.Host, bc.TcpDest.Port))
