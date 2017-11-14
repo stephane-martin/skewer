@@ -55,11 +55,12 @@ type BaseConfig struct {
 
 // MainConfig lists general/global parameters.
 type MainConfig struct {
-	DirectRelp          bool              `mapstructure:"direct_relp" toml:"direct_relp" json:"direct_relp"`
-	InputQueueSize      uint64            `mapstructure:"input_queue_size" toml:"input_queue_size" json:"input_queue_size"`
-	MaxInputMessageSize int               `mapstructure:"max_input_message_size" toml:"max_input_message_size" json:"max_input_message_size"`
-	Destination         string            `mapstructure:"destination" toml:"destination" json:"destination"`
-	Dest                []DestinationType `mapstructure:"-" toml:"-" json:"dest"`
+	DirectRelp          bool   `mapstructure:"direct_relp" toml:"direct_relp" json:"direct_relp"`
+	InputQueueSize      uint64 `mapstructure:"input_queue_size" toml:"input_queue_size" json:"input_queue_size"`
+	MaxInputMessageSize int    `mapstructure:"max_input_message_size" toml:"max_input_message_size" json:"max_input_message_size"`
+	Destination         string `mapstructure:"destination" toml:"destination" json:"destination"`
+	// TODO: eliminate array
+	Dest []DestinationType `mapstructure:"-" toml:"-" json:"dest"`
 }
 
 type MetricsConfig struct {
@@ -78,10 +79,11 @@ type ParserConfig struct {
 }
 
 type StoreConfig struct {
-	Dirname string   `mapstructure:"-" toml:"-" json:"dirname"`
-	Maxsize int64    `mapstructure:"max_size" toml:"max_size" json:"max_size"`
-	FSync   bool     `mapstructure:"fsync" toml:"fsync" json:"fsync"`
-	Secret  string   `mapstructure:"secret" toml:"-" json:"secret"`
+	Dirname string `mapstructure:"-" toml:"-" json:"dirname"`
+	Maxsize int64  `mapstructure:"max_size" toml:"max_size" json:"max_size"`
+	FSync   bool   `mapstructure:"fsync" toml:"fsync" json:"fsync"`
+	Secret  string `mapstructure:"secret" toml:"-" json:"secret"`
+	// todo: eliminate secretb
 	SecretB [32]byte `mapstructure:"-" toml:"-" json:"secretb"`
 }
 
