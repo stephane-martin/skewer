@@ -17,7 +17,7 @@ import (
 )
 
 type storeServiceImpl struct {
-	st              store.Store
+	st              *store.MessageStore
 	config          conf.BaseConfig
 	logger          log15.Logger
 	shutdownStore   context.CancelFunc
@@ -95,7 +95,7 @@ func (s *storeServiceImpl) doStart(test bool, mu *sync.Mutex) ([]model.ListenerI
 		var err error
 		s.test = test
 
-		s.st, err = store.NewStore(s.shutdownCtx, s.config.Store, s.logger)
+		s.st, err = store.NewStore(s.shutdownCtx, s.config.Store, s.config.Main.Dest, s.logger)
 		if err != nil {
 			return infos, err
 		}
@@ -125,6 +125,9 @@ func (s *storeServiceImpl) doStart(test bool, mu *sync.Mutex) ([]model.ListenerI
 			}
 		}()
 	}
+
+	// refresh destinations
+	s.st.SetDestinations(s.config.Main.Dest)
 
 	// create and start the forwarder
 	var forwarderCtx context.Context
@@ -195,6 +198,7 @@ func (s *storeServiceImpl) doStop(mu *sync.Mutex) {
 	// stop the kafka forwarder
 	s.cancelForwarder()
 	s.forwarder.WaitFinished()
+	s.logger.Debug("Forwarder has stopped")
 	s.status = false
 }
 
@@ -209,6 +213,7 @@ func (s *storeServiceImpl) Shutdown() {
 	s.Stop()
 	s.ingestwg.Wait() // wait until we are done ingesting new messages
 	s.shutdownStore()
+	s.logger.Debug("Store service waits for end of store goroutines")
 	s.st.WaitFinished()
 	s.pipe.Close()
 }

@@ -10,19 +10,26 @@ type partitionImpl struct {
 	prefix []byte
 }
 
+func concat(prefix []byte, key ulid.ULID) (res []byte) {
+	res = make([]byte, 0, len(prefix)+16)
+	res = append(res, prefix...)
+	res = append(res, key[:]...)
+	return res
+}
+
 func (p *partitionImpl) Get(key ulid.ULID, txn *badger.Txn) ([]byte, error) {
 	if txn == nil {
 		txn = p.parent.NewTransaction(false)
 		defer txn.Discard()
 	}
-	item, err := txn.Get(append(p.prefix, key[:]...))
+	item, err := txn.Get(concat(p.prefix, key))
 	if err != nil {
 		return nil, err
 	}
 	if item == nil {
 		return nil, nil
 	}
-	val, err := item.Value()
+	val, err := item.ValueCopy(nil)
 	if err != nil {
 		return nil, err
 	}
@@ -36,7 +43,7 @@ func (p *partitionImpl) Set(key ulid.ULID, value []byte, txn *badger.Txn) (err e
 		n = true
 		defer txn.Discard()
 	}
-	err = txn.Set(append(p.prefix, key[:]...), value)
+	err = txn.Set(concat(p.prefix, key), value)
 	if err != nil {
 		txn.Discard()
 	} else if n {
@@ -51,7 +58,7 @@ func (p *partitionImpl) Set(key ulid.ULID, value []byte, txn *badger.Txn) (err e
 	return
 }
 
-func (p *partitionImpl) AddMany(m map[ulid.ULID][]byte, txn *badger.Txn) (err error) {
+func (p *partitionImpl) AddMany(m map[ulid.ULID]([]byte), txn *badger.Txn) (err error) {
 	if len(m) == 0 {
 		return
 	}
@@ -62,7 +69,7 @@ func (p *partitionImpl) AddMany(m map[ulid.ULID][]byte, txn *badger.Txn) (err er
 		defer txn.Discard()
 	}
 	for k, v := range m {
-		err = txn.Set(append(p.prefix, k[:]...), v)
+		err = txn.Set(concat(p.prefix, k), v)
 		if err != nil {
 			txn.Discard()
 			return
@@ -85,7 +92,7 @@ func (p *partitionImpl) Exists(key ulid.ULID, txn *badger.Txn) (bool, error) {
 		txn = p.parent.NewTransaction(false)
 		defer txn.Discard()
 	}
-	_, err := txn.Get(append(p.prefix, key[:]...))
+	_, err := txn.Get(concat(p.prefix, key))
 	if err == nil {
 		return true, nil
 	} else if err == badger.ErrKeyNotFound {
@@ -103,7 +110,7 @@ func (p *partitionImpl) Delete(key ulid.ULID, txn *badger.Txn) (err error) {
 		defer txn.Discard()
 	}
 
-	err = txn.Delete(append(p.prefix, key[:]...))
+	err = txn.Delete(concat(p.prefix, key))
 	if err != nil {
 		txn.Discard()
 	} else if n {
@@ -130,7 +137,7 @@ func (p *partitionImpl) DeleteMany(keys []ulid.ULID, txn *badger.Txn) (err error
 	}
 
 	for _, key := range keys {
-		err = txn.Delete(append(p.prefix, key[:]...))
+		err = txn.Delete(concat(p.prefix, key))
 		if err != nil {
 			txn.Discard()
 			return
@@ -252,7 +259,7 @@ func (i *partitionIterImpl) Value() []byte {
 	if item == nil {
 		return nil
 	} else {
-		val, err := item.Value()
+		val, err := item.ValueCopy(nil)
 		if err != nil {
 			return nil
 		}

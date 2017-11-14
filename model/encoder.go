@@ -94,7 +94,7 @@ func (e *encoderFile) Enc(v interface{}, w io.Writer) error {
 		}
 		_, err := fmt.Fprintf(
 			w,
-			"%s %s %s %s\n",
+			"%s %s %s %s",
 			val.Parsed.Fields.GetTimeReported().Format(time.RFC3339),
 			val.Parsed.Fields.Hostname,
 			val.Parsed.Fields.Appname,
@@ -110,7 +110,7 @@ func (e *encoderFile) Enc(v interface{}, w io.Writer) error {
 		}
 		_, err := fmt.Fprintf(
 			w,
-			"%s %s %s %s\n",
+			"%s %s %s %s",
 			val.GetTimeReported().Format(time.RFC3339),
 			val.Hostname,
 			val.Appname,

@@ -18,6 +18,24 @@ const (
 	Stderr
 )
 
+var Destinations = map[string]DestinationType{
+	"kafka":  Kafka,
+	"udp":    Udp,
+	"tcp":    Tcp,
+	"relp":   Relp,
+	"file":   File,
+	"stderr": Stderr,
+}
+
+var RDestinations = map[DestinationType]byte{
+	Kafka:  'k',
+	Udp:    'u',
+	Tcp:    't',
+	Relp:   'r',
+	File:   'f',
+	Stderr: 's',
+}
+
 // BaseConfig is the root of all configuration parameters.
 type BaseConfig struct {
 	Syslog     []SyslogConfig   `mapstructure:"syslog" toml:"syslog" json:"syslog"`
@@ -37,11 +55,11 @@ type BaseConfig struct {
 
 // MainConfig lists general/global parameters.
 type MainConfig struct {
-	DirectRelp          bool            `mapstructure:"direct_relp" toml:"direct_relp" json:"direct_relp"`
-	InputQueueSize      uint64          `mapstructure:"input_queue_size" toml:"input_queue_size" json:"input_queue_size"`
-	MaxInputMessageSize int             `mapstructure:"max_input_message_size" toml:"max_input_message_size" json:"max_input_message_size"`
-	Destination         string          `mapstructure:"destination" toml:"destination" json:"destination"`
-	Dest                DestinationType `mapstructure:"-" toml:"-" json:"dest"`
+	DirectRelp          bool              `mapstructure:"direct_relp" toml:"direct_relp" json:"direct_relp"`
+	InputQueueSize      uint64            `mapstructure:"input_queue_size" toml:"input_queue_size" json:"input_queue_size"`
+	MaxInputMessageSize int               `mapstructure:"max_input_message_size" toml:"max_input_message_size" json:"max_input_message_size"`
+	Destination         string            `mapstructure:"destination" toml:"destination" json:"destination"`
+	Dest                []DestinationType `mapstructure:"-" toml:"-" json:"dest"`
 }
 
 type MetricsConfig struct {

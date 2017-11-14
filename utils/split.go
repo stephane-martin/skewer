@@ -20,9 +20,12 @@ func W(dest io.Writer, header []byte, message []byte) (err error) {
 	)
 }
 
-func PluginSplit(data []byte, atEOF bool) (int, []byte, error) {
+func PluginSplit(data []byte, atEOF bool) (advance int, token []byte, eoferr error) {
+	if atEOF {
+		eoferr = io.EOF
+	}
 	if len(data) < 11 {
-		return 0, nil, nil
+		return 0, nil, eoferr
 	}
 	if data[10] != byte(' ') {
 		return 0, nil, fmt.Errorf("Wrong plugin format, 11th char is not space: '%s'", string(data))
@@ -37,35 +40,39 @@ func PluginSplit(data []byte, atEOF bool) (int, []byte, error) {
 	if err != nil {
 		return 0, nil, err
 	}
-	advance := 11 + datalen
+	advance = 11 + datalen
 	if len(data) < advance {
-		return 0, nil, nil
+		return 0, nil, eoferr
 	}
 	return advance, data[11 : 11+datalen], nil
 }
 
 // RelpSplit is used to extract RELP lines from the incoming TCP stream
-func RelpSplit(data []byte, atEOF bool) (int, []byte, error) {
+func RelpSplit(data []byte, atEOF bool) (advance int, token []byte, eoferr error) {
+	if atEOF {
+		eoferr = io.EOF
+	}
 	trimmedData := bytes.TrimLeft(data, " \r\n")
 	if len(trimmedData) == 0 {
-		return 0, nil, nil
+
+		return 0, nil, eoferr
 	}
 	splits := bytes.FieldsFunc(trimmedData, splitSpaceOrLF)
 	l := len(splits)
 	if l < 3 {
 		// Request more data
-		return 0, nil, nil
+		return 0, nil, eoferr
 	}
 
 	txnrStr := string(splits[0])
 	command := string(splits[1])
 	datalenStr := string(splits[2])
 	tokenStr := txnrStr + " " + command + " " + datalenStr
-	advance := len(data) - len(trimmedData) + len(tokenStr) + 1
+	advance = len(data) - len(trimmedData) + len(tokenStr) + 1
 
 	if l == 3 && (len(data) < advance) {
 		// datalen field is not complete, request more data
-		return 0, nil, nil
+		return 0, nil, eoferr
 	}
 
 	_, err := strconv.Atoi(txnrStr)
@@ -81,11 +88,11 @@ func RelpSplit(data []byte, atEOF bool) (int, []byte, error) {
 	}
 	advance += datalen + 1
 	if len(data) >= advance {
-		token := bytes.Trim(data[:advance], " \r\n")
+		token = bytes.Trim(data[:advance], " \r\n")
 		return advance, token, nil
 	}
 	// Request more data
-	return 0, nil, nil
+	return 0, nil, eoferr
 }
 
 func splitSpaceOrLF(r rune) bool {

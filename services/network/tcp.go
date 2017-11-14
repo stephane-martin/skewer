@@ -5,6 +5,7 @@ package network
 import (
 	"bufio"
 	"bytes"
+	"io"
 	"net"
 	"runtime"
 	"strconv"
@@ -311,55 +312,61 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 	logger.Info("End of TCP client connection", "error", scanner.Err())
 }
 
-func lfTCPSplit(data []byte, atEOF bool) (int, []byte, error) {
+func lfTCPSplit(data []byte, atEOF bool) (advance int, token []byte, eoferr error) {
+	if atEOF {
+		eoferr = io.EOF
+	}
 	trimmedData := bytes.TrimLeft(data, " \r\n")
 	if len(trimmedData) == 0 {
-		return 0, nil, nil
+		return 0, nil, eoferr
 	}
 	trimmed := len(data) - len(trimmedData)
 	lf := bytes.IndexByte(trimmedData, '\n')
 	if lf == 0 {
-		return 0, nil, nil
+		return 0, nil, eoferr
 	}
-	token := bytes.Trim(trimmedData[0:lf], " \r\n")
-	advance := trimmed + lf + 1
+	token = bytes.Trim(trimmedData[0:lf], " \r\n")
+	advance = trimmed + lf + 1
 	return advance, token, nil
 }
 
-func getline(data []byte, trimmed int) (int, []byte, error) {
+func getline(data []byte, trimmed int, eoferr error) (int, []byte, error) {
 	lf := bytes.IndexByte(data, '\n')
 	if lf == 0 {
-		return 0, nil, nil
+		return 0, nil, eoferr
 	}
 	token := bytes.Trim(data[0:lf], " \r\n")
 	return lf + trimmed + 1, token, nil
 }
 
-func TcpSplit(data []byte, atEOF bool) (int, []byte, error) {
+func TcpSplit(data []byte, atEOF bool) (advance int, token []byte, eoferr error) {
+	if atEOF {
+		eoferr = io.EOF
+	}
 	trimmedData := bytes.TrimLeft(data, " \r\n")
 	if len(trimmedData) == 0 {
-		return 0, nil, nil
+		return 0, nil, eoferr
 	}
 	trimmed := len(data) - len(trimmedData)
 	if trimmedData[0] == byte('<') {
-		return getline(trimmedData, trimmed)
+		return getline(trimmedData, trimmed, eoferr)
 	}
 	// octet counting framing?
 	sp := bytes.IndexAny(trimmedData, " \n")
 	if sp <= 0 {
-		return 0, nil, nil
+		return 0, nil, eoferr
 	}
 	datalenStr := bytes.Trim(trimmedData[0:sp], " \r\n")
 	datalen, err := strconv.Atoi(string(datalenStr))
 	if err != nil {
 		// the first part is not a number, so back to LF
-		return getline(trimmedData, trimmed)
+		return getline(trimmedData, trimmed, eoferr)
 	}
-	advance := trimmed + sp + 1 + datalen
+	advance = trimmed + sp + 1 + datalen
 	if len(data) < advance {
-		return 0, nil, nil
+		return 0, nil, eoferr
 	}
-	token := bytes.Trim(trimmedData[sp+1:sp+1+datalen], " \r\n")
+	token = bytes.Trim(trimmedData[sp+1:sp+1+datalen], " \r\n")
 	return advance, token, nil
 
 }

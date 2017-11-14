@@ -65,7 +65,7 @@ func NewKafkaDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, per
 	go func() {
 		var m *sarama.ProducerMessage
 		for m = range d.producer.Successes() {
-			d.ack(m.Metadata.(ulid.ULID))
+			d.ack(m.Metadata.(ulid.ULID), conf.Kafka)
 			d.ackCounter.WithLabelValues("ack", m.Topic).Inc()
 		}
 	}()
@@ -73,7 +73,7 @@ func NewKafkaDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, per
 	go func() {
 		var m *sarama.ProducerError
 		for m = range d.producer.Errors() {
-			d.nack(m.Msg.Metadata.(ulid.ULID))
+			d.nack(m.Msg.Metadata.(ulid.ULID), conf.Kafka)
 			d.ackCounter.WithLabelValues("nack", m.Msg.Topic).Inc()
 			if model.IsFatalKafkaError(m.Err) {
 				d.once.Do(func() { close(d.fatal) })
@@ -92,7 +92,7 @@ func (d *kafkaDestination) Send(message model.FullMessage, partitionKey string, 
 	serialized, err := message.MarshalAll(d.format)
 
 	if err != nil {
-		d.permerr(message.Uid)
+		d.permerr(message.Uid, conf.Kafka)
 		return err
 	}
 

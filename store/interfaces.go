@@ -13,10 +13,10 @@ import (
 
 type Store interface {
 	Stash(m model.FullMessage) (error, error)
-	Outputs() chan *model.FullMessage
-	ACK(uid ulid.ULID)
-	NACK(uid ulid.ULID)
-	PermError(uid ulid.ULID)
+	Outputs(dest conf.DestinationType) chan *model.FullMessage
+	ACK(uid ulid.ULID, dest conf.DestinationType)
+	NACK(uid ulid.ULID, dest conf.DestinationType)
+	PermError(uid ulid.ULID, dest conf.DestinationType)
 	Errors() chan struct{}
 	WaitFinished()
 	GetSyslogConfig(configID ulid.ULID) (*conf.SyslogConfig, error)
@@ -24,6 +24,7 @@ type Store interface {
 	ReadAllBadgers() (map[string]string, map[string]string, map[string]string)
 	Gather() ([]*dto.MetricFamily, error)
 	ReleaseMsg(msg *model.FullMessage)
+	Destinations() []conf.DestinationType
 }
 
 type Forwarder interface {

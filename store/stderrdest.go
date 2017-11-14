@@ -47,11 +47,11 @@ func NewStderrDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, pe
 func (d *stderrDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
 	err = model.ChainEncode(d.encoder, &message, "\n")
 	if err == nil {
-		d.ack(message.Uid)
+		d.ack(message.Uid, conf.Stderr)
 	} else if model.IsEncodingError(err) {
-		d.permerr(message.Uid)
+		d.permerr(message.Uid, conf.Stderr)
 	} else {
-		d.nack(message.Uid)
+		d.nack(message.Uid, conf.Stderr)
 	}
 	return err
 }

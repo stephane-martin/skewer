@@ -141,9 +141,9 @@ func (d *relpDestination) handleRspAnswers() {
 			d.txnr2msgid.Delete(txnr)
 			<-d.window
 			if retcode == 200 {
-				d.ack(uid.([16]byte))
+				d.ack(uid.([16]byte), conf.Relp)
 			} else {
-				d.nack(uid.([16]byte))
+				d.nack(uid.([16]byte), conf.Relp)
 				d.logger.Info("RELP server returned a non-200 code", "code", retcode)
 				d.once.Do(func() { close(d.fatal) })
 			}
@@ -200,9 +200,9 @@ func (d *relpDestination) Send(message model.FullMessage, partitionKey string, p
 		d.window <- true
 		d.txnr2msgid.Store(txnr, message.Uid)
 	} else if model.IsEncodingError(err) {
-		d.permerr(message.Uid)
+		d.permerr(message.Uid, conf.Relp)
 	} else {
-		d.nack(message.Uid)
+		d.nack(message.Uid, conf.Relp)
 		d.once.Do(func() { close(d.fatal) })
 	}
 	return
@@ -215,7 +215,7 @@ func (d *relpDestination) Close() {
 	d.conn.Close()
 	// NACK all pending messages
 	d.txnr2msgid.Range(func(k interface{}, v interface{}) bool {
-		d.nack(v.([16]byte))
+		d.nack(v.([16]byte), conf.Relp)
 		return true
 	})
 }

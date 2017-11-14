@@ -44,7 +44,7 @@ var printStoreCmd = &cobra.Command{
 		}
 
 		// prepare the message store
-		st, err = store.NewStore(ctx, c.Store, logger)
+		st, err = store.NewStore(ctx, c.Store, c.Main.Dest, logger)
 		if err != nil {
 			fmt.Println("Can't create the message Store", "error", err)
 			return

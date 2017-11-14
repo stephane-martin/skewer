@@ -116,16 +116,16 @@ func (d *tcpDestination) Send(message model.FullMessage, partitionKey string, pa
 	}
 	if err == nil {
 		if d.previousUid != zero {
-			d.ack(d.previousUid)
+			d.ack(d.previousUid, conf.Tcp)
 		}
 		d.previousUid = message.Uid
 	} else if model.IsEncodingError(err) {
-		d.permerr(message.Uid)
+		d.permerr(message.Uid, conf.Tcp)
 	} else {
 		// error writing to d.conn
-		d.nack(message.Uid)
+		d.nack(message.Uid, conf.Tcp)
 		if d.previousUid != zero {
-			d.nack(d.previousUid)
+			d.nack(d.previousUid, conf.Tcp)
 			d.previousUid = zero
 		}
 		d.once.Do(func() { close(d.fatal) })

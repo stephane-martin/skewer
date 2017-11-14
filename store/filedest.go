@@ -163,29 +163,29 @@ func (d *fileDestination) Send(message model.FullMessage, partitionKey string, p
 	err = d.filenameTmpl.Execute(buf, message.Parsed)
 	if err != nil {
 		err = fmt.Errorf("Error calculating filename: %s", err)
-		d.permerr(message.Uid)
+		d.permerr(message.Uid, conf.File)
 		return err
 	}
 	filename := strings.TrimSpace(buf.String())
 	f, err := d.files.open(filename)
 	if err != nil {
 		err = fmt.Errorf("Error opening file '%s': %s", filename, err)
-		d.nack(message.Uid)
+		d.nack(message.Uid, conf.File)
 		return err
 	}
 	encoder, err := model.NewEncoder(f, d.format)
 	if err != nil {
 		err = fmt.Errorf("Error getting encoder: %s", err)
-		d.permerr(message.Uid)
+		d.permerr(message.Uid, conf.File)
 		return err
 	}
-	err = encoder.Encode(&message)
+	err = model.ChainEncode(encoder, &message, "\n")
 	if err == nil {
-		d.ack(message.Uid)
+		d.ack(message.Uid, conf.File)
 	} else if model.IsEncodingError(err) {
-		d.permerr(message.Uid)
+		d.permerr(message.Uid, conf.File)
 	} else {
-		d.nack(message.Uid)
+		d.nack(message.Uid, conf.File)
 	}
 	return err
 }

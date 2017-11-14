@@ -8,12 +8,14 @@ import (
 	"unsafe"
 
 	"github.com/oklog/ulid"
+	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/utils"
 )
 
 type ackNode struct {
 	next *ackNode
 	uid  ulid.ULID
+	dest conf.DestinationType
 }
 
 type AckQueue struct {
@@ -39,7 +41,7 @@ func (q *AckQueue) Dispose() {
 	atomic.StoreInt32(&q.disposed, 1)
 }
 
-func (q *AckQueue) Get() (ulid.ULID, error) {
+func (q *AckQueue) Get() (ulid.ULID, conf.DestinationType, error) {
 	tail := q.tail
 	next := tail.next
 	if next != nil {
@@ -48,16 +50,17 @@ func (q *AckQueue) Get() (ulid.ULID, error) {
 		//s = tail.msg
 		(*ackNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.tail)), unsafe.Pointer(next))).uid = next.uid
 		q.pool.Put(tail)
-		return next.uid, nil
+		return next.uid, next.dest, nil
 	} else if q.Disposed() {
-		return utils.EmptyUid, utils.ErrDisposed
+		return utils.EmptyUid, 0, utils.ErrDisposed
 	}
-	return utils.EmptyUid, nil
+	return utils.EmptyUid, 0, nil
 }
 
-func (q *AckQueue) Put(uid ulid.ULID) error {
+func (q *AckQueue) Put(uid ulid.ULID, dest conf.DestinationType) error {
 	n := q.pool.Get().(*ackNode)
 	n.uid = uid
+	n.dest = dest
 	n.next = nil
 	if q.Disposed() {
 		return utils.ErrDisposed
@@ -121,16 +124,23 @@ MainLoop:
 	}
 }
 
-func (q *AckQueue) GetMany(max int) []ulid.ULID {
-	var elt ulid.ULID
+type UidDest struct {
+	Uid  ulid.ULID
+	Dest conf.DestinationType
+}
+
+func (q *AckQueue) GetMany(max int) (res []UidDest) {
+	var uid ulid.ULID
+	var dest conf.DestinationType
 	var err error
-	res := make([]ulid.ULID, 0, max)
+
+	res = make([]UidDest, 0, max)
 	for {
-		elt, err = q.Get()
-		if elt == utils.EmptyUid || err != nil {
+		uid, dest, err = q.Get()
+		if uid == utils.EmptyUid || err != nil {
 			break
 		}
-		res = append(res, elt)
+		res = append(res, UidDest{Uid: uid, Dest: dest})
 		if len(res) == max {
 			break
 		}

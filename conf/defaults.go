@@ -98,7 +98,7 @@ func SetMainDefaults(v *viper.Viper, prefixed bool) {
 	v.SetDefault(prefix+"direct_relp", false)
 	v.SetDefault(prefix+"max_input_message_size", 65536)
 	v.SetDefault(prefix+"input_queue_size", 1024)
-	v.SetDefault(prefix+"destination", "kafka")
+	v.SetDefault(prefix+"destination", "stderr")
 }
 
 func SetAccountingDefaults(v *viper.Viper, prefixed bool) {

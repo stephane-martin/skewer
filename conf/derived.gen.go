@@ -51,10 +51,12 @@ func deriveDeepCopy(dst, src *BaseConfig) {
 	dst.Journald = src.Journald
 	dst.Metrics = src.Metrics
 	dst.Accounting = src.Accounting
-	dst.Main = src.Main
-	field := new(KafkaDestConfig)
-	deriveDeepCopy_(field, &src.KafkaDest)
-	dst.KafkaDest = *field
+	field := new(MainConfig)
+	deriveDeepCopy_(field, &src.Main)
+	dst.Main = *field
+	field1 := new(KafkaDestConfig)
+	deriveDeepCopy_1(field1, &src.KafkaDest)
+	dst.KafkaDest = *field1
 	dst.UdpDest = src.UdpDest
 	dst.TcpDest = src.TcpDest
 	dst.RelpDest = src.RelpDest
@@ -63,7 +65,33 @@ func deriveDeepCopy(dst, src *BaseConfig) {
 }
 
 // deriveDeepCopy_ recursively copies the contents of src into dst.
-func deriveDeepCopy_(dst, src *KafkaDestConfig) {
+func deriveDeepCopy_(dst, src *MainConfig) {
+	dst.DirectRelp = src.DirectRelp
+	dst.InputQueueSize = src.InputQueueSize
+	dst.MaxInputMessageSize = src.MaxInputMessageSize
+	dst.Destination = src.Destination
+	if src.Dest == nil {
+		dst.Dest = nil
+	} else {
+		if dst.Dest != nil {
+			if len(src.Dest) > len(dst.Dest) {
+				if cap(dst.Dest) >= len(src.Dest) {
+					dst.Dest = (dst.Dest)[:len(src.Dest)]
+				} else {
+					dst.Dest = make([]DestinationType, len(src.Dest))
+				}
+			} else if len(src.Dest) < len(dst.Dest) {
+				dst.Dest = (dst.Dest)[:len(src.Dest)]
+			}
+		} else {
+			dst.Dest = make([]DestinationType, len(src.Dest))
+		}
+		copy(dst.Dest, src.Dest)
+	}
+}
+
+// deriveDeepCopy_1 recursively copies the contents of src into dst.
+func deriveDeepCopy_1(dst, src *KafkaDestConfig) {
 	dst.TlsBaseConfig = src.TlsBaseConfig
 	dst.BaseDestConfig = src.BaseDestConfig
 	dst.Insecure = src.Insecure

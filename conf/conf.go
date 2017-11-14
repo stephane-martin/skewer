@@ -643,21 +643,19 @@ func (c *BaseConfig) Complete() (err error) {
 		}
 	}
 
-	switch strings.TrimSpace(strings.ToLower(c.Main.Destination)) {
-	case "kafka":
-		c.Main.Dest = Kafka
-	case "udp":
-		c.Main.Dest = Udp
-	case "tcp":
-		c.Main.Dest = Tcp
-	case "relp":
-		c.Main.Dest = Relp
-	case "file":
-		c.Main.Dest = File
-	case "stderr":
-		c.Main.Dest = Stderr
-	default:
-		return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown destination type: '%s'", c.Main.Destination)}
+	c.Main.Destination = strings.TrimSpace(strings.ToLower(c.Main.Destination))
+	dests := strings.Split(c.Main.Destination, ",")
+	c.Main.Dest = []DestinationType{}
+	for _, dest := range dests {
+		d, ok := Destinations[dest]
+		if ok {
+			c.Main.Dest = append(c.Main.Dest, d)
+		} else {
+			return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown destination type: '%s'", dest)}
+		}
+	}
+	if len(c.Main.Dest) == 0 {
+		c.Main.Dest = append(c.Main.Dest, Stderr)
 	}
 
 	c.UdpDest.Format = strings.TrimSpace(strings.ToLower(c.UdpDest.Format))

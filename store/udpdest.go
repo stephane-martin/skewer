@@ -101,11 +101,11 @@ func (d *udpDestination) Gather() ([]*dto.MetricFamily, error) {
 func (d *udpDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
 	err = d.encoder.Encode(&message)
 	if err == nil {
-		d.ack(message.Uid)
+		d.ack(message.Uid, conf.Udp)
 	} else if model.IsEncodingError(err) {
-		d.permerr(message.Uid)
+		d.permerr(message.Uid, conf.Udp)
 	} else {
-		d.nack(message.Uid)
+		d.nack(message.Uid, conf.Udp)
 		d.once.Do(func() { close(d.fatal) })
 	}
 	return
