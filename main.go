@@ -368,6 +368,7 @@ func main() {
 
 	loggerCtx, cancelLogger := context.WithCancel(context.Background())
 	logger := log15.New()
+	logger.SetHandler(log15.LvlFilterHandler(log15.LvlWarn, log15.StderrHandler))
 
 	if runtime.GOOS == "openbsd" {
 		// so that we execute IP capabilities probes before the call to pledge

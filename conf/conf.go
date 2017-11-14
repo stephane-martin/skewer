@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"text/template"
@@ -23,6 +24,7 @@ import (
 	"github.com/inconshreveable/log15"
 	"github.com/spf13/viper"
 	"github.com/stephane-martin/skewer/consul"
+	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
 )
 
@@ -662,9 +664,8 @@ func (c *BaseConfig) Complete() (err error) {
 		c.FileDest.Format,
 		c.StderrDest.Format,
 	} {
-		switch frmt {
-		case "rfc5424", "rfc3164", "json", "fulljson":
-		default:
+		_, err := model.NewEncoder(os.Stderr, frmt)
+		if err != nil {
 			return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown destination format: '%s'", frmt)}
 		}
 	}
