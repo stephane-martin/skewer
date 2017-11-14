@@ -642,18 +642,9 @@ func (c *BaseConfig) Complete() (err error) {
 		}
 	}
 
-	c.Main.Destination = strings.TrimSpace(strings.ToLower(c.Main.Destination))
-	dests := strings.Split(c.Main.Destination, ",")
-	for _, dest := range dests {
-		d, ok := Destinations[dest]
-		if ok {
-			c.Main.Destinations = c.Main.Destinations | d
-		} else {
-			return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown destination type: '%s'", dest)}
-		}
-	}
-	if c.Main.Destinations == 0 {
-		c.Main.Destinations = Stderr
+	_, err = c.Main.GetDestinations()
+	if err != nil {
+		return err
 	}
 
 	c.UdpDest.Format = strings.TrimSpace(strings.ToLower(c.UdpDest.Format))

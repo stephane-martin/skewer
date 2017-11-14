@@ -2,6 +2,8 @@ package conf
 
 import (
 	"encoding/base64"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/oklog/ulid"
@@ -56,11 +58,26 @@ type BaseConfig struct {
 
 // MainConfig lists general/global parameters.
 type MainConfig struct {
-	DirectRelp          bool            `mapstructure:"direct_relp" toml:"direct_relp" json:"direct_relp"`
-	InputQueueSize      uint64          `mapstructure:"input_queue_size" toml:"input_queue_size" json:"input_queue_size"`
-	MaxInputMessageSize int             `mapstructure:"max_input_message_size" toml:"max_input_message_size" json:"max_input_message_size"`
-	Destination         string          `mapstructure:"destination" toml:"destination" json:"destination"`
-	Destinations        DestinationType `mapstructure:"-" toml:"-" json:"dest"`
+	DirectRelp          bool   `mapstructure:"direct_relp" toml:"direct_relp" json:"direct_relp"`
+	InputQueueSize      uint64 `mapstructure:"input_queue_size" toml:"input_queue_size" json:"input_queue_size"`
+	MaxInputMessageSize int    `mapstructure:"max_input_message_size" toml:"max_input_message_size" json:"max_input_message_size"`
+	Destination         string `mapstructure:"destination" toml:"destination" json:"destination"`
+}
+
+func (m *MainConfig) GetDestinations() (dests DestinationType, err error) {
+	destr := strings.TrimSpace(strings.ToLower(m.Destination))
+	for _, dest := range strings.Split(destr, ",") {
+		d, ok := Destinations[strings.TrimSpace(dest)]
+		if ok {
+			dests = dests | d
+		} else {
+			return 0, ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown destination type: '%s'", dest)}
+		}
+	}
+	if dests == 0 {
+		return Stderr, nil
+	}
+	return
 }
 
 type MetricsConfig struct {
@@ -86,12 +103,13 @@ type StoreConfig struct {
 }
 
 func (s *StoreConfig) GetSecretB() (secretb [32]byte, err error) {
-	if len(s.Secret) == 0 {
+	secret := strings.TrimSpace(s.Secret)
+	if len(secret) == 0 {
 		return
 	}
 	var n int
-	t := make([]byte, base64.URLEncoding.DecodedLen(len(s.Secret)))
-	n, err = base64.URLEncoding.Decode(t, []byte(s.Secret))
+	t := make([]byte, base64.URLEncoding.DecodedLen(len(secret)))
+	n, err = base64.URLEncoding.Decode(t, []byte(secret))
 	if err != nil {
 		return secretb, ConfigurationCheckError{ErrString: "Error decoding store secret", Err: err}
 	}

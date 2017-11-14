@@ -92,10 +92,12 @@ func (s *storeServiceImpl) doStart(test bool, mu *sync.Mutex) ([]model.ListenerI
 
 	// create the store if needed
 	if s.st == nil {
-		var err error
 		s.test = test
-
-		s.st, err = store.NewStore(s.shutdownCtx, s.config.Store, s.config.Main.Destinations, s.logger)
+		destinations, err := s.config.Main.GetDestinations()
+		if err != nil {
+			return infos, err
+		}
+		s.st, err = store.NewStore(s.shutdownCtx, s.config.Store, destinations, s.logger)
 		if err != nil {
 			return infos, err
 		}
@@ -125,9 +127,13 @@ func (s *storeServiceImpl) doStart(test bool, mu *sync.Mutex) ([]model.ListenerI
 			}
 		}()
 	}
-
-	// refresh destinations
-	s.st.SetDestinations(s.config.Main.Destinations)
+	destinations, err := s.config.Main.GetDestinations()
+	if err != nil {
+		s.logger.Warn("Error parsing destinations (should not happen!!!)", "error", err)
+	} else {
+		// refresh destinations
+		s.st.SetDestinations(destinations)
+	}
 
 	// create and start the forwarder
 	var forwarderCtx context.Context
