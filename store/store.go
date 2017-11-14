@@ -222,14 +222,14 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, dests []conf.Destinatio
 			store.doNACK(store.nackQueue.GetMany(300))
 			store.doPermanentError(store.permerrorsQueue.GetMany(300))
 		}
-		store.logger.Debug("Store goroutine WaitAck ended")
+		//store.logger.Debug("Store goroutine WaitAck ended")
 		store.wg.Done()
 	}()
 
 	store.wg.Add(1)
 	go func() {
 		<-ctx.Done()
-		store.logger.Debug("Store is asked to stop")
+		//store.logger.Debug("Store is asked to stop")
 		store.toStashQueue.Dispose()
 		store.ackQueue.Dispose()
 		store.nackQueue.Dispose()
@@ -246,7 +246,7 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, dests []conf.Destinatio
 				store.logger.Warn("Ingestion error", "error", err)
 			}
 		}
-		store.logger.Debug("Store goroutine WaitMessages ended")
+		//store.logger.Debug("Store goroutine WaitMessages ended")
 		store.wg.Done()
 	}()
 
@@ -269,7 +269,7 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, dests []conf.Destinatio
 				store.resetFailures()
 			case <-ctx.Done():
 				store.ticker.Stop()
-				store.logger.Debug("Store ticker has been stopped")
+				//store.logger.Debug("Store ticker has been stopped")
 				return
 			}
 		}
@@ -293,7 +293,7 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, dests []conf.Destinatio
 			defer func() {
 				lok.Unlock()
 				close(c)
-				store.logger.Debug("End of retrieve goroutine", "dest", d)
+				//store.logger.Debug("End of retrieve goroutine", "dest", d)
 				store.wg.Done()
 			}()
 
@@ -420,7 +420,7 @@ func (s *MessageStore) closeBadgers() {
 	if err != nil {
 		s.logger.Warn("Error closing the badger", "error", err)
 	}
-	s.logger.Debug("Badger databases are closed")
+	//s.logger.Debug("Badger databases are closed")
 }
 
 func (s *MessageStore) pruneOrphaned() (err error) {
@@ -552,9 +552,7 @@ func (s *MessageStore) resetFailures() (err error) {
 			return err
 		}
 	}
-	s.logger.Debug("resetFailures done")
 	s.PurgeBadger()
-	s.logger.Debug("PurgeBadger done")
 	return nil
 }
 
