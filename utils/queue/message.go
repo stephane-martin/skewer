@@ -2,7 +2,7 @@ package queue
 
 import (
 	//"runtime"
-	"runtime"
+
 	"sync"
 	"sync/atomic"
 	"time"
@@ -51,11 +51,8 @@ func (q *MessageQueue) Has() bool {
 }
 
 func (q *MessageQueue) Wait(timeout time.Duration) bool {
-	var start time.Time
-	if timeout > 0 {
-		start = time.Now()
-	}
-	var nb uint64
+	start := time.Now()
+	var w utils.ExpWait
 	for {
 		if q.tail.next != nil {
 			return true
@@ -66,16 +63,7 @@ func (q *MessageQueue) Wait(timeout time.Duration) bool {
 		if atomic.LoadInt32(&q.disposed) == 1 {
 			return false
 		}
-		if nb < 22 {
-			runtime.Gosched()
-		} else if nb < 24 {
-			time.Sleep(1000000)
-		} else if nb < 26 {
-			time.Sleep(10000000)
-		} else {
-			time.Sleep(100000000)
-		}
-		nb++
+		w.Wait()
 	}
 }
 

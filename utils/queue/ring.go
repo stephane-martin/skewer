@@ -116,7 +116,7 @@ func (rb *Ring) Poll(timeout time.Duration) (*Data, error) {
 		n     *node
 		pos   = atomic.LoadUint64(&rb.dequeue)
 		start time.Time
-		nb    uint64
+		w     utils.ExpWait
 	)
 	if timeout > 0 {
 		start = time.Now()
@@ -142,17 +142,7 @@ L:
 		if atomic.LoadUint64(&rb.disposed) == 1 {
 			return nil, utils.ErrDisposed
 		}
-
-		if nb < 22 {
-			runtime.Gosched()
-		} else if nb < 24 {
-			time.Sleep(1000000)
-		} else if nb < 26 {
-			time.Sleep(10000000)
-		} else {
-			time.Sleep(100000000)
-		}
-		nb++
+		w.Wait()
 	}
 	data := n.data
 	n.data = nil

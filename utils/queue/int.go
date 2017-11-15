@@ -79,7 +79,7 @@ func (q *IntQueue) Has() bool {
 }
 
 func (q *IntQueue) Wait() bool {
-	var nb uint64
+	var w utils.ExpWait
 	for {
 		if q.Has() {
 			return true
@@ -87,16 +87,7 @@ func (q *IntQueue) Wait() bool {
 		if q.Disposed() {
 			return false
 		}
-		if nb < 22 {
-			runtime.Gosched()
-		} else if nb < 24 {
-			time.Sleep(1000000)
-		} else if nb < 26 {
-			time.Sleep(10000000)
-		} else {
-			time.Sleep(100000000)
-		}
-		nb++
+		w.Wait()
 	}
 }
 

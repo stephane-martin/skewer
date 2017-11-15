@@ -25,6 +25,15 @@ func ChainWrites(dest io.Writer, buffers ...[]byte) (err error) {
 	return nil
 }
 
+func AnyErr(errs ...error) (err error) {
+	for _, err = range errs {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func Parallel(funs ...func() error) error {
 	var wg sync.WaitGroup
 	errs := make([]error, 0, len(funs))
@@ -46,10 +55,5 @@ func Parallel(funs ...func() error) error {
 	wg.Wait()
 	close(errChan)
 	<-finished
-	for _, err := range errs {
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+	return AnyErr(errs...)
 }
