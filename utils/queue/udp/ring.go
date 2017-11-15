@@ -68,7 +68,7 @@ L:
 
 		n = rb.nodes[pos&rb.mask]
 		seq := atomic.LoadUint64(&n.position)
-		switch dif := int64(seq) - int64(pos); {
+		switch dif := seq - pos; {
 		case dif == 0:
 			if atomic.CompareAndSwapUint64(&rb.queue, pos, pos+1) {
 				break L
@@ -127,7 +127,7 @@ L:
 	for {
 		n = rb.nodes[pos&rb.mask]
 		seq := atomic.LoadUint64(&n.position)
-		switch dif := int64(seq) - int64(pos+1); {
+		switch dif := seq - (pos + 1); {
 		case dif == 0:
 			if atomic.CompareAndSwapUint64(&rb.dequeue, pos, pos+1) {
 				break L
