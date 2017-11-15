@@ -8,7 +8,6 @@ import (
 	"net/http/pprof"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
@@ -373,7 +372,7 @@ func (ch *ServeChild) StopController(typ services.NetworkServiceType, doShutdown
 	}
 }
 
-func (ch *ServeChild) Reload() error {
+func (ch *ServeChild) Reload() (err error) {
 	ch.logger.Info("Reloading configuration and services")
 	// first, let's stop the HTTP server that reports the metrics
 	ch.metricsServer.Stop()
@@ -382,62 +381,39 @@ func (ch *ServeChild) Reload() error {
 	ch.logger.Debug("The forwarder has been stopped")
 	ch.store.SetConf(*ch.conf)
 	// restart the kafka forwarder
-	_, fatal := ch.store.Start()
-	if fatal != nil {
-		return fatal
+	_, err = ch.store.Start()
+	if err != nil {
+		return err
 	}
-	var errJournal error
-	var errTCP error
-	var errUDP error
-	var errAccounting error
-	var errRelp error
-
-	wg := &sync.WaitGroup{}
-
-	if journald.Supported {
-		// restart the journal service
-		wg.Add(1)
-		go func() {
+	err = utils.Parallel(
+		func() error {
+			if !journald.Supported {
+				return nil
+			}
 			ch.StopController(services.Journal, false)
-			errJournal = ch.StartJournal()
-			wg.Done()
-		}()
+			return ch.StartJournal()
+		},
+		func() error {
+			ch.StopController(services.Accounting, false)
+			return ch.StartAccounting()
+		},
+		func() error {
+			ch.StopController(services.RELP, false)
+			return ch.StartRelp()
+		},
+		func() error {
+			ch.StopController(services.TCP, false)
+			return ch.StartTcp()
+		},
+		func() error {
+			ch.StopController(services.UDP, false)
+			return ch.StartUdp()
+		},
+	)
+	if err != nil {
+		return err
 	}
 
-	// restart the accounting service
-	wg.Add(1)
-	go func() {
-		ch.StopController(services.Accounting, false)
-		errAccounting = ch.StartAccounting()
-		wg.Done()
-	}()
-
-	// restart the RELP service
-	wg.Add(1)
-	go func() {
-		ch.StopController(services.RELP, false)
-		errRelp = ch.StartRelp()
-		wg.Done()
-	}()
-
-	// restart the TCP service
-	wg.Add(1)
-	go func() {
-		ch.StopController(services.TCP, false)
-		errTCP = ch.StartTcp()
-		wg.Done()
-	}()
-
-	// restart the UDP service
-	wg.Add(1)
-	go func() {
-		ch.StopController(services.UDP, false)
-		errUDP = ch.StartUdp()
-		wg.Done()
-	}()
-	wg.Wait()
-
-	// restart the HTTP metrics server
 	ch.SetupMetrics(ch.logger)
 	return nil
 }

@@ -98,6 +98,10 @@ func (c *ConfigurationService) Start() error {
 	}
 	if err != nil || !capabilities.CapabilitiesSupported {
 		cmd, stdin, stdout, err = setupCmd("skewer-conf", 0, c.loggerHandle, nil, false)
+		if err != nil {
+			close(c.output)
+			return err
+		}
 		err = cmd.Start()
 	}
 	if err != nil {

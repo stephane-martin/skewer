@@ -19,10 +19,12 @@ func receive(ctx context.Context, l log15.Logger, c net.Conn) {
 	}
 	h := l.GetHandler()
 	rem := msgp.NewReader(c)
+
+Listen:
 	for {
 		select {
 		case <-ctx.Done():
-			break
+			break Listen
 		default:
 			r := Record{}
 			c.SetReadDeadline(time.Now().Add(2 * time.Second))

@@ -315,12 +315,16 @@ func execParent(logger log15.Logger) {
 }
 
 func parseCobraFlags() (string, error) {
-	c, f, err := cmd.RootCmd.Find(os.Args[1:])
+	c, _, err := cmd.RootCmd.Find(os.Args[1:])
 	if err != nil {
 		return c.Name(), err
 	}
-	c, f, err = c.Find(os.Args[1:])
-	return c.Name(), c.ParseFlags(f)
+	var flags []string
+	c, flags, err = c.Find(os.Args[1:])
+	if err != nil {
+		return c.Name(), err
+	}
+	return c.Name(), c.ParseFlags(flags)
 }
 
 func fixLinuxParentPrivileges(logger log15.Logger) {

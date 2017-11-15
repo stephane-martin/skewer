@@ -1,7 +1,5 @@
 package network
 
-//go:generate goderive .
-
 import (
 	"bufio"
 	"bytes"
