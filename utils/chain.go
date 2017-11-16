@@ -39,12 +39,12 @@ func Parallel(funs ...func() error) error {
 	errs := make([]error, 0, len(funs))
 	errChan := make(chan error)
 	finished := make(chan struct{})
-	for _, f := range funs {
+	for _, fun := range funs {
 		wg.Add(1)
-		go func() {
+		go func(f func() error) {
 			errChan <- f()
 			wg.Done()
-		}()
+		}(fun)
 	}
 	go func() {
 		for err := range errChan {
