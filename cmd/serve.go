@@ -248,7 +248,7 @@ func (ch *ServeChild) SetupControllers() {
 }
 
 func (ch *ServeChild) StartControllers() error {
-	return utils.Chain(
+	return utils.Parallel(
 		ch.StartRelp,
 		ch.StartTcp,
 		ch.StartUdp,
@@ -433,19 +433,32 @@ func (ch *ServeChild) SetupMetrics(logger log15.Logger) {
 }
 
 func (ch *ServeChild) ShutdownControllers() {
-	ch.StopController(services.RELP, true)
+	utils.Parallel(
+		func() error {
+			ch.StopController(services.RELP, true)
+			return nil
+		},
+		func() error {
+			ch.StopController(services.Accounting, true)
+			return nil
+		},
+		func() error {
+			ch.StopController(services.Journal, true)
+			return nil
+		},
+		func() error {
+			ch.StopController(services.TCP, true)
+			return nil
+		},
+		func() error {
+			ch.StopController(services.UDP, true)
+			return nil
+		},
+	)
 	ch.logger.Debug("The RELP service has been stopped")
-
-	ch.StopController(services.Accounting, true)
 	ch.logger.Debug("Stopped accounting service")
-
-	ch.StopController(services.Journal, true)
 	ch.logger.Debug("Stopped journald service")
-
-	ch.StopController(services.TCP, true)
 	ch.logger.Debug("The TCP service has been stopped")
-
-	ch.StopController(services.UDP, true)
 	ch.logger.Debug("The UDP service has been stopped")
 
 	ch.globalCancel()

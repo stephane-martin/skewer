@@ -225,17 +225,21 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, dests conf.DestinationT
 	store.syslogConfigsDB = db.NewPartition(kv, []byte("configs"))
 
 	// only once, push back messages from previous run that may have been stuck in the sent queue
+	store.logger.Debug("reset messages stuck in sent")
 	store.resetStuckInSent()
 
 	// prune orphaned messages
+	store.logger.Debug("prune orphaned messages")
 	store.pruneOrphaned()
 
 	// count existing messages in badger and report to metrics
+	store.logger.Debug("init store metrics")
 	store.initGauge()
 
 	store.FatalErrorChan = make(chan struct{})
 	store.ticker = time.NewTicker(time.Minute)
 
+	store.logger.Debug("launch store goroutines")
 	store.wg.Add(1)
 	go func() {
 		for queue.WaitManyAckQueues(store.ackQueue, store.nackQueue, store.permerrorsQueue) {
@@ -424,13 +428,16 @@ func (s *MessageStore) GetSyslogConfig(confID ulid.ULID) (*conf.SyslogConfig, er
 
 func (s *MessageStore) initGauge() {
 	s.metrics.BadgerGauge.WithLabelValues("syslogconf", "").Set(float64(s.syslogConfigsDB.Count(nil)))
-	for dname, dtype := range conf.Destinations {
-		s.metrics.BadgerGauge.WithLabelValues("messages", dname).Set(float64(s.backend.GetPartition(Messages, dtype).Count(nil)))
-		s.metrics.BadgerGauge.WithLabelValues("ready", dname).Set(float64(s.backend.GetPartition(Ready, dtype).Count(nil)))
-		s.metrics.BadgerGauge.WithLabelValues("sent", dname).Set(float64(s.backend.GetPartition(Sent, dtype).Count(nil)))
-		s.metrics.BadgerGauge.WithLabelValues("failed", dname).Set(float64(s.backend.GetPartition(Failed, dtype).Count(nil)))
-		s.metrics.BadgerGauge.WithLabelValues("permerrors", dname).Set(float64(s.backend.GetPartition(PermErrors, dtype).Count(nil)))
-	}
+	s.badger.View(func(txn *badger.Txn) error {
+		for dname, dtype := range conf.Destinations {
+			s.metrics.BadgerGauge.WithLabelValues("messages", dname).Set(float64(s.backend.GetPartition(Messages, dtype).Count(txn)))
+			s.metrics.BadgerGauge.WithLabelValues("ready", dname).Set(float64(s.backend.GetPartition(Ready, dtype).Count(txn)))
+			s.metrics.BadgerGauge.WithLabelValues("sent", dname).Set(float64(s.backend.GetPartition(Sent, dtype).Count(txn)))
+			s.metrics.BadgerGauge.WithLabelValues("failed", dname).Set(float64(s.backend.GetPartition(Failed, dtype).Count(txn)))
+			s.metrics.BadgerGauge.WithLabelValues("permerrors", dname).Set(float64(s.backend.GetPartition(PermErrors, dtype).Count(txn)))
+		}
+		return nil
+	})
 }
 
 func (s *MessageStore) closeBadgers() {
