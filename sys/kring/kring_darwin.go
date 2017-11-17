@@ -120,3 +120,7 @@ func GetBoxSecret(session string) (secret *memguard.LockedBuffer, err error) {
 func DeleteBoxSecret(session string) error {
 	return keychain.DeleteGenericPasswordItem("skewer", session)
 }
+
+func JoinSessionKeyRing() error {
+	return nil
+}
