@@ -264,7 +264,7 @@ func (ch *ServeChild) SetupControllers() {
 }
 
 func (ch *ServeChild) StartControllers() error {
-	return utils.Parallel(
+	return utils.All(
 		ch.StartRelp,
 		ch.StartTcp,
 		ch.StartUdp,
@@ -401,7 +401,7 @@ func (ch *ServeChild) Reload() (err error) {
 	if err != nil {
 		return err
 	}
-	err = utils.Parallel(
+	err = utils.All(
 		func() error {
 			if !journald.Supported {
 				return nil

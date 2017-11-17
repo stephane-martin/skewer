@@ -15,6 +15,14 @@ func Chain(funs ...func() error) (err error) {
 	return nil
 }
 
+func All(funs ...func() error) (err error) {
+	errs := make([]error, 0, len(funs))
+	for _, f := range funs {
+		errs = append(errs, f())
+	}
+	return AnyErr(errs...)
+}
+
 func ChainWrites(dest io.Writer, buffers ...[]byte) (err error) {
 	for _, b := range buffers {
 		_, err = dest.Write(b)
