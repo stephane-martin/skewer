@@ -189,6 +189,22 @@
 			"revisionTime": "2015-01-07T20:56:47Z"
 		},
 		{
+			"checksumSHA1": "7rYdgCQsBUGRz7Zi+c1CDoM6j90=",
+			"path": "github.com/awnumar/memguard",
+			"revision": "6844db088c1e9ff46875cb87404a34e2c31622f6",
+			"revisionTime": "2017-10-23T12:45:52Z",
+			"version": "v0.13.1",
+			"versionExact": "v0.13.1"
+		},
+		{
+			"checksumSHA1": "ZNVBjfMFEN7Xk8hC2tQ1MhvG19w=",
+			"path": "github.com/awnumar/memguard/memcall",
+			"revision": "6844db088c1e9ff46875cb87404a34e2c31622f6",
+			"revisionTime": "2017-10-23T12:45:52Z",
+			"version": "v0.13.1",
+			"versionExact": "v0.13.1"
+		},
+		{
 			"checksumSHA1": "spyv5/YFBjYyZLZa1U2LBfDR8PM=",
 			"path": "github.com/beorn7/perks/quantile",
 			"revision": "4c0e84591b9aa9e6dcfdf3e020114cd81f89d5f9",
@@ -453,10 +469,22 @@
 			"revisionTime": "2014-10-17T20:07:13Z"
 		},
 		{
+			"checksumSHA1": "PKCbn95g/mlPlUCtLgqYajuYeyo=",
+			"path": "github.com/jsipprell/keyctl",
+			"revision": "988d05162bc59cf7789c35af405be8f1599a87a3",
+			"revisionTime": "2016-03-28T20:52:32Z"
+		},
+		{
 			"checksumSHA1": "gEjGS03N1eysvpQ+FCHTxPcbxXc=",
 			"path": "github.com/kardianos/osext",
 			"revision": "ae77be60afb1dcacde03767a8c37337fad28ac14",
 			"revisionTime": "2017-05-10T13:15:34Z"
+		},
+		{
+			"checksumSHA1": "wGeOW2FOX1w2L75QGM9qnKGSePs=",
+			"path": "github.com/keybase/go-keychain",
+			"revision": "ea111bd9eaa41fcf8f0c877304cf6b32cab505ca",
+			"revisionTime": "2017-08-14T23:56:12Z"
 		},
 		{
 			"checksumSHA1": "UvboqgDDSAbGORdtr5tBpkwYR0A=",
@@ -781,6 +809,18 @@
 			"path": "golang.org/x/crypto/cast5",
 			"revision": "0fe963104e9d1877082f8fb38f816fcd97eb1d10",
 			"revisionTime": "2017-05-16T11:44:04Z"
+		},
+		{
+			"checksumSHA1": "1hwn8cgg4EVXhCpJIqmMbzqnUo0=",
+			"path": "golang.org/x/crypto/ed25519",
+			"revision": "9f005a07e0d31d45e6656d241bb5c0f2efd4bc94",
+			"revisionTime": "2017-09-21T17:41:56Z"
+		},
+		{
+			"checksumSHA1": "LXFcVx8I587SnWmKycSDEq9yvK8=",
+			"path": "golang.org/x/crypto/ed25519/internal/edwards25519",
+			"revision": "9f005a07e0d31d45e6656d241bb5c0f2efd4bc94",
+			"revisionTime": "2017-09-21T17:41:56Z"
 		},
 		{
 			"checksumSHA1": "Y/FcWB2/xSfX1rRp7HYhktHNw8s=",
