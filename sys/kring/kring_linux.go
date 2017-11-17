@@ -3,6 +3,7 @@ package kring
 import (
 	"crypto/rand"
 	"fmt"
+	"syscall"
 
 	"github.com/awnumar/memguard"
 	"github.com/jsipprell/keyctl"
@@ -22,7 +23,7 @@ func getSecret(session string, label string) (pubkey *memguard.LockedBuffer, err
 	if err != nil {
 		return nil, err
 	}
-	secret, err = memguard.NewImmutableFromBytes(data)
+	secret, err := memguard.NewImmutableFromBytes(data)
 	if err != nil {
 		return nil, err
 	}
@@ -38,6 +39,10 @@ func NewSignaturePubkey(session string) (pubkey *memguard.LockedBuffer, privkey 
 	if err != nil {
 		return nil, nil, err
 	}
+	keyring, err := keyctl.SessionKeyring()
+	if err != nil {
+		return nil, nil, err
+	}
 	pubkey, err = memguard.NewImmutableFromBytes(pub)
 	if err != nil {
 		return nil, nil, err
@@ -46,7 +51,7 @@ func NewSignaturePubkey(session string) (pubkey *memguard.LockedBuffer, privkey 
 	if err != nil {
 		return nil, nil, err
 	}
-	err = storeSecret("skewer", session, "sigpubkey", pubkey)
+	_, err = keyring.Add(fmt.Sprintf("skewer-sigpubkey-%s", session), pubkey.Buffer())
 	if err != nil {
 		pubkey.Destroy()
 		privkey.Destroy()
@@ -91,4 +96,14 @@ func DeleteBoxSecret(session string) error {
 		return err
 	}
 	return key.Unlink()
+}
+
+func JoinSessionKeyRing() error {
+	a := make([]uintptr, 6)
+	a[0] = 1
+	_, _, errno := syscall.Syscall6(syscall_keyctl, a[0], a[1], a[2], a[3], a[4], a[5])
+	if errno != 0 {
+		return errno
+	}
+	return nil
 }

@@ -131,7 +131,7 @@ func dropNetBindCap(logger log15.Logger) {
 		if err != nil {
 			cleanup("Error getting executable name", err, logger, nil)
 		}
-		err = syscall.Exec(exe, append([]string{"skewer-linux-child"}, os.Args[1:]...), []string{"PATH=/bin:/usr/bin"})
+		err = syscall.Exec(exe, append([]string{"skewer-linux-child"}, os.Args[1:]...), os.Environ())
 		if err != nil {
 			cleanup("Error reexecuting self", err, logger, nil)
 		}
@@ -182,6 +182,10 @@ func execServeParent() error {
 	logger := rootlogger.New("proc", "parent")
 
 	sessionID := utils.NewUid().String()
+	err := kring.JoinSessionKeyRing()
+	if err != nil {
+		return makeErr("Can't join the linux keyring", err)
+	}
 	boxsecret, err := kring.NewBoxSecret(sessionID)
 	if err != nil {
 		return makeErr("Can't create a new box secret", err)
@@ -378,7 +382,7 @@ func fixLinuxParentPrivileges(logger log15.Logger) {
 			if err != nil {
 				cleanup("Error finding executable name", err, logger, nil)
 			}
-			err = syscall.Exec(exe, append([]string{"skewer-parent-dropped"}, os.Args[1:]...), []string{"PATH=/bin:/usr/bin"})
+			err = syscall.Exec(exe, append([]string{"skewer-parent-dropped"}, os.Args[1:]...), os.Environ())
 			if err != nil {
 				cleanup("Error rexecuting self", err, logger, nil)
 			}
