@@ -16,7 +16,10 @@ import (
 	"github.com/stephane-martin/skewer/utils"
 )
 
-func Launch(typ NetworkServiceType, test bool, binderClient *binder.BinderClient, logger log15.Logger, pipe *os.File) error {
+func Launch(typ NetworkServiceType, test bool, sessionID string, binderClient *binder.BinderClient, logger log15.Logger, pipe *os.File) error {
+	if len(sessionID) == 0 {
+		return fmt.Errorf("Empty session ID")
+	}
 	generator := utils.Generator(context.Background(), logger)
 
 	var command string

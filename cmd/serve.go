@@ -8,9 +8,11 @@ import (
 	"net/http/pprof"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/awnumar/memguard"
 	"github.com/inconshreveable/log15"
 	"github.com/spf13/cobra"
 	"github.com/stephane-martin/skewer/conf"
@@ -19,6 +21,7 @@ import (
 	"github.com/stephane-martin/skewer/metrics"
 	"github.com/stephane-martin/skewer/services"
 	"github.com/stephane-martin/skewer/sys/capabilities"
+	"github.com/stephane-martin/skewer/sys/kring"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/logging"
 )
@@ -84,7 +87,15 @@ func init() {
 }
 
 func ExecuteChild() (err error) {
-	ch := NewServeChild()
+	sessionID := strings.TrimSpace(os.Getenv("SKEWER_SESSION"))
+	if len(sessionID) == 0 {
+		return fmt.Errorf("Empty session ID")
+	}
+	secret, err := kring.GetBoxSecret(sessionID)
+	if err != nil {
+		return err
+	}
+	ch := NewServeChild(sessionID, secret)
 	err = ch.Init()
 	if err != nil {
 		return fmt.Errorf("Fatal error initializing Serve: %s", err)
@@ -113,17 +124,22 @@ type ServeChild struct {
 	store          *services.StorePlugin
 	controllers    map[services.NetworkServiceType]*services.PluginController
 	metricsServer  *metrics.MetricsServer
+	sessionID      string
 }
 
-func NewServeChild() *ServeChild {
-	c := ServeChild{}
+func NewServeChild(sessionID string, secret *memguard.LockedBuffer) *ServeChild {
+	c := ServeChild{sessionID: sessionID}
 	c.globalCtx, c.globalCancel = context.WithCancel(context.Background())
 	c.shutdownCtx, c.shutdown = context.WithCancel(c.globalCtx)
-	loggerConn, _ := net.FileConn(os.NewFile(uintptr(HandlesMap["CHILD_LOGGER"]), "logger"))
-	loggerConn.(*net.UnixConn).SetReadBuffer(65536)
-	loggerConn.(*net.UnixConn).SetWriteBuffer(65536)
+	conn, err := net.FileConn(os.NewFile(uintptr(HandlesMap["CHILD_LOGGER"]), "logger"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "OUPS", err)
+	}
+	loggerConn := conn.(*net.UnixConn)
+	loggerConn.SetReadBuffer(65536)
+	loggerConn.SetWriteBuffer(65536)
 	c.loggerCtx, c.cancelLogger = context.WithCancel(context.Background())
-	c.logger = logging.NewRemoteLogger(c.loggerCtx, loggerConn).New("proc", "child")
+	c.logger = logging.NewRemoteLogger(c.loggerCtx, loggerConn, secret).New("proc", "child")
 	return &c
 }
 
@@ -157,7 +173,7 @@ func (ch *ServeChild) SetupConfiguration() error {
 	ch.confService = services.NewConfigurationService(HandlesMap["CONFIG_LOGGER"], ch.logger)
 	ch.confService.SetConfDir(configDirName)
 	ch.confService.SetConsulParams(ch.consulParams)
-	err := ch.confService.Start()
+	err := ch.confService.Start(ch.sessionID)
 	if err != nil {
 		return fmt.Errorf("Error starting the configuration service: %s", err)
 	}
@@ -197,7 +213,7 @@ func (ch *ServeChild) SetupStore() error {
 	// setup the Store
 	ch.store = services.NewStorePlugin(HandlesMap["STORE_LOGGER"], ch.logger)
 	ch.store.SetConf(*ch.conf)
-	err := ch.store.Create(testFlag, DumpableFlag, storeDirname, "", "")
+	err := ch.store.Create(testFlag, ch.sessionID, DumpableFlag, storeDirname, "", "")
 	if err != nil {
 		return fmt.Errorf("Can't create the message Store: %s", err)
 	}
@@ -260,7 +276,7 @@ func (ch *ServeChild) StartControllers() error {
 func (ch *ServeChild) StartAccounting() error {
 	if ch.conf.Accounting.Enabled {
 		ch.logger.Info("Process accounting is enabled")
-		err := ch.controllers[services.Accounting].Create(testFlag, DumpableFlag, "", "", ch.conf.Accounting.Path)
+		err := ch.controllers[services.Accounting].Create(testFlag, ch.sessionID, DumpableFlag, "", "", ch.conf.Accounting.Path)
 		if err != nil {
 			return fmt.Errorf("Error creating the accounting plugin: %s", err)
 		}
@@ -282,7 +298,7 @@ func (ch *ServeChild) StartJournal() error {
 			ctl := ch.controllers[services.Journal]
 			ch.logger.Info("Journald service is enabled")
 			// in fact Create() will only do something the first time startJournal() is called
-			err := ctl.Create(testFlag, DumpableFlag, "", "", "")
+			err := ctl.Create(testFlag, ch.sessionID, DumpableFlag, "", "", "")
 			if err != nil {
 				return fmt.Errorf("Error creating Journald plugin: %s", err)
 			}
@@ -304,7 +320,7 @@ func (ch *ServeChild) StartJournal() error {
 
 func (ch *ServeChild) StartRelp() error {
 	ctl := ch.controllers[services.RELP]
-	err := ctl.Create(testFlag, DumpableFlag, "", "", "")
+	err := ctl.Create(testFlag, ch.sessionID, DumpableFlag, "", "", "")
 	if err != nil {
 		return fmt.Errorf("Error creating RELP plugin: %s", err)
 	}
@@ -320,7 +336,7 @@ func (ch *ServeChild) StartRelp() error {
 
 func (ch *ServeChild) StartTcp() error {
 	ctl := ch.controllers[services.TCP]
-	err := ctl.Create(testFlag, DumpableFlag, "", "", "")
+	err := ctl.Create(testFlag, ch.sessionID, DumpableFlag, "", "", "")
 	if err != nil {
 		return fmt.Errorf("Error creating TCP plugin: %s", err)
 	}
@@ -338,7 +354,7 @@ func (ch *ServeChild) StartTcp() error {
 
 func (ch *ServeChild) StartUdp() error {
 	ctl := ch.controllers[services.UDP]
-	err := ctl.Create(testFlag, DumpableFlag, "", "", "")
+	err := ctl.Create(testFlag, ch.sessionID, DumpableFlag, "", "", "")
 	if err != nil {
 		return fmt.Errorf("Error creating UDP plugin: %s", err)
 	}

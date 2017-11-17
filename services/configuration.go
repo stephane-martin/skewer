@@ -78,7 +78,7 @@ func (c *ConfigurationService) Chan() chan *conf.BaseConfig {
 	return c.output
 }
 
-func (c *ConfigurationService) Start() error {
+func (c *ConfigurationService) Start(sessionID string) error {
 	var err error
 	var cmd *exec.Cmd
 	var stdin io.WriteCloser
@@ -86,7 +86,7 @@ func (c *ConfigurationService) Start() error {
 	c.output = make(chan *conf.BaseConfig)
 
 	if capabilities.CapabilitiesSupported {
-		cmd, stdin, stdout, err = setupCmd("confined-skewer-conf", 0, c.loggerHandle, nil, false)
+		cmd, stdin, stdout, err = setupCmd("confined-skewer-conf", sessionID, 0, c.loggerHandle, nil, false)
 		if err != nil {
 			close(c.output)
 			return err
@@ -97,7 +97,7 @@ func (c *ConfigurationService) Start() error {
 		c.logger.Warn("Starting configuration service in user namespace has failed", "error", err)
 	}
 	if err != nil || !capabilities.CapabilitiesSupported {
-		cmd, stdin, stdout, err = setupCmd("skewer-conf", 0, c.loggerHandle, nil, false)
+		cmd, stdin, stdout, err = setupCmd("skewer-conf", sessionID, 0, c.loggerHandle, nil, false)
 		if err != nil {
 			close(c.output)
 			return err
@@ -285,7 +285,10 @@ func start(confdir string, params consul.ConnParams, logger log15.Logger) (conte
 	return cancel, nil
 }
 
-func LaunchConfProvider(logger log15.Logger) error {
+func LaunchConfProvider(sessionID string, logger log15.Logger) error {
+	if len(sessionID) == 0 {
+		return fmt.Errorf("Empty session ID")
+	}
 	var confdir string
 	var params consul.ConnParams
 

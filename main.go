@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/awnumar/memguard"
 	"github.com/inconshreveable/log15"
 	"github.com/kardianos/osext"
 	"github.com/spf13/pflag"
@@ -22,8 +23,10 @@ import (
 	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/sys/capabilities"
 	"github.com/stephane-martin/skewer/sys/dumpable"
+	"github.com/stephane-martin/skewer/sys/kring"
 	"github.com/stephane-martin/skewer/sys/namespaces"
 	"github.com/stephane-martin/skewer/sys/scomp"
+	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/logging"
 )
 
@@ -40,27 +43,34 @@ func getSocketPair(typ int) (spair, error) {
 	return spair{child: a, parent: b}, nil
 }
 
-func getLoggerConn(handle int) net.Conn {
-	loggerConn, _ := net.FileConn(os.NewFile(uintptr(handle), "logger"))
-	loggerConn.(*net.UnixConn).SetReadBuffer(65536)
-	loggerConn.(*net.UnixConn).SetWriteBuffer(65536)
-	return loggerConn
+func getLoggerConn(handle int) (loggerConn *net.UnixConn) {
+	c, _ := net.FileConn(os.NewFile(uintptr(handle), "logger"))
+	conn := c.(*net.UnixConn)
+	conn.SetReadBuffer(65536)
+	conn.SetWriteBuffer(65536)
+	return conn
 }
 
-func getLogger(ctx context.Context, name string, handle int) (log15.Logger, error) {
-	loggerConn, err := net.FileConn(os.NewFile(uintptr(handle), "logger"))
+func getLogger(ctx context.Context, name string, sessionID string, handle int) (log15.Logger, error) {
+	secret, err := kring.GetBoxSecret(sessionID)
 	if err != nil {
 		return nil, err
 	}
-	err = loggerConn.(*net.UnixConn).SetReadBuffer(65536)
+
+	conn, err := net.FileConn(os.NewFile(uintptr(handle), "logger"))
 	if err != nil {
 		return nil, err
 	}
-	err = loggerConn.(*net.UnixConn).SetWriteBuffer(65536)
+	loggerConn := conn.(*net.UnixConn)
+	err = loggerConn.SetReadBuffer(65536)
 	if err != nil {
 		return nil, err
 	}
-	return logging.NewRemoteLogger(ctx, loggerConn).New("proc", name), nil
+	err = loggerConn.SetWriteBuffer(65536)
+	if err != nil {
+		return nil, err
+	}
+	return logging.NewRemoteLogger(ctx, loggerConn, secret).New("proc", name), nil
 }
 
 func cleanup(msg string, err error, logger log15.Logger, cancelLogger context.CancelFunc) {
@@ -70,24 +80,17 @@ func cleanup(msg string, err error, logger log15.Logger, cancelLogger context.Ca
 		}
 		logger.Crit(msg, "error", err)
 		time.Sleep(100 * time.Millisecond)
-		if cancelLogger != nil {
-			cancelLogger()
-			time.Sleep(100 * time.Millisecond)
-		}
-		os.Exit(-1)
+		memguard.SafeExit(-1)
 	} else if len(msg) > 0 {
 		logger.Crit(msg)
 		time.Sleep(100 * time.Millisecond)
-		if cancelLogger != nil {
-			cancelLogger()
-			time.Sleep(100 * time.Millisecond)
-		}
-		os.Exit(-1)
-	} else {
-		if cancelLogger != nil {
-			cancelLogger()
-		}
+		memguard.SafeExit(-1)
 	}
+	if cancelLogger != nil {
+		cancelLogger()
+		time.Sleep(100 * time.Millisecond)
+	}
+	memguard.DestroyAll()
 }
 
 func earlyDropCaps(logger log15.Logger) {
@@ -136,8 +139,6 @@ func dropNetBindCap(logger log15.Logger) {
 }
 
 func execChild(logger log15.Logger) {
-	sys.MlockAll()
-
 	err := scomp.SetupSeccomp("parent")
 	if err != nil {
 		cleanup("Error setting up seccomp", err, logger, nil)
@@ -157,9 +158,17 @@ func execChild(logger log15.Logger) {
 	if err != nil {
 		cleanup("Error executing child", err, logger, nil)
 	}
+	cleanup("", nil, logger, nil)
 }
 
-func executeParent() {
+func makeErr(msg string, err error) error {
+	if err == nil {
+		return fmt.Errorf(msg)
+	}
+	return fmt.Errorf("%s: %s", msg, err)
+}
+
+func execServeParent() error {
 
 	/*
 		err := capabilities.NoNewPriv()
@@ -172,19 +181,30 @@ func executeParent() {
 	rootlogger := logging.SetLogging(nil, cmd.LoglevelFlag, cmd.LogjsonFlag, cmd.SyslogFlag, cmd.LogfilenameFlag)
 	logger := rootlogger.New("proc", "parent")
 
+	sessionID := utils.NewUid().String()
+	boxsecret, err := kring.NewBoxSecret(sessionID)
+	if err != nil {
+		return makeErr("Can't create a new box secret", err)
+	}
+
+	defer func() {
+		boxsecret.Destroy()
+		kring.DeleteBoxSecret(sessionID)
+	}()
+
 	if !cmd.DumpableFlag {
 		err := dumpable.SetNonDumpable()
 		if err != nil {
-			cleanup("Error setting PR_SET_DUMPABLE", err, logger, nil)
+			return makeErr("Error setting PR_SET_DUMPABLE", err)
 		}
 	}
 
 	numuid, numgid, err := sys.LookupUid(cmd.UidFlag, cmd.GidFlag)
 	if err != nil {
-		cleanup("Error looking up uid", err, logger, nil)
+		return makeErr("Error looking up uid", err)
 	}
 	if numuid == 0 {
-		cleanup("Provide a non-privileged user with --uid flag", nil, logger, nil)
+		return makeErr("Provide a non-privileged user with --uid flag", nil)
 	}
 
 	binderSockets := map[string]spair{}
@@ -197,7 +217,7 @@ func executeParent() {
 			loggerSockets[h], err = getSocketPair(syscall.SOCK_DGRAM)
 		}
 		if err != nil {
-			cleanup("Can't create the required socketpairs", err, logger, nil)
+			return makeErr("Can't create the required socketpairs", err)
 		}
 	}
 
@@ -207,21 +227,23 @@ func executeParent() {
 	}
 	err = binder.Binder(binderParents, logger) // returns immediately
 	if err != nil {
-		cleanup("Error setting the root binder", err, logger, nil)
+		return makeErr("Error setting the root binder", err)
 	}
 
-	remoteLoggerConn := []net.Conn{}
+	remoteLoggerConn := []*net.UnixConn{}
 	for _, s := range loggerSockets {
 		remoteLoggerConn = append(remoteLoggerConn, getLoggerConn(s.parent))
 	}
-	logging.LogReceiver(context.Background(), rootlogger, remoteLoggerConn)
+	loggingCtx, loggingCancel := context.WithCancel(context.Background())
+	logger.Debug("Receiving from remote loggers", "nb", len(remoteLoggerConn))
+	loggingWg := logging.LogReceiver(loggingCtx, boxsecret, rootlogger, remoteLoggerConn)
 
 	logger.Debug("Target user", "uid", numuid, "gid", numgid)
 
 	// execute child under the new user
 	exe, err := osext.Executable() // custom Executable function to support OpenBSD
 	if err != nil {
-		cleanup("Error getting executable name", err, logger, nil)
+		return makeErr("Error getting executable name", err)
 	}
 
 	extraFiles := []*os.File{}
@@ -240,7 +262,7 @@ func executeParent() {
 		Stdout:     os.Stdout,
 		Stderr:     os.Stderr,
 		ExtraFiles: extraFiles,
-		Env:        []string{"PATH=/bin:/usr/bin"},
+		Env:        []string{"PATH=/bin:/usr/bin", fmt.Sprintf("SKEWER_SESSION=%s", sessionID)},
 	}
 	if os.Getuid() != numuid {
 		// execute the child with the given uid, gid
@@ -248,7 +270,7 @@ func executeParent() {
 	}
 	err = childProcess.Start()
 	if err != nil {
-		cleanup("Error starting child", err, logger, nil)
+		return makeErr("Error starting child", err)
 	}
 
 	for _, h := range cmd.Handles {
@@ -285,12 +307,12 @@ func executeParent() {
 	logger.Debug("PIDs", "parent", os.Getpid(), "child", childProcess.Process.Pid)
 
 	childProcess.Process.Wait()
-	cleanup("", nil, logger, nil)
+	loggingCancel()
+	loggingWg.Wait()
+	return nil
 }
 
 func execParent(logger log15.Logger) {
-	sys.MlockAll()
-
 	err := scomp.SetupSeccomp("parent")
 	if err != nil {
 		cleanup("Error setting up seccomp", err, logger, nil)
@@ -307,10 +329,14 @@ func execParent(logger log15.Logger) {
 	}
 	logger.Debug("Executing command", "command", name, "args", strings.Join(os.Args, " "))
 	if name == "serve" && err != pflag.ErrHelp {
-		executeParent()
+		err = execServeParent()
 	} else {
-		cmd.Execute()
+		err = cmd.Execute()
 	}
+	if err != nil {
+		cleanup("Error executing command", err, logger, nil)
+	}
+	cleanup("", nil, logger, nil)
 
 }
 
@@ -379,6 +405,8 @@ func main() {
 		net.Dial("udp4", "127.0.0.1:80")
 	}
 
+	sessionID := os.Getenv("SKEWER_SESSION")
+
 	switch name {
 	case "skewer-conf":
 		sys.MlockAll()
@@ -386,7 +414,7 @@ func main() {
 		capabilities.NoNewPriv()
 		signal.Ignore(syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
 
-		logger, err := getLogger(loggerCtx, name, 3)
+		logger, err := getLogger(loggerCtx, name, sessionID, 3)
 		if err != nil {
 			cleanup("Could not create a logger for the configuration service", err, logger, cancelLogger)
 		}
@@ -398,10 +426,11 @@ func main() {
 		if err != nil {
 			cleanup("Pledge setup error", err, logger, cancelLogger)
 		}
-		err = services.LaunchConfProvider(logger)
+		err = services.LaunchConfProvider(sessionID, logger)
 		if err != nil {
 			cleanup("ConfigurationProvider encountered a fatal error", err, logger, cancelLogger)
 		}
+		cleanup("", nil, logger, cancelLogger)
 
 	case "confined-skewer-journal":
 		// journal is a special case, as /run/log/journal and /var/log/journal
@@ -479,7 +508,7 @@ func main() {
 
 		if os.Getenv("SKEWER_HAS_BINDER") == "TRUE" {
 			if os.Getenv("SKEWER_HAS_LOGGER") == "TRUE" {
-				logger, err = getLogger(loggerCtx, name, 4)
+				logger, err = getLogger(loggerCtx, name, sessionID, 4)
 				if os.Getenv("SKEWER_HAS_PIPE") == "TRUE" {
 					pipe = os.NewFile(5, "pipe")
 				}
@@ -488,7 +517,7 @@ func main() {
 			}
 			binderClient, _ = binder.NewBinderClient(os.NewFile(3, "binder"), logger)
 		} else if os.Getenv("SKEWER_HAS_LOGGER") == "TRUE" {
-			logger, err = getLogger(loggerCtx, name, 3)
+			logger, err = getLogger(loggerCtx, name, sessionID, 3)
 			if os.Getenv("SKEWER_HAS_PIPE") == "TRUE" {
 				pipe = os.NewFile(4, "pipe")
 			}
@@ -508,10 +537,11 @@ func main() {
 		if err != nil {
 			cleanup("Pledge setup error", err, logger, cancelLogger)
 		}
-		err = services.Launch(services.NetworkServiceMap[name], os.Getenv("SKEWER_TEST") == "TRUE", binderClient, logger, pipe)
+		err = services.Launch(services.NetworkServiceMap[name], os.Getenv("SKEWER_TEST") == "TRUE", sessionID, binderClient, logger, pipe)
 		if err != nil {
 			cleanup("Plugin encountered a fatal error", err, logger, cancelLogger)
 		}
+		cleanup("", nil, logger, cancelLogger)
 
 	case "skewer-child":
 		dropNetBindCap(logger)

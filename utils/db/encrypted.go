@@ -1,6 +1,7 @@
 package db
 
 import (
+	"github.com/awnumar/memguard"
 	"github.com/dgraph-io/badger"
 	"github.com/oklog/ulid"
 	"github.com/stephane-martin/skewer/utils/sbox"
@@ -8,7 +9,7 @@ import (
 
 type EncryptedDB struct {
 	p      Partition
-	secret [32]byte
+	secret *memguard.LockedBuffer
 }
 
 type encryptedIterator struct {
@@ -48,7 +49,7 @@ func (i *encryptedIterator) Value() []byte {
 	return decValue
 }
 
-func NewEncryptedPartition(p Partition, secret [32]byte) Partition {
+func NewEncryptedPartition(p Partition, secret *memguard.LockedBuffer) Partition {
 	return &EncryptedDB{p: p, secret: secret}
 }
 

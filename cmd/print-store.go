@@ -19,7 +19,7 @@ var printStoreCmd = &cobra.Command{
 		fmt.Println("print-store called")
 
 		var err error
-		var c *conf.BaseConfig
+		var c conf.BaseConfig
 		var st store.Store
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -42,14 +42,15 @@ var printStoreCmd = &cobra.Command{
 			fmt.Println("bleh", err)
 			return
 		}
+		c.Store.Dirname = storeDirname
 
 		// prepare the message store
 		st, err = store.NewStore(ctx, c.Store, conf.Stderr, logger)
 		if err != nil {
-			fmt.Println("Can't create the message Store", "error", err)
+			fmt.Println("Can't create the message Store", "path", c.Store.Dirname, "error", err)
 			return
 		}
-		defer st.WaitFinished()
+		//defer st.WaitFinished()
 
 		readyMap, failedMap, sentMap := st.ReadAllBadgers()
 
@@ -70,7 +71,6 @@ var printStoreCmd = &cobra.Command{
 			fmt.Printf("%s %s\n", k, v)
 		}
 		fmt.Println()
-
 	},
 }
 

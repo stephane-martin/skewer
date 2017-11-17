@@ -511,12 +511,12 @@ func (s *PluginController) Start() ([]model.ListenerInfo, error) {
 	return infos, nil
 }
 
-func setupCmd(name string, binderHandle int, loggerHandle int, messagePipe *os.File, test bool) (*exec.Cmd, io.WriteCloser, io.ReadCloser, error) {
+func setupCmd(name string, sessionID string, binderHandle int, loggerHandle int, messagePipe *os.File, test bool) (*exec.Cmd, io.WriteCloser, io.ReadCloser, error) {
 	exe, err := osext.Executable()
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	envs := []string{"PATH=/bin:/usr/bin"}
+	envs := []string{"PATH=/bin:/usr/bin", fmt.Sprintf("SKEWER_SESSION=%s", sessionID)}
 	files := []*os.File{}
 	if binderHandle != 0 {
 		files = append(files, os.NewFile(uintptr(binderHandle), "binder"))
@@ -552,7 +552,7 @@ func setupCmd(name string, binderHandle int, loggerHandle int, messagePipe *os.F
 	return cmd, in, out, nil
 }
 
-func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, acctPath string) error {
+func (s *PluginController) Create(test bool, sessionID string, dumpable bool, storePath, confDir, acctPath string) error {
 	// if the provider process already lives, Create() just returns
 	s.createdMu.Lock()
 	if s.created {
@@ -583,7 +583,7 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 		// this way we can support environments where user namespaces are not
 		// available
 		if capabilities.CapabilitiesSupported {
-			s.cmd, s.stdin, s.stdout, err = setupCmd(fmt.Sprintf("confined-%s", name), s.binderHandle, s.loggerHandle, pipew, test)
+			s.cmd, s.stdin, s.stdout, err = setupCmd(fmt.Sprintf("confined-%s", name), sessionID, s.binderHandle, s.loggerHandle, pipew, test)
 			if err != nil {
 				piper.Close()
 				pipew.Close()
@@ -598,7 +598,7 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 			s.logger.Warn("Starting plugin in user namespace failed", "error", err, "type", name)
 		}
 		if err != nil || !capabilities.CapabilitiesSupported {
-			s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.binderHandle, s.loggerHandle, pipew, test)
+			s.cmd, s.stdin, s.stdout, err = setupCmd(name, sessionID, s.binderHandle, s.loggerHandle, pipew, test)
 			if err != nil {
 				piper.Close()
 				pipew.Close()
@@ -624,7 +624,7 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 		}
 		s.pipe = pipew
 		if capabilities.CapabilitiesSupported {
-			s.cmd, s.stdin, s.stdout, err = setupCmd(fmt.Sprintf("confined-%s", name), s.binderHandle, s.loggerHandle, piper, test)
+			s.cmd, s.stdin, s.stdout, err = setupCmd(fmt.Sprintf("confined-%s", name), sessionID, s.binderHandle, s.loggerHandle, piper, test)
 			if err != nil {
 				piper.Close()
 				pipew.Close()
@@ -639,7 +639,7 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 			s.logger.Warn("Starting plugin in user namespace failed", "error", err, "type", name)
 		}
 		if err != nil || !capabilities.CapabilitiesSupported {
-			s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.binderHandle, s.loggerHandle, piper, test)
+			s.cmd, s.stdin, s.stdout, err = setupCmd(name, sessionID, s.binderHandle, s.loggerHandle, piper, test)
 			if err != nil {
 				piper.Close()
 				pipew.Close()
@@ -655,7 +655,7 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 		}
 
 	default:
-		s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.binderHandle, s.loggerHandle, nil, test)
+		s.cmd, s.stdin, s.stdout, err = setupCmd(name, sessionID, s.binderHandle, s.loggerHandle, nil, test)
 		if err != nil {
 			close(s.ShutdownChan)
 			s.createdMu.Unlock()

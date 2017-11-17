@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/awnumar/memguard"
 	"github.com/dgraph-io/badger"
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
@@ -98,7 +99,7 @@ func (b *Backend) GetPartition(qtype QueueType, dtype conf.DestinationType) db.P
 	return (b.Partitions[qtype])[dtype]
 }
 
-func NewBackend(parent *badger.DB, haveSecret bool, secretb [32]byte) *Backend {
+func NewBackend(parent *badger.DB, haveSecret bool, secretb *memguard.LockedBuffer) *Backend {
 	b := Backend{}
 	b.Partitions = map[QueueType](map[conf.DestinationType]db.Partition){}
 	for qtype := range Queues {
@@ -210,17 +211,17 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, dests conf.DestinationT
 	}
 	store.badger = kv
 
-	var secretb [32]byte
-	if len(cfg.Secret) == 0 {
-		store.backend = NewBackend(kv, false, secretb)
-	} else {
-		secretb, err = cfg.GetSecretB()
-		if err != nil {
-			return nil, err
-		}
-		store.backend = NewBackend(kv, true, secretb)
-		store.logger.Info("The badger store is encrypted")
-	}
+	var secretb *memguard.LockedBuffer
+	//if len(cfg.Secret) == 0 {
+	store.backend = NewBackend(kv, false, secretb)
+	//} else {
+	//	secretb, err = cfg.GetSecretB()
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	//	store.backend = NewBackend(kv, true, secretb)
+	//	store.logger.Info("The badger store is encrypted")
+	//}
 
 	store.syslogConfigsDB = db.NewPartition(kv, []byte("configs"))
 

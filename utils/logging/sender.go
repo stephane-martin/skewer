@@ -4,20 +4,22 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"strconv"
 	"time"
 
+	"github.com/awnumar/memguard"
 	"github.com/inconshreveable/log15"
-	"github.com/tinylib/msgp/msgp"
+	"github.com/stephane-martin/skewer/utils/sbox"
 )
 
 type RemoteLoggerHandler struct {
-	remote  net.Conn
+	remote  *net.UnixConn
 	msgChan chan *log15.Record
 	ctx     context.Context
 }
 
-func NewRemoteLogger(ctx context.Context, remote net.Conn) log15.Logger {
+func NewRemoteLogger(ctx context.Context, remote *net.UnixConn, secret *memguard.LockedBuffer) log15.Logger {
 	// the h.msgChan ensures that we write log messages sequentially to the remote socket
 	logger := log15.New()
 	h := RemoteLoggerHandler{remote: remote, ctx: ctx}
@@ -30,19 +32,16 @@ func NewRemoteLogger(ctx context.Context, remote net.Conn) log15.Logger {
 		var rbis Record
 		var r *log15.Record
 		var more bool
-		rem := msgp.NewWriter(h.remote)
 		done := ctx.Done()
 
+	Send:
 		for {
 			select {
 			case <-done:
 				return
 			case r, more = <-h.msgChan:
 				if more {
-					rbis = Record{Time: r.Time, Lvl: int(r.Lvl), Msg: r.Msg}
-
-					rbis.Ctx = map[string]string{}
-
+					rbis = Record{Time: r.Time, Lvl: int(r.Lvl), Msg: r.Msg, Ctx: map[string]string{}}
 					l := len(r.Ctx)
 					var i int
 					var ok bool
@@ -61,8 +60,23 @@ func NewRemoteLogger(ctx context.Context, remote net.Conn) log15.Logger {
 						}
 
 					}
-					rbis.EncodeMsg(rem)
-					rem.Flush()
+					dec, err := rbis.MarshalMsg(nil)
+					if err != nil {
+						fmt.Fprintln(os.Stderr, "BLAH", err)
+						continue Send
+					}
+					enc, err := sbox.Encrypt(dec, secret)
+					if err != nil {
+						fmt.Fprintln(os.Stderr, "BLEH", err)
+						continue Send
+					}
+					_, err = remote.Write(enc)
+					if err != nil {
+						fmt.Fprintln(os.Stderr, "BLEUH")
+						continue Send
+					} else {
+						//fmt.Fprintln(os.Stderr, n)
+					}
 				} else {
 					return
 				}

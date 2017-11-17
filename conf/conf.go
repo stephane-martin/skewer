@@ -33,7 +33,7 @@ func (source BaseConfig) Clone() BaseConfig {
 	return deriveCloneBaseConfig(source)
 }
 
-func newBaseConf() *BaseConfig {
+func newBaseConf() BaseConfig {
 	brokers := []string{}
 	baseConf := BaseConfig{
 		Syslog:    []SyslogConfig{},
@@ -43,20 +43,20 @@ func newBaseConf() *BaseConfig {
 		Journald:  JournaldConfig{},
 		Metrics:   MetricsConfig{},
 	}
-	return &baseConf
+	return baseConf
 }
 
-func Default() (*BaseConfig, error) {
+func Default() (BaseConfig, error) {
 	v := viper.New()
 	SetDefaults(v)
 	baseConf := newBaseConf()
-	err := v.Unmarshal(baseConf)
+	err := v.Unmarshal(&baseConf)
 	if err != nil {
-		return nil, ConfigurationSyntaxError{Err: err}
+		return baseConf, ConfigurationSyntaxError{Err: err}
 	}
 	err = baseConf.Complete()
 	if err != nil {
-		return nil, ConfigurationSyntaxError{Err: err}
+		return baseConf, ConfigurationSyntaxError{Err: err}
 	}
 	return baseConf, nil
 }
@@ -306,7 +306,7 @@ func (c *KafkaDestConfig) GetClient() (sarama.Client, error) {
 	return nil, KafkaError{Err: err}
 }
 
-func InitLoad(ctx context.Context, confDir string, params consul.ConnParams, logger log15.Logger) (c *BaseConfig, updated chan *BaseConfig, err error) {
+func InitLoad(ctx context.Context, confDir string, params consul.ConnParams, logger log15.Logger) (c BaseConfig, updated chan *BaseConfig, err error) {
 	defer func() {
 		// sometimes viper panics... let's catch that
 		if r := recover(); r != nil {
@@ -322,7 +322,7 @@ func InitLoad(ctx context.Context, confDir string, params consul.ConnParams, log
 			logger.Error("Recovered in conf.InitLoad()", "error", err)
 		}
 		if err != nil {
-			c = nil
+			c = newBaseConf()
 			updated = nil
 		}
 	}()
@@ -346,19 +346,18 @@ func InitLoad(ctx context.Context, confDir string, params consul.ConnParams, log
 	if err != nil {
 		switch err.(type) {
 		default:
-			return nil, nil, ConfigurationReadError{err}
+			return newBaseConf(), nil, ConfigurationReadError{err}
 		case viper.ConfigFileNotFoundError:
 			logger.Info("No configuration file was found")
 		}
 	}
 
-	baseConf := newBaseConf()
-	err = v.Unmarshal(baseConf)
+	var baseConf BaseConfig
+	err = v.Unmarshal(&baseConf)
 	if err != nil {
-		return nil, nil, ConfigurationSyntaxError{Err: err, Filename: v.ConfigFileUsed()}
+		return newBaseConf(), nil, ConfigurationSyntaxError{Err: err, Filename: v.ConfigFileUsed()}
 	}
-	cop := baseConf.Clone()
-	c = &cop
+	c = baseConf.Clone()
 
 	var watchCtx context.Context
 	var cancelWatch context.CancelFunc
@@ -392,7 +391,7 @@ func InitLoad(ctx context.Context, confDir string, params consul.ConnParams, log
 		if cancelWatch != nil {
 			cancelWatch()
 		}
-		return nil, nil, err
+		return newBaseConf(), nil, err
 	}
 
 	if consulResults != nil {
