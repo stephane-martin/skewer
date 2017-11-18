@@ -191,18 +191,14 @@
 		{
 			"checksumSHA1": "7rYdgCQsBUGRz7Zi+c1CDoM6j90=",
 			"path": "github.com/awnumar/memguard",
-			"revision": "6844db088c1e9ff46875cb87404a34e2c31622f6",
-			"revisionTime": "2017-10-23T12:45:52Z",
-			"version": "v0.13.1",
-			"versionExact": "v0.13.1"
+			"revision": "b482b0c828e2eeecbfebb05ca965c8d571afaeff",
+			"revisionTime": "2017-11-18T03:21:55Z"
 		},
 		{
-			"checksumSHA1": "ZNVBjfMFEN7Xk8hC2tQ1MhvG19w=",
+			"checksumSHA1": "yjVDN17EoXXGp2hm3vicTrlJorw=",
 			"path": "github.com/awnumar/memguard/memcall",
-			"revision": "6844db088c1e9ff46875cb87404a34e2c31622f6",
-			"revisionTime": "2017-10-23T12:45:52Z",
-			"version": "v0.13.1",
-			"versionExact": "v0.13.1"
+			"revision": "b482b0c828e2eeecbfebb05ca965c8d571afaeff",
+			"revisionTime": "2017-11-18T03:21:55Z"
 		},
 		{
 			"checksumSHA1": "spyv5/YFBjYyZLZa1U2LBfDR8PM=",
