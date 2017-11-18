@@ -16,6 +16,7 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/sys/kring"
 	"github.com/stephane-martin/skewer/utils/db"
 	"github.com/stephane-martin/skewer/utils/queue"
 )
@@ -99,7 +100,7 @@ func (b *Backend) GetPartition(qtype QueueType, dtype conf.DestinationType) db.P
 	return (b.Partitions[qtype])[dtype]
 }
 
-func NewBackend(parent *badger.DB, haveSecret bool, secretb *memguard.LockedBuffer) *Backend {
+func NewBackend(parent *badger.DB, storeSecret *memguard.LockedBuffer) *Backend {
 	b := Backend{}
 	b.Partitions = map[QueueType](map[conf.DestinationType]db.Partition){}
 	for qtype := range Queues {
@@ -108,9 +109,9 @@ func NewBackend(parent *badger.DB, haveSecret bool, secretb *memguard.LockedBuff
 			(b.Partitions[qtype])[dtype] = db.NewPartition(parent, getPartitionPrefix(qtype, dtype))
 		}
 	}
-	if haveSecret {
+	if storeSecret != nil {
 		for _, dtype := range conf.Destinations {
-			b.Partitions[Messages][dtype] = db.NewEncryptedPartition(b.Partitions[Messages][dtype], secretb)
+			b.Partitions[Messages][dtype] = db.NewEncryptedPartition(b.Partitions[Messages][dtype], storeSecret)
 		}
 	}
 	return &b
@@ -165,7 +166,7 @@ func (s *MessageStore) SetDestinations(dests conf.DestinationType) {
 	s.dests.Store(dests)
 }
 
-func NewStore(ctx context.Context, cfg conf.StoreConfig, dests conf.DestinationType, l log15.Logger) (*MessageStore, error) {
+func NewStore(ctx context.Context, cfg conf.StoreConfig, sessionID string, dests conf.DestinationType, l log15.Logger) (*MessageStore, error) {
 	badgerOpts := badger.DefaultOptions
 	badgerOpts.Dir = cfg.Dirname
 	badgerOpts.ValueDir = cfg.Dirname
@@ -211,17 +212,22 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, dests conf.DestinationT
 	}
 	store.badger = kv
 
-	var secretb *memguard.LockedBuffer
-	//if len(cfg.Secret) == 0 {
-	store.backend = NewBackend(kv, false, secretb)
-	//} else {
-	//	secretb, err = cfg.GetSecretB()
-	//	if err != nil {
-	//		return nil, err
-	//	}
-	//	store.backend = NewBackend(kv, true, secretb)
-	//	store.logger.Info("The badger store is encrypted")
-	//}
+	if len(sessionID) == 0 {
+		store.backend = NewBackend(kv, nil)
+	} else {
+		sessionSecret, err := kring.GetBoxSecret(sessionID)
+		if err != nil {
+			return nil, err
+		}
+		storeSecret, err := cfg.GetSecretB(sessionSecret)
+		if err != nil {
+			return nil, err
+		}
+		store.backend = NewBackend(kv, storeSecret)
+		if storeSecret != nil {
+			store.logger.Info("The badger store is encrypted")
+		}
+	}
 
 	store.syslogConfigsDB = db.NewPartition(kv, []byte("configs"))
 

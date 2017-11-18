@@ -29,7 +29,7 @@ func Launch(typ NetworkServiceType, test bool, sessionID string, binderClient *b
 	reporter := base.NewReporter(name, logger, pipe)
 	defer reporter.Stop()
 
-	svc := Factory(typ, reporter, generator, binderClient, logger, pipe)
+	svc := Factory(typ, sessionID, reporter, generator, binderClient, logger, pipe)
 	if svc == nil {
 		err := fmt.Errorf("The Service Factory returned 'nil' for plugin '%s'", name)
 		base.Wout(STARTERROR, []byte(err.Error()))

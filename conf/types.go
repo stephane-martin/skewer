@@ -6,7 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/awnumar/memguard"
 	"github.com/oklog/ulid"
+	"github.com/stephane-martin/skewer/utils/sbox"
 )
 
 // DestinationType lists the possible kind of destinations where skewer can forward messages.
@@ -111,22 +113,71 @@ type StoreConfig struct {
 	Secret  string `mapstructure:"secret" toml:"-" json:"secret"`
 }
 
-func (s *StoreConfig) GetSecretB() (secretb [32]byte, err error) {
-	secret := strings.TrimSpace(s.Secret)
-	if len(secret) == 0 {
-		return
-	}
-	var n int
-	t := make([]byte, base64.URLEncoding.DecodedLen(len(secret)))
-	n, err = base64.URLEncoding.Decode(t, []byte(secret))
+// the Secret in StoreConfig will be encrypted with the session secret in Complete()
+// so we do not transport an unencrypted secret between the multiple skewer processes
+
+func (s *StoreConfig) GetSecretB(m *memguard.LockedBuffer) (secretb *memguard.LockedBuffer, err error) {
+	locked, err := s.DecryptSecret(m)
 	if err != nil {
-		return secretb, ConfigurationCheckError{ErrString: "Error decoding store secret", Err: err}
+		return nil, err
+	}
+	if locked == nil {
+		return nil, nil
+	}
+	defer locked.Destroy()
+
+	var n int = base64.URLEncoding.DecodedLen(len(locked.Buffer()))
+	if n < 32 {
+		return nil, ConfigurationCheckError{ErrString: "Store secret is too short"}
+	}
+	secret := make([]byte, n)
+	n, err = base64.URLEncoding.Decode(secret, locked.Buffer())
+	if err != nil {
+		return nil, ConfigurationCheckError{ErrString: "Error decoding store secret", Err: err}
 	}
 	if n < 32 {
-		return secretb, ConfigurationCheckError{ErrString: "Store secret is too short"}
+		return nil, ConfigurationCheckError{ErrString: "Store secret is too short"}
 	}
-	copy(secretb[:], t[:32])
+	secret = secret[:32]
+	secretb, err = memguard.NewImmutableFromBytes(secret)
+	if err != nil {
+		return nil, err
+	}
 	return secretb, nil
+}
+
+func (s *StoreConfig) EncryptSecret(m *memguard.LockedBuffer) error {
+	secret := strings.TrimSpace(s.Secret)
+	if len(secret) == 0 {
+		s.Secret = ""
+		return nil
+	}
+	enc, err := sbox.Encrypt([]byte(secret), m)
+	if err != nil {
+		s.Secret = ""
+		return err
+	}
+	s.Secret = base64.StdEncoding.EncodeToString(enc)
+	return nil
+}
+
+func (s *StoreConfig) DecryptSecret(m *memguard.LockedBuffer) (locked *memguard.LockedBuffer, err error) {
+	if len(s.Secret) == 0 {
+		return nil, nil
+	}
+	enc, err := base64.StdEncoding.DecodeString(s.Secret)
+	if err != nil {
+		return nil, err
+	}
+	dec, err := sbox.Decrypt(enc, m)
+	if err != nil {
+		return nil, err
+	}
+	locked, err = memguard.NewImmutableFromBytes(dec)
+	if err != nil {
+		return nil, err
+	}
+	return locked, nil
 }
 
 type BaseDestConfig struct {

@@ -37,7 +37,7 @@ var printStoreCmd = &cobra.Command{
 			Prefix:     consulPrefix,
 		}
 
-		c, _, err = conf.InitLoad(ctx, configDirName, params, logger)
+		c, _, err = conf.InitLoad(ctx, configDirName, params, "", logger)
 		if err != nil {
 			fmt.Println("bleh", err)
 			return
@@ -45,7 +45,7 @@ var printStoreCmd = &cobra.Command{
 		c.Store.Dirname = storeDirname
 
 		// prepare the message store
-		st, err = store.NewStore(ctx, c.Store, conf.Stderr, logger)
+		st, err = store.NewStore(ctx, c.Store, "", conf.Stderr, logger)
 		if err != nil {
 			fmt.Println("Can't create the message Store", "path", c.Store.Dirname, "error", err)
 			return

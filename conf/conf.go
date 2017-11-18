@@ -25,6 +25,7 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stephane-martin/skewer/consul"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/sys/kring"
 	"github.com/stephane-martin/skewer/utils"
 )
 
@@ -54,7 +55,7 @@ func Default() (BaseConfig, error) {
 	if err != nil {
 		return baseConf, ConfigurationSyntaxError{Err: err}
 	}
-	err = baseConf.Complete()
+	err = baseConf.Complete("")
 	if err != nil {
 		return baseConf, ConfigurationSyntaxError{Err: err}
 	}
@@ -306,7 +307,7 @@ func (c *KafkaDestConfig) GetClient() (sarama.Client, error) {
 	return nil, KafkaError{Err: err}
 }
 
-func InitLoad(ctx context.Context, confDir string, params consul.ConnParams, logger log15.Logger) (c BaseConfig, updated chan *BaseConfig, err error) {
+func InitLoad(ctx context.Context, confDir string, params consul.ConnParams, sessionID string, logger log15.Logger) (c BaseConfig, updated chan *BaseConfig, err error) {
 	defer func() {
 		// sometimes viper panics... let's catch that
 		if r := recover(); r != nil {
@@ -386,7 +387,7 @@ func InitLoad(ctx context.Context, confDir string, params consul.ConnParams, log
 		logger.Info("Configuration is not fetched from Consul")
 	}
 
-	err = c.Complete()
+	err = c.Complete(sessionID)
 	if err != nil {
 		if cancelWatch != nil {
 			cancelWatch()
@@ -402,7 +403,7 @@ func InitLoad(ctx context.Context, confDir string, params consul.ConnParams, log
 				newConfig := baseConf.Clone()
 				err := newConfig.ParseParamsFromConsul(result, params.Prefix, logger)
 				if err == nil {
-					err = newConfig.Complete()
+					err = newConfig.Complete(sessionID)
 					if err == nil {
 						updated <- &newConfig
 					} else {
@@ -622,7 +623,7 @@ func (c *BaseConfig) Export() string {
 	return buf.String()
 }
 
-func (c *BaseConfig) Complete() (err error) {
+func (c *BaseConfig) Complete(sessionID string) (err error) {
 	parsersNames := map[string]bool{}
 	for _, parserConf := range c.Parsers {
 		name := strings.TrimSpace(parserConf.Name)
@@ -774,13 +775,18 @@ func (c *BaseConfig) Complete() (err error) {
 			}
 		}
 	}
-
-	c.Store.Secret = strings.TrimSpace(c.Store.Secret)
-	if len(c.Store.Secret) > 0 {
-		_, err := c.Store.GetSecretB()
+	if len(sessionID) > 0 {
+		m, err := kring.GetBoxSecret(sessionID)
 		if err != nil {
-			return err
+			return ConfigurationCheckError{ErrString: "Failed to retrieve the current session encryption secret", Err: err}
 		}
+		err = c.Store.EncryptSecret(m)
+		m.Destroy()
+		if err != nil {
+			return ConfigurationCheckError{ErrString: "Failed to encrypt the Store secret", Err: err}
+		}
+	} else {
+		c.Store.Secret = ""
 	}
 
 	for i := range c.Syslog {

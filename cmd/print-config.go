@@ -32,12 +32,12 @@ account, if you provide the necessary Consul flags on the command line.`,
 			Prefix:     consulPrefix,
 		}
 
-		c, _, err := conf.InitLoad(context.Background(), configDirName, params, log15.New())
+		c, _, err := conf.InitLoad(context.Background(), configDirName, params, "", log15.New())
 		if err != nil {
 			fmt.Printf("Error happened: %s\n", err)
 			os.Exit(-1)
 		}
-		fmt.Println(c)
+		fmt.Println(c.Export())
 	},
 }
 

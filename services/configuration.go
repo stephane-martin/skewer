@@ -261,13 +261,13 @@ func writeNewConf(ctx context.Context, updated chan *conf.BaseConfig, logger log
 	}
 }
 
-func start(confdir string, params consul.ConnParams, logger log15.Logger) (context.CancelFunc, error) {
+func start(confdir string, params consul.ConnParams, sessionID string, logger log15.Logger) (context.CancelFunc, error) {
 
 	if len(confdir) == 0 {
 		return nil, fmt.Errorf("Configuration directory is empty")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	gconf, updated, err := conf.InitLoad(ctx, confdir, params, logger)
+	gconf, updated, err := conf.InitLoad(ctx, confdir, params, sessionID, logger)
 	if err == nil {
 		confb, err := json.Marshal(gconf)
 		if err == nil {
@@ -304,14 +304,14 @@ func LaunchConfProvider(sessionID string, logger log15.Logger) error {
 		switch command {
 		case "start":
 			var err error
-			cancel, err = start(confdir, params, logger)
+			cancel, err = start(confdir, params, sessionID, logger)
 			if err != nil {
 				utils.W(os.Stdout, []byte("starterror"), []byte(err.Error()))
 				return err
 			}
 
 		case "reload":
-			newcancel, err := start(confdir, params, logger)
+			newcancel, err := start(confdir, params, sessionID, logger)
 			if err == nil {
 				if cancel != nil {
 					cancel()
