@@ -21,31 +21,40 @@ import (
 	"github.com/stephane-martin/skewer/utils"
 )
 
+var stdoutMu sync.Mutex
+
+func WConf(header []byte, message []byte) (err error) {
+	stdoutMu.Lock()
+	err = utils.W(os.Stdout, header, message, nil)
+	stdoutMu.Unlock()
+	return err
+}
+
 type ConfigurationService struct {
 	output       chan *conf.BaseConfig
 	params       consul.ConnParams
 	stdin        io.WriteCloser
 	logger       log15.Logger
-	mu           *sync.Mutex
+	stdinMu      *sync.Mutex
 	confdir      string
 	loggerHandle int
 }
 
 func NewConfigurationService(childLoggerHandle int, l log15.Logger) *ConfigurationService {
 	c := &ConfigurationService{loggerHandle: childLoggerHandle, logger: l}
-	c.mu = &sync.Mutex{}
+	c.stdinMu = &sync.Mutex{}
 	return c
 }
 
 func (c *ConfigurationService) W(header []byte, message []byte) (err error) {
-	c.mu.Lock()
+	c.stdinMu.Lock()
 	// TODO: sign
 	if c.stdin != nil {
 		err = utils.W(c.stdin, header, message, nil)
 	} else {
 		err = fmt.Errorf("stdin is nil")
 	}
-	c.mu.Unlock()
+	c.stdinMu.Unlock()
 	return err
 }
 
@@ -128,9 +137,9 @@ func (c *ConfigurationService) Start(sessionID string) error {
 
 			if kill {
 				c.logger.Warn("Killing configuration service")
-				c.mu.Lock()
+				c.stdinMu.Lock()
 				cmd.Process.Kill()
-				c.mu.Unlock()
+				c.stdinMu.Unlock()
 			}
 
 			errChan := make(chan error)
@@ -145,9 +154,9 @@ func (c *ConfigurationService) Start(sessionID string) error {
 			case err = <-errChan:
 			case <-time.After(3 * time.Second):
 				c.logger.Warn("Timeout: killing configuration service")
-				c.mu.Lock()
+				c.stdinMu.Lock()
 				cmd.Process.Kill()
-				c.mu.Unlock()
+				c.stdinMu.Unlock()
 				err = cmd.Wait()
 			}
 
@@ -251,7 +260,8 @@ func writeNewConf(ctx context.Context, updated chan *conf.BaseConfig, logger log
 			if more {
 				confb, err := json.Marshal(newconf)
 				if err == nil {
-					utils.W(os.Stdout, []byte("newconf"), confb, nil)
+					// TODO: sign configuration
+					WConf([]byte("newconf"), confb)
 				} else {
 					logger.Warn("Error serializing new configuration", "error", err)
 				}
@@ -272,8 +282,8 @@ func start(confdir string, params consul.ConnParams, sessionID string, logger lo
 	if err == nil {
 		confb, err := json.Marshal(gconf)
 		if err == nil {
-			utils.W(os.Stdout, []byte("started"), utils.NOW, nil)
-			utils.W(os.Stdout, []byte("newconf"), confb, nil)
+			WConf([]byte("started"), utils.NOW)
+			WConf([]byte("newconf"), confb)
 			go writeNewConf(ctx, updated, logger)
 		} else {
 			cancel()
@@ -307,8 +317,7 @@ func LaunchConfProvider(sessionID string, logger log15.Logger) error {
 			var err error
 			cancel, err = start(confdir, params, sessionID, logger)
 			if err != nil {
-				// TODO: lock stdout
-				utils.W(os.Stdout, []byte("starterror"), []byte(err.Error()), nil)
+				WConf([]byte("starterror"), []byte(err.Error()))
 				return err
 			}
 
@@ -319,7 +328,7 @@ func LaunchConfProvider(sessionID string, logger log15.Logger) error {
 					cancel()
 				}
 				cancel = newcancel
-				utils.W(os.Stdout, []byte("reloaded"), utils.NOW, nil)
+				WConf([]byte("reloaded"), utils.NOW)
 			} else {
 				logger.Warn("Error reloading configuration", "error", err)
 			}
