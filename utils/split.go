@@ -9,10 +9,72 @@ import (
 
 	"github.com/awnumar/memguard"
 	"github.com/stephane-martin/skewer/utils/sbox"
+	"golang.org/x/crypto/ed25519"
 )
 
 var NOW []byte = []byte("now")
 var SP []byte = []byte(" ")
+
+func WSign(dest io.Writer, header []byte, message []byte, privsignkey *memguard.LockedBuffer) (err error) {
+	fullmessage := make([]byte, 0, len(header)+len(message)+1)
+	fullmessage = append(fullmessage, header...)
+	fullmessage = append(fullmessage, SP...)
+	fullmessage = append(fullmessage, message...)
+	signature := ed25519.Sign(privsignkey.Buffer(), fullmessage)
+	return ChainWrites(
+		dest,
+		[]byte(fmt.Sprintf("%010d %010d ", len(fullmessage), len(signature))),
+		fullmessage,
+		signature,
+	)
+}
+
+func MakeSignSplit(signpubkey *memguard.LockedBuffer) (signSplit bufio.SplitFunc) {
+
+	signSplit = func(data []byte, atEOF bool) (advance int, token []byte, eoferr error) {
+		if atEOF {
+			eoferr = io.EOF
+		}
+		if len(data) < 22 {
+			return 0, nil, eoferr
+		}
+		if data[10] != byte(' ') || data[21] != byte(' ') {
+			return 0, nil, fmt.Errorf("Wrong sign format, 11th or 22th char is not space: '%s'", string(data))
+		}
+
+		var i int
+		for i = 0; i < 10; i++ {
+			if data[i] < byte('0') || data[i] > byte('9') {
+				return 0, nil, fmt.Errorf("Wrong sign format")
+			}
+		}
+		for i = 11; i < 21; i++ {
+			if data[i] < byte('0') || data[i] > byte('9') {
+				return 0, nil, fmt.Errorf("Wrong sign format")
+			}
+		}
+		fullmessagelen, err := strconv.Atoi(string(data[:10]))
+		if err != nil {
+			return 0, nil, err
+		}
+		signaturelen, err := strconv.Atoi(string(data[11:21]))
+		if err != nil {
+			return 0, nil, err
+		}
+
+		advance = 22 + fullmessagelen + signaturelen
+		if len(data) < advance {
+			return 0, nil, eoferr
+		}
+		fullmessage := data[22 : 22+fullmessagelen]
+		signature := data[22+fullmessagelen : 22+fullmessagelen+signaturelen]
+		if ed25519.Verify(signpubkey.Buffer(), fullmessage, signature) {
+			return advance, fullmessage, nil
+		}
+		return 0, nil, fmt.Errorf("Wrong signature")
+	}
+	return signSplit
+}
 
 func W(dest io.Writer, header []byte, message []byte, secret *memguard.LockedBuffer) (err error) {
 	var enc []byte
@@ -79,7 +141,7 @@ func PluginSplit(data []byte, atEOF bool) (advance int, token []byte, eoferr err
 	if len(data) < advance {
 		return 0, nil, eoferr
 	}
-	return advance, data[11 : 11+datalen], nil
+	return advance, data[11:advance], nil
 }
 
 // RelpSplit is used to extract RELP lines from the incoming TCP stream

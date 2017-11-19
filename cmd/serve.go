@@ -149,18 +149,22 @@ func (ch *ServeChild) Init() error {
 	if err != nil {
 		return err
 	}
-	err = ch.SetupConfiguration()
-	if err != nil {
-		return err
-	}
-	err = ch.SetupStore()
-	if err != nil {
-		return err
-	}
+
 	err = ch.SetupSignKey()
 	if err != nil {
 		return err
 	}
+
+	err = ch.SetupConfiguration()
+	if err != nil {
+		return err
+	}
+
+	err = ch.SetupStore()
+	if err != nil {
+		return err
+	}
+
 	ch.controllers = map[services.NetworkServiceType]*services.PluginController{}
 	ch.SetupControllers()
 	ch.SetupMetrics(ch.logger)

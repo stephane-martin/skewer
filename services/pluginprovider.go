@@ -40,8 +40,15 @@ func Launch(typ NetworkServiceType, test bool, sessionID string, binderClient *b
 	var fatalChan chan struct{}
 
 	var globalConf conf.BaseConfig
+
+	signpubkey, err := kring.GetSignaturePubkey(sessionID)
+	if err != nil {
+		return err
+	}
+
 	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Split(utils.PluginSplit)
+	scanner.Split(utils.MakeSignSplit(signpubkey))
+	//scanner.Split(utils.PluginSplit)
 
 	for scanner.Scan() {
 		select {
