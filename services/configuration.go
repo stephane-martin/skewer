@@ -39,8 +39,9 @@ func NewConfigurationService(childLoggerHandle int, l log15.Logger) *Configurati
 
 func (c *ConfigurationService) W(header []byte, message []byte) (err error) {
 	c.mu.Lock()
+	// TODO: sign
 	if c.stdin != nil {
-		err = utils.W(c.stdin, header, message)
+		err = utils.W(c.stdin, header, message, nil)
 	} else {
 		err = fmt.Errorf("stdin is nil")
 	}
@@ -250,7 +251,7 @@ func writeNewConf(ctx context.Context, updated chan *conf.BaseConfig, logger log
 			if more {
 				confb, err := json.Marshal(newconf)
 				if err == nil {
-					utils.W(os.Stdout, []byte("newconf"), confb)
+					utils.W(os.Stdout, []byte("newconf"), confb, nil)
 				} else {
 					logger.Warn("Error serializing new configuration", "error", err)
 				}
@@ -271,8 +272,8 @@ func start(confdir string, params consul.ConnParams, sessionID string, logger lo
 	if err == nil {
 		confb, err := json.Marshal(gconf)
 		if err == nil {
-			utils.W(os.Stdout, []byte("started"), utils.NOW)
-			utils.W(os.Stdout, []byte("newconf"), confb)
+			utils.W(os.Stdout, []byte("started"), utils.NOW, nil)
+			utils.W(os.Stdout, []byte("newconf"), confb, nil)
 			go writeNewConf(ctx, updated, logger)
 		} else {
 			cancel()
@@ -306,7 +307,8 @@ func LaunchConfProvider(sessionID string, logger log15.Logger) error {
 			var err error
 			cancel, err = start(confdir, params, sessionID, logger)
 			if err != nil {
-				utils.W(os.Stdout, []byte("starterror"), []byte(err.Error()))
+				// TODO: lock stdout
+				utils.W(os.Stdout, []byte("starterror"), []byte(err.Error()), nil)
 				return err
 			}
 
@@ -317,7 +319,7 @@ func LaunchConfProvider(sessionID string, logger log15.Logger) error {
 					cancel()
 				}
 				cancel = newcancel
-				utils.W(os.Stdout, []byte("reloaded"), utils.NOW)
+				utils.W(os.Stdout, []byte("reloaded"), utils.NOW, nil)
 			} else {
 				logger.Warn("Error reloading configuration", "error", err)
 			}

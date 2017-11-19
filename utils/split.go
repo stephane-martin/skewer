@@ -1,30 +1,58 @@
 package utils
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"io"
 	"strconv"
+
+	"github.com/awnumar/memguard"
+	"github.com/stephane-martin/skewer/utils/sbox"
 )
 
 var NOW []byte = []byte("now")
 var SP []byte = []byte(" ")
 
-func W(dest io.Writer, header []byte, message []byte) (err error) {
+func W(dest io.Writer, header []byte, message []byte, secret *memguard.LockedBuffer) (err error) {
+	var enc []byte
+	if secret == nil {
+		enc = message
+	} else {
+		enc, err = sbox.Encrypt(message, secret)
+		if err != nil {
+			return err
+		}
+	}
 	if len(header) == 0 {
 		return ChainWrites(
 			dest,
-			[]byte(fmt.Sprintf("%010d ", len(message))),
-			message,
+			[]byte(fmt.Sprintf("%010d ", len(enc))),
+			enc,
 		)
 	}
 	return ChainWrites(
 		dest,
-		[]byte(fmt.Sprintf("%010d ", len(header)+len(message)+1)),
+		[]byte(fmt.Sprintf("%010d ", len(header)+len(enc)+1)),
 		header,
 		SP,
-		message,
+		enc,
 	)
+}
+
+func MakeDecryptSplit(secret *memguard.LockedBuffer) bufio.SplitFunc {
+	spl := func(data []byte, atEOF bool) (int, []byte, error) {
+		adv, tok, err := PluginSplit(data, atEOF)
+		if err != nil || tok == nil || secret == nil {
+			return adv, tok, err
+		}
+		dec, err := sbox.Decrypt(tok, secret)
+		if err != nil {
+			return 0, nil, err
+		}
+		return adv, dec, nil
+	}
+	return spl
 }
 
 func PluginSplit(data []byte, atEOF bool) (advance int, token []byte, eoferr error) {

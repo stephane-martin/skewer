@@ -125,12 +125,12 @@ func (s *storeServiceImpl) doStart(test bool, mu *sync.Mutex) ([]model.ListenerI
 			defer s.ingestwg.Done()
 
 			scanner := bufio.NewScanner(s.pipe)
-			scanner.Split(utils.PluginSplit)
+			scanner.Split(utils.MakeDecryptSplit(s.secret))
 			var err error
 
 			for scanner.Scan() {
 				message := model.FullMessage{}
-				err = message.Decrypt(s.secret, scanner.Bytes())
+				_, err = message.UnmarshalMsg(scanner.Bytes())
 				if err == nil {
 					s.st.Stash(message)
 				} else {

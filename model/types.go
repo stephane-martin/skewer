@@ -123,6 +123,7 @@ func (m *SyslogMessage) Empty() bool {
 	return len(m.Message) == 0 && len(m.Structured) == 0 && len(m.Properties) == 0
 }
 
+/*
 func (m *FullMessage) Encrypt(secret *memguard.LockedBuffer) (enc []byte, err error) {
 	dec, err := m.MarshalMsg(nil)
 	if err != nil {
@@ -137,6 +138,7 @@ func (m *FullMessage) Encrypt(secret *memguard.LockedBuffer) (enc []byte, err er
 	}
 	return enc, err
 }
+*/
 
 func (m *FullMessage) Decrypt(secret *memguard.LockedBuffer, enc []byte) (err error) {
 	if len(enc) == 0 {

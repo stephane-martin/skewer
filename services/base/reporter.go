@@ -21,10 +21,10 @@ var INFOS = []byte("infos")
 var SP = []byte(" ")
 
 // Wout writes a message to the controller via stdout
-func Wout(header []byte, m []byte) (err error) {
+func Wout(header []byte, m []byte, secret *memguard.LockedBuffer) (err error) {
 	stdoutLock.Lock()
 	// LEN HEADER ENCRYPTEDMSG
-	err = utils.W(os.Stdout, header, m)
+	err = utils.W(os.Stdout, header, m, secret)
 	stdoutLock.Unlock()
 	return
 }
@@ -69,16 +69,17 @@ func (s *Reporter) pushqueue() {
 	for s.queue.Wait(0) {
 		m, err = s.queue.Get()
 		if m != nil && err == nil {
-			b, err = m.Encrypt(s.secret)
-			if err == nil {
-				// LEN ENCRYPTEDMSG
-				err = utils.W(s.pipe, nil, b)
-				if err != nil {
-					s.logger.Crit("Unexpected error when writing messages to the plugin pipe", "error", err)
-					return
-				}
-			} else {
-				s.logger.Warn("A message provided by a plugin could not be serialized", "error", err)
+			b, err = m.MarshalMsg(nil)
+			if err != nil {
+				// should not happen
+				s.logger.Warn("A syslog message could not be serialized", "type", s.name, "error", err)
+				return
+			}
+			// LEN ENCRYPTEDMSG
+			err = utils.W(s.pipe, nil, b, s.secret)
+			if err != nil {
+				s.logger.Crit("Unexpected error when writing messages to the plugin pipe", "error", err)
+				return
 			}
 		}
 	}
@@ -94,13 +95,13 @@ func (s *Reporter) Stop() {
 // Stash reports one syslog message to the controller.
 func (s *Reporter) Stash(m model.FullMessage) (fatal, nonfatal error) {
 	if s.queue == nil {
-		b, err := m.Encrypt(s.secret)
+		b, err := m.MarshalMsg(nil)
 		if err != nil {
 			// should not happen
 			s.logger.Warn("A syslog message could not be serialized", "type", s.name, "error", err)
 			return nil, err
 		}
-		err = Wout(SYSLOG, b)
+		err = Wout(SYSLOG, b, s.secret)
 		if err != nil {
 			s.logger.Crit("Could not write message to upstream. There was message loss", "error", err, "type", s.name)
 			return err, nil
@@ -118,5 +119,5 @@ func (s *Reporter) Report(infos []model.ListenerInfo) error {
 	if err != nil {
 		return err
 	}
-	return Wout(INFOS, b)
+	return Wout(INFOS, b, nil)
 }

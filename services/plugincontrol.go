@@ -68,9 +68,10 @@ type PluginController struct {
 
 	sessionID string
 	secret    *memguard.LockedBuffer
+	signKey   *memguard.LockedBuffer
 }
 
-func NewPluginController(typ NetworkServiceType, sid string, stasher *StorePlugin, r *consul.Registry, bHandle int, lHandle int, l log15.Logger) *PluginController {
+func NewPluginController(typ NetworkServiceType, sid string, signKey *memguard.LockedBuffer, stasher *StorePlugin, r *consul.Registry, bHandle int, lHandle int, l log15.Logger) *PluginController {
 	s := &PluginController{
 		typ:          typ,
 		stasher:      stasher,
@@ -82,6 +83,7 @@ func NewPluginController(typ NetworkServiceType, sid string, stasher *StorePlugi
 		startedMu:    &sync.Mutex{},
 		createdMu:    &sync.Mutex{},
 		sessionID:    sid,
+		signKey:      signKey,
 	}
 	s.metricsChan = make(chan []*dto.MetricFamily)
 	s.ShutdownChan = make(chan struct{})
@@ -92,7 +94,8 @@ func NewPluginController(typ NetworkServiceType, sid string, stasher *StorePlugi
 func (s *PluginController) W(header []byte, message []byte) (err error) {
 	s.stdinMu.Lock()
 	if s.stdin != nil {
-		err = utils.W(s.stdin, header, message)
+		// TODO: sign
+		err = utils.W(s.stdin, header, message, nil)
 	} else {
 		err = fmt.Errorf("stdin is nil")
 	}
@@ -224,7 +227,7 @@ func (s *PluginController) listenpipe() {
 		return
 	}
 	scanner := bufio.NewScanner(s.pipe)
-	scanner.Split(utils.PluginSplit)
+	scanner.Split(utils.MakeDecryptSplit(s.secret))
 	scanner.Buffer(make([]byte, 0, 132000), 132000)
 
 	var err error
@@ -232,7 +235,8 @@ func (s *PluginController) listenpipe() {
 
 	for scanner.Scan() {
 		message = model.FullMessage{}
-		err = message.Decrypt(s.secret, scanner.Bytes())
+		_, err = message.UnmarshalMsg(scanner.Bytes())
+		//err = message.Decrypt(s.secret, scanner.Bytes())
 		if err == nil {
 			s.stasher.Stash(message)
 		} else {
@@ -746,9 +750,9 @@ func (s *StorePlugin) pushqueue() {
 			return
 		}
 		for _, message = range messages {
-			messageb, err = message.Encrypt(s.secret)
+			messageb, err = message.MarshalMsg(nil)
 			if err == nil {
-				err = utils.W(s.pipe, nil, messageb)
+				err = utils.W(s.pipe, nil, messageb, s.secret)
 				if err != nil {
 					s.logger.Error("Unexpected error when writing messages to the Store pipe", "error", err)
 					return
@@ -784,8 +788,8 @@ func (s *StorePlugin) Stash(m model.FullMessage) {
 }
 
 // NewStorePlugin creates a new Store controller.
-func NewStorePlugin(sid string, loggerHandle int, l log15.Logger) *StorePlugin {
-	s := &StorePlugin{PluginController: NewPluginController(Store, sid, nil, nil, 0, loggerHandle, l)}
+func NewStorePlugin(sid string, signKey *memguard.LockedBuffer, loggerHandle int, l log15.Logger) *StorePlugin {
+	s := &StorePlugin{PluginController: NewPluginController(Store, sid, signKey, nil, nil, 0, loggerHandle, l)}
 	s.MessageQueue = queue.NewMessageQueue()
 	s.pushwg = &sync.WaitGroup{}
 	return s

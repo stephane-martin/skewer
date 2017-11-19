@@ -125,6 +125,7 @@ type ServeChild struct {
 	controllers    map[services.NetworkServiceType]*services.PluginController
 	metricsServer  *metrics.MetricsServer
 	sessionID      string
+	signPrivKey    *memguard.LockedBuffer
 }
 
 func NewServeChild(sessionID string, secret *memguard.LockedBuffer) *ServeChild {
@@ -153,6 +154,10 @@ func (ch *ServeChild) Init() error {
 		return err
 	}
 	err = ch.SetupStore()
+	if err != nil {
+		return err
+	}
+	err = ch.SetupSignKey()
 	if err != nil {
 		return err
 	}
@@ -211,7 +216,7 @@ func (ch *ServeChild) SetupConsulRegistry() error {
 
 func (ch *ServeChild) SetupStore() error {
 	// setup the Store
-	ch.store = services.NewStorePlugin(ch.sessionID, HandlesMap["STORE_LOGGER"], ch.logger)
+	ch.store = services.NewStorePlugin(ch.sessionID, ch.signPrivKey, HandlesMap["STORE_LOGGER"], ch.logger)
 	ch.store.SetConf(*ch.conf)
 	err := ch.store.Create(testFlag, DumpableFlag, storeDirname, "", "")
 	if err != nil {
@@ -226,6 +231,17 @@ func (ch *ServeChild) SetupStore() error {
 	if err != nil {
 		return fmt.Errorf("Can't start the forwarder: %s", err)
 	}
+	return nil
+}
+
+func (ch *ServeChild) SetupSignKey() error {
+	ch.logger.Debug("Generating signature keys")
+	pubkey, privkey, err := kring.NewSignaturePubkey(ch.sessionID)
+	if err != nil {
+		return fmt.Errorf("Error generating signature keys: %s", err)
+	}
+	pubkey.Destroy()
+	ch.signPrivKey = privkey
 	return nil
 }
 
@@ -250,6 +266,7 @@ func (ch *ServeChild) SetupController(typ services.NetworkServiceType) {
 	ch.controllers[typ] = services.NewPluginController(
 		typ,
 		ch.sessionID,
+		ch.signPrivKey,
 		ch.store,
 		ch.consulRegistry,
 		binder, logger,
