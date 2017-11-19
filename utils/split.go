@@ -11,10 +11,17 @@ var NOW []byte = []byte("now")
 var SP []byte = []byte(" ")
 
 func W(dest io.Writer, header []byte, message []byte) (err error) {
+	if len(header) == 0 {
+		return ChainWrites(
+			dest,
+			[]byte(fmt.Sprintf("%010d ", len(message))),
+			message,
+		)
+	}
 	return ChainWrites(
 		dest,
 		[]byte(fmt.Sprintf("%010d ", len(header)+len(message)+1)),
-		[]byte(header),
+		header,
 		SP,
 		message,
 	)

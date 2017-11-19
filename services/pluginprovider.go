@@ -13,6 +13,7 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/sys/binder"
+	"github.com/stephane-martin/skewer/sys/kring"
 	"github.com/stephane-martin/skewer/utils"
 )
 
@@ -60,6 +61,18 @@ func Launch(typ NetworkServiceType, test bool, sessionID string, binderClient *b
 				base.Wout([]byte("syslogconferror"), []byte(err.Error()))
 				return err
 			}
+			if globalConf.Main.EncryptIPC {
+				logger.Debug("Encrypting messages from plugin", "type", name)
+				secret, err := kring.GetBoxSecret(sessionID)
+				if err != nil {
+					base.Wout(STARTERROR, []byte(err.Error()))
+					return err
+				}
+				reporter.SetSecret(secret)
+			} else {
+				reporter.SetSecret(nil)
+			}
+			reporter.Start()
 			infos, err := ConfigureAndStartService(svc, globalConf, test)
 			if err != nil {
 				base.Wout(STARTERROR, []byte(err.Error()))

@@ -73,6 +73,7 @@ type MainConfig struct {
 	InputQueueSize      uint64 `mapstructure:"input_queue_size" toml:"input_queue_size" json:"input_queue_size"`
 	MaxInputMessageSize int    `mapstructure:"max_input_message_size" toml:"max_input_message_size" json:"max_input_message_size"`
 	Destination         string `mapstructure:"destination" toml:"destination" json:"destination"`
+	EncryptIPC          bool   `mapstructure:"encrypt_ipc" toml:"encrypt_ipc" json:"encrypt_ipc"`
 }
 
 func (m *MainConfig) GetDestinations() (dests DestinationType, err error) {

@@ -8,7 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/awnumar/memguard"
 	"github.com/pquerna/ffjson/ffjson"
+	"github.com/stephane-martin/skewer/utils/sbox"
 )
 
 //go:generate msgp
@@ -119,6 +121,38 @@ func (m SyslogMessage) Date() string {
 // Empty returns true if the message is empty
 func (m *SyslogMessage) Empty() bool {
 	return len(m.Message) == 0 && len(m.Structured) == 0 && len(m.Properties) == 0
+}
+
+func (m *FullMessage) Encrypt(secret *memguard.LockedBuffer) (enc []byte, err error) {
+	dec, err := m.MarshalMsg(nil)
+	if err != nil {
+		return nil, err
+	}
+	if secret == nil {
+		return dec, nil
+	}
+	enc, err = sbox.Encrypt(dec, secret)
+	if err != nil {
+		return nil, err
+	}
+	return enc, err
+}
+
+func (m *FullMessage) Decrypt(secret *memguard.LockedBuffer, enc []byte) (err error) {
+	if len(enc) == 0 {
+		return fmt.Errorf("Empty message")
+	}
+	var dec []byte
+	if secret != nil {
+		dec, err = sbox.Decrypt(enc, secret)
+		if err != nil {
+			return err
+		}
+	} else {
+		dec = enc
+	}
+	_, err = m.UnmarshalMsg(dec)
+	return err
 }
 
 func (m *FullMessage) MarshalAll(frmt string) (b []byte, err error) {

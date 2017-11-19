@@ -5,6 +5,7 @@ import (
 	"os"
 	"sync"
 
+	"github.com/awnumar/memguard"
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
@@ -17,10 +18,12 @@ var stdoutLock sync.Mutex
 var SUCC = []byte("SUCCESS")
 var SYSLOG = []byte("syslog")
 var INFOS = []byte("infos")
+var SP = []byte(" ")
 
 // Wout writes a message to the controller via stdout
 func Wout(header []byte, m []byte) (err error) {
 	stdoutLock.Lock()
+	// LEN HEADER ENCRYPTEDMSG
 	err = utils.W(os.Stdout, header, m)
 	stdoutLock.Unlock()
 	return
@@ -32,16 +35,24 @@ type Reporter struct {
 	logger log15.Logger
 	pipe   *os.File
 	queue  *queue.MessageQueue
+	secret *memguard.LockedBuffer
 }
 
 // NewReporter creates a controller.
 func NewReporter(name string, l log15.Logger, pipe *os.File) *Reporter {
-	rep := &Reporter{name: name, logger: l, pipe: pipe}
-	if pipe != nil {
-		rep.queue = queue.NewMessageQueue()
-		go rep.pushqueue()
+	rep := Reporter{name: name, logger: l, pipe: pipe}
+	return &rep
+}
+
+func (s *Reporter) Start() {
+	if s.pipe != nil {
+		s.queue = queue.NewMessageQueue()
+		go s.pushqueue()
 	}
-	return rep
+}
+
+func (s *Reporter) SetSecret(secret *memguard.LockedBuffer) {
+	s.secret = secret
 }
 
 func (s *Reporter) pushqueue() {
@@ -49,12 +60,19 @@ func (s *Reporter) pushqueue() {
 	var b []byte
 	var err error
 
+	defer func() {
+		if s.secret != nil {
+			s.secret.Destroy()
+		}
+	}()
+
 	for s.queue.Wait(0) {
 		m, err = s.queue.Get()
 		if m != nil && err == nil {
-			b, err = m.MarshalMsg(nil)
+			b, err = m.Encrypt(s.secret)
 			if err == nil {
-				_, err = s.pipe.Write(b)
+				// LEN ENCRYPTEDMSG
+				err = utils.W(s.pipe, nil, b)
 				if err != nil {
 					s.logger.Crit("Unexpected error when writing messages to the plugin pipe", "error", err)
 					return
@@ -76,7 +94,7 @@ func (s *Reporter) Stop() {
 // Stash reports one syslog message to the controller.
 func (s *Reporter) Stash(m model.FullMessage) (fatal, nonfatal error) {
 	if s.queue == nil {
-		b, err := m.MarshalMsg(nil)
+		b, err := m.Encrypt(s.secret)
 		if err != nil {
 			// should not happen
 			s.logger.Warn("A syslog message could not be serialized", "type", s.name, "error", err)

@@ -44,6 +44,7 @@ func init() {
 }
 
 func ConfigureAndStartService(s NetworkService, c conf.BaseConfig, test bool) ([]model.ListenerInfo, error) {
+	 
 	switch s := s.(type) {
 	case *network.TcpServiceImpl:
 		s.SetConf(c.Syslog, c.Parsers, c.Main.InputQueueSize, c.Main.MaxInputMessageSize)

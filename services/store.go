@@ -1,19 +1,22 @@
 package services
 
 import (
+	"bufio"
 	"context"
 	"io"
 	"os"
 	"sync"
 	"time"
 
+	"github.com/awnumar/memguard"
 	"github.com/inconshreveable/log15"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/store"
-	"github.com/tinylib/msgp/msgp"
+	"github.com/stephane-martin/skewer/sys/kring"
+	"github.com/stephane-martin/skewer/utils"
 )
 
 type storeServiceImpl struct {
@@ -25,12 +28,12 @@ type storeServiceImpl struct {
 	cancelForwarder context.CancelFunc
 	forwarder       store.Forwarder
 	mu              *sync.Mutex
-	reader          *msgp.Reader
 	ingestwg        *sync.WaitGroup
 	pipe            *os.File
 	sessionID       string
 	status          bool
 	test            bool
+	secret          *memguard.LockedBuffer
 }
 
 // NewStoreService creates a StoreService.
@@ -42,7 +45,6 @@ func NewStoreService(l log15.Logger, sessionID string, pipe *os.File) StoreServi
 		return nil
 	}
 	impl := &storeServiceImpl{
-		reader:    msgp.NewReader(pipe),
 		ingestwg:  &sync.WaitGroup{},
 		mu:        &sync.Mutex{},
 		status:    false,
@@ -59,6 +61,16 @@ func (s *storeServiceImpl) SetConfAndRestart(c conf.BaseConfig, test bool) ([]mo
 	defer s.mu.Unlock()
 	s.doStop(nil)
 	s.config = c
+	if c.Main.EncryptIPC {
+		secret, err := kring.GetBoxSecret(s.sessionID)
+		if err != nil {
+			return nil, err
+		}
+		s.logger.Debug("The store receives messages from an encrypted pipe")
+		s.secret = secret
+	} else {
+		s.secret = nil
+	}
 	return s.doStart(test, nil)
 }
 
@@ -111,24 +123,32 @@ func (s *storeServiceImpl) doStart(test bool, mu *sync.Mutex) ([]model.ListenerI
 		s.ingestwg.Add(1)
 		go func() {
 			defer s.ingestwg.Done()
+
+			scanner := bufio.NewScanner(s.pipe)
+			scanner.Split(utils.PluginSplit)
 			var err error
-			var message model.FullMessage
-			for {
-				message = model.FullMessage{}
-				err = message.DecodeMsg(s.reader)
+
+			for scanner.Scan() {
+				message := model.FullMessage{}
+				err = message.Decrypt(s.secret, scanner.Bytes())
 				if err == nil {
 					s.st.Stash(message)
-				} else if err == io.EOF || err == io.ErrClosedPipe || err == io.ErrUnexpectedEOF {
-					return
 				} else {
-					s.logger.Error("Unexpected error reading from the Store pipe", "error", err)
+					s.logger.Warn("Unexpected error decoding message from the Store pipe", "error", err)
 					go func() { s.Shutdown() }()
 					return
 				}
+			}
 
+			err = scanner.Err()
+			if err == io.EOF || err == io.ErrClosedPipe || err == io.ErrUnexpectedEOF {
+				s.logger.Debug("Stopped to read the ingestion store pipe")
+			} else {
+				s.logger.Warn("Unexpected error decoding message from the Store pipe", "error", err)
 			}
 		}()
 	}
+
 	destinations, err := s.config.Main.GetDestinations()
 	if err != nil {
 		s.logger.Warn("Error parsing destinations (should not happen!!!)", "error", err)

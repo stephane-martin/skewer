@@ -211,9 +211,9 @@ func (ch *ServeChild) SetupConsulRegistry() error {
 
 func (ch *ServeChild) SetupStore() error {
 	// setup the Store
-	ch.store = services.NewStorePlugin(HandlesMap["STORE_LOGGER"], ch.logger)
+	ch.store = services.NewStorePlugin(ch.sessionID, HandlesMap["STORE_LOGGER"], ch.logger)
 	ch.store.SetConf(*ch.conf)
-	err := ch.store.Create(testFlag, ch.sessionID, DumpableFlag, storeDirname, "", "")
+	err := ch.store.Create(testFlag, DumpableFlag, storeDirname, "", "")
 	if err != nil {
 		return fmt.Errorf("Can't create the message Store: %s", err)
 	}
@@ -248,7 +248,9 @@ func (ch *ServeChild) SetupController(typ services.NetworkServiceType) {
 		logger = HandlesMap["ACCT_LOGGER"]
 	}
 	ch.controllers[typ] = services.NewPluginController(
-		typ, ch.store,
+		typ,
+		ch.sessionID,
+		ch.store,
 		ch.consulRegistry,
 		binder, logger,
 		ch.logger,
@@ -276,7 +278,7 @@ func (ch *ServeChild) StartControllers() error {
 func (ch *ServeChild) StartAccounting() error {
 	if ch.conf.Accounting.Enabled {
 		ch.logger.Info("Process accounting is enabled")
-		err := ch.controllers[services.Accounting].Create(testFlag, ch.sessionID, DumpableFlag, "", "", ch.conf.Accounting.Path)
+		err := ch.controllers[services.Accounting].Create(testFlag, DumpableFlag, "", "", ch.conf.Accounting.Path)
 		if err != nil {
 			return fmt.Errorf("Error creating the accounting plugin: %s", err)
 		}
@@ -298,7 +300,7 @@ func (ch *ServeChild) StartJournal() error {
 			ctl := ch.controllers[services.Journal]
 			ch.logger.Info("Journald service is enabled")
 			// in fact Create() will only do something the first time startJournal() is called
-			err := ctl.Create(testFlag, ch.sessionID, DumpableFlag, "", "", "")
+			err := ctl.Create(testFlag, DumpableFlag, "", "", "")
 			if err != nil {
 				return fmt.Errorf("Error creating Journald plugin: %s", err)
 			}
@@ -320,7 +322,7 @@ func (ch *ServeChild) StartJournal() error {
 
 func (ch *ServeChild) StartRelp() error {
 	ctl := ch.controllers[services.RELP]
-	err := ctl.Create(testFlag, ch.sessionID, DumpableFlag, "", "", "")
+	err := ctl.Create(testFlag, DumpableFlag, "", "", "")
 	if err != nil {
 		return fmt.Errorf("Error creating RELP plugin: %s", err)
 	}
@@ -336,7 +338,7 @@ func (ch *ServeChild) StartRelp() error {
 
 func (ch *ServeChild) StartTcp() error {
 	ctl := ch.controllers[services.TCP]
-	err := ctl.Create(testFlag, ch.sessionID, DumpableFlag, "", "", "")
+	err := ctl.Create(testFlag, DumpableFlag, "", "", "")
 	if err != nil {
 		return fmt.Errorf("Error creating TCP plugin: %s", err)
 	}
@@ -354,7 +356,7 @@ func (ch *ServeChild) StartTcp() error {
 
 func (ch *ServeChild) StartUdp() error {
 	ctl := ch.controllers[services.UDP]
-	err := ctl.Create(testFlag, ch.sessionID, DumpableFlag, "", "", "")
+	err := ctl.Create(testFlag, DumpableFlag, "", "", "")
 	if err != nil {
 		return fmt.Errorf("Error creating UDP plugin: %s", err)
 	}
@@ -527,7 +529,9 @@ func (ch *ServeChild) Serve() error {
 			// just loop
 		case newConf := <-ch.confChan:
 			if newConf != nil {
+				// some parameters can't be modified online
 				newConf.Store = ch.conf.Store
+				newConf.Main.EncryptIPC = ch.conf.Main.EncryptIPC
 				ch.conf = newConf
 				err := ch.Reload()
 				if err != nil {

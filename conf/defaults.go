@@ -99,6 +99,7 @@ func SetMainDefaults(v *viper.Viper, prefixed bool) {
 	v.SetDefault(prefix+"max_input_message_size", 65536)
 	v.SetDefault(prefix+"input_queue_size", 1024)
 	v.SetDefault(prefix+"destination", "stderr")
+	v.SetDefault(prefix+"encrypt_ipc", true)
 }
 
 func SetAccountingDefaults(v *viper.Viper, prefixed bool) {

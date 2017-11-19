@@ -25,6 +25,9 @@ func All(funs ...func() error) (err error) {
 
 func ChainWrites(dest io.Writer, buffers ...[]byte) (err error) {
 	for _, b := range buffers {
+		if len(b) == 0 {
+			continue
+		}
 		_, err = dest.Write(b)
 		if err != nil {
 			return err
