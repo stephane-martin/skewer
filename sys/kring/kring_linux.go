@@ -98,10 +98,20 @@ func DeleteBoxSecret(session string) error {
 	return key.Unlink()
 }
 
+func DeleteSignaturePubKey(session string) error {
+	keyring, err := keyctl.SessionKeyring()
+	if err != nil {
+		return err
+	}
+	key, err := keyring.Search(fmt.Sprintf("skewer-sigpubkey-%s", session))
+	if err != nil {
+		return err
+	}
+	return key.Unlink()
+}
+
 func JoinSessionKeyRing() error {
-	a := make([]uintptr, 6)
-	a[0] = 1
-	_, _, errno := syscall.Syscall6(syscall_keyctl, a[0], a[1], a[2], a[3], a[4], a[5])
+	_, _, errno := syscall.Syscall6(syscall_keyctl, 1, 0, 0, 0, 0, 0)
 	if errno != 0 {
 		return errno
 	}

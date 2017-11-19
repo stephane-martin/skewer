@@ -176,10 +176,14 @@ func (ch *ServeChild) Cleanup() {
 	ch.cancelLogger()
 	ch.shutdown()
 	ch.globalCancel()
+	if ch.signPrivKey != nil && len(ch.sessionID) > 0 {
+		ch.signPrivKey.Destroy()
+		kring.DeleteSignaturePubKey(ch.sessionID)
+	}
 }
 
 func (ch *ServeChild) SetupConfiguration() error {
-	ch.confService = services.NewConfigurationService(HandlesMap["CONFIG_LOGGER"], ch.logger)
+	ch.confService = services.NewConfigurationService(ch.signPrivKey, HandlesMap["CONFIG_LOGGER"], ch.logger)
 	ch.confService.SetConfDir(configDirName)
 	ch.confService.SetConsulParams(ch.consulParams)
 	err := ch.confService.Start(ch.sessionID)

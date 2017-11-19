@@ -13,10 +13,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/awnumar/memguard"
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/consul"
 	"github.com/stephane-martin/skewer/sys/capabilities"
+	"github.com/stephane-martin/skewer/sys/kring"
 	"github.com/stephane-martin/skewer/sys/namespaces"
 	"github.com/stephane-martin/skewer/utils"
 )
@@ -38,19 +40,24 @@ type ConfigurationService struct {
 	stdinMu      *sync.Mutex
 	confdir      string
 	loggerHandle int
+	signKey      *memguard.LockedBuffer
 }
 
-func NewConfigurationService(childLoggerHandle int, l log15.Logger) *ConfigurationService {
-	c := &ConfigurationService{loggerHandle: childLoggerHandle, logger: l}
-	c.stdinMu = &sync.Mutex{}
-	return c
+func NewConfigurationService(signKey *memguard.LockedBuffer, childLoggerHandle int, l log15.Logger) *ConfigurationService {
+	c := ConfigurationService{
+		loggerHandle: childLoggerHandle,
+		logger:       l,
+		signKey:      signKey,
+		stdinMu:      &sync.Mutex{},
+	}
+	return &c
 }
 
 func (c *ConfigurationService) W(header []byte, message []byte) (err error) {
 	c.stdinMu.Lock()
-	// TODO: sign
 	if c.stdin != nil {
-		err = utils.W(c.stdin, header, message, nil)
+		err = utils.WSign(c.stdin, header, message, c.signKey)
+		//err = utils.W(c.stdin, header, message, nil)
 	} else {
 		err = fmt.Errorf("stdin is nil")
 	}
@@ -300,11 +307,15 @@ func LaunchConfProvider(sessionID string, logger log15.Logger) error {
 	if len(sessionID) == 0 {
 		return fmt.Errorf("Empty session ID")
 	}
+	sigpubkey, err := kring.GetSignaturePubkey(sessionID)
+	if err != nil {
+		return err
+	}
 	var confdir string
 	var params consul.ConnParams
 
 	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Split(utils.PluginSplit)
+	scanner.Split(utils.MakeSignSplit(sigpubkey))
 	var command string
 	var cancel context.CancelFunc
 

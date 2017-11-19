@@ -74,7 +74,7 @@ func NewSignaturePubkey(session string) (pubkey *memguard.LockedBuffer, privkey 
 	if err != nil {
 		return nil, nil, err
 	}
-	err = storeSecret("skewer-signpubkey", session, "sigpubkey", pubkey)
+	err = storeSecret("skewer-sigpubkey", session, "sigpubkey", pubkey)
 	if err != nil {
 		pubkey.Destroy()
 		privkey.Destroy()
@@ -84,7 +84,7 @@ func NewSignaturePubkey(session string) (pubkey *memguard.LockedBuffer, privkey 
 }
 
 func GetSignaturePubkey(session string) (pubkey *memguard.LockedBuffer, err error) {
-	pubkey, err = getSecret("skewer-signpubkey", session, "sigpubkey")
+	pubkey, err = getSecret("skewer-sigpubkey", session, "sigpubkey")
 	if err != nil {
 		return nil, err
 	}
@@ -119,6 +119,10 @@ func GetBoxSecret(session string) (secret *memguard.LockedBuffer, err error) {
 
 func DeleteBoxSecret(session string) error {
 	return keychain.DeleteGenericPasswordItem("skewer-secret", session)
+}
+
+func DeleteSignaturePubKey(session string) error {
+	return keychain.DeleteGenericPasswordItem("skewer-sigpubkey", session)
 }
 
 func JoinSessionKeyRing() error {
