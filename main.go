@@ -54,6 +54,7 @@ func getLoggerConn(handle int) (loggerConn *net.UnixConn) {
 func getLogger(ctx context.Context, name string, sessionID string, handle int) (log15.Logger, error) {
 	secret, err := kring.GetBoxSecret(sessionID)
 	if err != nil {
+		fmt.Fprintln(os.Stderr, "kring getboxsecret error", err)
 		return nil, err
 	}
 
@@ -528,7 +529,8 @@ func main() {
 		}
 
 		if err != nil {
-			cleanup("Could not create logger for plugin", err, logger, cancelLogger)
+			fmt.Fprintln(os.Stderr, "Could not create logger for plugin:", err)
+			os.Exit(-1)
 		}
 
 		err = scomp.SetupSeccomp(name)

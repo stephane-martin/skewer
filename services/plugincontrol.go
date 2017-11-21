@@ -230,6 +230,12 @@ func (s *PluginController) listenpipe() {
 	scanner.Split(utils.MakeDecryptSplit(s.secret))
 	scanner.Buffer(make([]byte, 0, 132000), 132000)
 
+	defer func() {
+		if s.secret != nil {
+			s.secret.Destroy()
+		}
+	}()
+
 	var err error
 	var message model.FullMessage
 
@@ -778,6 +784,9 @@ func (s *StorePlugin) Shutdown(killTimeOut time.Duration) {
 	s.pushqueue()                            // empty the queue, in case there are pending messages
 	s.pipe.Close()                           // signal the child that we are done sending messages
 	s.PluginController.Shutdown(killTimeOut) // shutdown the child
+	if s.secret != nil {
+		s.secret.Destroy()
+	}
 }
 
 // Stash stores the given message into the Store

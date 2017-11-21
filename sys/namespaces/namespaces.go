@@ -145,6 +145,8 @@ func SetJournalFs(targetExec string) error {
 	if err != nil {
 		return fmt.Errorf("TempDir error: %s", err)
 	}
+
+	// we bind-mount /dev on 'temp'
 	err = syscall.Mount("/dev", temp, "bind", syscall.MS_BIND|syscall.MS_REC, "")
 	if err != nil {
 		return fmt.Errorf("Error bind-mounting /dev: %s", err)
@@ -184,10 +186,20 @@ func SetJournalFs(targetExec string) error {
 			f.Close()
 			err = syscall.Mount(filepath.Join(temp, device), filepath.Join("/dev", device), "bind", syscall.MS_BIND, "")
 			if err != nil {
-				return fmt.Errorf("Error mounting device %s: %s", device, err)
+				return fmt.Errorf("Error bind-mounting device %s: %s", device, err)
 			}
 		}
 	}
+	err = os.Mkdir("/dev/shm", 0755)
+	if err == nil {
+		err = syscall.Mount(filepath.Join(temp, "shm"), "/dev/shm", "bind", syscall.MS_BIND|syscall.MS_REC, "")
+		if err != nil {
+			return fmt.Errorf("Error bind-mounting /dev/shm: %s", err)
+		}
+	} else {
+		return fmt.Errorf("Failed to create /dev/shm: %s", err)
+	}
+
 	err = syscall.Unmount(temp, syscall.MNT_DETACH)
 	if err != nil {
 		return fmt.Errorf("Error unmounting %s: %s", temp, err)
@@ -398,8 +410,19 @@ func MakeChroot(targetExec string) (string, error) {
 		}
 	}
 
+	// bind mount /dev/shm
+	target = filepath.Join(root, "newroot", "dev", "shm")
+	err = os.Mkdir(target, 0755)
+	if err == nil {
+		err = syscall.Mount("/dev/shm", target, "bind", syscall.MS_BIND|syscall.MS_NOSUID|syscall.MS_NOEXEC|syscall.MS_REC, "")
+		if err != nil {
+			return "", fmt.Errorf("Failed to bind-mount /dev/shm")
+		}
+	} else {
+		return "", fmt.Errorf("Failed to create /dev/shm")
+	}
+
 	// bind mount /dev/console if needed
-	os.Mkdir(filepath.Join(root, "newroot", "dev", "shm"), 0755)
 	ttyname := strings.TrimSpace(os.Getenv("SKEWER_TTYNAME"))
 	if len(ttyname) > 0 {
 		target := filepath.Join(root, "newroot", "dev", "console")

@@ -212,22 +212,22 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, sessionID string, dests
 	}
 	store.badger = kv
 
-	if len(sessionID) == 0 {
-		store.backend = NewBackend(kv, nil)
-	} else {
+	var storeSecret *memguard.LockedBuffer
+	if len(sessionID) > 0 {
 		sessionSecret, err := kring.GetBoxSecret(sessionID)
 		if err != nil {
 			return nil, err
 		}
-		storeSecret, err := cfg.GetSecretB(sessionSecret)
+		defer sessionSecret.Destroy()
+		storeSecret, err = cfg.GetSecretB(sessionSecret)
 		if err != nil {
 			return nil, err
 		}
-		store.backend = NewBackend(kv, storeSecret)
 		if storeSecret != nil {
 			store.logger.Info("The badger store is encrypted")
 		}
 	}
+	store.backend = NewBackend(kv, storeSecret)
 
 	store.syslogConfigsDB = db.NewPartition(kv, []byte("configs"))
 
@@ -362,6 +362,9 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, sessionID string, dests
 	go func() {
 		store.wg.Wait()
 		store.closeBadgers()
+		if storeSecret != nil {
+			storeSecret.Destroy()
+		}
 		close(store.closedChan)
 	}()
 

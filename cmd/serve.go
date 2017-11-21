@@ -100,7 +100,10 @@ func ExecuteChild() (err error) {
 	if err != nil {
 		return fmt.Errorf("Fatal error initializing Serve: %s", err)
 	}
-	defer ch.Cleanup()
+	defer func() {
+		ch.Cleanup()
+		secret.Destroy()
+	}()
 	err = ch.Serve()
 	if err != nil {
 		return fmt.Errorf("Fatal error executing Serve: %s", err)

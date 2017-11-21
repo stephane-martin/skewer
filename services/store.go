@@ -126,6 +126,11 @@ func (s *storeServiceImpl) doStart(test bool, mu *sync.Mutex) ([]model.ListenerI
 
 			scanner := bufio.NewScanner(s.pipe)
 			scanner.Split(utils.MakeDecryptSplit(s.secret))
+			defer func() {
+				if s.secret != nil {
+					s.secret.Destroy()
+				}
+			}()
 			var err error
 
 			for scanner.Scan() {

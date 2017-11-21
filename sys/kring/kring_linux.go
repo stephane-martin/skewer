@@ -3,6 +3,7 @@ package kring
 import (
 	"crypto/rand"
 	"fmt"
+	"os"
 	"syscall"
 
 	"github.com/awnumar/memguard"
@@ -14,10 +15,12 @@ import (
 func getSecret(session string, label string) (pubkey *memguard.LockedBuffer, err error) {
 	sem, err := semaphore.New(fmt.Sprintf("skewer-%s", session))
 	if err != nil {
+		fmt.Fprintln(os.Stderr, "new semaphore error", err)
 		return nil, err
 	}
 	err = sem.Lock()
 	if err != nil {
+		fmt.Fprintln(os.Stderr, "semaphore lock error", err)
 		return nil, err
 	}
 	defer func() {
@@ -97,10 +100,12 @@ func NewBoxSecret(session string) (secret *memguard.LockedBuffer, err error) {
 
 	sem, err := semaphore.New(fmt.Sprintf("skewer-%s", session))
 	if err != nil {
+		fmt.Fprintln(os.Stderr, "new semaphore error", err)
 		return nil, err
 	}
 	err = sem.Lock()
 	if err != nil {
+		fmt.Fprintln(os.Stderr, "semaphore lock error", err)
 		return nil, err
 	}
 	defer func() {
