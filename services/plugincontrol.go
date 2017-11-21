@@ -94,7 +94,6 @@ func NewPluginController(typ NetworkServiceType, sid string, signKey *memguard.L
 func (s *PluginController) W(header []byte, message []byte) (err error) {
 	s.stdinMu.Lock()
 	if s.stdin != nil {
-		// TODO: sign
 		err = utils.WSign(s.stdin, header, message, s.signKey)
 		//err = utils.W(s.stdin, header, message, nil)
 	} else {

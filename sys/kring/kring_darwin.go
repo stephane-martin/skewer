@@ -7,6 +7,7 @@ import (
 
 	"github.com/awnumar/memguard"
 	"github.com/keybase/go-keychain"
+	"github.com/stephane-martin/skewer/sys/semaphore"
 	"golang.org/x/crypto/ed25519"
 )
 
@@ -25,6 +26,18 @@ func storeSecret(service string, account string, label string, data *memguard.Lo
 		Label:               "skewer",
 		TrustedApplications: []string{exec},
 	})
+	sem, err := semaphore.New(fmt.Sprintf("skw%s", account))
+	if err != nil {
+		return err
+	}
+	err = sem.Lock()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		sem.Unlock()
+		sem.Close()
+	}()
 	return keychain.AddItem(item)
 }
 
@@ -36,6 +49,18 @@ func getItem(service string, account string, label string) (res []byte, err erro
 	query.SetLabel(label)
 	query.SetMatchLimit(keychain.MatchLimitOne)
 	query.SetReturnData(true)
+	sem, err := semaphore.New(fmt.Sprintf("skw%s", account))
+	if err != nil {
+		return nil, err
+	}
+	err = sem.Lock()
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		sem.Unlock()
+		sem.Close()
+	}()
 	results, err := keychain.QueryItem(query)
 	if err != nil {
 		return nil, err
@@ -118,10 +143,36 @@ func GetBoxSecret(session string) (secret *memguard.LockedBuffer, err error) {
 }
 
 func DeleteBoxSecret(session string) error {
+	sem, err := semaphore.New(fmt.Sprintf("skw%s", session))
+	if err != nil {
+		return err
+	}
+	err = sem.Lock()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		sem.Unlock()
+		sem.Close()
+	}()
+
 	return keychain.DeleteGenericPasswordItem("skewer-secret", session)
 }
 
 func DeleteSignaturePubKey(session string) error {
+	sem, err := semaphore.New(fmt.Sprintf("skw%s", session))
+	if err != nil {
+		return err
+	}
+	err = sem.Lock()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		sem.Unlock()
+		sem.Close()
+	}()
+
 	return keychain.DeleteGenericPasswordItem("skewer-sigpubkey", session)
 }
 

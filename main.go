@@ -413,7 +413,6 @@ func main() {
 
 	switch name {
 	case "skewer-conf":
-		sys.MlockAll()
 		dumpable.SetNonDumpable()
 		capabilities.NoNewPriv()
 		signal.Ignore(syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
@@ -499,8 +498,6 @@ func main() {
 	case "skewer-tcp", "skewer-udp", "skewer-relp", "skewer-journal", "skewer-store", "skewer-accounting":
 		if name == "skewer-store" {
 			runtime.GOMAXPROCS(128)
-		} else {
-			sys.MlockAll()
 		}
 		signal.Ignore(syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
 		dumpable.SetNonDumpable()

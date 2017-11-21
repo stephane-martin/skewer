@@ -7,10 +7,24 @@ import (
 
 	"github.com/awnumar/memguard"
 	"github.com/jsipprell/keyctl"
+	"github.com/stephane-martin/skewer/sys/semaphore"
 	"golang.org/x/crypto/ed25519"
 )
 
 func getSecret(session string, label string) (pubkey *memguard.LockedBuffer, err error) {
+	sem, err := semaphore.New(fmt.Sprintf("skewer-%s", session))
+	if err != nil {
+		return nil, err
+	}
+	err = sem.Lock()
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		sem.Unlock()
+		sem.Close()
+	}()
+
 	keyring, err := keyctl.SessionKeyring()
 	if err != nil {
 		return nil, err
@@ -39,6 +53,20 @@ func NewSignaturePubkey(session string) (pubkey *memguard.LockedBuffer, privkey 
 	if err != nil {
 		return nil, nil, err
 	}
+
+	sem, err := semaphore.New(fmt.Sprintf("skewer-%s", session))
+	if err != nil {
+		return nil, nil, err
+	}
+	err = sem.Lock()
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() {
+		sem.Unlock()
+		sem.Close()
+	}()
+
 	keyring, err := keyctl.SessionKeyring()
 	if err != nil {
 		return nil, nil, err
@@ -66,6 +94,20 @@ func NewBoxSecret(session string) (secret *memguard.LockedBuffer, err error) {
 	if err != nil {
 		return nil, err
 	}
+
+	sem, err := semaphore.New(fmt.Sprintf("skewer-%s", session))
+	if err != nil {
+		return nil, err
+	}
+	err = sem.Lock()
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		sem.Unlock()
+		sem.Close()
+	}()
+
 	keyring, err := keyctl.SessionKeyring()
 	if err != nil {
 		return nil, err
@@ -87,6 +129,19 @@ func GetBoxSecret(session string) (secret *memguard.LockedBuffer, err error) {
 }
 
 func DeleteBoxSecret(session string) error {
+	sem, err := semaphore.New(fmt.Sprintf("skewer-%s", session))
+	if err != nil {
+		return err
+	}
+	err = sem.Lock()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		sem.Unlock()
+		sem.Close()
+	}()
+
 	keyring, err := keyctl.SessionKeyring()
 	if err != nil {
 		return err
@@ -99,6 +154,19 @@ func DeleteBoxSecret(session string) error {
 }
 
 func DeleteSignaturePubKey(session string) error {
+	sem, err := semaphore.New(fmt.Sprintf("skewer-%s", session))
+	if err != nil {
+		return err
+	}
+	err = sem.Lock()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		sem.Unlock()
+		sem.Close()
+	}()
+
 	keyring, err := keyctl.SessionKeyring()
 	if err != nil {
 		return err
