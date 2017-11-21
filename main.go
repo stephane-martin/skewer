@@ -194,6 +194,7 @@ func execServeParent() error {
 	defer func() {
 		boxsecret.Destroy()
 		kring.DeleteBoxSecret(sessionID)
+		kring.DestroySemaphore(sessionID)
 	}()
 
 	if !cmd.DumpableFlag {

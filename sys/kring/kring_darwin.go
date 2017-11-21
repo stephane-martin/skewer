@@ -179,3 +179,7 @@ func DeleteSignaturePubKey(session string) error {
 func JoinSessionKeyRing() error {
 	return nil
 }
+
+func DestroySemaphore(session string) {
+	semaphore.Destroy(fmt.Sprintf("skw%s", session))
+}

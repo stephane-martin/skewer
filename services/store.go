@@ -143,7 +143,7 @@ func (s *storeServiceImpl) doStart(test bool, mu *sync.Mutex) ([]model.ListenerI
 			err = scanner.Err()
 			if err == io.EOF || err == io.ErrClosedPipe || err == io.ErrUnexpectedEOF {
 				s.logger.Debug("Stopped to read the ingestion store pipe")
-			} else {
+			} else if err != nil {
 				s.logger.Warn("Unexpected error decoding message from the Store pipe", "error", err)
 			}
 		}()

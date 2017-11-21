@@ -185,3 +185,7 @@ func JoinSessionKeyRing() error {
 	}
 	return nil
 }
+
+func DestroySemaphore(session string) {
+	semaphore.Destroy(fmt.Sprintf("skewer-%s", session))
+}
