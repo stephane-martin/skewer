@@ -51,19 +51,19 @@ func GetSignaturePubkey(session string) (pubkey *memguard.LockedBuffer, err erro
 	return getSecret(session, "sigpubkey")
 }
 
-func NewSignaturePubkey(session string) (pubkey *memguard.LockedBuffer, privkey *memguard.LockedBuffer, err error) {
+func NewSignaturePubkey(session string) (privkey *memguard.LockedBuffer, err error) {
 	pub, priv, err := ed25519.GenerateKey(nil)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	sem, err := semaphore.New(fmt.Sprintf("skewer-%s", session))
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	err = sem.Lock()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	defer func() {
 		sem.Unlock()
@@ -72,23 +72,23 @@ func NewSignaturePubkey(session string) (pubkey *memguard.LockedBuffer, privkey 
 
 	keyring, err := keyctl.SessionKeyring()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	pubkey, err = memguard.NewImmutableFromBytes(pub)
+	pubkey, err := memguard.NewImmutableFromBytes(pub)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	privkey, err = memguard.NewImmutableFromBytes(priv)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	_, err = keyring.Add(fmt.Sprintf("skewer-sigpubkey-%s", session), pubkey.Buffer())
+	pubkey.Destroy()
 	if err != nil {
-		pubkey.Destroy()
 		privkey.Destroy()
-		return nil, nil, err
+		return nil, err
 	}
-	return pubkey, privkey, nil
+	return privkey, nil
 }
 
 func NewBoxSecret(session string) (secret *memguard.LockedBuffer, err error) {
