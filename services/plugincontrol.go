@@ -226,6 +226,7 @@ func (s *PluginController) listenpipe() {
 	default:
 		return
 	}
+	name := ReverseNetworkServiceMap[s.typ]
 	scanner := bufio.NewScanner(s.pipe)
 	scanner.Split(utils.MakeDecryptSplit(s.secret))
 	scanner.Buffer(make([]byte, 0, 132000), 132000)
@@ -246,7 +247,7 @@ func (s *PluginController) listenpipe() {
 		if err == nil {
 			s.stasher.Stash(message)
 		} else {
-			s.logger.Error("Unexpected error decrypting message from the plugin pipe", "error", err)
+			s.logger.Error("Unexpected error decrypting message from the plugin pipe", "type", name, "error", err)
 			return
 		}
 
@@ -255,7 +256,7 @@ func (s *PluginController) listenpipe() {
 	if err == io.EOF || err == io.ErrClosedPipe || err == io.ErrUnexpectedEOF {
 		s.logger.Debug("listenpipe stops", "type", s.typ)
 	} else if err != nil {
-		s.logger.Error("Unexpected error when listening to the plugin pipe", "error", err)
+		s.logger.Error("Unexpected error when listening to the plugin pipe", "type", name, "error", err)
 	}
 }
 
