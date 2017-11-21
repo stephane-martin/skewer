@@ -125,7 +125,7 @@ func (s *StoreConfig) GetSecretB(m *memguard.LockedBuffer) (secretb *memguard.Lo
 	if locked == nil {
 		return nil, nil
 	}
-	//defer locked.Destroy()
+	defer locked.Destroy()
 
 	var n int = base64.URLEncoding.DecodedLen(len(locked.Buffer()))
 	if n < 32 {

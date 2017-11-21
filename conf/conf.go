@@ -780,7 +780,7 @@ func (c *BaseConfig) Complete(sessionID string) (err error) {
 		if err != nil {
 			return ConfigurationCheckError{ErrString: "Failed to retrieve the current session encryption secret", Err: err}
 		}
-		//defer m.Destroy()
+		defer m.Destroy()
 		err = c.Store.EncryptSecret(m)
 		if err != nil {
 			return ConfigurationCheckError{ErrString: "Failed to encrypt the Store secret", Err: err}

@@ -21,26 +21,22 @@ import (
 	"unsafe"
 )
 
-type Semaphore struct {
-	sem  *C.sem_t
-	name string
-}
+type Semaphore C.sem_t
 
 func New(name string) (s *Semaphore, err error) {
 	if !strings.HasPrefix(name, "/") {
 		name = "/" + name
 	}
-	s = &Semaphore{name: name}
-	cName := C.CString(s.name)
+	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
-	s.sem, err = C.my_sem_open(cName, C.O_CREAT, C.mode_t(0600), C.uint(1))
-	if s.sem == C.my_sem_failed() {
+	semptr, err := C.my_sem_open(cName, C.O_CREAT, C.mode_t(0600), C.uint(1))
+	if semptr == C.my_sem_failed() {
 		if err != nil {
 			return nil, err
 		}
 		return nil, fmt.Errorf("sem_open returned SEM_FAILED")
 	}
-	return s, nil
+	return (*Semaphore)(semptr), nil
 }
 
 func Destroy(name string) (err error) {
@@ -59,7 +55,7 @@ func Destroy(name string) (err error) {
 
 func (s *Semaphore) Lock() (err error) {
 	var ret C.int
-	ret, err = C.sem_wait(s.sem)
+	ret, err = C.sem_wait((*C.sem_t)(s))
 	if ret != 0 {
 		return err
 	}
@@ -68,7 +64,7 @@ func (s *Semaphore) Lock() (err error) {
 
 func (s *Semaphore) TryLock() (err error) {
 	var ret C.int
-	ret, err = C.sem_trywait(s.sem)
+	ret, err = C.sem_trywait((*C.sem_t)(s))
 	if ret != 0 {
 		return err
 	}
@@ -77,7 +73,7 @@ func (s *Semaphore) TryLock() (err error) {
 
 func (s *Semaphore) Unlock() (err error) {
 	var ret C.int
-	ret, err = C.sem_post(s.sem)
+	ret, err = C.sem_post((*C.sem_t)(s))
 	if ret != 0 {
 		return err
 	}
@@ -86,7 +82,7 @@ func (s *Semaphore) Unlock() (err error) {
 
 func (s *Semaphore) Close() (err error) {
 	var ret C.int
-	ret, err = C.sem_close(s.sem)
+	ret, err = C.sem_close((*C.sem_t)(s))
 	if ret != 0 {
 		return err
 	}

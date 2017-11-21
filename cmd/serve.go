@@ -102,7 +102,7 @@ func ExecuteChild() (err error) {
 	}
 	defer func() {
 		ch.Cleanup()
-		//secret.Destroy()
+		secret.Destroy()
 	}()
 	err = ch.Serve()
 	if err != nil {
@@ -180,7 +180,7 @@ func (ch *ServeChild) Cleanup() {
 	ch.shutdown()
 	ch.globalCancel()
 	if ch.signPrivKey != nil && len(ch.sessionID) > 0 {
-		//ch.signPrivKey.Destroy()
+		ch.signPrivKey.Destroy()
 		kring.DeleteSignaturePubKey(ch.sessionID)
 	}
 }
@@ -247,11 +247,10 @@ func (ch *ServeChild) SetupStore() error {
 
 func (ch *ServeChild) SetupSignKey() error {
 	ch.logger.Debug("Generating signature keys")
-	_, privkey, err := kring.NewSignaturePubkey(ch.sessionID)
+	privkey, err := kring.NewSignaturePubkey(ch.sessionID)
 	if err != nil {
 		return fmt.Errorf("Error generating signature keys: %s", err)
 	}
-	//pubkey.Destroy()
 	ch.signPrivKey = privkey
 	return nil
 }

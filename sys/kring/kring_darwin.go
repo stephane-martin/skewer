@@ -86,26 +86,26 @@ func getSecret(service string, account string, label string) (secret *memguard.L
 	return secret, nil
 }
 
-func NewSignaturePubkey(session string) (pubkey *memguard.LockedBuffer, privkey *memguard.LockedBuffer, err error) {
+func NewSignaturePubkey(session string) (privkey *memguard.LockedBuffer, err error) {
 	pub, priv, err := ed25519.GenerateKey(nil)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	pubkey, err = memguard.NewImmutableFromBytes(pub)
+	pubkey, err := memguard.NewImmutableFromBytes(pub)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	privkey, err = memguard.NewImmutableFromBytes(priv)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	err = storeSecret("skewer-sigpubkey", session, "sigpubkey", pubkey)
+	pubkey.Destroy()
 	if err != nil {
-		pubkey.Destroy()
 		privkey.Destroy()
-		return nil, nil, err
+		return nil, err
 	}
-	return pubkey, privkey, nil
+	return privkey, nil
 }
 
 func GetSignaturePubkey(session string) (pubkey *memguard.LockedBuffer, err error) {

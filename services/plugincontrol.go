@@ -233,7 +233,7 @@ func (s *PluginController) listenpipe() {
 
 	defer func() {
 		if s.secret != nil {
-			//s.secret.Destroy()
+			s.secret.Destroy()
 		}
 	}()
 
@@ -786,7 +786,7 @@ func (s *StorePlugin) Shutdown(killTimeOut time.Duration) {
 	s.pipe.Close()                           // signal the child that we are done sending messages
 	s.PluginController.Shutdown(killTimeOut) // shutdown the child
 	if s.secret != nil {
-		//s.secret.Destroy()
+		s.secret.Destroy()
 	}
 }
 

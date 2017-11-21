@@ -218,7 +218,7 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, sessionID string, dests
 		if err != nil {
 			return nil, err
 		}
-		//defer sessionSecret.Destroy()
+		defer sessionSecret.Destroy()
 		storeSecret, err = cfg.GetSecretB(sessionSecret)
 		if err != nil {
 			return nil, err
@@ -363,7 +363,7 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, sessionID string, dests
 		store.wg.Wait()
 		store.closeBadgers()
 		if storeSecret != nil {
-			//storeSecret.Destroy()
+			storeSecret.Destroy()
 		}
 		close(store.closedChan)
 	}()
