@@ -62,7 +62,7 @@ func (s *Reporter) pushqueue() {
 
 	defer func() {
 		if s.secret != nil {
-			s.secret.Destroy()
+			//s.secret.Destroy()
 		}
 	}()
 

@@ -128,7 +128,7 @@ func (s *storeServiceImpl) doStart(test bool, mu *sync.Mutex) ([]model.ListenerI
 			scanner.Split(utils.MakeDecryptSplit(s.secret))
 			defer func() {
 				if s.secret != nil {
-					s.secret.Destroy()
+					//s.secret.Destroy()
 				}
 			}()
 			var err error

@@ -193,7 +193,7 @@ func execServeParent() error {
 	}
 
 	defer func() {
-		boxsecret.Destroy()
+		//boxsecret.Destroy()
 		kring.DeleteBoxSecret(sessionID)
 		kring.DestroySemaphore(sessionID)
 	}()
