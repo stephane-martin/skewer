@@ -14,6 +14,7 @@ import (
 
 	"github.com/awnumar/memguard"
 	"github.com/inconshreveable/log15"
+	"github.com/oklog/ulid"
 	"github.com/spf13/cobra"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/consul"
@@ -91,11 +92,27 @@ func ExecuteChild() (err error) {
 	if len(sessionID) == 0 {
 		return fmt.Errorf("Empty session ID")
 	}
-	secret, err := kring.GetBoxSecret(sessionID)
+	wOpenBsdSecretPipe := os.NewFile(15, "openbsdpipe")
+	var bsdSecret *memguard.LockedBuffer
+	buf := make([]byte, 32)
+	_, err = wOpenBsdSecretPipe.Read(buf)
 	if err != nil {
 		return err
 	}
-	ch := NewServeChild(sessionID, secret)
+	bsdSecret, err = memguard.NewImmutableFromBytes(buf)
+	if err != nil {
+		return err
+	}
+	creds := kring.RingCreds{Secret: bsdSecret, SessionID: ulid.MustParse(sessionID)}
+	ring := kring.GetRing(creds)
+	secret, err := ring.GetBoxSecret()
+	if err != nil {
+		return err
+	}
+	ch, err := NewServeChild(ring)
+	if err != nil {
+		return fmt.Errorf("Fatal error initializing Child: %s", err)
+	}
 	err = ch.Init()
 	if err != nil {
 		return fmt.Errorf("Fatal error initializing Serve: %s", err)
@@ -127,24 +144,29 @@ type ServeChild struct {
 	store          *services.StorePlugin
 	controllers    map[services.NetworkServiceType]*services.PluginController
 	metricsServer  *metrics.MetricsServer
-	sessionID      string
 	signPrivKey    *memguard.LockedBuffer
+	ring           kring.Ring
 }
 
-func NewServeChild(sessionID string, secret *memguard.LockedBuffer) *ServeChild {
-	c := ServeChild{sessionID: sessionID}
-	c.globalCtx, c.globalCancel = context.WithCancel(context.Background())
-	c.shutdownCtx, c.shutdown = context.WithCancel(c.globalCtx)
+func NewServeChild(ring kring.Ring) (*ServeChild, error) {
+	secret, err := ring.GetBoxSecret()
+	if err != nil {
+		return nil, err
+	}
 	conn, err := net.FileConn(os.NewFile(uintptr(HandlesMap["CHILD_LOGGER"]), "logger"))
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "OUPS", err)
+		return nil, err
 	}
+	c := ServeChild{ring: ring}
+	c.globalCtx, c.globalCancel = context.WithCancel(context.Background())
+	c.shutdownCtx, c.shutdown = context.WithCancel(c.globalCtx)
+
 	loggerConn := conn.(*net.UnixConn)
 	loggerConn.SetReadBuffer(65536)
 	loggerConn.SetWriteBuffer(65536)
 	c.loggerCtx, c.cancelLogger = context.WithCancel(context.Background())
 	c.logger = logging.NewRemoteLogger(c.loggerCtx, loggerConn, secret).New("proc", "child")
-	return &c
+	return &c, nil
 }
 
 func (ch *ServeChild) Init() error {
@@ -179,17 +201,17 @@ func (ch *ServeChild) Cleanup() {
 	ch.cancelLogger()
 	ch.shutdown()
 	ch.globalCancel()
-	if ch.signPrivKey != nil && len(ch.sessionID) > 0 {
+	if ch.signPrivKey != nil {
 		ch.signPrivKey.Destroy()
-		kring.DeleteSignaturePubKey(ch.sessionID)
 	}
+	ch.ring.Destroy()
 }
 
 func (ch *ServeChild) SetupConfiguration() error {
 	ch.confService = services.NewConfigurationService(ch.signPrivKey, HandlesMap["CONFIG_LOGGER"], ch.logger)
 	ch.confService.SetConfDir(configDirName)
 	ch.confService.SetConsulParams(ch.consulParams)
-	err := ch.confService.Start(ch.sessionID)
+	err := ch.confService.Start(ch.ring)
 	if err != nil {
 		return fmt.Errorf("Error starting the configuration service: %s", err)
 	}
@@ -227,7 +249,7 @@ func (ch *ServeChild) SetupConsulRegistry() error {
 
 func (ch *ServeChild) SetupStore() error {
 	// setup the Store
-	ch.store = services.NewStorePlugin(ch.sessionID, ch.signPrivKey, HandlesMap["STORE_LOGGER"], ch.logger)
+	ch.store = services.NewStorePlugin(ch.ring, ch.signPrivKey, HandlesMap["STORE_LOGGER"], ch.logger)
 	ch.store.SetConf(*ch.conf)
 	err := ch.store.Create(testFlag, DumpableFlag, storeDirname, "", "")
 	if err != nil {
@@ -247,7 +269,7 @@ func (ch *ServeChild) SetupStore() error {
 
 func (ch *ServeChild) SetupSignKey() error {
 	ch.logger.Debug("Generating signature keys")
-	privkey, err := kring.NewSignaturePubkey(ch.sessionID)
+	privkey, err := ch.ring.NewSignaturePubkey()
 	if err != nil {
 		return fmt.Errorf("Error generating signature keys: %s", err)
 	}
@@ -275,7 +297,7 @@ func (ch *ServeChild) SetupController(typ services.NetworkServiceType) {
 	}
 	ch.controllers[typ] = services.NewPluginController(
 		typ,
-		ch.sessionID,
+		ch.ring,
 		ch.signPrivKey,
 		ch.store,
 		ch.consulRegistry,

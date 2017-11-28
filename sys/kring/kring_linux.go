@@ -3,17 +3,62 @@ package kring
 import (
 	"crypto/rand"
 	"fmt"
+	"io"
 	"os"
 	"syscall"
 
 	"github.com/awnumar/memguard"
 	"github.com/jsipprell/keyctl"
+	"github.com/oklog/ulid"
 	"github.com/stephane-martin/skewer/sys/semaphore"
 	"golang.org/x/crypto/ed25519"
 )
 
-func getSecret(session string, label string) (pubkey *memguard.LockedBuffer, err error) {
-	sem, err := semaphore.New(fmt.Sprintf("skewer-%s", session))
+func joinSessionKeyRing() error {
+	_, _, errno := syscall.Syscall6(syscall_keyctl, 1, 0, 0, 0, 0, 0)
+	if errno != 0 {
+		return errno
+	}
+	return nil
+}
+
+type ring struct {
+	creds RingCreds
+}
+
+func GetRing(creds RingCreds) Ring {
+	return &ring{creds: creds}
+}
+
+func (r *ring) Destroy() {
+	r.creds.Secret.Destroy()
+	destroySem(r.creds.SessionID)
+}
+
+func NewRing() (r Ring, err error) {
+	err = joinSessionKeyRing()
+	if err != nil {
+		return nil, err
+	}
+	creds, err := NewCreds()
+	if err != nil {
+		return nil, err
+	}
+	return GetRing(creds), nil
+}
+
+func (r *ring) WriteRingPass(w io.Writer) (err error) {
+	_, err = w.Write(r.creds.Secret.Buffer())
+	return err
+}
+
+func (r *ring) GetSessionID() ulid.ULID {
+	return r.creds.SessionID
+}
+
+func getSecret(session ulid.ULID, label string) (pubkey *memguard.LockedBuffer, err error) {
+	sessionStr := session.String()
+	sem, err := semaphore.New(fmt.Sprintf("skw%s", sessionStr))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "new semaphore error", err)
 		return nil, err
@@ -32,7 +77,7 @@ func getSecret(session string, label string) (pubkey *memguard.LockedBuffer, err
 	if err != nil {
 		return nil, err
 	}
-	key, err := keyring.Search(fmt.Sprintf("skewer-%s-%s", label, session))
+	key, err := keyring.Search(fmt.Sprintf("skewer-%s-%s", label, sessionStr))
 	if err != nil {
 		return nil, err
 	}
@@ -47,17 +92,18 @@ func getSecret(session string, label string) (pubkey *memguard.LockedBuffer, err
 	return secret, nil
 }
 
-func GetSignaturePubkey(session string) (pubkey *memguard.LockedBuffer, err error) {
-	return getSecret(session, "sigpubkey")
+func (r *ring) GetSignaturePubkey() (pubkey *memguard.LockedBuffer, err error) {
+	return getSecret(r.creds.SessionID, "sigpubkey")
 }
 
-func NewSignaturePubkey(session string) (privkey *memguard.LockedBuffer, err error) {
+func (r *ring) NewSignaturePubkey() (privkey *memguard.LockedBuffer, err error) {
+	sessionStr := r.creds.SessionID.String()
 	pub, priv, err := ed25519.GenerateKey(nil)
 	if err != nil {
 		return nil, err
 	}
 
-	sem, err := semaphore.New(fmt.Sprintf("skewer-%s", session))
+	sem, err := semaphore.New(fmt.Sprintf("skw%s", sessionStr))
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +128,7 @@ func NewSignaturePubkey(session string) (privkey *memguard.LockedBuffer, err err
 	if err != nil {
 		return nil, err
 	}
-	_, err = keyring.Add(fmt.Sprintf("skewer-sigpubkey-%s", session), pubkey.Buffer())
+	_, err = keyring.Add(fmt.Sprintf("skewer-sigpubkey-%s", sessionStr), pubkey.Buffer())
 	pubkey.Destroy()
 	if err != nil {
 		privkey.Destroy()
@@ -91,21 +137,20 @@ func NewSignaturePubkey(session string) (privkey *memguard.LockedBuffer, err err
 	return privkey, nil
 }
 
-func NewBoxSecret(session string) (secret *memguard.LockedBuffer, err error) {
+func (r *ring) NewBoxSecret() (secret *memguard.LockedBuffer, err error) {
+	sessionStr := r.creds.SessionID.String()
 	secretKey := make([]byte, 32)
 	_, err = rand.Read(secretKey)
 	if err != nil {
 		return nil, err
 	}
 
-	sem, err := semaphore.New(fmt.Sprintf("skewer-%s", session))
+	sem, err := semaphore.New(fmt.Sprintf("skw%s", sessionStr))
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "new semaphore error", err)
 		return nil, err
 	}
 	err = sem.Lock()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "semaphore lock error", err)
 		return nil, err
 	}
 	defer func() {
@@ -121,7 +166,7 @@ func NewBoxSecret(session string) (secret *memguard.LockedBuffer, err error) {
 	if err != nil {
 		return nil, err
 	}
-	_, err = keyring.Add(fmt.Sprintf("skewer-boxsecret-%s", session), secret.Buffer())
+	_, err = keyring.Add(fmt.Sprintf("skewer-boxsecret-%s", sessionStr), secret.Buffer())
 	if err != nil {
 		secret.Destroy()
 		return nil, err
@@ -129,12 +174,13 @@ func NewBoxSecret(session string) (secret *memguard.LockedBuffer, err error) {
 	return secret, nil
 }
 
-func GetBoxSecret(session string) (secret *memguard.LockedBuffer, err error) {
-	return getSecret(session, "boxsecret")
+func (r *ring) GetBoxSecret() (secret *memguard.LockedBuffer, err error) {
+	return getSecret(r.creds.SessionID, "boxsecret")
 }
 
-func DeleteBoxSecret(session string) error {
-	sem, err := semaphore.New(fmt.Sprintf("skewer-%s", session))
+func (r *ring) DeleteBoxSecret() error {
+	sessionStr = r.creds.SessionID.String()
+	sem, err := semaphore.New(fmt.Sprintf("skw%s", sessionStr))
 	if err != nil {
 		return err
 	}
@@ -151,15 +197,16 @@ func DeleteBoxSecret(session string) error {
 	if err != nil {
 		return err
 	}
-	key, err := keyring.Search(fmt.Sprintf("skewer-boxsecret-%s", session))
+	key, err := keyring.Search(fmt.Sprintf("skewer-boxsecret-%s", sessionStr))
 	if err != nil {
 		return err
 	}
 	return key.Unlink()
 }
 
-func DeleteSignaturePubKey(session string) error {
-	sem, err := semaphore.New(fmt.Sprintf("skewer-%s", session))
+func (r *ring) DeleteSignaturePubKey() error {
+	sessionStr = r.creds.SessionID.String()
+	sem, err := semaphore.New(fmt.Sprintf("skw%s", sessionStr))
 	if err != nil {
 		return err
 	}
@@ -176,21 +223,9 @@ func DeleteSignaturePubKey(session string) error {
 	if err != nil {
 		return err
 	}
-	key, err := keyring.Search(fmt.Sprintf("skewer-sigpubkey-%s", session))
+	key, err := keyring.Search(fmt.Sprintf("skewer-sigpubkey-%s", sessionStr))
 	if err != nil {
 		return err
 	}
 	return key.Unlink()
-}
-
-func JoinSessionKeyRing() error {
-	_, _, errno := syscall.Syscall6(syscall_keyctl, 1, 0, 0, 0, 0, 0)
-	if errno != 0 {
-		return errno
-	}
-	return nil
-}
-
-func DestroySemaphore(session string) {
-	semaphore.Destroy(fmt.Sprintf("skewer-%s", session))
 }

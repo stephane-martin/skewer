@@ -16,6 +16,7 @@ import (
 	"github.com/awnumar/memguard"
 	"github.com/inconshreveable/log15"
 	"github.com/kardianos/osext"
+	"github.com/oklog/ulid"
 	"github.com/spf13/pflag"
 	"github.com/stephane-martin/skewer/cmd"
 	"github.com/stephane-martin/skewer/services"
@@ -26,7 +27,6 @@ import (
 	"github.com/stephane-martin/skewer/sys/kring"
 	"github.com/stephane-martin/skewer/sys/namespaces"
 	"github.com/stephane-martin/skewer/sys/scomp"
-	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/logging"
 )
 
@@ -51,14 +51,14 @@ func getLoggerConn(handle int) (loggerConn *net.UnixConn) {
 	return conn
 }
 
-func getLogger(ctx context.Context, name string, sessionID string, handle int) (log15.Logger, error) {
-	secret, err := kring.GetBoxSecret(sessionID)
+func getLogger(ctx context.Context, name string, ring kring.Ring, handle uintptr) (log15.Logger, error) {
+	secret, err := ring.GetBoxSecret()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "kring getboxsecret error", err)
 		return nil, err
 	}
 
-	conn, err := net.FileConn(os.NewFile(uintptr(handle), "logger"))
+	conn, err := net.FileConn(os.NewFile(handle, "logger"))
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +169,7 @@ func makeErr(msg string, err error) error {
 	return fmt.Errorf("%s: %s", msg, err)
 }
 
-func execServeParent() error {
+func execServeParent() (err error) {
 
 	/*
 		err := capabilities.NoNewPriv()
@@ -182,20 +182,20 @@ func execServeParent() error {
 	rootlogger := logging.SetLogging(nil, cmd.LoglevelFlag, cmd.LogjsonFlag, cmd.SyslogFlag, cmd.LogfilenameFlag)
 	logger := rootlogger.New("proc", "parent")
 
-	sessionID := utils.NewUid().String()
-	err := kring.JoinSessionKeyRing()
+	ring, err := kring.NewRing()
 	if err != nil {
-		return makeErr("Can't join the linux keyring", err)
+		return makeErr("Can't make a new keyring", err)
 	}
-	boxsecret, err := kring.NewBoxSecret(sessionID)
+
+	boxsecret, err := ring.NewBoxSecret()
 	if err != nil {
 		return makeErr("Can't create a new box secret", err)
 	}
 
 	defer func() {
 		boxsecret.Destroy()
-		kring.DeleteBoxSecret(sessionID)
-		kring.DestroySemaphore(sessionID)
+		ring.DeleteBoxSecret()
+		ring.Destroy()
 	}()
 
 	if !cmd.DumpableFlag {
@@ -260,6 +260,11 @@ func execServeParent() error {
 			extraFiles = append(extraFiles, os.NewFile(uintptr(loggerSockets[h].child), h))
 		}
 	}
+	rOpenBsdSecretPipe, wOpenBsdSecretPipe, err := os.Pipe()
+	if err != nil {
+		return makeErr("Error creating OpenBSD-secret pipe", err)
+	}
+	extraFiles = append(extraFiles, rOpenBsdSecretPipe)
 
 	childProcess := exec.Cmd{
 		Args:       append([]string{"skewer-child"}, os.Args[1:]...),
@@ -268,7 +273,7 @@ func execServeParent() error {
 		Stdout:     os.Stdout,
 		Stderr:     os.Stderr,
 		ExtraFiles: extraFiles,
-		Env:        []string{"PATH=/bin:/usr/bin", fmt.Sprintf("SKEWER_SESSION=%s", sessionID)},
+		Env:        []string{"PATH=/bin:/usr/bin", fmt.Sprintf("SKEWER_SESSION=%s", ring.GetSessionID().String())},
 	}
 	if os.Getuid() != numuid {
 		// execute the child with the given uid, gid
@@ -279,6 +284,7 @@ func execServeParent() error {
 		return makeErr("Error starting child", err)
 	}
 
+	rOpenBsdSecretPipe.Close()
 	for _, h := range cmd.Handles {
 		if strings.HasSuffix(h, "_BINDER") {
 			syscall.Close(binderSockets[h].child)
@@ -286,6 +292,8 @@ func execServeParent() error {
 			syscall.Close(loggerSockets[h].child)
 		}
 	}
+	ring.WriteRingPass(wOpenBsdSecretPipe)
+	wOpenBsdSecretPipe.Close()
 
 	sig_chan := make(chan os.Signal, 10)
 	once := sync.Once{}
@@ -411,15 +419,32 @@ func main() {
 		net.Dial("udp4", "127.0.0.1:80")
 	}
 
-	sessionID := os.Getenv("SKEWER_SESSION")
+	sid := os.Getenv("SKEWER_SESSION")
 
 	switch name {
 	case "skewer-conf":
 		dumpable.SetNonDumpable()
 		capabilities.NoNewPriv()
 		signal.Ignore(syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
+		var loggerHandle uintptr = 3
+		var bsdSecret *memguard.LockedBuffer
+		rPipe := os.NewFile(4, "bsdpipe")
+		buf := make([]byte, 32)
+		_, err := rPipe.Read(buf)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Could not read BSD secret:", err)
+			os.Exit(-1)
+		}
+		bsdSecret, err = memguard.NewImmutableFromBytes(buf)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Could not create BSD secret:", err)
+			os.Exit(-1)
+		}
+		rPipe.Close()
+		sessionID := ulid.MustParse(sid)
+		ring := kring.GetRing(kring.RingCreds{Secret: bsdSecret, SessionID: sessionID})
 
-		logger, err := getLogger(loggerCtx, name, sessionID, 3)
+		logger, err := getLogger(loggerCtx, name, ring, loggerHandle)
 		if err != nil {
 			cleanup("Could not create a logger for the configuration service", err, logger, cancelLogger)
 		}
@@ -431,7 +456,7 @@ func main() {
 		if err != nil {
 			cleanup("Pledge setup error", err, logger, cancelLogger)
 		}
-		err = services.LaunchConfProvider(sessionID, logger)
+		err = services.LaunchConfProvider(ring, logger)
 		if err != nil {
 			cleanup("ConfigurationProvider encountered a fatal error", err, logger, cancelLogger)
 		}
@@ -508,29 +533,58 @@ func main() {
 		var binderClient *binder.BinderClient
 		var pipe *os.File
 		var err error
+		var handle uintptr = 3
+		var binderHandle uintptr
+		var loggerHandle uintptr
+		var messagePipeHandle uintptr
+		var bsdSecretPipeHandle uintptr
+		var bsdSecret *memguard.LockedBuffer
 
 		if os.Getenv("SKEWER_HAS_BINDER") == "TRUE" {
-			if os.Getenv("SKEWER_HAS_LOGGER") == "TRUE" {
-				logger, err = getLogger(loggerCtx, name, sessionID, 4)
-				if os.Getenv("SKEWER_HAS_PIPE") == "TRUE" {
-					pipe = os.NewFile(5, "pipe")
-				}
-			} else if os.Getenv("SKEWER_HAS_PIPE") == "TRUE" {
-				pipe = os.NewFile(4, "pipe")
-			}
-			binderClient, _ = binder.NewBinderClient(os.NewFile(3, "binder"), logger)
-		} else if os.Getenv("SKEWER_HAS_LOGGER") == "TRUE" {
-			logger, err = getLogger(loggerCtx, name, sessionID, 3)
-			if os.Getenv("SKEWER_HAS_PIPE") == "TRUE" {
-				pipe = os.NewFile(4, "pipe")
-			}
-		} else if os.Getenv("SKEWER_HAS_PIPE") == "TRUE" {
-			pipe = os.NewFile(3, "pipe")
+			binderHandle = handle
+			handle++
 		}
 
+		if os.Getenv("SKEWER_HAS_LOGGER") == "TRUE" {
+			loggerHandle = handle
+			handle++
+		}
+		if os.Getenv("SKEWER_HAS_PIPE") == "TRUE" {
+			messagePipeHandle = handle
+			handle++
+		}
+		bsdSecretPipeHandle = handle
+		rPipe := os.NewFile(bsdSecretPipeHandle, "bsdpipe")
+		buf := make([]byte, 32)
+		_, err = rPipe.Read(buf)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Could not create logger for plugin:", err)
+			fmt.Fprintln(os.Stderr, "Could not read BSD secret:", err)
 			os.Exit(-1)
+		}
+		bsdSecret, err = memguard.NewImmutableFromBytes(buf)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Could not create BSD secret:", err)
+			os.Exit(-1)
+		}
+		rPipe.Close()
+		sessionID := ulid.MustParse(sid)
+		ring := kring.GetRing(kring.RingCreds{Secret: bsdSecret, SessionID: sessionID})
+		if loggerHandle > 0 {
+			logger, err = getLogger(loggerCtx, name, ring, loggerHandle)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "Could not create logger for plugin:", err)
+				os.Exit(-1)
+			}
+		}
+		if binderHandle > 0 {
+			binderClient, _ = binder.NewBinderClient(os.NewFile(binderHandle, "binder"), logger)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "Could not create binder for plugin:", err)
+				os.Exit(-1)
+			}
+		}
+		if messagePipeHandle > 0 {
+			pipe = os.NewFile(messagePipeHandle, "pipe")
 		}
 
 		err = scomp.SetupSeccomp(name)
@@ -541,7 +595,7 @@ func main() {
 		if err != nil {
 			cleanup("Pledge setup error", err, logger, cancelLogger)
 		}
-		err = services.Launch(services.NetworkServiceMap[name], os.Getenv("SKEWER_TEST") == "TRUE", sessionID, binderClient, logger, pipe)
+		err = services.Launch(services.NetworkServiceMap[name], os.Getenv("SKEWER_TEST") == "TRUE", ring, binderClient, logger, pipe)
 		if err != nil {
 			cleanup("Plugin encountered a fatal error", err, logger, cancelLogger)
 		}

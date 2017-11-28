@@ -3,12 +3,14 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/inconshreveable/log15"
 	"github.com/spf13/cobra"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/consul"
 	"github.com/stephane-martin/skewer/store"
+	"github.com/stephane-martin/skewer/sys/shm"
 )
 
 // printStoreCmd represents the printStore command
@@ -37,7 +39,7 @@ var printStoreCmd = &cobra.Command{
 			Prefix:     consulPrefix,
 		}
 
-		c, _, err = conf.InitLoad(ctx, configDirName, params, "", logger)
+		c, _, err = conf.InitLoad(ctx, configDirName, params, nil, logger)
 		if err != nil {
 			fmt.Println("bleh", err)
 			return
@@ -45,7 +47,7 @@ var printStoreCmd = &cobra.Command{
 		c.Store.Dirname = storeDirname
 
 		// prepare the message store
-		st, err = store.NewStore(ctx, c.Store, "", conf.Stderr, logger)
+		st, err = store.NewStore(ctx, c.Store, nil, conf.Stderr, logger)
 		if err != nil {
 			fmt.Println("Can't create the message Store", "path", c.Store.Dirname, "error", err)
 			return
@@ -71,6 +73,24 @@ var printStoreCmd = &cobra.Command{
 			fmt.Printf("%s %s\n", k, v)
 		}
 		fmt.Println()
+		sh, err := shm.Create("/blah", 64)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "shm create error:", err)
+			return
+		}
+		defer sh.Delete()
+		fmt.Printf("Shared memory is %d bytes long\n", sh.Len())
+
+		iptr := (*int64)(sh.Pointer())
+		*iptr = 9
+		sh.Close()
+		sh, err = shm.Open("/blah")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "shm open error:", err)
+			return
+		}
+		iptr = (*int64)(sh.Pointer())
+		fmt.Printf("Store value: %d\n", *iptr)
 	},
 }
 

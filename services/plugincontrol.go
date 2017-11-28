@@ -65,13 +65,11 @@ type PluginController struct {
 	createdMu *sync.Mutex
 	started   bool
 	created   bool
-
-	sessionID string
-	secret    *memguard.LockedBuffer
+	ring      kring.Ring
 	signKey   *memguard.LockedBuffer
 }
 
-func NewPluginController(typ NetworkServiceType, sid string, signKey *memguard.LockedBuffer, stasher *StorePlugin, r *consul.Registry, bHandle int, lHandle int, l log15.Logger) *PluginController {
+func NewPluginController(typ NetworkServiceType, ring kring.Ring, signKey *memguard.LockedBuffer, stasher *StorePlugin, r *consul.Registry, bHandle int, lHandle int, l log15.Logger) *PluginController {
 	s := &PluginController{
 		typ:          typ,
 		stasher:      stasher,
@@ -82,8 +80,8 @@ func NewPluginController(typ NetworkServiceType, sid string, signKey *memguard.L
 		stdinMu:      &sync.Mutex{},
 		startedMu:    &sync.Mutex{},
 		createdMu:    &sync.Mutex{},
-		sessionID:    sid,
 		signKey:      signKey,
+		ring:         ring,
 	}
 	s.metricsChan = make(chan []*dto.MetricFamily)
 	s.ShutdownChan = make(chan struct{})
@@ -217,7 +215,7 @@ type InfosAndError struct {
 }
 
 // listen for the encrypted messages that the plugin produces
-func (s *PluginController) listenpipe() {
+func (s *PluginController) listenpipe(secret *memguard.LockedBuffer) {
 	if s.pipe == nil {
 		return
 	}
@@ -228,12 +226,12 @@ func (s *PluginController) listenpipe() {
 	}
 	name := ReverseNetworkServiceMap[s.typ]
 	scanner := bufio.NewScanner(s.pipe)
-	scanner.Split(utils.MakeDecryptSplit(s.secret))
+	scanner.Split(utils.MakeDecryptSplit(secret))
 	scanner.Buffer(make([]byte, 0, 132000), 132000)
 
 	defer func() {
-		if s.secret != nil {
-			s.secret.Destroy()
+		if secret != nil {
+			secret.Destroy()
 		}
 	}()
 
@@ -260,7 +258,7 @@ func (s *PluginController) listenpipe() {
 	}
 }
 
-func (s *PluginController) listen() chan InfosAndError {
+func (s *PluginController) listen(secret *memguard.LockedBuffer) chan InfosAndError {
 	startErrorChan := make(chan InfosAndError)
 	name := ReverseNetworkServiceMap[s.typ]
 
@@ -339,7 +337,7 @@ func (s *PluginController) listen() chan InfosAndError {
 						return
 					}
 					m = model.FullMessage{}
-					err := m.Decrypt(s.secret, parts[1])
+					err := m.Decrypt(secret, parts[1])
 					if err == nil {
 						s.stasher.Stash(m)
 					} else {
@@ -493,7 +491,7 @@ func (s *PluginController) listen() chan InfosAndError {
 }
 
 // Start asks the controlled plugin to start the operations.
-func (s *PluginController) Start() ([]model.ListenerInfo, error) {
+func (s *PluginController) Start() (infos []model.ListenerInfo, err error) {
 	name := ReverseNetworkServiceMap[s.typ]
 	s.createdMu.Lock()
 	s.startedMu.Lock()
@@ -510,17 +508,15 @@ func (s *PluginController) Start() ([]model.ListenerInfo, error) {
 	s.StopChan = make(chan struct{})
 
 	// setup the secret used to encrypt/decrypt messages
+	var secret *memguard.LockedBuffer
 	if s.conf.Main.EncryptIPC {
 		s.logger.Debug("Decrypting messages from plugin", "type", name)
-		secret, err := kring.GetBoxSecret(s.sessionID)
+		secret, err = s.ring.GetBoxSecret()
 		if err != nil {
 			return nil, err
 		}
-		s.secret = secret
-	} else {
-		s.secret = nil
 	}
-	go s.listenpipe()
+	go s.listenpipe(secret)
 
 	cb, _ := json.Marshal(s.conf)
 
@@ -528,10 +524,10 @@ func (s *PluginController) Start() ([]model.ListenerInfo, error) {
 	if rerr == nil {
 		rerr = s.W(START, utils.NOW)
 	}
-	infos := []model.ListenerInfo{}
+	infos = []model.ListenerInfo{}
 	if rerr == nil {
 		select {
-		case infoserr := <-s.listen():
+		case infoserr := <-s.listen(secret):
 			rerr = infoserr.err
 			infos = infoserr.infos
 		case <-time.After(5 * time.Second):
@@ -554,12 +550,12 @@ func (s *PluginController) Start() ([]model.ListenerInfo, error) {
 	return infos, nil
 }
 
-func setupCmd(name string, sessionID string, binderHandle int, loggerHandle int, messagePipe *os.File, test bool) (*exec.Cmd, io.WriteCloser, io.ReadCloser, error) {
+func setupCmd(name string, r kring.Ring, binderHandle int, loggerHandle int, messagePipe *os.File, test bool) (*exec.Cmd, io.WriteCloser, io.ReadCloser, error) {
 	exe, err := osext.Executable()
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	envs := []string{"PATH=/bin:/usr/bin", fmt.Sprintf("SKEWER_SESSION=%s", sessionID)}
+	envs := []string{"PATH=/bin:/usr/bin", fmt.Sprintf("SKEWER_SESSION=%s", r.GetSessionID().String())}
 	files := []*os.File{}
 	if binderHandle != 0 {
 		files = append(files, os.NewFile(uintptr(binderHandle), "binder"))
@@ -573,6 +569,16 @@ func setupCmd(name string, sessionID string, binderHandle int, loggerHandle int,
 		files = append(files, messagePipe)
 		envs = append(envs, "SKEWER_HAS_PIPE=TRUE")
 	}
+	rPipe, wPipe, err := os.Pipe()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	files = append(files, rPipe)
+	err = r.WriteRingPass(wPipe)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	wPipe.Close()
 	if test {
 		envs = append(envs, "SKEWER_TEST=TRUE")
 	}
@@ -626,7 +632,7 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 		// this way we can support environments where user namespaces are not
 		// available
 		if capabilities.CapabilitiesSupported {
-			s.cmd, s.stdin, s.stdout, err = setupCmd(fmt.Sprintf("confined-%s", name), s.sessionID, s.binderHandle, s.loggerHandle, pipew, test)
+			s.cmd, s.stdin, s.stdout, err = setupCmd(fmt.Sprintf("confined-%s", name), s.ring, s.binderHandle, s.loggerHandle, pipew, test)
 			if err != nil {
 				piper.Close()
 				pipew.Close()
@@ -641,7 +647,7 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 			s.logger.Warn("Starting plugin in user namespace failed", "error", err, "type", name)
 		}
 		if err != nil || !capabilities.CapabilitiesSupported {
-			s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.sessionID, s.binderHandle, s.loggerHandle, pipew, test)
+			s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.ring, s.binderHandle, s.loggerHandle, pipew, test)
 			if err != nil {
 				piper.Close()
 				pipew.Close()
@@ -665,7 +671,7 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 		}
 		s.pipe = pipew
 		if capabilities.CapabilitiesSupported {
-			s.cmd, s.stdin, s.stdout, err = setupCmd(fmt.Sprintf("confined-%s", name), s.sessionID, s.binderHandle, s.loggerHandle, piper, test)
+			s.cmd, s.stdin, s.stdout, err = setupCmd(fmt.Sprintf("confined-%s", name), s.ring, s.binderHandle, s.loggerHandle, piper, test)
 			if err != nil {
 				piper.Close()
 				pipew.Close()
@@ -680,7 +686,7 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 			s.logger.Warn("Starting plugin in user namespace failed", "error", err, "type", name)
 		}
 		if err != nil || !capabilities.CapabilitiesSupported {
-			s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.sessionID, s.binderHandle, s.loggerHandle, piper, test)
+			s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.ring, s.binderHandle, s.loggerHandle, piper, test)
 			if err != nil {
 				piper.Close()
 				pipew.Close()
@@ -696,7 +702,7 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 		}
 
 	default:
-		s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.sessionID, s.binderHandle, s.loggerHandle, nil, test)
+		s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.ring, s.binderHandle, s.loggerHandle, nil, test)
 		if err != nil {
 			close(s.ShutdownChan)
 			s.createdMu.Unlock()
@@ -746,7 +752,7 @@ type StorePlugin struct {
 	pushwg *sync.WaitGroup
 }
 
-func (s *StorePlugin) pushqueue() {
+func (s *StorePlugin) pushqueue(secret *memguard.LockedBuffer) {
 	var messages []*model.FullMessage
 	var message *model.FullMessage
 	var messageb []byte
@@ -759,7 +765,7 @@ func (s *StorePlugin) pushqueue() {
 		for _, message = range messages {
 			messageb, err = message.MarshalMsg(nil)
 			if err == nil {
-				err = utils.W(s.pipe, nil, messageb, s.secret)
+				err = utils.W(s.pipe, nil, messageb, secret)
 				if err != nil {
 					s.logger.Error("Unexpected error when writing messages to the Store pipe", "error", err)
 					return
@@ -771,23 +777,27 @@ func (s *StorePlugin) pushqueue() {
 	}
 }
 
-func (s *StorePlugin) push() {
+func (s *StorePlugin) push(secret *memguard.LockedBuffer) {
 	for s.MessageQueue.Wait(0) {
-		s.pushqueue()
+		s.pushqueue(secret)
 	}
 	s.pushwg.Done()
 }
 
 // Shutdown stops definetely the Store.
 func (s *StorePlugin) Shutdown(killTimeOut time.Duration) {
-	s.MessageQueue.Dispose()                 // will make push() return
-	s.pushwg.Wait()                          // wait that push() returns
-	s.pushqueue()                            // empty the queue, in case there are pending messages
+	s.MessageQueue.Dispose() // will make push() return
+	s.pushwg.Wait()          // wait that push() returns
+
+	if s.conf.Main.EncryptIPC {
+		secret, err := s.ring.GetBoxSecret()
+		if err == nil {
+			s.pushqueue(secret) // empty the queue, in case there are pending messages
+		}
+	}
+
 	s.pipe.Close()                           // signal the child that we are done sending messages
 	s.PluginController.Shutdown(killTimeOut) // shutdown the child
-	if s.secret != nil {
-		s.secret.Destroy()
-	}
 }
 
 // Stash stores the given message into the Store
@@ -798,19 +808,27 @@ func (s *StorePlugin) Stash(m model.FullMessage) {
 }
 
 // NewStorePlugin creates a new Store controller.
-func NewStorePlugin(sid string, signKey *memguard.LockedBuffer, loggerHandle int, l log15.Logger) *StorePlugin {
-	s := &StorePlugin{PluginController: NewPluginController(Store, sid, signKey, nil, nil, 0, loggerHandle, l)}
+func NewStorePlugin(r kring.Ring, signKey *memguard.LockedBuffer, loggerHandle int, l log15.Logger) *StorePlugin {
+	s := &StorePlugin{PluginController: NewPluginController(Store, r, signKey, nil, nil, 0, loggerHandle, l)}
 	s.MessageQueue = queue.NewMessageQueue()
 	s.pushwg = &sync.WaitGroup{}
 	return s
 }
 
 func (s *StorePlugin) Start() (infos []model.ListenerInfo, err error) {
-	infos, err = s.PluginController.Start() // Start() sets s.secret, so that s.push() can encrypt messages
+	var secret *memguard.LockedBuffer
+	if s.conf.Main.EncryptIPC {
+		secret, err = s.ring.GetBoxSecret()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	infos, err = s.PluginController.Start()
 	if err != nil {
 		return nil, err
 	}
 	s.pushwg.Add(1)
-	go s.push()
+	go s.push(secret)
 	return infos, nil
 }

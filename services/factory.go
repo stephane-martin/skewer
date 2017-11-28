@@ -12,6 +12,7 @@ import (
 	"github.com/stephane-martin/skewer/services/linux"
 	"github.com/stephane-martin/skewer/services/network"
 	"github.com/stephane-martin/skewer/sys/binder"
+	"github.com/stephane-martin/skewer/sys/kring"
 )
 
 type NetworkServiceType int
@@ -44,7 +45,7 @@ func init() {
 }
 
 func ConfigureAndStartService(s NetworkService, c conf.BaseConfig, test bool) ([]model.ListenerInfo, error) {
-	 
+
 	switch s := s.(type) {
 	case *network.TcpServiceImpl:
 		s.SetConf(c.Syslog, c.Parsers, c.Main.InputQueueSize, c.Main.MaxInputMessageSize)
@@ -69,7 +70,7 @@ func ConfigureAndStartService(s NetworkService, c conf.BaseConfig, test bool) ([
 
 }
 
-func Factory(t NetworkServiceType, sessionID string, reporter *base.Reporter, gen chan ulid.ULID, b *binder.BinderClient, l log15.Logger, pipe *os.File) NetworkService {
+func Factory(t NetworkServiceType, r kring.Ring, reporter *base.Reporter, gen chan ulid.ULID, b *binder.BinderClient, l log15.Logger, pipe *os.File) NetworkService {
 	switch t {
 	case TCP:
 		return network.NewTcpService(reporter, gen, b, l)
@@ -94,7 +95,7 @@ func Factory(t NetworkServiceType, sessionID string, reporter *base.Reporter, ge
 			return nil
 		}
 	case Store:
-		return NewStoreService(l, sessionID, pipe)
+		return NewStoreService(l, r, pipe)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown service type: %d\n", t)
 		return nil

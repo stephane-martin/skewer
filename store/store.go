@@ -166,7 +166,7 @@ func (s *MessageStore) SetDestinations(dests conf.DestinationType) {
 	s.dests.Store(dests)
 }
 
-func NewStore(ctx context.Context, cfg conf.StoreConfig, sessionID string, dests conf.DestinationType, l log15.Logger) (*MessageStore, error) {
+func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests conf.DestinationType, l log15.Logger) (*MessageStore, error) {
 	badgerOpts := badger.DefaultOptions
 	badgerOpts.Dir = cfg.Dirname
 	badgerOpts.ValueDir = cfg.Dirname
@@ -213,8 +213,8 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, sessionID string, dests
 	store.badger = kv
 
 	var storeSecret *memguard.LockedBuffer
-	if len(sessionID) > 0 {
-		sessionSecret, err := kring.GetBoxSecret(sessionID)
+	if r != nil {
+		sessionSecret, err := r.GetBoxSecret()
 		if err != nil {
 			return nil, err
 		}

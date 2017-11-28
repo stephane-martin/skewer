@@ -1,33 +1,62 @@
 package kring
 
 import (
+	"io"
+
 	"github.com/awnumar/memguard"
+	"github.com/oklog/ulid"
 )
 
-func GetSignaturePubkey(session string) (pubkey *memguard.LockedBuffer, err error) {
-	return nil, nil
+type ring struct {
+	creds RingCreds
 }
 
-func NewSignaturePubkey(session string) (pubkey *memguard.LockedBuffer, privkey *memguard.LockedBuffer, err error) {
-	return nil, nil, nil
+func GetRing(creds RingCreds) Ring {
+	return &ring{creds: creds}
 }
 
-func NewBoxSecret(session string) (secret *memguard.LockedBuffer, err error) {
-	return nil, nil
+func (r *ring) Destroy() {
+	r.creds.Secret.Destroy()
+	destroySem(r.creds.SessionID)
 }
 
-func GetBoxSecret(session string) (secret *memguard.LockedBuffer, err error) {
-	return nil, nil
+func NewRing() (r Ring, err error) {
+	creds, err := NewCreds()
+	if err != nil {
+		return nil, err
+	}
+	return GetRing(creds), nil
 }
 
-func DeleteBoxSecret(session string) error {
-	return nil
+func (r *ring) WriteRingPass(w io.Writer) (err error) {
+	_, err = w.Write(r.creds.Secret.Buffer())
+	return err
 }
 
-func DeleteSignaturePubKey(session string) error {
+func (r *ring) GetSessionID() ulid.ULID {
+	return r.creds.SessionID
+}
+
+func (r *ring) NewSignaturePubkey() (privkey *memguard.LockedBuffer, err error) {
 
 }
 
-func JoinSessionKeyRing() error {
-	return nil
+func (r *ring) GetSignaturePubkey() (pubkey *memguard.LockedBuffer, err error) {
+
+}
+
+func (r *ring) NewBoxSecret() (secret *memguard.LockedBuffer, err error) {
+
+}
+
+func (r *ring) GetBoxSecret() (secret *memguard.LockedBuffer, err error) {
+
+}
+
+func (r *ring) DeleteBoxSecret() error {
+
+}
+
+func (r *ring) DeleteSignaturePubKey() error {
+
 }

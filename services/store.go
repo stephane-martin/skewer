@@ -30,27 +30,27 @@ type storeServiceImpl struct {
 	mu              *sync.Mutex
 	ingestwg        *sync.WaitGroup
 	pipe            *os.File
-	sessionID       string
 	status          bool
 	test            bool
 	secret          *memguard.LockedBuffer
+	ring            kring.Ring
 }
 
 // NewStoreService creates a StoreService.
 // The StoreService is responsible to manage the lifecycle of the Store and the
 // Kafka Forwarder that is fed by the Store.
-func NewStoreService(l log15.Logger, sessionID string, pipe *os.File) StoreService {
+func NewStoreService(l log15.Logger, ring kring.Ring, pipe *os.File) StoreService {
 	if pipe == nil {
 		l.Crit("The Store was not given a message pipe")
 		return nil
 	}
 	impl := &storeServiceImpl{
-		ingestwg:  &sync.WaitGroup{},
-		mu:        &sync.Mutex{},
-		status:    false,
-		pipe:      pipe,
-		logger:    l,
-		sessionID: sessionID,
+		ingestwg: &sync.WaitGroup{},
+		mu:       &sync.Mutex{},
+		status:   false,
+		pipe:     pipe,
+		logger:   l,
+		ring:     ring,
 	}
 	impl.shutdownCtx, impl.shutdownStore = context.WithCancel(context.Background())
 	return impl
@@ -62,7 +62,7 @@ func (s *storeServiceImpl) SetConfAndRestart(c conf.BaseConfig, test bool) ([]mo
 	s.doStop(nil)
 	s.config = c
 	if c.Main.EncryptIPC {
-		secret, err := kring.GetBoxSecret(s.sessionID)
+		secret, err := s.ring.GetBoxSecret()
 		if err != nil {
 			return nil, err
 		}
@@ -111,7 +111,7 @@ func (s *storeServiceImpl) doStart(test bool, mu *sync.Mutex) ([]model.ListenerI
 		if err != nil {
 			return infos, err
 		}
-		s.st, err = store.NewStore(s.shutdownCtx, s.config.Store, s.sessionID, destinations, s.logger)
+		s.st, err = store.NewStore(s.shutdownCtx, s.config.Store, s.ring, destinations, s.logger)
 		if err != nil {
 			return infos, err
 		}

@@ -17,9 +17,9 @@ import (
 	"github.com/stephane-martin/skewer/utils"
 )
 
-func Launch(typ NetworkServiceType, test bool, sessionID string, binderClient *binder.BinderClient, logger log15.Logger, pipe *os.File) error {
-	if len(sessionID) == 0 {
-		return fmt.Errorf("Empty session ID")
+func Launch(typ NetworkServiceType, test bool, r kring.Ring, binderClient *binder.BinderClient, logger log15.Logger, pipe *os.File) error {
+	if r == nil {
+		return fmt.Errorf("No ring")
 	}
 	generator := utils.Generator(context.Background(), logger)
 
@@ -30,7 +30,7 @@ func Launch(typ NetworkServiceType, test bool, sessionID string, binderClient *b
 	reporter := base.NewReporter(name, logger, pipe)
 	defer reporter.Stop()
 
-	svc := Factory(typ, sessionID, reporter, generator, binderClient, logger, pipe)
+	svc := Factory(typ, r, reporter, generator, binderClient, logger, pipe)
 	if svc == nil {
 		err := fmt.Errorf("The Service Factory returned 'nil' for plugin '%s'", name)
 		base.Wout(STARTERROR, []byte(err.Error()), nil)
@@ -41,7 +41,7 @@ func Launch(typ NetworkServiceType, test bool, sessionID string, binderClient *b
 
 	var globalConf conf.BaseConfig
 
-	signpubkey, err := kring.GetSignaturePubkey(sessionID)
+	signpubkey, err := r.GetSignaturePubkey()
 	if err != nil {
 		return err
 	}
@@ -70,7 +70,7 @@ func Launch(typ NetworkServiceType, test bool, sessionID string, binderClient *b
 			}
 			if globalConf.Main.EncryptIPC {
 				logger.Debug("Encrypting messages from plugin", "type", name)
-				secret, err := kring.GetBoxSecret(sessionID)
+				secret, err := r.GetBoxSecret()
 				if err != nil {
 					base.Wout(STARTERROR, []byte(err.Error()), nil)
 					return err

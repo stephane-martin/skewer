@@ -55,7 +55,7 @@ func Default() (BaseConfig, error) {
 	if err != nil {
 		return baseConf, ConfigurationSyntaxError{Err: err}
 	}
-	err = baseConf.Complete("")
+	err = baseConf.Complete(nil)
 	if err != nil {
 		return baseConf, ConfigurationSyntaxError{Err: err}
 	}
@@ -307,7 +307,7 @@ func (c *KafkaDestConfig) GetClient() (sarama.Client, error) {
 	return nil, KafkaError{Err: err}
 }
 
-func InitLoad(ctx context.Context, confDir string, params consul.ConnParams, sessionID string, logger log15.Logger) (c BaseConfig, updated chan *BaseConfig, err error) {
+func InitLoad(ctx context.Context, confDir string, params consul.ConnParams, r kring.Ring, logger log15.Logger) (c BaseConfig, updated chan *BaseConfig, err error) {
 	defer func() {
 		// sometimes viper panics... let's catch that
 		if r := recover(); r != nil {
@@ -387,7 +387,7 @@ func InitLoad(ctx context.Context, confDir string, params consul.ConnParams, ses
 		logger.Info("Configuration is not fetched from Consul")
 	}
 
-	err = c.Complete(sessionID)
+	err = c.Complete(r)
 	if err != nil {
 		if cancelWatch != nil {
 			cancelWatch()
@@ -403,7 +403,7 @@ func InitLoad(ctx context.Context, confDir string, params consul.ConnParams, ses
 				newConfig := baseConf.Clone()
 				err := newConfig.ParseParamsFromConsul(result, params.Prefix, logger)
 				if err == nil {
-					err = newConfig.Complete(sessionID)
+					err = newConfig.Complete(r)
 					if err == nil {
 						updated <- &newConfig
 					} else {
@@ -623,7 +623,7 @@ func (c *BaseConfig) Export() string {
 	return buf.String()
 }
 
-func (c *BaseConfig) Complete(sessionID string) (err error) {
+func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 	parsersNames := map[string]bool{}
 	for _, parserConf := range c.Parsers {
 		name := strings.TrimSpace(parserConf.Name)
@@ -775,8 +775,8 @@ func (c *BaseConfig) Complete(sessionID string) (err error) {
 			}
 		}
 	}
-	if len(sessionID) > 0 {
-		m, err := kring.GetBoxSecret(sessionID)
+	if r != nil {
+		m, err := r.GetBoxSecret()
 		if err != nil {
 			return ConfigurationCheckError{ErrString: "Failed to retrieve the current session encryption secret", Err: err}
 		}

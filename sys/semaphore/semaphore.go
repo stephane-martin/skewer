@@ -10,7 +10,7 @@ sem_t *my_sem_open(const char *name, int oflag, mode_t mode, unsigned int value)
 	return sem_open(name, oflag, mode, value);
 }
 
-sem_t * my_sem_failed() {
+sem_t *my_sem_failed() {
 	return SEM_FAILED;
 }
 */

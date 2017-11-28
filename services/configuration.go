@@ -95,7 +95,7 @@ func (c *ConfigurationService) Chan() chan *conf.BaseConfig {
 	return c.output
 }
 
-func (c *ConfigurationService) Start(sessionID string) error {
+func (c *ConfigurationService) Start(r kring.Ring) error {
 	var err error
 	var cmd *exec.Cmd
 	var stdin io.WriteCloser
@@ -103,7 +103,7 @@ func (c *ConfigurationService) Start(sessionID string) error {
 	c.output = make(chan *conf.BaseConfig)
 
 	if capabilities.CapabilitiesSupported {
-		cmd, stdin, stdout, err = setupCmd("confined-skewer-conf", sessionID, 0, c.loggerHandle, nil, false)
+		cmd, stdin, stdout, err = setupCmd("confined-skewer-conf", r, 0, c.loggerHandle, nil, false)
 		if err != nil {
 			close(c.output)
 			return err
@@ -114,7 +114,7 @@ func (c *ConfigurationService) Start(sessionID string) error {
 		c.logger.Warn("Starting configuration service in user namespace has failed", "error", err)
 	}
 	if err != nil || !capabilities.CapabilitiesSupported {
-		cmd, stdin, stdout, err = setupCmd("skewer-conf", sessionID, 0, c.loggerHandle, nil, false)
+		cmd, stdin, stdout, err = setupCmd("skewer-conf", r, 0, c.loggerHandle, nil, false)
 		if err != nil {
 			close(c.output)
 			return err
@@ -279,13 +279,13 @@ func writeNewConf(ctx context.Context, updated chan *conf.BaseConfig, logger log
 	}
 }
 
-func start(confdir string, params consul.ConnParams, sessionID string, logger log15.Logger) (context.CancelFunc, error) {
+func start(confdir string, params consul.ConnParams, r kring.Ring, logger log15.Logger) (context.CancelFunc, error) {
 
 	if len(confdir) == 0 {
 		return nil, fmt.Errorf("Configuration directory is empty")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	gconf, updated, err := conf.InitLoad(ctx, confdir, params, sessionID, logger)
+	gconf, updated, err := conf.InitLoad(ctx, confdir, params, r, logger)
 	if err == nil {
 		confb, err := json.Marshal(gconf)
 		if err == nil {
@@ -303,11 +303,11 @@ func start(confdir string, params consul.ConnParams, sessionID string, logger lo
 	return cancel, nil
 }
 
-func LaunchConfProvider(sessionID string, logger log15.Logger) error {
-	if len(sessionID) == 0 {
-		return fmt.Errorf("Empty session ID")
+func LaunchConfProvider(r kring.Ring, logger log15.Logger) error {
+	if r == nil {
+		return fmt.Errorf("No ring")
 	}
-	sigpubkey, err := kring.GetSignaturePubkey(sessionID)
+	sigpubkey, err := r.GetSignaturePubkey()
 	if err != nil {
 		return err
 	}
@@ -326,14 +326,14 @@ func LaunchConfProvider(sessionID string, logger log15.Logger) error {
 		switch command {
 		case "start":
 			var err error
-			cancel, err = start(confdir, params, sessionID, logger)
+			cancel, err = start(confdir, params, r, logger)
 			if err != nil {
 				WConf([]byte("starterror"), []byte(err.Error()))
 				return err
 			}
 
 		case "reload":
-			newcancel, err := start(confdir, params, sessionID, logger)
+			newcancel, err := start(confdir, params, r, logger)
 			if err == nil {
 				if cancel != nil {
 					cancel()
