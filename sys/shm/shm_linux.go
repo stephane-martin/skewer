@@ -1,8 +1,10 @@
-// +build !linux
+// +build linux
 
 package shm
 
 /*
+#cgo LDFLAGS: -lrt
+
 #include <sys/mman.h>
 #include <stdlib.h>
 #include <fcntl.h>

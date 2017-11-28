@@ -179,7 +179,7 @@ func (r *ring) GetBoxSecret() (secret *memguard.LockedBuffer, err error) {
 }
 
 func (r *ring) DeleteBoxSecret() error {
-	sessionStr = r.creds.SessionID.String()
+	sessionStr := r.creds.SessionID.String()
 	sem, err := semaphore.New(fmt.Sprintf("skw%s", sessionStr))
 	if err != nil {
 		return err
@@ -205,7 +205,7 @@ func (r *ring) DeleteBoxSecret() error {
 }
 
 func (r *ring) DeleteSignaturePubKey() error {
-	sessionStr = r.creds.SessionID.String()
+	sessionStr := r.creds.SessionID.String()
 	sem, err := semaphore.New(fmt.Sprintf("skw%s", sessionStr))
 	if err != nil {
 		return err
