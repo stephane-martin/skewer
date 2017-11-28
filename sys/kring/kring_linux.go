@@ -11,6 +11,7 @@ import (
 	"github.com/jsipprell/keyctl"
 	"github.com/oklog/ulid"
 	"github.com/stephane-martin/skewer/sys/semaphore"
+	"github.com/stephane-martin/skewer/utils/sbox"
 	"golang.org/x/crypto/ed25519"
 )
 
@@ -56,8 +57,8 @@ func (r *ring) GetSessionID() ulid.ULID {
 	return r.creds.SessionID
 }
 
-func getSecret(session ulid.ULID, label string) (pubkey *memguard.LockedBuffer, err error) {
-	sessionStr := session.String()
+func getSecret(creds RingCreds, label string) (pubkey *memguard.LockedBuffer, err error) {
+	sessionStr := creds.SessionID.String()
 	sem, err := semaphore.New(fmt.Sprintf("skw%s", sessionStr))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "new semaphore error", err)
@@ -81,11 +82,15 @@ func getSecret(session ulid.ULID, label string) (pubkey *memguard.LockedBuffer, 
 	if err != nil {
 		return nil, err
 	}
-	data, err := key.Get()
+	encrypted, err := key.Get()
 	if err != nil {
 		return nil, err
 	}
-	secret, err := memguard.NewImmutableFromBytes(data)
+	decrypted, err := sbox.Decrypt(encrypted, creds.Secret)
+	if err != nil {
+		return nil, err
+	}
+	secret, err := memguard.NewImmutableFromBytes(decrypted)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +98,7 @@ func getSecret(session ulid.ULID, label string) (pubkey *memguard.LockedBuffer, 
 }
 
 func (r *ring) GetSignaturePubkey() (pubkey *memguard.LockedBuffer, err error) {
-	return getSecret(r.creds.SessionID, "sigpubkey")
+	return getSecret(r.creds, "sigpubkey")
 }
 
 func (r *ring) NewSignaturePubkey() (privkey *memguard.LockedBuffer, err error) {
@@ -128,7 +133,11 @@ func (r *ring) NewSignaturePubkey() (privkey *memguard.LockedBuffer, err error) 
 	if err != nil {
 		return nil, err
 	}
-	_, err = keyring.Add(fmt.Sprintf("skewer-sigpubkey-%s", sessionStr), pubkey.Buffer())
+	encryptedPubKey, err := sbox.Encrypt(pubkey.Buffer(), r.creds.Secret)
+	if err != nil {
+		return nil, err
+	}
+	_, err = keyring.Add(fmt.Sprintf("skewer-sigpubkey-%s", sessionStr), encryptedPubKey)
 	pubkey.Destroy()
 	if err != nil {
 		privkey.Destroy()
@@ -166,7 +175,11 @@ func (r *ring) NewBoxSecret() (secret *memguard.LockedBuffer, err error) {
 	if err != nil {
 		return nil, err
 	}
-	_, err = keyring.Add(fmt.Sprintf("skewer-boxsecret-%s", sessionStr), secret.Buffer())
+	encryptedSecret, err := sbox.Encrypt(secret.Buffer(), r.creds.Secret)
+	if err != nil {
+		return nil, err
+	}
+	_, err = keyring.Add(fmt.Sprintf("skewer-boxsecret-%s", sessionStr), encryptedSecret)
 	if err != nil {
 		secret.Destroy()
 		return nil, err
@@ -175,7 +188,7 @@ func (r *ring) NewBoxSecret() (secret *memguard.LockedBuffer, err error) {
 }
 
 func (r *ring) GetBoxSecret() (secret *memguard.LockedBuffer, err error) {
-	return getSecret(r.creds.SessionID, "boxsecret")
+	return getSecret(r.creds, "boxsecret")
 }
 
 func (r *ring) DeleteBoxSecret() error {
