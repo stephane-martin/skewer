@@ -1053,12 +1053,12 @@
 			"revisionTime": "2017-04-21T08:09:44Z"
 		},
 		{
-			"checksumSHA1": "iUafQRt0zfZuin1IYz9Zuc0Ovjo=",
+			"checksumSHA1": "toAZuzA0LeXM+VBx3Wqh5E0yMDg=",
 			"path": "gopkg.in/Shopify/sarama.v1",
-			"revision": "bbdbe644099b7fdc8327d5cc69c030945188b2e9",
-			"revisionTime": "2017-10-04T12:52:49Z",
-			"version": "v1.13.0",
-			"versionExact": "v1.13.0"
+			"revision": "240fd146ce68bcafb034cc5dc977229ffbafa8ea",
+			"revisionTime": "2017-11-13T14:11:41Z",
+			"version": "v1.14.0",
+			"versionExact": "v1.14.0"
 		},
 		{
 			"checksumSHA1": "fALlQNY1fM99NesfLJ50KguWsio=",
