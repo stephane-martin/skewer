@@ -76,10 +76,11 @@ func readFileUntilEnd(f *os.File, size int) (err error) {
 	}
 }
 
-func (s *AccountingService) makeMessage(buf []byte, tick int64, hostname string) *model.FullMessage {
+func (s *AccountingService) makeMessage(buf []byte, tick int64, hostname string) model.FullMessage {
 	acct := accounting.MakeAcct(buf, tick)
+	props := acct.Properties()
 	uid := <-s.generator
-	msg := model.FullMessage{
+	return model.FullMessage{
 		ConfId: s.Conf.ConfID,
 		Uid:    uid,
 		Parsed: model.ParsedMessage{
@@ -92,18 +93,17 @@ func (s *AccountingService) makeMessage(buf []byte, tick int64, hostname string)
 				Hostname:         hostname,
 				Msgid:            "",
 				Priority:         0,
-				Procid:           "",
+				Procid:           props["pid"],
 				Severity:         0,
 				Properties:       map[string]map[string]string{"acct": acct.Properties()},
 				Structured:       "",
 				TimeGeneratedNum: acct.Btime.UnixNano(),
 				TimeReportedNum:  time.Now().UnixNano(),
 				Version:          0,
-				Message:          "Process accounting message",
+				Message:          fmt.Sprintf("Accounting: %s (%s/%s)", props["comm"], props["uid"], props["gid"]),
 			},
 		},
 	}
-	return &msg
 }
 
 var ErrTruncated error = errors.New("File has been truncated")
@@ -134,7 +134,7 @@ func (s *AccountingService) readFile(f *os.File, tick int64, hostname string, si
 		} else if err != nil {
 			return fmt.Errorf("Unexpected error while reading the accounting file: %s", err)
 		} else {
-			s.stasher.Stash(*(s.makeMessage(buf, tick, hostname)))
+			s.stasher.Stash(s.makeMessage(buf, tick, hostname))
 			s.metrics.IncomingMsgsCounter.WithLabelValues("accounting", hostname, "", "").Inc()
 		}
 	}

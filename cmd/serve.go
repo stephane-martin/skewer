@@ -186,12 +186,12 @@ func (ch *serveChild) init() error {
 		return err
 	}
 
-	err = ch.setupStore()
+	st, err := ch.setupStore()
 	if err != nil {
 		return err
 	}
+	ch.store = st
 
-	ch.controllers = map[services.NetworkServiceType]*services.PluginController{}
 	ch.setupControllers()
 	ch.setupMetrics(ch.logger)
 	return nil
@@ -287,23 +287,24 @@ func (ch *serveChild) setupConsulRegistry() error {
 	return nil
 }
 
-func (ch *serveChild) setupStore() error {
-	ch.store = services.NewStorePlugin(ch.ring, ch.signPrivKey, HandlesMap["STORE_LOGGER"], ch.logger)
-	ch.store.SetConf(*ch.conf)
-	err := ch.store.Create(testFlag, DumpableFlag, storeDirname, "", "")
+func (ch *serveChild) setupStore() (st *services.StorePlugin, err error) {
+	f := services.ControllerFactory(ch.ring, ch.signPrivKey, nil, ch.consulRegistry, ch.logger)
+	st = f.NewStore(HandlesMap["STORE_LOGGER"])
+	st.SetConf(*ch.conf)
+	err = st.Create(testFlag, DumpableFlag, storeDirname, "", "")
 	if err != nil {
-		return fmt.Errorf("Can't create the message Store: %s", err)
+		return nil, fmt.Errorf("Can't create the message Store: %s", err)
 	}
 	go func() {
-		<-ch.store.ShutdownChan
+		<-st.ShutdownChan
 		ch.logger.Info("Store has shutdown: aborting all operations")
 		ch.shutdown()
 	}()
-	_, err = ch.store.Start()
+	_, err = st.Start()
 	if err != nil {
-		return fmt.Errorf("Can't start the forwarder: %s", err)
+		return nil, fmt.Errorf("Can't start the forwarder: %s", err)
 	}
-	return nil
+	return st, nil
 }
 
 func (ch *serveChild) setupSignKey() error {
@@ -316,7 +317,7 @@ func (ch *serveChild) setupSignKey() error {
 	return nil
 }
 
-func (ch *serveChild) setupController(typ services.NetworkServiceType) {
+func setupController(f *services.CFactory, typ services.NetworkServiceType) *services.PluginController {
 	var binder int
 	var logger int
 	switch typ {
@@ -334,23 +335,15 @@ func (ch *serveChild) setupController(typ services.NetworkServiceType) {
 	case services.Accounting:
 		logger = HandlesMap["ACCT_LOGGER"]
 	}
-	ch.controllers[typ] = services.NewPluginController(
-		typ,
-		ch.ring,
-		ch.signPrivKey,
-		ch.store,
-		ch.consulRegistry,
-		binder, logger,
-		ch.logger,
-	)
+	return f.New(typ, binder, logger)
 }
 
 func (ch *serveChild) setupControllers() {
-	ch.setupController(services.RELP)
-	ch.setupController(services.TCP)
-	ch.setupController(services.UDP)
-	ch.setupController(services.Journal)
-	ch.setupController(services.Accounting)
+	ch.controllers = map[services.NetworkServiceType]*services.PluginController{}
+	factory := services.ControllerFactory(ch.ring, ch.signPrivKey, ch.store, ch.consulRegistry, ch.logger)
+	for _, typ := range []services.NetworkServiceType{services.RELP, services.TCP, services.UDP, services.Journal, services.Accounting} {
+		ch.controllers[typ] = setupController(factory, typ)
+	}
 }
 
 // StartControllers starts all the processes that produce syslog messages.

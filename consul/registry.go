@@ -91,6 +91,12 @@ func (r *Registry) WaitFinished() {
 	r.wgroup.Wait()
 }
 
+func (r *Registry) RegisterTcpListeners(infos []model.ListenerInfo) {
+	for _, info := range infos {
+		r.RegisterTcpListener(info)
+	}
+}
+
 func (r *Registry) RegisterTcpListener(infos model.ListenerInfo) {
 	if infos.BindAddr == "" || infos.Port == 0 || infos.Protocol == "" {
 		return
@@ -99,6 +105,12 @@ func (r *Registry) RegisterTcpListener(infos model.ListenerInfo) {
 	if err == nil {
 		action := ServiceAction{Action: REGISTER, Service: svc}
 		r.RegisterChan <- action
+	}
+}
+
+func (r *Registry) UnregisterTcpListeners(infos []model.ListenerInfo) {
+	for _, info := range infos {
+		r.UnregisterTcpListener(info)
 	}
 }
 

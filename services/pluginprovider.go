@@ -24,8 +24,8 @@ func Wout(header []byte, msg []byte) (err error) {
 	return err
 }
 
-func Launch(typ NetworkServiceType, test bool, r kring.Ring, binderClient *binder.BinderClient, logger log15.Logger, pipe *os.File) error {
-	if r == nil {
+func Launch(typ NetworkServiceType, test bool, ring kring.Ring, binderClient *binder.BinderClient, logger log15.Logger, pipe *os.File) error {
+	if ring == nil {
 		return fmt.Errorf("No ring")
 	}
 	generator := utils.Generator(context.Background(), logger)
@@ -37,7 +37,7 @@ func Launch(typ NetworkServiceType, test bool, r kring.Ring, binderClient *binde
 	reporter := base.NewReporter(name, logger, pipe)
 	defer reporter.Stop()
 
-	svc := Factory(typ, r, reporter, generator, binderClient, logger, pipe)
+	svc := ProviderFactory(typ, ring, reporter, generator, binderClient, logger, pipe)
 	if svc == nil {
 		err := fmt.Errorf("The Service Factory returned 'nil' for plugin '%s'", name)
 		Wout(STARTERROR, []byte(err.Error()))
@@ -48,14 +48,13 @@ func Launch(typ NetworkServiceType, test bool, r kring.Ring, binderClient *binde
 
 	var globalConf conf.BaseConfig
 
-	signpubkey, err := r.GetSignaturePubkey()
+	signpubkey, err := ring.GetSignaturePubkey()
 	if err != nil {
 		return err
 	}
 
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Split(utils.MakeSignSplit(signpubkey))
-	//scanner.Split(utils.PluginSplit)
 
 	for scanner.Scan() {
 		select {
@@ -79,7 +78,7 @@ func Launch(typ NetworkServiceType, test bool, r kring.Ring, binderClient *binde
 			reporter.SetSecret(nil)
 			if globalConf.Main.EncryptIPC {
 				logger.Debug("Encrypting messages from plugin", "type", name)
-				secret, err := r.GetBoxSecret()
+				secret, err := ring.GetBoxSecret()
 				if err != nil {
 					Wout(STARTERROR, []byte(err.Error()))
 					return err

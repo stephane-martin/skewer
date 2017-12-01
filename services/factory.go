@@ -70,7 +70,7 @@ func ConfigureAndStartService(s NetworkService, c conf.BaseConfig, test bool) ([
 
 }
 
-func Factory(t NetworkServiceType, r kring.Ring, reporter *base.Reporter, gen chan ulid.ULID, b *binder.BinderClient, l log15.Logger, pipe *os.File) NetworkService {
+func ProviderFactory(t NetworkServiceType, r kring.Ring, reporter *base.Reporter, gen chan ulid.ULID, b *binder.BinderClient, l log15.Logger, pipe *os.File) NetworkService {
 	switch t {
 	case TCP:
 		return network.NewTcpService(reporter, gen, b, l)

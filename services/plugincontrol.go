@@ -53,7 +53,7 @@ type PluginController struct {
 
 	metricsChan chan []*dto.MetricFamily
 	stdin       io.WriteCloser
-	stdinMu     *sync.Mutex
+	stdinMu     sync.Mutex
 	stdinWriter *utils.SigWriter
 	signKey     *memguard.LockedBuffer
 	stdout      io.ReadCloser
@@ -63,29 +63,52 @@ type PluginController struct {
 	StopChan     chan struct{}
 	// ExitCode should be read only after ShutdownChan has been closed
 	ExitCode  int
-	startedMu *sync.Mutex
-	createdMu *sync.Mutex
+	startedMu sync.Mutex
+	createdMu sync.Mutex
 	started   bool
 	created   bool
 	ring      kring.Ring
 }
 
-func NewPluginController(typ NetworkServiceType, ring kring.Ring, signKey *memguard.LockedBuffer, stasher *StorePlugin, r *consul.Registry, bHandle int, lHandle int, l log15.Logger) *PluginController {
-	s := &PluginController{
+type CFactory struct {
+	ring     kring.Ring
+	signKey  *memguard.LockedBuffer
+	stasher  *StorePlugin
+	registry *consul.Registry
+	logger   log15.Logger
+}
+
+func ControllerFactory(ring kring.Ring, signKey *memguard.LockedBuffer, stasher *StorePlugin, registry *consul.Registry, logger log15.Logger) *CFactory {
+	f := CFactory{
+		ring:     ring,
+		signKey:  signKey,
+		stasher:  stasher,
+		registry: registry,
+		logger:   logger,
+	}
+	return &f
+}
+
+func (f *CFactory) New(typ NetworkServiceType, binderHandle int, loggerHandle int) *PluginController {
+	s := PluginController{
 		typ:          typ,
-		stasher:      stasher,
-		registry:     r,
-		binderHandle: bHandle,
-		loggerHandle: lHandle,
-		logger:       l,
-		stdinMu:      &sync.Mutex{},
-		startedMu:    &sync.Mutex{},
-		createdMu:    &sync.Mutex{},
-		signKey:      signKey,
-		ring:         ring,
+		stasher:      f.stasher,
+		registry:     f.registry,
+		binderHandle: binderHandle,
+		loggerHandle: loggerHandle,
+		logger:       f.logger,
+		signKey:      f.signKey,
+		ring:         f.ring,
 	}
 	s.metricsChan = make(chan []*dto.MetricFamily)
 	s.ShutdownChan = make(chan struct{})
+	return &s
+}
+
+func (f *CFactory) NewStore(loggerHandle int) *StorePlugin {
+	s := &StorePlugin{PluginController: f.New(Store, 0, loggerHandle)}
+	s.MessageQueue = queue.NewMessageQueue()
+	s.pushwg = &sync.WaitGroup{}
 	return s
 }
 
@@ -102,26 +125,27 @@ func (s *PluginController) W(header []byte, message []byte) (err error) {
 }
 
 // Gather asks the controlled plugin to report its metrics
-func (s *PluginController) Gather() ([]*dto.MetricFamily, error) {
+func (s *PluginController) Gather() (m []*dto.MetricFamily, err error) {
+	m = []*dto.MetricFamily{}
 	select {
 	case <-s.ShutdownChan:
-		return []*dto.MetricFamily{}, nil
+		return
 	default:
 		s.startedMu.Lock()
 		defer s.startedMu.Unlock()
 		if !s.started {
-			return []*dto.MetricFamily{}, nil
+			return
 		}
 		if s.W(GATHER, utils.NOW) != nil {
-			return []*dto.MetricFamily{}, nil
+			return
 		}
 
 		select {
 		case <-time.After(2 * time.Second):
-			return []*dto.MetricFamily{}, nil
+			return
 		case metrics, more := <-s.metricsChan:
 			if !more || metrics == nil {
-				return []*dto.MetricFamily{}, nil
+				return
 			}
 			return metrics, nil
 		}
@@ -261,21 +285,26 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 	startErrorChan := make(chan infosAndError)
 	name := ReverseNetworkServiceMap[s.typ]
 
+	var once sync.Once
+	startError := func(err error, infos []model.ListenerInfo) {
+		once.Do(func() {
+			startErrorChan <- infosAndError{
+				err:   err,
+				infos: infos,
+			}
+			close(startErrorChan)
+		})
+	}
+
 	go func() {
-		var once sync.Once
 		initialized := false
 		kill := false
 		normalStop := false
 
 		defer func() {
 			s.logger.Debug("Plugin controller is stopping", "type", name)
-			once.Do(func() {
-				startErrorChan <- infosAndError{
-					err:   fmt.Errorf("Unexpected end of plugin before it was initialized"),
-					infos: nil,
-				}
-				close(startErrorChan)
-			})
+			startError(fmt.Errorf("Unexpected end of plugin before it was initialized"), nil)
+
 			s.createdMu.Lock()
 			s.startedMu.Lock()
 			s.started = false
@@ -325,13 +354,7 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 					if !initialized {
 						msg := "Plugin sent a syslog message before being initialized"
 						s.logger.Error(msg)
-						once.Do(func() {
-							startErrorChan <- infosAndError{
-								err:   fmt.Errorf(msg),
-								infos: nil,
-							}
-							close(startErrorChan)
-						})
+						startError(fmt.Errorf(msg), nil)
 						kill = true
 						return
 					}
@@ -352,22 +375,10 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 					err := json.Unmarshal([]byte(parts[1]), &infos)
 					if err == nil {
 						initialized = true
-						once.Do(func() {
-							startErrorChan <- infosAndError{
-								infos: infos,
-								err:   nil,
-							}
-							close(startErrorChan)
-						})
+						startError(nil, infos)
 					} else {
 						s.logger.Warn("Plugin sent a badly encoded JSON listener info", "error", err)
-						once.Do(func() {
-							startErrorChan <- infosAndError{
-								infos: nil,
-								err:   err,
-							}
-							close(startErrorChan)
-						})
+						startError(err, nil)
 						kill = true
 						return
 					}
@@ -379,16 +390,8 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 					if err == nil {
 						s.logger.Info("reported infos", "infos", newinfos, "type", name)
 						if s.registry != nil {
-							if len(infos) > 0 {
-								for _, info := range infos {
-									s.registry.UnregisterTcpListener(info)
-								}
-							}
-							if len(newinfos) > 0 {
-								for _, info := range newinfos {
-									s.registry.RegisterTcpListener(info)
-								}
-							}
+							s.registry.UnregisterTcpListeners(infos)
+							s.registry.RegisterTcpListeners(newinfos)
 							infos = newinfos
 						}
 					}
@@ -401,34 +404,16 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 			case "starterror":
 				if len(parts) == 2 {
 					err := fmt.Errorf(string(parts[1]))
-					once.Do(func() {
-						startErrorChan <- infosAndError{
-							infos: nil,
-							err:   err,
-						}
-						close(startErrorChan)
-					})
+					startError(err, nil)
 				}
 			case "conferror":
 				if len(parts) == 2 {
 					err := fmt.Errorf(string(parts[1]))
-					once.Do(func() {
-						startErrorChan <- infosAndError{
-							infos: nil,
-							err:   err,
-						}
-						close(startErrorChan)
-					})
+					startError(err, nil)
 				}
 			case "nolistenererror":
 				err := fmt.Errorf("No listener")
-				once.Do(func() {
-					startErrorChan <- infosAndError{
-						infos: nil,
-						err:   err,
-					}
-					close(startErrorChan)
-				})
+				startError(err, nil)
 			case "metrics":
 				if len(parts) == 2 {
 					families := []*dto.MetricFamily{}
@@ -450,13 +435,7 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 			default:
 				err := fmt.Errorf("Unexpected message from plugin")
 				s.logger.Error("Unexpected message from plugin", "command", command)
-				once.Do(func() {
-					startErrorChan <- infosAndError{
-						infos: nil,
-						err:   err,
-					}
-					close(startErrorChan)
-				})
+				startError(err, nil)
 				kill = true
 				return
 			}
@@ -471,13 +450,7 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 			<-s.ShutdownChan
 		} else {
 			// plugin has sent an invalid message that could not be interpreted by scanner
-			once.Do(func() {
-				startErrorChan <- infosAndError{
-					infos: nil,
-					err:   err,
-				}
-				close(startErrorChan)
-			})
+			startError(err, nil)
 			if err == io.EOF || err == io.ErrClosedPipe || err == io.ErrUnexpectedEOF || err == os.ErrClosed {
 				<-s.ShutdownChan
 			} else {
@@ -813,14 +786,6 @@ func (s *StorePlugin) Stash(m model.FullMessage) {
 	// this method is called very frequently, so we avoid to lock anything
 	// the MessageQueue ensures that we write the messages sequentially to the store child
 	s.MessageQueue.Put(m)
-}
-
-// NewStorePlugin creates a new Store controller.
-func NewStorePlugin(r kring.Ring, signKey *memguard.LockedBuffer, loggerHandle int, l log15.Logger) *StorePlugin {
-	s := &StorePlugin{PluginController: NewPluginController(Store, r, signKey, nil, nil, 0, loggerHandle, l)}
-	s.MessageQueue = queue.NewMessageQueue()
-	s.pushwg = &sync.WaitGroup{}
-	return s
 }
 
 func (s *StorePlugin) Start() (infos []model.ListenerInfo, err error) {
