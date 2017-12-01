@@ -236,18 +236,17 @@ func (s *PluginController) listenpipe(secret *memguard.LockedBuffer) {
 	}()
 
 	var err error
+	var buf []byte
 	var message model.FullMessage
 
 	for scanner.Scan() {
-		message = model.FullMessage{}
-		_, err = message.UnmarshalMsg(scanner.Bytes())
-		//err = message.Decrypt(s.secret, scanner.Bytes())
-		if err == nil {
-			s.stasher.Stash(message)
-		} else {
+		buf = scanner.Bytes()
+		_, err = message.UnmarshalMsg(buf)
+		if err != nil {
 			s.logger.Error("Unexpected error decrypting message from the plugin pipe", "type", name, "error", err)
 			return
 		}
+		s.stasher.Stash(message)
 
 	}
 	err = scanner.Err()
@@ -758,7 +757,8 @@ func (s *StorePlugin) pushqueue(secret *memguard.LockedBuffer) {
 	var message *model.FullMessage
 	var messageb []byte
 	var err error
-	writeToStore := utils.NewEncryptWriter(s.pipe, secret)
+	bufpipe := bufio.NewWriter(s.pipe)
+	writeToStore := utils.NewEncryptWriter(bufpipe, secret)
 
 	for {
 		messages = s.MessageQueue.GetMany(1000)
@@ -776,6 +776,11 @@ func (s *StorePlugin) pushqueue(secret *memguard.LockedBuffer) {
 			} else {
 				s.logger.Warn("A message provided by a plugin could not be serialized", "error", err)
 			}
+		}
+		err = bufpipe.Flush()
+		if err != nil {
+			s.logger.Error("Unexpected error when flushing the Store pipe", "error", err)
+			return
 		}
 	}
 }

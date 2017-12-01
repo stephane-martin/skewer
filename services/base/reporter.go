@@ -1,9 +1,11 @@
 package base
 
 import (
+	"bufio"
 	"encoding/json"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/awnumar/memguard"
 	"github.com/inconshreveable/log15"
@@ -36,6 +38,7 @@ type Reporter struct {
 	name         string
 	logger       log15.Logger
 	pipe         *os.File
+	bufferedPipe *bufio.Writer
 	queue        *queue.MessageQueue
 	secret       *memguard.LockedBuffer
 	stdoutWriter *utils.EncryptWriter
@@ -45,9 +48,10 @@ type Reporter struct {
 // NewReporter creates a controller.
 func NewReporter(name string, l log15.Logger, pipe *os.File) *Reporter {
 	rep := Reporter{
-		name:   name,
-		logger: l,
-		pipe:   pipe,
+		name:         name,
+		logger:       l,
+		pipe:         pipe,
+		bufferedPipe: bufio.NewWriter(pipe),
 	}
 	return &rep
 }
@@ -62,7 +66,7 @@ func (s *Reporter) Start() {
 func (s *Reporter) SetSecret(secret *memguard.LockedBuffer) {
 	s.secret = secret
 	s.stdoutWriter = utils.NewEncryptWriter(os.Stdout, s.secret)
-	s.pipeWriter = utils.NewEncryptWriter(s.pipe, s.secret)
+	s.pipeWriter = utils.NewEncryptWriter(s.bufferedPipe, s.secret)
 }
 
 func (s *Reporter) pushqueue() {
@@ -77,20 +81,26 @@ func (s *Reporter) pushqueue() {
 	}()
 
 	for s.queue.Wait(0) {
-		m, err = s.queue.Get()
-		if m != nil && err == nil {
-			b, err = m.MarshalMsg(nil)
-			if err != nil {
-				// should not happen
-				s.logger.Warn("A syslog message could not be serialized", "type", s.name, "error", err)
-				return
+		for s.queue.Wait(100 * time.Millisecond) {
+			m, err = s.queue.Get()
+			if m != nil && err == nil {
+				b, err = m.MarshalMsg(nil)
+				if err != nil {
+					// should not happen
+					s.logger.Warn("A syslog message could not be serialized", "type", s.name, "error", err)
+					return
+				}
+				_, err = s.pipeWriter.Write(b)
+				if err != nil {
+					s.logger.Crit("Unexpected error when writing messages to the plugin pipe", "error", err)
+					return
+				}
 			}
-			// LEN ENCRYPTEDMSG
-			_, err = s.pipeWriter.Write(b)
-			if err != nil {
-				s.logger.Crit("Unexpected error when writing messages to the plugin pipe", "error", err)
-				return
-			}
+		}
+		err = s.bufferedPipe.Flush()
+		if err != nil {
+			s.logger.Crit("Unexpected error when flushing the plugin pipe", "error", err)
+			return
 		}
 	}
 }
