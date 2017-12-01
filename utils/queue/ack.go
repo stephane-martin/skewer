@@ -52,9 +52,9 @@ func (q *AckQueue) Get() (ulid.ULID, conf.DestinationType, error) {
 		q.pool.Put(tail)
 		return next.uid, next.dest, nil
 	} else if q.Disposed() {
-		return utils.EmptyUid, 0, utils.ErrDisposed
+		return utils.EmptyUID, 0, utils.ErrDisposed
 	}
-	return utils.EmptyUid, 0, nil
+	return utils.EmptyUID, 0, nil
 }
 
 func (q *AckQueue) Put(uid ulid.ULID, dest conf.DestinationType) error {
@@ -128,7 +128,7 @@ func (q *AckQueue) GetMany(max int) (res []UidDest) {
 	res = make([]UidDest, 0, max)
 	for {
 		uid, dest, err = q.Get()
-		if uid == utils.EmptyUid || err != nil {
+		if uid == utils.EmptyUID || err != nil {
 			break
 		}
 		res = append(res, UidDest{Uid: uid, Dest: dest})

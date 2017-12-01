@@ -1,5 +1,6 @@
 package utils
 
+// RoundUp rounds the provided int to the next power of 2.
 func RoundUp(v uint64) uint64 {
 	v--
 	v |= v >> 1

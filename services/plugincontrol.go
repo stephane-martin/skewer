@@ -53,6 +53,9 @@ type PluginController struct {
 
 	metricsChan chan []*dto.MetricFamily
 	stdin       io.WriteCloser
+	stdinMu     *sync.Mutex
+	stdinWriter *utils.SigWriter
+	signKey     *memguard.LockedBuffer
 	stdout      io.ReadCloser
 	cmd         *exec.Cmd
 
@@ -60,13 +63,11 @@ type PluginController struct {
 	StopChan     chan struct{}
 	// ExitCode should be read only after ShutdownChan has been closed
 	ExitCode  int
-	stdinMu   *sync.Mutex
 	startedMu *sync.Mutex
 	createdMu *sync.Mutex
 	started   bool
 	created   bool
 	ring      kring.Ring
-	signKey   *memguard.LockedBuffer
 }
 
 func NewPluginController(typ NetworkServiceType, ring kring.Ring, signKey *memguard.LockedBuffer, stasher *StorePlugin, r *consul.Registry, bHandle int, lHandle int, l log15.Logger) *PluginController {
@@ -91,9 +92,8 @@ func NewPluginController(typ NetworkServiceType, ring kring.Ring, signKey *memgu
 // W encodes an writes a message to the controlled plugin via stdin
 func (s *PluginController) W(header []byte, message []byte) (err error) {
 	s.stdinMu.Lock()
-	if s.stdin != nil {
-		err = utils.WSign(s.stdin, header, message, s.signKey)
-		//err = utils.W(s.stdin, header, message, nil)
+	if s.stdinWriter != nil {
+		err = s.stdinWriter.WriteWithHeader(header, message)
 	} else {
 		err = fmt.Errorf("stdin is nil")
 	}
@@ -209,7 +209,7 @@ func (s *PluginController) kill(misbevave bool) {
 	s.stdinMu.Unlock()
 }
 
-type InfosAndError struct {
+type infosAndError struct {
 	infos []model.ListenerInfo
 	err   error
 }
@@ -258,8 +258,8 @@ func (s *PluginController) listenpipe(secret *memguard.LockedBuffer) {
 	}
 }
 
-func (s *PluginController) listen(secret *memguard.LockedBuffer) chan InfosAndError {
-	startErrorChan := make(chan InfosAndError)
+func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndError {
+	startErrorChan := make(chan infosAndError)
 	name := ReverseNetworkServiceMap[s.typ]
 
 	go func() {
@@ -271,7 +271,7 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan InfosAndEr
 		defer func() {
 			s.logger.Debug("Plugin controller is stopping", "type", name)
 			once.Do(func() {
-				startErrorChan <- InfosAndError{
+				startErrorChan <- infosAndError{
 					err:   fmt.Errorf("Unexpected end of plugin before it was initialized"),
 					infos: nil,
 				}
@@ -327,7 +327,7 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan InfosAndEr
 						msg := "Plugin sent a syslog message before being initialized"
 						s.logger.Error(msg)
 						once.Do(func() {
-							startErrorChan <- InfosAndError{
+							startErrorChan <- infosAndError{
 								err:   fmt.Errorf(msg),
 								infos: nil,
 							}
@@ -354,7 +354,7 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan InfosAndEr
 					if err == nil {
 						initialized = true
 						once.Do(func() {
-							startErrorChan <- InfosAndError{
+							startErrorChan <- infosAndError{
 								infos: infos,
 								err:   nil,
 							}
@@ -363,7 +363,7 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan InfosAndEr
 					} else {
 						s.logger.Warn("Plugin sent a badly encoded JSON listener info", "error", err)
 						once.Do(func() {
-							startErrorChan <- InfosAndError{
+							startErrorChan <- infosAndError{
 								infos: nil,
 								err:   err,
 							}
@@ -403,7 +403,7 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan InfosAndEr
 				if len(parts) == 2 {
 					err := fmt.Errorf(string(parts[1]))
 					once.Do(func() {
-						startErrorChan <- InfosAndError{
+						startErrorChan <- infosAndError{
 							infos: nil,
 							err:   err,
 						}
@@ -414,7 +414,7 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan InfosAndEr
 				if len(parts) == 2 {
 					err := fmt.Errorf(string(parts[1]))
 					once.Do(func() {
-						startErrorChan <- InfosAndError{
+						startErrorChan <- infosAndError{
 							infos: nil,
 							err:   err,
 						}
@@ -424,7 +424,7 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan InfosAndEr
 			case "nolistenererror":
 				err := fmt.Errorf("No listener")
 				once.Do(func() {
-					startErrorChan <- InfosAndError{
+					startErrorChan <- infosAndError{
 						infos: nil,
 						err:   err,
 					}
@@ -452,7 +452,7 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan InfosAndEr
 				err := fmt.Errorf("Unexpected message from plugin")
 				s.logger.Error("Unexpected message from plugin", "command", command)
 				once.Do(func() {
-					startErrorChan <- InfosAndError{
+					startErrorChan <- infosAndError{
 						infos: nil,
 						err:   err,
 					}
@@ -473,7 +473,7 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan InfosAndEr
 		} else {
 			// plugin has sent an invalid message that could not be interpreted by scanner
 			once.Do(func() {
-				startErrorChan <- InfosAndError{
+				startErrorChan <- infosAndError{
 					infos: nil,
 					err:   err,
 				}
@@ -716,6 +716,7 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 		s.createdMu.Unlock()
 		return err
 	}
+	s.stdinWriter = utils.NewSignatureWriter(s.stdin, s.signKey)
 	s.created = true
 	s.createdMu.Unlock()
 
@@ -757,6 +758,8 @@ func (s *StorePlugin) pushqueue(secret *memguard.LockedBuffer) {
 	var message *model.FullMessage
 	var messageb []byte
 	var err error
+	writeToStore := utils.NewEncryptWriter(s.pipe, secret)
+
 	for {
 		messages = s.MessageQueue.GetMany(1000)
 		if len(messages) == 0 {
@@ -765,7 +768,7 @@ func (s *StorePlugin) pushqueue(secret *memguard.LockedBuffer) {
 		for _, message = range messages {
 			messageb, err = message.MarshalMsg(nil)
 			if err == nil {
-				err = utils.W(s.pipe, nil, messageb, secret)
+				_, err = writeToStore.Write(messageb)
 				if err != nil {
 					s.logger.Error("Unexpected error when writing messages to the Store pipe", "error", err)
 					return

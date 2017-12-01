@@ -243,6 +243,10 @@ func execServeParent() (err error) {
 	loggingCtx, loggingCancel := context.WithCancel(context.Background())
 	logger.Debug("Receiving from remote loggers", "nb", len(remoteLoggerConn))
 	loggingWg := logging.LogReceiver(loggingCtx, boxsecret, rootlogger, remoteLoggerConn)
+	defer func() {
+		loggingCancel()
+		loggingWg.Wait()
+	}()
 
 	logger.Debug("Target user", "uid", numuid, "gid", numgid)
 
@@ -295,10 +299,10 @@ func execServeParent() (err error) {
 	ring.WriteRingPass(wOpenBsdSecretPipe)
 	wOpenBsdSecretPipe.Close()
 
-	sig_chan := make(chan os.Signal, 10)
+	sigChan := make(chan os.Signal, 10)
 	once := sync.Once{}
 	go func() {
-		for sig := range sig_chan {
+		for sig := range sigChan {
 			logger.Debug("parent received signal", "signal", sig)
 			switch sig {
 			case syscall.SIGTERM:
@@ -317,12 +321,10 @@ func execServeParent() (err error) {
 			}
 		}
 	}()
-	signal.Notify(sig_chan, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT, syscall.SIGUSR1)
+	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT, syscall.SIGUSR1)
 	logger.Debug("PIDs", "parent", os.Getpid(), "child", childProcess.Process.Pid)
 
 	childProcess.Process.Wait()
-	loggingCancel()
-	loggingWg.Wait()
 	return nil
 }
 
@@ -375,11 +377,11 @@ func fixLinuxParentPrivileges(logger log15.Logger) {
 		if err != nil && err != pflag.ErrHelp {
 			cleanup("Error parsing flags", err, logger, nil)
 		}
-		need_fix, err := capabilities.NeedFixLinuxPrivileges(cmd.UidFlag, cmd.GidFlag)
+		needFix, err := capabilities.NeedFixLinuxPrivileges(cmd.UidFlag, cmd.GidFlag)
 		if err != nil {
 			cleanup("Error dropping privileges", err, logger, nil)
 		}
-		if need_fix {
+		if needFix {
 			err = capabilities.FixLinuxPrivileges(cmd.UidFlag, cmd.GidFlag)
 			if err != nil {
 				cleanup("Error dropping privileges", err, logger, nil)

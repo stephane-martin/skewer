@@ -5,6 +5,7 @@ import "golang.org/x/text/encoding/unicode"
 import "golang.org/x/text/encoding/charmap"
 import "golang.org/x/text/encoding"
 
+// SelectDecoder returns a decoder from the provided coding string/
 func SelectDecoder(coding string) *encoding.Decoder {
 	coding = strings.TrimSpace(strings.ToLower(strings.Replace(coding, "-", "", -1)))
 	var enc encoding.Encoding

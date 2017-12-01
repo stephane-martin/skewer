@@ -17,6 +17,13 @@ import (
 	"github.com/stephane-martin/skewer/utils"
 )
 
+func Wout(header []byte, msg []byte) (err error) {
+	stdoutMu.Lock()
+	err = stdoutWriter.WriteWithHeader(header, msg)
+	stdoutMu.Unlock()
+	return err
+}
+
 func Launch(typ NetworkServiceType, test bool, r kring.Ring, binderClient *binder.BinderClient, logger log15.Logger, pipe *os.File) error {
 	if r == nil {
 		return fmt.Errorf("No ring")
@@ -33,7 +40,7 @@ func Launch(typ NetworkServiceType, test bool, r kring.Ring, binderClient *binde
 	svc := Factory(typ, r, reporter, generator, binderClient, logger, pipe)
 	if svc == nil {
 		err := fmt.Errorf("The Service Factory returned 'nil' for plugin '%s'", name)
-		base.Wout(STARTERROR, []byte(err.Error()), nil)
+		Wout(STARTERROR, []byte(err.Error()))
 		return err
 	}
 
@@ -54,7 +61,7 @@ func Launch(typ NetworkServiceType, test bool, r kring.Ring, binderClient *binde
 		select {
 		case <-fatalChan:
 			svc.Shutdown()
-			base.Wout(SHUTDOWN, []byte("fatal"), nil)
+			Wout(SHUTDOWN, []byte("fatal"))
 			return fmt.Errorf("Store fatal error in plugin '%s'", name)
 		default:
 		}
@@ -65,36 +72,36 @@ func Launch(typ NetworkServiceType, test bool, r kring.Ring, binderClient *binde
 		case "start":
 			if !hasConf {
 				err := fmt.Errorf("Configuration was not provided to plugin '%s' before start", name)
-				base.Wout([]byte("syslogconferror"), []byte(err.Error()), nil)
+				Wout([]byte("syslogconferror"), []byte(err.Error()))
 				return err
 			}
+
+			reporter.SetSecret(nil)
 			if globalConf.Main.EncryptIPC {
 				logger.Debug("Encrypting messages from plugin", "type", name)
 				secret, err := r.GetBoxSecret()
 				if err != nil {
-					base.Wout(STARTERROR, []byte(err.Error()), nil)
+					Wout(STARTERROR, []byte(err.Error()))
 					return err
 				}
 				reporter.SetSecret(secret)
-			} else {
-				reporter.SetSecret(nil)
 			}
 			reporter.Start()
 			infos, err := ConfigureAndStartService(svc, globalConf, test)
 			if err != nil {
-				base.Wout(STARTERROR, []byte(err.Error()), nil)
+				Wout(STARTERROR, []byte(err.Error()))
 				return err
 			} else if len(infos) == 0 && (typ == TCP || typ == UDP) {
 				// only TCP and UDP directly report info about their effective listening ports
 				svc.Stop()
-				base.Wout([]byte("nolistenererror"), []byte("plugin is inactive"), nil)
+				Wout([]byte("nolistenererror"), []byte("plugin is inactive"))
 			} else if typ == TCP {
 				infosb, _ := json.Marshal(infos)
-				base.Wout(STARTED, infosb, nil)
+				Wout(STARTED, infosb)
 				reporter.Report(infos)
 			} else {
 				infosb, _ := json.Marshal(infos)
-				base.Wout(STARTED, infosb, nil)
+				Wout(STARTED, infosb)
 			}
 			if typ == Store {
 				// monitor the Store fatal errors
@@ -102,13 +109,13 @@ func Launch(typ NetworkServiceType, test bool, r kring.Ring, binderClient *binde
 			}
 		case "stop":
 			svc.Stop()
-			base.Wout(STOPPED, base.SUCC, nil)
+			Wout(STOPPED, base.SUCC)
 			// here we *do not return*. So the plugin process continues to live
 			// and to listen for subsequent control commands
 		case "shutdown":
 			logger.Debug("provider is asked to stop", "type", name)
 			svc.Shutdown()
-			base.Wout(SHUTDOWN, base.SUCC, nil)
+			Wout(SHUTDOWN, base.SUCC)
 			// at the end of shutdown command, we *return*. So the plugin
 			// process stops right now.
 			return nil
@@ -119,7 +126,7 @@ func Launch(typ NetworkServiceType, test bool, r kring.Ring, binderClient *binde
 				globalConf = c
 				hasConf = true
 			} else {
-				base.Wout(CONFERROR, []byte(err.Error()), nil)
+				Wout(CONFERROR, []byte(err.Error()))
 				return err
 			}
 		case "gathermetrics":
@@ -134,7 +141,7 @@ func Launch(typ NetworkServiceType, test bool, r kring.Ring, binderClient *binde
 				logger.Warn("Error marshaling metrics", "type", name, "error", err)
 				familiesb, _ = json.Marshal(empty)
 			}
-			err = base.Wout(METRICS, familiesb, nil)
+			err = Wout(METRICS, familiesb)
 			if err != nil {
 				logger.Crit("Could not write metrics to upstream", "type", name, "error", err)
 				return err

@@ -15,20 +15,42 @@ import (
 var NOW []byte = []byte("now")
 var SP []byte = []byte(" ")
 
-func WSign(dest io.Writer, header []byte, message []byte, privsignkey *memguard.LockedBuffer) (err error) {
+type SigWriter struct {
+	dest io.Writer
+	key  *memguard.LockedBuffer
+}
+
+func NewSignatureWriter(dest io.Writer, privsignkey *memguard.LockedBuffer) *SigWriter {
+	return &SigWriter{dest: dest, key: privsignkey}
+}
+
+func (s *SigWriter) Write(p []byte) (n int, err error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	signature := ed25519.Sign(s.key.Buffer(), p)
+	err = ChainWrites(
+		s.dest,
+		[]byte(fmt.Sprintf("%010d %010d ", len(p), len(signature))),
+		p,
+		signature,
+	)
+	if err == nil {
+		return len(p), nil
+	}
+	return 0, err
+}
+
+func (s *SigWriter) WriteWithHeader(header []byte, message []byte) (err error) {
 	fullmessage := make([]byte, 0, len(header)+len(message)+1)
 	fullmessage = append(fullmessage, header...)
 	fullmessage = append(fullmessage, SP...)
 	fullmessage = append(fullmessage, message...)
-	signature := ed25519.Sign(privsignkey.Buffer(), fullmessage)
-	return ChainWrites(
-		dest,
-		[]byte(fmt.Sprintf("%010d %010d ", len(fullmessage), len(signature))),
-		fullmessage,
-		signature,
-	)
+	_, err = s.Write(fullmessage)
+	return err
 }
 
+// MakeSignSplit returns a split function that checks for message signatures.
 func MakeSignSplit(signpubkey *memguard.LockedBuffer) (signSplit bufio.SplitFunc) {
 
 	signSplit = func(data []byte, atEOF bool) (advance int, token []byte, eoferr error) {
@@ -76,6 +98,50 @@ func MakeSignSplit(signpubkey *memguard.LockedBuffer) (signSplit bufio.SplitFunc
 	return signSplit
 }
 
+type EncryptWriter struct {
+	dest io.Writer
+	key  *memguard.LockedBuffer
+}
+
+func NewEncryptWriter(dest io.Writer, encryptkey *memguard.LockedBuffer) *EncryptWriter {
+	return &EncryptWriter{dest: dest, key: encryptkey}
+}
+
+func (s *EncryptWriter) Write(p []byte) (n int, err error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	var enc []byte
+	if s.key == nil {
+		enc = p
+	} else {
+		enc, err = sbox.Encrypt(p, s.key)
+		if err != nil {
+			return 0, err
+		}
+	}
+	err = ChainWrites(
+		s.dest,
+		[]byte(fmt.Sprintf("%010d ", len(enc))),
+		enc,
+	)
+	if err == nil {
+		return len(p), nil
+	}
+	return 0, err
+}
+
+func (s *EncryptWriter) WriteWithHeader(header []byte, message []byte) (err error) {
+	fullmessage := make([]byte, 0, len(header)+len(message)+1)
+	fullmessage = append(fullmessage, header...)
+	fullmessage = append(fullmessage, SP...)
+	fullmessage = append(fullmessage, message...)
+	_, err = s.Write(fullmessage)
+	return err
+}
+
+/*
+// W encrypts the provided message and writes it to some Writer.
 func W(dest io.Writer, header []byte, message []byte, secret *memguard.LockedBuffer) (err error) {
 	var enc []byte
 	if secret == nil {
@@ -101,7 +167,9 @@ func W(dest io.Writer, header []byte, message []byte, secret *memguard.LockedBuf
 		enc,
 	)
 }
+*/
 
+// MakeDecryptSplit returns a aplit function that extracts and decrypts messages.
 func MakeDecryptSplit(secret *memguard.LockedBuffer) bufio.SplitFunc {
 	spl := func(data []byte, atEOF bool) (int, []byte, error) {
 		adv, tok, err := PluginSplit(data, atEOF)
@@ -117,6 +185,7 @@ func MakeDecryptSplit(secret *memguard.LockedBuffer) bufio.SplitFunc {
 	return spl
 }
 
+// PluginSplit is a split function used by plugins.
 func PluginSplit(data []byte, atEOF bool) (advance int, token []byte, eoferr error) {
 	if atEOF {
 		eoferr = io.EOF

@@ -9,6 +9,7 @@ import (
 	"github.com/oklog/ulid"
 )
 
+// Generator returns a channel that produces new ULIDs.
 func Generator(ctx context.Context, logger log15.Logger) (out chan ulid.ULID) {
 	out = make(chan ulid.ULID)
 
@@ -38,6 +39,7 @@ func Generator(ctx context.Context, logger log15.Logger) (out chan ulid.ULID) {
 	return out
 }
 
+// NewUid returns a random ULID.
 func NewUid() (uid ulid.ULID) {
 	uid, _ = ulid.New(ulid.Timestamp(time.Now()), rand.New(rand.NewSource(time.Now().UnixNano())))
 	return uid

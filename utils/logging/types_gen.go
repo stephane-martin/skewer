@@ -12,13 +12,13 @@ import (
 func (z *Record) DecodeMsg(dc *msgp.Reader) (err error) {
 	var field []byte
 	_ = field
-	var zb0001 uint32
-	zb0001, err = dc.ReadMapHeader()
+	var zbai uint32
+	zbai, err = dc.ReadMapHeader()
 	if err != nil {
 		return
 	}
-	for zb0001 > 0 {
-		zb0001--
+	for zbai > 0 {
+		zbai--
 		field, err = dc.ReadMapKeyPtr()
 		if err != nil {
 			return
@@ -40,31 +40,31 @@ func (z *Record) DecodeMsg(dc *msgp.Reader) (err error) {
 				return
 			}
 		case "Ctx":
-			var zb0002 uint32
-			zb0002, err = dc.ReadMapHeader()
+			var zcmr uint32
+			zcmr, err = dc.ReadMapHeader()
 			if err != nil {
 				return
 			}
-			if z.Ctx == nil && zb0002 > 0 {
-				z.Ctx = make(map[string]string, zb0002)
+			if z.Ctx == nil && zcmr > 0 {
+				z.Ctx = make(map[string]string, zcmr)
 			} else if len(z.Ctx) > 0 {
 				for key, _ := range z.Ctx {
 					delete(z.Ctx, key)
 				}
 			}
-			for zb0002 > 0 {
-				zb0002--
-				var za0001 string
-				var za0002 string
-				za0001, err = dc.ReadString()
+			for zcmr > 0 {
+				zcmr--
+				var zxvk string
+				var zbzg string
+				zxvk, err = dc.ReadString()
 				if err != nil {
 					return
 				}
-				za0002, err = dc.ReadString()
+				zbzg, err = dc.ReadString()
 				if err != nil {
 					return
 				}
-				z.Ctx[za0001] = za0002
+				z.Ctx[zxvk] = zbzg
 			}
 		default:
 			err = dc.Skip()
@@ -115,12 +115,12 @@ func (z *Record) EncodeMsg(en *msgp.Writer) (err error) {
 	if err != nil {
 		return
 	}
-	for za0001, za0002 := range z.Ctx {
-		err = en.WriteString(za0001)
+	for zxvk, zbzg := range z.Ctx {
+		err = en.WriteString(zxvk)
 		if err != nil {
 			return
 		}
-		err = en.WriteString(za0002)
+		err = en.WriteString(zbzg)
 		if err != nil {
 			return
 		}
@@ -144,9 +144,9 @@ func (z *Record) MarshalMsg(b []byte) (o []byte, err error) {
 	// string "Ctx"
 	o = append(o, 0xa3, 0x43, 0x74, 0x78)
 	o = msgp.AppendMapHeader(o, uint32(len(z.Ctx)))
-	for za0001, za0002 := range z.Ctx {
-		o = msgp.AppendString(o, za0001)
-		o = msgp.AppendString(o, za0002)
+	for zxvk, zbzg := range z.Ctx {
+		o = msgp.AppendString(o, zxvk)
+		o = msgp.AppendString(o, zbzg)
 	}
 	return
 }
@@ -155,13 +155,13 @@ func (z *Record) MarshalMsg(b []byte) (o []byte, err error) {
 func (z *Record) UnmarshalMsg(bts []byte) (o []byte, err error) {
 	var field []byte
 	_ = field
-	var zb0001 uint32
-	zb0001, bts, err = msgp.ReadMapHeaderBytes(bts)
+	var zajw uint32
+	zajw, bts, err = msgp.ReadMapHeaderBytes(bts)
 	if err != nil {
 		return
 	}
-	for zb0001 > 0 {
-		zb0001--
+	for zajw > 0 {
+		zajw--
 		field, bts, err = msgp.ReadMapKeyZC(bts)
 		if err != nil {
 			return
@@ -183,31 +183,31 @@ func (z *Record) UnmarshalMsg(bts []byte) (o []byte, err error) {
 				return
 			}
 		case "Ctx":
-			var zb0002 uint32
-			zb0002, bts, err = msgp.ReadMapHeaderBytes(bts)
+			var zwht uint32
+			zwht, bts, err = msgp.ReadMapHeaderBytes(bts)
 			if err != nil {
 				return
 			}
-			if z.Ctx == nil && zb0002 > 0 {
-				z.Ctx = make(map[string]string, zb0002)
+			if z.Ctx == nil && zwht > 0 {
+				z.Ctx = make(map[string]string, zwht)
 			} else if len(z.Ctx) > 0 {
 				for key, _ := range z.Ctx {
 					delete(z.Ctx, key)
 				}
 			}
-			for zb0002 > 0 {
-				var za0001 string
-				var za0002 string
-				zb0002--
-				za0001, bts, err = msgp.ReadStringBytes(bts)
+			for zwht > 0 {
+				var zxvk string
+				var zbzg string
+				zwht--
+				zxvk, bts, err = msgp.ReadStringBytes(bts)
 				if err != nil {
 					return
 				}
-				za0002, bts, err = msgp.ReadStringBytes(bts)
+				zbzg, bts, err = msgp.ReadStringBytes(bts)
 				if err != nil {
 					return
 				}
-				z.Ctx[za0001] = za0002
+				z.Ctx[zxvk] = zbzg
 			}
 		default:
 			bts, err = msgp.Skip(bts)
@@ -224,9 +224,9 @@ func (z *Record) UnmarshalMsg(bts []byte) (o []byte, err error) {
 func (z *Record) Msgsize() (s int) {
 	s = 1 + 5 + msgp.TimeSize + 4 + msgp.IntSize + 4 + msgp.StringPrefixSize + len(z.Msg) + 4 + msgp.MapHeaderSize
 	if z.Ctx != nil {
-		for za0001, za0002 := range z.Ctx {
-			_ = za0002
-			s += msgp.StringPrefixSize + len(za0001) + msgp.StringPrefixSize + len(za0002)
+		for zxvk, zbzg := range z.Ctx {
+			_ = zbzg
+			s += msgp.StringPrefixSize + len(zxvk) + msgp.StringPrefixSize + len(zbzg)
 		}
 	}
 	return

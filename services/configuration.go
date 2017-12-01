@@ -24,10 +24,15 @@ import (
 )
 
 var stdoutMu sync.Mutex
+var stdoutWriter *utils.EncryptWriter
+
+func init() {
+	stdoutWriter = utils.NewEncryptWriter(os.Stdout, nil)
+}
 
 func WConf(header []byte, message []byte) (err error) {
 	stdoutMu.Lock()
-	err = utils.W(os.Stdout, header, message, nil)
+	err = stdoutWriter.WriteWithHeader(header, message)
 	stdoutMu.Unlock()
 	return err
 }
@@ -41,6 +46,7 @@ type ConfigurationService struct {
 	confdir      string
 	loggerHandle int
 	signKey      *memguard.LockedBuffer
+	stdinWriter  *utils.SigWriter
 }
 
 func NewConfigurationService(signKey *memguard.LockedBuffer, childLoggerHandle int, l log15.Logger) *ConfigurationService {
@@ -55,9 +61,8 @@ func NewConfigurationService(signKey *memguard.LockedBuffer, childLoggerHandle i
 
 func (c *ConfigurationService) W(header []byte, message []byte) (err error) {
 	c.stdinMu.Lock()
-	if c.stdin != nil {
-		err = utils.WSign(c.stdin, header, message, c.signKey)
-		//err = utils.W(c.stdin, header, message, nil)
+	if c.stdinWriter != nil {
+		err = c.stdinWriter.WriteWithHeader(header, message)
 	} else {
 		err = fmt.Errorf("stdin is nil")
 	}
@@ -128,6 +133,7 @@ func (c *ConfigurationService) Start(r kring.Ring) error {
 		return err
 	}
 	c.stdin = stdin
+	c.stdinWriter = utils.NewSignatureWriter(stdin, c.signKey)
 
 	startedChan := make(chan error)
 

@@ -20,6 +20,7 @@ var SYSLOG = []byte("syslog")
 var INFOS = []byte("infos")
 var SP = []byte(" ")
 
+/*
 // Wout writes a message to the controller via stdout
 func Wout(header []byte, m []byte, secret *memguard.LockedBuffer) (err error) {
 	stdoutLock.Lock()
@@ -28,19 +29,26 @@ func Wout(header []byte, m []byte, secret *memguard.LockedBuffer) (err error) {
 	stdoutLock.Unlock()
 	return
 }
+*/
 
 // Reporter is used by plugins to report new syslog messages to the controller.
 type Reporter struct {
-	name   string
-	logger log15.Logger
-	pipe   *os.File
-	queue  *queue.MessageQueue
-	secret *memguard.LockedBuffer
+	name         string
+	logger       log15.Logger
+	pipe         *os.File
+	queue        *queue.MessageQueue
+	secret       *memguard.LockedBuffer
+	stdoutWriter *utils.EncryptWriter
+	pipeWriter   *utils.EncryptWriter
 }
 
 // NewReporter creates a controller.
 func NewReporter(name string, l log15.Logger, pipe *os.File) *Reporter {
-	rep := Reporter{name: name, logger: l, pipe: pipe}
+	rep := Reporter{
+		name:   name,
+		logger: l,
+		pipe:   pipe,
+	}
 	return &rep
 }
 
@@ -53,6 +61,8 @@ func (s *Reporter) Start() {
 
 func (s *Reporter) SetSecret(secret *memguard.LockedBuffer) {
 	s.secret = secret
+	s.stdoutWriter = utils.NewEncryptWriter(os.Stdout, s.secret)
+	s.pipeWriter = utils.NewEncryptWriter(s.pipe, s.secret)
 }
 
 func (s *Reporter) pushqueue() {
@@ -76,7 +86,7 @@ func (s *Reporter) pushqueue() {
 				return
 			}
 			// LEN ENCRYPTEDMSG
-			err = utils.W(s.pipe, nil, b, s.secret)
+			_, err = s.pipeWriter.Write(b)
 			if err != nil {
 				s.logger.Crit("Unexpected error when writing messages to the plugin pipe", "error", err)
 				return
@@ -101,7 +111,9 @@ func (s *Reporter) Stash(m model.FullMessage) (fatal, nonfatal error) {
 			s.logger.Warn("A syslog message could not be serialized", "type", s.name, "error", err)
 			return nil, err
 		}
-		err = Wout(SYSLOG, b, s.secret)
+		stdoutLock.Lock()
+		err = s.stdoutWriter.WriteWithHeader(SYSLOG, b)
+		stdoutLock.Unlock()
 		if err != nil {
 			s.logger.Crit("Could not write message to upstream. There was message loss", "error", err, "type", s.name)
 			return err, nil
@@ -119,5 +131,8 @@ func (s *Reporter) Report(infos []model.ListenerInfo) error {
 	if err != nil {
 		return err
 	}
-	return Wout(INFOS, b, nil)
+	stdoutLock.Lock()
+	err = utils.NewEncryptWriter(os.Stdout, nil).WriteWithHeader(INFOS, b)
+	stdoutLock.Unlock()
+	return err
 }

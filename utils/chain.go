@@ -5,6 +5,7 @@ import (
 	"sync"
 )
 
+// Chain executes the provided funcs until an error is returned.
 func Chain(funs ...func() error) (err error) {
 	for _, f := range funs {
 		err = f()
@@ -15,6 +16,7 @@ func Chain(funs ...func() error) (err error) {
 	return nil
 }
 
+// All executes all the provided funcs and returns the first error.
 func All(funs ...func() error) (err error) {
 	errs := make([]error, 0, len(funs))
 	for _, f := range funs {
@@ -23,6 +25,7 @@ func All(funs ...func() error) (err error) {
 	return AnyErr(errs...)
 }
 
+// ChainWrites writes the provided buffers until an error is returned.
 func ChainWrites(dest io.Writer, buffers ...[]byte) (err error) {
 	for _, b := range buffers {
 		if len(b) == 0 {
@@ -36,6 +39,7 @@ func ChainWrites(dest io.Writer, buffers ...[]byte) (err error) {
 	return nil
 }
 
+// AnyErr returns the first error from the provided list.
 func AnyErr(errs ...error) (err error) {
 	for _, err = range errs {
 		if err != nil {
@@ -45,6 +49,7 @@ func AnyErr(errs ...error) (err error) {
 	return nil
 }
 
+// Parallel executes the provided funcs in parallel and returns one of the returned errors if any.
 func Parallel(funs ...func() error) error {
 	var wg sync.WaitGroup
 	errs := make([]error, 0, len(funs))
