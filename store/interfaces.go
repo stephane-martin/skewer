@@ -19,7 +19,7 @@ type Store interface {
 	PermError(uid ulid.ULID, dest conf.DestinationType)
 	Errors() chan struct{}
 	WaitFinished()
-	GetSyslogConfig(configID ulid.ULID) (*conf.SyslogConfig, error)
+	GetSyslogConfig(configID ulid.ULID) (*conf.FilterSubConfig, error)
 	StoreAllSyslogConfigs(c conf.BaseConfig) error
 	ReadAllBadgers() (map[string]string, map[string]string, map[string]string)
 	Gather() ([]*dto.MetricFamily, error)

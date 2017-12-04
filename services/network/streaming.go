@@ -12,35 +12,35 @@ import (
 )
 
 type StreamHandler interface {
-	HandleConnection(conn net.Conn, config conf.SyslogConfig)
+	HandleConnection(conn net.Conn, config conf.TcpSourceConfig)
 }
 
 type TCPListenerConf struct {
 	Listener net.Listener
-	Conf     conf.SyslogConfig
+	Conf     conf.TcpSourceConfig
 }
 
 type UnixListenerConf struct {
 	Listener net.Listener
-	Conf     conf.SyslogConfig
+	Conf     conf.TcpSourceConfig
 }
 
 type StreamingService struct {
 	base.BaseService
+	TcpConfigs     []conf.TcpSourceConfig
 	TcpListeners   []TCPListenerConf
 	UnixListeners  []UnixListenerConf
-	acceptsWg      *sync.WaitGroup
 	handler        StreamHandler
-	wg             *sync.WaitGroup
 	MaxMessageSize int
+	acceptsWg      sync.WaitGroup
+	wg             sync.WaitGroup
 }
 
 func (s *StreamingService) init() {
 	s.BaseService.Init()
 	s.TcpListeners = []TCPListenerConf{}
 	s.UnixListeners = []UnixListenerConf{}
-	s.acceptsWg = &sync.WaitGroup{}
-	s.wg = &sync.WaitGroup{}
+	s.TcpConfigs = []conf.TcpSourceConfig{}
 }
 
 func (s *StreamingService) initTCPListeners() []model.ListenerInfo {
@@ -48,17 +48,13 @@ func (s *StreamingService) initTCPListeners() []model.ListenerInfo {
 	s.ClearConnections()
 	s.TcpListeners = []TCPListenerConf{}
 	s.UnixListeners = []UnixListenerConf{}
-	//fmt.Println(s.SyslogConfigs)
-	for _, syslogConf := range s.SyslogConfigs {
-		if syslogConf.Protocol != s.Protocol {
-			continue
-		}
+	for _, syslogConf := range s.TcpConfigs {
 		if len(syslogConf.UnixSocketPath) > 0 {
 			l, err := s.Binder.Listen("unix", syslogConf.UnixSocketPath)
 			if err != nil {
 				s.Logger.Warn("Error listening on stream unix socket", "path", syslogConf.UnixSocketPath, "error", err)
 			} else {
-				s.Logger.Debug("Listener", "protocol", s.Protocol, "path", syslogConf.UnixSocketPath, "format", syslogConf.Format)
+				s.Logger.Debug("Listener", "protocol", "stream", "path", syslogConf.UnixSocketPath, "format", syslogConf.Format)
 				nb++
 				lc := UnixListenerConf{
 					Listener: l,
@@ -73,7 +69,7 @@ func (s *StreamingService) initTCPListeners() []model.ListenerInfo {
 			if err != nil {
 				s.Logger.Warn("Error listening on stream (TCP or RELP)", "listen_addr", listenAddr, "error", err)
 			} else {
-				s.Logger.Debug("Listener", "protocol", s.Protocol, "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
+				s.Logger.Debug("Listener", "protocol", "stream", "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
 				nb++
 				lc := TCPListenerConf{
 					Listener: l,
@@ -87,7 +83,7 @@ func (s *StreamingService) initTCPListeners() []model.ListenerInfo {
 	infos := []model.ListenerInfo{}
 	for _, unixc := range s.UnixListeners {
 		infos = append(infos, model.ListenerInfo{
-			Protocol:       unixc.Conf.Protocol,
+			Protocol:       "tcp_or_relp",
 			UnixSocketPath: unixc.Conf.UnixSocketPath,
 		})
 	}
@@ -95,7 +91,7 @@ func (s *StreamingService) initTCPListeners() []model.ListenerInfo {
 		infos = append(infos, model.ListenerInfo{
 			BindAddr: tcpc.Conf.BindAddr,
 			Port:     tcpc.Conf.Port,
-			Protocol: tcpc.Conf.Protocol,
+			Protocol: "tcp_or_relp",
 		})
 	}
 	return infos
@@ -110,7 +106,7 @@ func (s *StreamingService) resetTCPListeners() {
 	}
 }
 
-func (s *StreamingService) handleConnection(conn net.Conn, config conf.SyslogConfig) {
+func (s *StreamingService) handleConnection(conn net.Conn, config conf.TcpSourceConfig) {
 	s.handler.HandleConnection(conn, config)
 }
 
@@ -215,7 +211,8 @@ func (s *StreamingService) Listen() {
 	}()
 }
 
-func (s *StreamingService) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig, queueSize uint64, messageSize int) {
+func (s *StreamingService) SetConf(sc []conf.TcpSourceConfig, pc []conf.ParserConfig, queueSize uint64, messageSize int) {
 	s.MaxMessageSize = messageSize
-	s.BaseService.SetConf(sc, pc, queueSize)
+	s.BaseService.SetConf(pc, queueSize)
+	s.TcpConfigs = sc
 }

@@ -52,19 +52,22 @@ var RDestinations = map[DestinationType]byte{
 
 // BaseConfig is the root of all configuration parameters.
 type BaseConfig struct {
-	Syslog     []SyslogConfig   `mapstructure:"syslog" toml:"syslog" json:"syslog"`
-	Store      StoreConfig      `mapstructure:"store" toml:"store" json:"store"`
-	Parsers    []ParserConfig   `mapstructure:"parser" toml:"parser" json:"parser"`
-	Journald   JournaldConfig   `mapstructure:"journald" toml:"journald" json:"journald"`
-	Metrics    MetricsConfig    `mapstructure:"metrics" toml:"metrics" json:"metrics"`
-	Accounting AccountingConfig `mapstructure:"accounting" toml:"accounting" json:"accounting"`
-	Main       MainConfig       `mapstructure:"main" toml:"main" json:"main"`
-	KafkaDest  KafkaDestConfig  `mapstructure:"kafka_destination" toml:"kafka_destination" json:"kafka_destination"`
-	UdpDest    UdpDestConfig    `mapstructure:"udp_destination" toml:"udp_destination" json:"udp_destination"`
-	TcpDest    TcpDestConfig    `mapstructure:"tcp_destination" toml:"tcp_destination" json:"tcp_destination"`
-	RelpDest   RelpDestConfig   `mapstructure:"relp_destination" toml:"relp_destination" json:"relp_destination"`
-	FileDest   FileDestConfig   `mapstructure:"file_destination" toml:"file_destination" json:"file_destination"`
-	StderrDest StderrDestConfig `mapstructure:"stderr_destination" toml:"stderr_destination" json:"stderr_destination"`
+	//Syslog     []SyslogConfig     `mapstructure:"syslog" toml:"syslog" json:"syslog"`
+	TcpSource  []TcpSourceConfig  `mapstructure:"tcp_source" toml:"tcp_source" json:"tcp_source"`
+	UdpSource  []UdpSourceConfig  `mapstructure:"udp_source" toml:"udp_source" json:"udp_source"`
+	RelpSource []RelpSourceConfig `mapstructure:"relp_source" toml:"relp_source" json:"relp_source"`
+	Store      StoreConfig        `mapstructure:"store" toml:"store" json:"store"`
+	Parsers    []ParserConfig     `mapstructure:"parser" toml:"parser" json:"parser"`
+	Journald   JournaldConfig     `mapstructure:"journald" toml:"journald" json:"journald"`
+	Metrics    MetricsConfig      `mapstructure:"metrics" toml:"metrics" json:"metrics"`
+	Accounting AccountingConfig   `mapstructure:"accounting" toml:"accounting" json:"accounting"`
+	Main       MainConfig         `mapstructure:"main" toml:"main" json:"main"`
+	KafkaDest  KafkaDestConfig    `mapstructure:"kafka_destination" toml:"kafka_destination" json:"kafka_destination"`
+	UdpDest    UdpDestConfig      `mapstructure:"udp_destination" toml:"udp_destination" json:"udp_destination"`
+	TcpDest    TcpDestConfig      `mapstructure:"tcp_destination" toml:"tcp_destination" json:"tcp_destination"`
+	RelpDest   RelpDestConfig     `mapstructure:"relp_destination" toml:"relp_destination" json:"relp_destination"`
+	FileDest   FileDestConfig     `mapstructure:"file_destination" toml:"file_destination" json:"file_destination"`
+	StderrDest StderrDestConfig   `mapstructure:"stderr_destination" toml:"stderr_destination" json:"stderr_destination"`
 }
 
 // MainConfig lists general/global parameters.
@@ -265,7 +268,6 @@ type FilterSubConfig struct {
 	PartitionFunc       string `mapstructure:"partition_key_func" toml:"partition_key_func" json:"partition_key_func"`
 	PartitionNumberFunc string `mapstructure:"partition_number_func" toml:"partition_number_func" json:"partition_number_func"`
 	FilterFunc          string `mapstructure:"filter_func" toml:"filter_func" json:"filter_func"`
-	Encoding            string `mapstructure:"encoding" toml:"encoding" json:"encoding"`
 }
 
 type JournaldConfig struct {
@@ -282,16 +284,76 @@ type AccountingConfig struct {
 	Enabled         bool          `mapstructure:"enabled" toml:"enabled" json:"enabled"`
 }
 
-type SyslogConfig struct {
-	FilterSubConfig `mapstructure:",squash"`
-	TlsBaseConfig   `mapstructure:",squash"`
-	ClientAuthType  string        `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
-	ConfID          ulid.ULID     `mapstructure:"-" toml:"-" json:"conf_id"`
+type TcpSourceConfig struct {
+	SyslogSourceBaseConfig `mapstructure:",squash"`
+	FilterSubConfig        `mapstructure:",squash"`
+	TlsBaseConfig          `mapstructure:",squash"`
+	ClientAuthType         string    `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
+	ConfID                 ulid.ULID `mapstructure:"-" toml:"-" json:"conf_id"`
+}
+
+func (c *TcpSourceConfig) GetFilterConf() *FilterSubConfig {
+	return &c.FilterSubConfig
+}
+
+func (c *TcpSourceConfig) GetSyslogConf() *SyslogSourceBaseConfig {
+	return &c.SyslogSourceBaseConfig
+}
+
+func (c *TcpSourceConfig) DefaultPort() int {
+	return 1514
+}
+
+type UdpSourceConfig struct {
+	SyslogSourceBaseConfig `mapstructure:",squash"`
+	FilterSubConfig        `mapstructure:",squash"`
+	ConfID                 ulid.ULID `mapstructure:"-" toml:"-" json:"conf_id"`
+}
+
+func (c *UdpSourceConfig) GetFilterConf() *FilterSubConfig {
+	return &c.FilterSubConfig
+}
+
+func (c *UdpSourceConfig) GetSyslogConf() *SyslogSourceBaseConfig {
+	return &c.SyslogSourceBaseConfig
+}
+
+func (c *UdpSourceConfig) DefaultPort() int {
+	return 1514
+}
+
+type RelpSourceConfig struct {
+	SyslogSourceBaseConfig `mapstructure:",squash"`
+	FilterSubConfig        `mapstructure:",squash"`
+	TlsBaseConfig          `mapstructure:",squash"`
+	ClientAuthType         string    `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
+	ConfID                 ulid.ULID `mapstructure:"-" toml:"-" json:"conf_id"`
+}
+
+func (c *RelpSourceConfig) GetFilterConf() *FilterSubConfig {
+	return &c.FilterSubConfig
+}
+
+func (c *RelpSourceConfig) GetSyslogConf() *SyslogSourceBaseConfig {
+	return &c.SyslogSourceBaseConfig
+}
+
+func (c *RelpSourceConfig) DefaultPort() int {
+	return 2514
+}
+
+type SyslogSourceConfig interface {
+	GetFilterConf() *FilterSubConfig
+	GetSyslogConf() *SyslogSourceBaseConfig
+	DefaultPort() int
+	SetConfID()
+}
+
+type SyslogSourceBaseConfig struct {
 	Port            int           `mapstructure:"port" toml:"port" json:"port"`
 	BindAddr        string        `mapstructure:"bind_addr" toml:"bind_addr" json:"bind_addr"`
 	UnixSocketPath  string        `mapstructure:"unix_socket_path" toml:"unix_socket_path" json:"unix_socket_path"`
 	Format          string        `mapstructure:"format" toml:"format" json:"format"`
-	Protocol        string        `mapstructure:"protocol" toml:"protocol" json:"protocol"`
 	DontParseSD     bool          `mapstructure:"dont_parse_structured_data" toml:"dont_parse_structured_data" json:"dont_parse_structured_data"`
 	KeepAlive       bool          `mapstructure:"keepalive" toml:"keepalive" json:"keepalive"`
 	KeepAlivePeriod time.Duration `mapstructure:"keepalive_period" toml:"keepalive_period" json:"keepalive_period"`

@@ -427,7 +427,9 @@ func (ch *serveChild) StartTcp() error {
 	}
 	ctl.SetConf(*ch.conf)
 	tcpinfos, err := ctl.Start()
-	if err != nil {
+	if err == services.NOLISTENER {
+		ch.logger.Info("TCP plugin not started")
+	} else if err != nil {
 		return fmt.Errorf("Error starting TCP plugin: %s", err)
 	} else if len(tcpinfos) == 0 {
 		ch.logger.Info("TCP plugin not started")
@@ -446,7 +448,9 @@ func (ch *serveChild) StartUdp() error {
 	}
 	ctl.SetConf(*ch.conf)
 	udpinfos, err := ctl.Start()
-	if err != nil {
+	if err == services.NOLISTENER {
+		ch.logger.Info("UDP plugin not started")
+	} else if err != nil {
 		return fmt.Errorf("Error starting UDP plugin: %s", err)
 	} else if len(udpinfos) == 0 {
 		ch.logger.Info("UDP plugin not started")

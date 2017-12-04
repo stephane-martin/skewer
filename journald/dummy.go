@@ -20,9 +20,9 @@ func NewReader(generator chan ulid.ULID, logger log15.Logger) (JournaldReader, e
 	return r, nil
 }
 
-func (r *reader) Start(coding string) {}
-func (r *reader) Stop()               {}
-func (r *reader) Shutdown()           {}
+func (r *reader) Start()    {}
+func (r *reader) Stop()     {}
+func (r *reader) Shutdown() {}
 
 func (r *reader) Entries() *queue.MessageQueue {
 	return r.entries

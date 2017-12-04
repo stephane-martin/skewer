@@ -262,7 +262,7 @@ type RelpService struct {
 	reporter  *base.Reporter
 	direct    bool
 	b         *binder.BinderClient
-	sc        []conf.SyslogConfig
+	sc        []conf.RelpSourceConfig
 	pc        []conf.ParserConfig
 	kc        conf.KafkaDestConfig
 	wg        sync.WaitGroup
@@ -337,7 +337,7 @@ func (s *RelpService) Stop() {
 	s.wg.Wait()
 }
 
-func (s *RelpService) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig, kc conf.KafkaDestConfig, direct bool, queueSize uint64) {
+func (s *RelpService) SetConf(sc []conf.RelpSourceConfig, pc []conf.ParserConfig, kc conf.KafkaDestConfig, direct bool, queueSize uint64) {
 	s.sc = sc
 	s.pc = pc
 	s.kc = kc
@@ -347,6 +347,7 @@ func (s *RelpService) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig, kc
 
 type RelpServiceImpl struct {
 	StreamingService
+	RelpConfigs         []conf.RelpSourceConfig
 	kafkaConf           conf.KafkaDestConfig
 	status              RelpServerStatus
 	StatusChan          chan RelpServerStatus
@@ -360,7 +361,7 @@ type RelpServiceImpl struct {
 	rawMessagesQueue    *tcp.Ring
 	parsedMessagesQueue *queue.MessageQueue
 	parsewg             sync.WaitGroup
-	configs             map[ulid.ULID]conf.SyslogConfig
+	configs             map[ulid.ULID]conf.RelpSourceConfig
 	forwarder           *ackForwarder
 }
 
@@ -372,7 +373,7 @@ func NewRelpServiceImpl(direct bool, gen chan ulid.ULID, reporter *base.Reporter
 		reporter:  reporter,
 		direct:    direct,
 		gen:       gen,
-		configs:   map[ulid.ULID]conf.SyslogConfig{},
+		configs:   map[ulid.ULID]conf.RelpSourceConfig{},
 		forwarder: newAckForwarder(),
 	}
 	s.StreamingService.init()
@@ -388,7 +389,6 @@ func NewRelpServiceImpl(direct bool, gen chan ulid.ULID, reporter *base.Reporter
 	)
 	s.StreamingService.BaseService.Logger = logger.New("class", "RelpServer")
 	s.StreamingService.BaseService.Binder = b
-	s.StreamingService.BaseService.Protocol = "relp"
 	s.StreamingService.handler = RelpHandler{Server: &s}
 	s.StatusChan = make(chan RelpServerStatus, 10)
 	return &s
@@ -425,13 +425,13 @@ func (s *RelpServiceImpl) Start(test bool) ([]model.ListenerInfo, error) {
 
 	s.parsedMessagesQueue = queue.NewMessageQueue()
 	s.rawMessagesQueue = tcp.NewRing(s.QueueSize)
-	s.configs = map[ulid.ULID]conf.SyslogConfig{}
+	s.configs = map[ulid.ULID]conf.RelpSourceConfig{}
 
 	for _, l := range s.UnixListeners {
-		s.configs[l.Conf.ConfID] = l.Conf
+		s.configs[l.Conf.ConfID] = conf.RelpSourceConfig(l.Conf)
 	}
 	for _, l := range s.TcpListeners {
-		s.configs[l.Conf.ConfID] = l.Conf
+		s.configs[l.Conf.ConfID] = conf.RelpSourceConfig(l.Conf)
 	}
 
 	if !s.test && s.direct {
@@ -529,8 +529,12 @@ func (s *RelpServiceImpl) doStop(final bool, wait bool) {
 	}
 }
 
-func (s *RelpServiceImpl) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig, kc conf.KafkaDestConfig, queueSize uint64) {
-	s.StreamingService.SetConf(sc, pc, queueSize, 132000)
+func (s *RelpServiceImpl) SetConf(sc []conf.RelpSourceConfig, pc []conf.ParserConfig, kc conf.KafkaDestConfig, queueSize uint64) {
+	tcpConfigs := []conf.TcpSourceConfig{}
+	for _, c := range sc {
+		tcpConfigs = append(tcpConfigs, conf.TcpSourceConfig(c))
+	}
+	s.StreamingService.SetConf(tcpConfigs, pc, queueSize, 132000)
 	s.kafkaConf = kc
 	s.BaseService.Pool = &sync.Pool{New: func() interface{} {
 		return &model.RawTcpMessage{Message: make([]byte, 132000)}
@@ -561,7 +565,7 @@ func (s *RelpServiceImpl) Parse() {
 		}
 
 		logger = s.Logger.New(
-			"protocol", s.Protocol,
+			"protocol", "relp",
 			"client", raw.Client,
 			"local_port", raw.LocalPort,
 			"unix_socket_path", raw.UnixSocketPath,
@@ -580,7 +584,7 @@ func (s *RelpServiceImpl) Parse() {
 		if err != nil {
 			logger.Warn("Parsing error", "message", string(raw.Message[:raw.Size]), "error", err)
 			s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
-			s.metrics.ParsingErrorCounter.WithLabelValues(s.Protocol, raw.Client, raw.Format).Inc()
+			s.metrics.ParsingErrorCounter.WithLabelValues("relp", raw.Client, raw.Format).Inc()
 			s.Pool.Put(raw)
 			continue
 		}
@@ -760,7 +764,7 @@ func (s *RelpServiceImpl) push2kafka() {
 	var kafkaMsg *sarama.ProducerMessage
 	var serialized []byte
 	var reported time.Time
-	var config conf.SyslogConfig
+	var config conf.RelpSourceConfig
 
 ForParsedChan:
 	for s.parsedMessagesQueue.Wait(0) {
@@ -872,8 +876,9 @@ type RelpHandler struct {
 	Server *RelpServiceImpl
 }
 
-func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
+func (h RelpHandler) HandleConnection(conn net.Conn, c conf.TcpSourceConfig) {
 	// http://www.rsyslog.com/doc/relp.html
+	config := conf.RelpSourceConfig(c)
 	s := h.Server
 	s.AddConnection(conn)
 	connID := s.forwarder.AddConn()
@@ -911,7 +916,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 	localPortStr := strconv.FormatInt(int64(localPort), 10)
 
 	logger = logger.New(
-		"protocol", s.Protocol,
+		"protocol", "relp",
 		"client", client,
 		"local_port", localPort,
 		"unix_socket_path", path,
@@ -919,7 +924,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 		"connid", connID,
 	)
 	logger.Info("New client connection")
-	s.metrics.ClientConnectionCounter.WithLabelValues(s.Protocol, client, localPortStr, path).Inc()
+	s.metrics.ClientConnectionCounter.WithLabelValues("relp", client, localPortStr, path).Inc()
 
 	s.wg.Add(1)
 	go s.handleResponses(conn, connID, client, logger)
@@ -1011,7 +1016,7 @@ Loop:
 			rawmsg.Format = config.Format
 			rawmsg.ConnID = connID
 			copy(rawmsg.Message, data)
-			s.metrics.IncomingMsgsCounter.WithLabelValues(s.Protocol, client, localPortStr, path).Inc()
+			s.metrics.IncomingMsgsCounter.WithLabelValues("relp", client, localPortStr, path).Inc()
 			s.rawMessagesQueue.Put(rawmsg)
 			//logger.Debug("RELP client received a syslog message")
 		default:

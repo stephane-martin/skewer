@@ -11,23 +11,59 @@ func deriveCloneBaseConfig(src BaseConfig) BaseConfig {
 
 // deriveDeepCopy recursively copies the contents of src into dst.
 func deriveDeepCopy(dst, src *BaseConfig) {
-	if src.Syslog == nil {
-		dst.Syslog = nil
+	if src.TcpSource == nil {
+		dst.TcpSource = nil
 	} else {
-		if dst.Syslog != nil {
-			if len(src.Syslog) > len(dst.Syslog) {
-				if cap(dst.Syslog) >= len(src.Syslog) {
-					dst.Syslog = (dst.Syslog)[:len(src.Syslog)]
+		if dst.TcpSource != nil {
+			if len(src.TcpSource) > len(dst.TcpSource) {
+				if cap(dst.TcpSource) >= len(src.TcpSource) {
+					dst.TcpSource = (dst.TcpSource)[:len(src.TcpSource)]
 				} else {
-					dst.Syslog = make([]SyslogConfig, len(src.Syslog))
+					dst.TcpSource = make([]TcpSourceConfig, len(src.TcpSource))
 				}
-			} else if len(src.Syslog) < len(dst.Syslog) {
-				dst.Syslog = (dst.Syslog)[:len(src.Syslog)]
+			} else if len(src.TcpSource) < len(dst.TcpSource) {
+				dst.TcpSource = (dst.TcpSource)[:len(src.TcpSource)]
 			}
 		} else {
-			dst.Syslog = make([]SyslogConfig, len(src.Syslog))
+			dst.TcpSource = make([]TcpSourceConfig, len(src.TcpSource))
 		}
-		copy(dst.Syslog, src.Syslog)
+		copy(dst.TcpSource, src.TcpSource)
+	}
+	if src.UdpSource == nil {
+		dst.UdpSource = nil
+	} else {
+		if dst.UdpSource != nil {
+			if len(src.UdpSource) > len(dst.UdpSource) {
+				if cap(dst.UdpSource) >= len(src.UdpSource) {
+					dst.UdpSource = (dst.UdpSource)[:len(src.UdpSource)]
+				} else {
+					dst.UdpSource = make([]UdpSourceConfig, len(src.UdpSource))
+				}
+			} else if len(src.UdpSource) < len(dst.UdpSource) {
+				dst.UdpSource = (dst.UdpSource)[:len(src.UdpSource)]
+			}
+		} else {
+			dst.UdpSource = make([]UdpSourceConfig, len(src.UdpSource))
+		}
+		copy(dst.UdpSource, src.UdpSource)
+	}
+	if src.RelpSource == nil {
+		dst.RelpSource = nil
+	} else {
+		if dst.RelpSource != nil {
+			if len(src.RelpSource) > len(dst.RelpSource) {
+				if cap(dst.RelpSource) >= len(src.RelpSource) {
+					dst.RelpSource = (dst.RelpSource)[:len(src.RelpSource)]
+				} else {
+					dst.RelpSource = make([]RelpSourceConfig, len(src.RelpSource))
+				}
+			} else if len(src.RelpSource) < len(dst.RelpSource) {
+				dst.RelpSource = (dst.RelpSource)[:len(src.RelpSource)]
+			}
+		} else {
+			dst.RelpSource = make([]RelpSourceConfig, len(src.RelpSource))
+		}
+		copy(dst.RelpSource, src.RelpSource)
 	}
 	dst.Store = src.Store
 	if src.Parsers == nil {

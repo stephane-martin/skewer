@@ -12,25 +12,21 @@ import (
 )
 
 type BaseService struct {
-	SyslogConfigs   []conf.SyslogConfig
 	ParserConfigs   []conf.ParserConfig
 	Logger          log15.Logger
 	Binder          *binder.BinderClient
 	UnixSocketPaths []string
-	Protocol        string
 	Connections     map[io.Closer]bool
 	QueueSize       uint64
 
-	connMutex   *sync.Mutex
-	statusMutex *sync.Mutex
+	connMutex   sync.Mutex
+	statusMutex sync.Mutex
 	Pool        *sync.Pool
 }
 
 func (s *BaseService) Init() {
 	s.UnixSocketPaths = []string{}
-	s.connMutex = &sync.Mutex{}
 	s.Connections = map[io.Closer]bool{}
-	s.statusMutex = &sync.Mutex{}
 }
 
 func (s *BaseService) LockStatus() {
@@ -41,8 +37,7 @@ func (s *BaseService) UnlockStatus() {
 	s.statusMutex.Unlock()
 }
 
-func (s *BaseService) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig, queueSize uint64) {
-	s.SyslogConfigs = sc
+func (s *BaseService) SetConf(pc []conf.ParserConfig, queueSize uint64) {
 	s.ParserConfigs = pc
 	s.QueueSize = queueSize
 }

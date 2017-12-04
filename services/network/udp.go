@@ -30,6 +30,7 @@ const (
 
 type UdpServiceImpl struct {
 	base.BaseService
+	UdpConfigs []conf.UdpSourceConfig
 	status     UdpServerStatus
 	statusChan chan UdpServerStatus
 	stasher    *base.Reporter
@@ -37,13 +38,13 @@ type UdpServiceImpl struct {
 	generator  chan ulid.ULID
 	metrics    *udpMetrics
 	registry   *prometheus.Registry
-	wg         *sync.WaitGroup
+	wg         sync.WaitGroup
 
 	rawMessagesQueue *udp.Ring
 }
 
 type PacketHandler interface {
-	HandleConnection(conn net.PacketConn, config conf.SyslogConfig)
+	HandleConnection(conn net.PacketConn, config conf.UdpSourceConfig)
 }
 
 type UdpHandler struct {
@@ -76,27 +77,27 @@ func NewUdpMetrics() *udpMetrics {
 
 func NewUdpService(stasher *base.Reporter, gen chan ulid.ULID, b *binder.BinderClient, l log15.Logger) *UdpServiceImpl {
 	s := UdpServiceImpl{
-		status:    UdpStopped,
-		metrics:   NewUdpMetrics(),
-		registry:  prometheus.NewRegistry(),
-		stasher:   stasher,
-		generator: gen,
-		wg:        &sync.WaitGroup{},
+		status:     UdpStopped,
+		metrics:    NewUdpMetrics(),
+		registry:   prometheus.NewRegistry(),
+		stasher:    stasher,
+		generator:  gen,
+		UdpConfigs: []conf.UdpSourceConfig{},
 	}
 	s.BaseService.Init()
 	s.registry.MustRegister(s.metrics.IncomingMsgsCounter, s.metrics.ParsingErrorCounter)
 	s.BaseService.Logger = l.New("class", "UdpServer")
 	s.BaseService.Binder = b
-	s.BaseService.Protocol = "udp"
 	s.handler = UdpHandler{Server: &s}
 	return &s
 }
 
-func (s *UdpServiceImpl) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig, queueSize uint64) {
+func (s *UdpServiceImpl) SetConf(sc []conf.UdpSourceConfig, pc []conf.ParserConfig, queueSize uint64) {
 	s.BaseService.Pool = &sync.Pool{New: func() interface{} {
 		return &model.RawUdpMessage{}
 	}}
-	s.BaseService.SetConf(sc, pc, queueSize)
+	s.BaseService.SetConf(pc, queueSize)
+	s.UdpConfigs = sc
 	s.rawMessagesQueue = udp.NewRing(s.QueueSize)
 }
 
@@ -120,7 +121,7 @@ func (s *UdpServiceImpl) Parse() {
 		}
 
 		logger = s.Logger.New(
-			"protocol", s.Protocol,
+			"protocol", "udp",
 			"client", raw.Client,
 			"local_port", raw.LocalPort,
 			"unix_socket_path", raw.UnixSocketPath,
@@ -137,7 +138,7 @@ func (s *UdpServiceImpl) Parse() {
 		syslogMsg, err = parser.Parse(raw.Message[:raw.Size], decoder, raw.DontParseSD)
 		if err != nil {
 			s.Pool.Put(raw)
-			s.metrics.ParsingErrorCounter.WithLabelValues(s.Protocol, raw.Client, raw.Format).Inc()
+			s.metrics.ParsingErrorCounter.WithLabelValues("udp", raw.Client, raw.Format).Inc()
 			logger.Info("Parsing error", "Message", raw.Message, "error", err)
 			continue
 		}
@@ -172,7 +173,7 @@ func (s *UdpServiceImpl) Gather() ([]*dto.MetricFamily, error) {
 	return s.registry.Gather()
 }
 
-func (s *UdpServiceImpl) handleConnection(conn net.PacketConn, config conf.SyslogConfig) {
+func (s *UdpServiceImpl) handleConnection(conn net.PacketConn, config conf.UdpSourceConfig) {
 	s.handler.HandleConnection(conn, config)
 }
 
@@ -230,59 +231,57 @@ func (s *UdpServiceImpl) Stop() {
 func (s *UdpServiceImpl) ListenPacket() []model.ListenerInfo {
 	udpinfos := []model.ListenerInfo{}
 	s.UnixSocketPaths = []string{}
-	for _, syslogConf := range s.SyslogConfigs {
-		if syslogConf.Protocol == "udp" {
-			if len(syslogConf.UnixSocketPath) > 0 {
-				conn, err := s.Binder.ListenPacket("unixgram", syslogConf.UnixSocketPath)
-				if err != nil {
-					s.Logger.Warn("Listen unixgram error", "error", err)
-				} else {
-					s.Logger.Debug(
-						"Unixgram listener",
-						"protocol", s.Protocol,
-						"path", syslogConf.UnixSocketPath,
-						"format", syslogConf.Format,
-					)
-					udpinfos = append(udpinfos, model.ListenerInfo{
-						UnixSocketPath: syslogConf.UnixSocketPath,
-						Protocol:       s.Protocol,
-					})
-					s.UnixSocketPaths = append(s.UnixSocketPaths, syslogConf.UnixSocketPath)
-					conn.(*binder.FilePacketConn).PacketConn.(*net.UnixConn).SetReadBuffer(65536)
-					conn.(*binder.FilePacketConn).PacketConn.(*net.UnixConn).SetWriteBuffer(65536)
-					s.wg.Add(1)
-					go s.handleConnection(conn, syslogConf)
-				}
+	for _, syslogConf := range s.UdpConfigs {
+		if len(syslogConf.UnixSocketPath) > 0 {
+			conn, err := s.Binder.ListenPacket("unixgram", syslogConf.UnixSocketPath)
+			if err != nil {
+				s.Logger.Warn("Listen unixgram error", "error", err)
 			} else {
-				listenAddr, _ := syslogConf.GetListenAddr()
-				conn, err := s.Binder.ListenPacket("udp", listenAddr)
-				if err != nil {
-					s.Logger.Warn("Listen UDP error", "error", err)
-				} else {
-					s.Logger.Debug(
-						"UDP listener",
-						"protocol", s.Protocol,
-						"bind_addr", syslogConf.BindAddr,
-						"port", syslogConf.Port,
-						"format", syslogConf.Format,
-					)
-					udpinfos = append(udpinfos, model.ListenerInfo{
-						BindAddr: syslogConf.BindAddr,
-						Port:     syslogConf.Port,
-						Protocol: syslogConf.Protocol,
-					})
-					conn.(*binder.FilePacketConn).PacketConn.(*net.UDPConn).SetReadBuffer(65536)
-					conn.(*binder.FilePacketConn).PacketConn.(*net.UDPConn).SetReadBuffer(65536)
-					s.wg.Add(1)
-					go s.handleConnection(conn, syslogConf)
-				}
+				s.Logger.Debug(
+					"Unixgram listener",
+					"protocol", "udp",
+					"path", syslogConf.UnixSocketPath,
+					"format", syslogConf.Format,
+				)
+				udpinfos = append(udpinfos, model.ListenerInfo{
+					UnixSocketPath: syslogConf.UnixSocketPath,
+					Protocol:       "udp",
+				})
+				s.UnixSocketPaths = append(s.UnixSocketPaths, syslogConf.UnixSocketPath)
+				conn.(*binder.FilePacketConn).PacketConn.(*net.UnixConn).SetReadBuffer(65536)
+				conn.(*binder.FilePacketConn).PacketConn.(*net.UnixConn).SetWriteBuffer(65536)
+				s.wg.Add(1)
+				go s.handleConnection(conn, syslogConf)
+			}
+		} else {
+			listenAddr, _ := syslogConf.GetListenAddr()
+			conn, err := s.Binder.ListenPacket("udp", listenAddr)
+			if err != nil {
+				s.Logger.Warn("Listen UDP error", "error", err)
+			} else {
+				s.Logger.Debug(
+					"UDP listener",
+					"protocol", "udp",
+					"bind_addr", syslogConf.BindAddr,
+					"port", syslogConf.Port,
+					"format", syslogConf.Format,
+				)
+				udpinfos = append(udpinfos, model.ListenerInfo{
+					BindAddr: syslogConf.BindAddr,
+					Port:     syslogConf.Port,
+					Protocol: "udp",
+				})
+				conn.(*binder.FilePacketConn).PacketConn.(*net.UDPConn).SetReadBuffer(65536)
+				conn.(*binder.FilePacketConn).PacketConn.(*net.UDPConn).SetReadBuffer(65536)
+				s.wg.Add(1)
+				go s.handleConnection(conn, syslogConf)
 			}
 		}
 	}
 	return udpinfos
 }
 
-func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConfig) {
+func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.UdpSourceConfig) {
 	var localPort int
 	var localPortS string
 	var path string
@@ -308,7 +307,7 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 		}
 	}
 
-	logger := s.Logger.New("protocol", s.Protocol, "local_port", localPortS, "unix_socket_path", path)
+	logger := s.Logger.New("protocol", "udp", "local_port", localPortS, "unix_socket_path", path)
 
 	// Syslog UDP server
 	var remote net.Addr
@@ -341,6 +340,6 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.SyslogConf
 		}
 
 		s.rawMessagesQueue.Put(rawmsg)
-		s.metrics.IncomingMsgsCounter.WithLabelValues(s.Protocol, rawmsg.Client, localPortS, path).Inc()
+		s.metrics.IncomingMsgsCounter.WithLabelValues("udp", rawmsg.Client, localPortS, path).Inc()
 	}
 }

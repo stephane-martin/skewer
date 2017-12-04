@@ -17,6 +17,7 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/sys/kring"
+	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/db"
 	"github.com/stephane-martin/skewer/utils/queue"
 )
@@ -390,19 +391,35 @@ func (s *MessageStore) WaitFinished() {
 }
 
 func (s *MessageStore) StoreAllSyslogConfigs(c conf.BaseConfig) (err error) {
-	for _, sysconf := range c.Syslog {
-		err = s.StoreSyslogConfig(sysconf.ConfID, sysconf.FilterSubConfig)
-		if err != nil {
-			return err
-		}
+	funcs := []utils.Func{}
+
+	for _, tcpConf := range c.TcpSource {
+		funcs = append(funcs, func() error {
+			return s.StoreSyslogConfig(tcpConf.ConfID, tcpConf.FilterSubConfig)
+		})
 	}
 
-	err = s.StoreSyslogConfig(c.Journald.ConfID, c.Journald.FilterSubConfig)
-	if err != nil {
-		return err
+	for _, udpConf := range c.UdpSource {
+		funcs = append(funcs, func() error {
+			return s.StoreSyslogConfig(udpConf.ConfID, udpConf.FilterSubConfig)
+		})
 	}
 
-	return s.StoreSyslogConfig(c.Accounting.ConfID, c.Accounting.FilterSubConfig)
+	for _, relpConf := range c.RelpSource {
+		funcs = append(funcs, func() error {
+			return s.StoreSyslogConfig(relpConf.ConfID, relpConf.FilterSubConfig)
+		})
+	}
+
+	funcs = append(funcs, func() error {
+		return s.StoreSyslogConfig(c.Journald.ConfID, c.Journald.FilterSubConfig)
+	})
+
+	funcs = append(funcs, func() error {
+		return s.StoreSyslogConfig(c.Accounting.ConfID, c.Accounting.FilterSubConfig)
+	})
+
+	return utils.Chain(funcs...)
 }
 
 func (s *MessageStore) StoreSyslogConfig(confID ulid.ULID, config conf.FilterSubConfig) error {
@@ -421,7 +438,7 @@ func (s *MessageStore) StoreSyslogConfig(confID ulid.ULID, config conf.FilterSub
 	return nil
 }
 
-func (s *MessageStore) GetSyslogConfig(confID ulid.ULID) (*conf.SyslogConfig, error) {
+func (s *MessageStore) GetSyslogConfig(confID ulid.ULID) (*conf.FilterSubConfig, error) {
 	data, err := s.syslogConfigsDB.Get(confID, nil)
 	if err != nil {
 		return nil, err

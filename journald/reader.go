@@ -174,7 +174,7 @@ func (r *reader) wait() chan struct{} {
 	return events
 }
 
-func (r *reader) Start(coding string) {
+func (r *reader) Start() {
 	r.stopchan = make(chan struct{})
 	r.entries = queue.NewMessageQueue()
 
@@ -189,7 +189,7 @@ func (r *reader) Start(coding string) {
 		var err error
 		var nb uint64
 		var entry *sdjournal.JournalEntry
-		converter := makeMapConverter(coding, r.generator)
+		converter := makeMapConverter("utf8", r.generator)
 
 		for {
 			// get entries from journald

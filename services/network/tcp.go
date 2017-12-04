@@ -87,7 +87,6 @@ func NewTcpService(reporter *base.Reporter, gen chan ulid.ULID, b *binder.Binder
 	s.registry.MustRegister(s.metrics.ClientConnectionCounter, s.metrics.IncomingMsgsCounter, s.metrics.ParsingErrorCounter)
 	s.StreamingService.BaseService.Logger = l.New("class", "TcpServer")
 	s.StreamingService.BaseService.Binder = b
-	s.StreamingService.BaseService.Protocol = "tcp"
 	s.StreamingService.handler = tcpHandler{Server: &s}
 	return &s
 }
@@ -153,7 +152,7 @@ func (s *TcpServiceImpl) Stop() {
 }
 
 // SetConf configures the TCP service
-func (s *TcpServiceImpl) SetConf(sc []conf.SyslogConfig, pc []conf.ParserConfig, queueSize uint64, messageSize int) {
+func (s *TcpServiceImpl) SetConf(sc []conf.TcpSourceConfig, pc []conf.ParserConfig, queueSize uint64, messageSize int) {
 	s.BaseService.Pool = &sync.Pool{New: func() interface{} {
 		return &model.RawTcpMessage{Message: make([]byte, messageSize)}
 	}}
@@ -181,7 +180,7 @@ func (s *TcpServiceImpl) Parse() {
 		}
 
 		logger = s.Logger.New(
-			"protocol", s.Protocol,
+			"protocol", "tcp",
 			"client", raw.Client,
 			"local_port", raw.LocalPort,
 			"unix_socket_path", raw.UnixSocketPath,
@@ -198,7 +197,7 @@ func (s *TcpServiceImpl) Parse() {
 		syslogMsg, err = parser.Parse(raw.Message[:raw.Size], decoder, raw.DontParseSD)
 		if err != nil {
 			s.Pool.Put(raw)
-			s.metrics.ParsingErrorCounter.WithLabelValues(s.Protocol, raw.Client, raw.Format).Inc()
+			s.metrics.ParsingErrorCounter.WithLabelValues("tcp", raw.Client, raw.Format).Inc()
 			logger.Info("Parsing error", "Message", raw.Message, "error", err)
 			continue
 		}
@@ -234,7 +233,7 @@ type tcpHandler struct {
 	Server *TcpServiceImpl
 }
 
-func (h tcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
+func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TcpSourceConfig) {
 
 	s := h.Server
 	s.AddConnection(conn)
@@ -267,9 +266,9 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 	client = strings.TrimSpace(client)
 	path = strings.TrimSpace(path)
 
-	logger := s.Logger.New("protocol", s.Protocol, "client", client, "local_port", localPort, "unix_socket_path", path, "format", config.Format)
+	logger := s.Logger.New("protocol", "tcp", "client", client, "local_port", localPort, "unix_socket_path", path, "format", config.Format)
 	logger.Info("New client")
-	s.metrics.ClientConnectionCounter.WithLabelValues(s.Protocol, client, localPort, path).Inc()
+	s.metrics.ClientConnectionCounter.WithLabelValues("tcp", client, localPort, path).Inc()
 
 	timeout := config.Timeout
 	if timeout > 0 {
@@ -294,7 +293,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.SyslogConfig) {
 		if len(buf) == 0 {
 			continue
 		}
-		s.metrics.IncomingMsgsCounter.WithLabelValues(s.Protocol, client, localPort, path).Inc()
+		s.metrics.IncomingMsgsCounter.WithLabelValues("tcp", client, localPort, path).Inc()
 		rawmsg = s.Pool.Get().(*model.RawTcpMessage)
 		rawmsg.Client = client
 		rawmsg.LocalPort = localPortInt

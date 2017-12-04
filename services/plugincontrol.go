@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -37,6 +38,7 @@ var SHUTDOWN = []byte("shutdown")
 var STARTERROR = []byte("starterror")
 var GATHER = []byte("gathermetrics")
 var METRICS = []byte("metrics")
+var NOLISTENER = errors.New("")
 
 // PluginController launches and controls the plugins services
 type PluginController struct {
@@ -112,7 +114,7 @@ func (f *CFactory) NewStore(loggerHandle int) *StorePlugin {
 	return s
 }
 
-// W encodes an writes a message to the controlled plugin via stdin
+// W encodes an writes a message to the controlled plugin via its stdin
 func (s *PluginController) W(header []byte, message []byte) (err error) {
 	s.stdinMu.Lock()
 	if s.stdinWriter != nil {
@@ -412,8 +414,7 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 					startError(err, nil)
 				}
 			case "nolistenererror":
-				err := fmt.Errorf("No listener")
-				startError(err, nil)
+				startError(NOLISTENER, nil)
 			case "metrics":
 				if len(parts) == 2 {
 					families := []*dto.MetricFamily{}
@@ -511,7 +512,9 @@ func (s *PluginController) Start() (infos []model.ListenerInfo, err error) {
 	if rerr != nil {
 		s.startedMu.Unlock()
 		s.createdMu.Unlock()
-		s.logger.Error("Start error", "error", rerr, "type", name)
+		if rerr != NOLISTENER {
+			s.logger.Error("Start error", "error", rerr.Error(), "type", name)
+		}
 		s.Shutdown(3 * time.Second)
 		return nil, rerr
 	}

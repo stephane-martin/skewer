@@ -144,7 +144,7 @@ func (fwder *fwderImpl) fwdMsgsByDest(ctx context.Context, store Store, dest Des
 
 func (fwder *fwderImpl) fwdMsg(m *model.FullMessage, envs map[ulid.ULID]*javascript.Environment, st Store, dst Destination, dtype conf.DestinationType) (err error) {
 	var errs []error
-	var config *conf.SyslogConfig
+	var config *conf.FilterSubConfig
 	var topic, partitionKey string
 	var partitionNumber int32
 	var filterResult javascript.FilterResult

@@ -37,12 +37,14 @@ func (source BaseConfig) Clone() BaseConfig {
 func newBaseConf() BaseConfig {
 	brokers := []string{}
 	baseConf := BaseConfig{
-		Syslog:    []SyslogConfig{},
-		KafkaDest: KafkaDestConfig{Brokers: brokers},
-		Store:     StoreConfig{},
-		Parsers:   []ParserConfig{},
-		Journald:  JournaldConfig{},
-		Metrics:   MetricsConfig{},
+		TcpSource:  []TcpSourceConfig{},
+		UdpSource:  []UdpSourceConfig{},
+		RelpSource: []RelpSourceConfig{},
+		KafkaDest:  KafkaDestConfig{Brokers: brokers},
+		Store:      StoreConfig{},
+		Parsers:    []ParserConfig{},
+		Journald:   JournaldConfig{},
+		Metrics:    MetricsConfig{},
 	}
 	return baseConf
 }
@@ -149,20 +151,37 @@ func (c *FilterSubConfig) CalculateID() []byte {
 	return fnv.New128a().Sum(c.Export())
 }
 
-func (c *SyslogConfig) SetConfID() {
-	copy(c.ConfID[:], c.FilterSubConfig.Export())
+func (c *TcpSourceConfig) SetConfID() {
+	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
+}
+
+func (c *UdpSourceConfig) SetConfID() {
+	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
+}
+
+func (c *RelpSourceConfig) SetConfID() {
+	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
 }
 
 func (c *JournaldConfig) SetConfID() {
-	copy(c.ConfID[:], c.FilterSubConfig.Export())
+	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
 }
 
 func (c *AccountingConfig) SetConfID() {
-	copy(c.ConfID[:], c.FilterSubConfig.Export())
+	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
 }
 
-func (c *SyslogConfig) GetClientAuthType() tls.ClientAuthType {
-	s := strings.TrimSpace(c.ClientAuthType)
+func (c *TcpSourceConfig) GetClientAuthType() tls.ClientAuthType {
+	return convertClientAuthType(c.ClientAuthType)
+}
+
+func (c *RelpSourceConfig) GetClientAuthType() tls.ClientAuthType {
+	return convertClientAuthType(c.ClientAuthType)
+}
+
+func convertClientAuthType(auth_type string) tls.ClientAuthType {
+	//s := strings.TrimSpace(c.ClientAuthType)
+	s := strings.TrimSpace(auth_type)
 	if len(s) == 0 {
 		return tls.NoClientCert
 	}
@@ -184,7 +203,7 @@ func (c *SyslogConfig) GetClientAuthType() tls.ClientAuthType {
 	}
 }
 
-func (c *SyslogConfig) GetListenAddr() (string, error) {
+func (c *SyslogSourceBaseConfig) GetListenAddr() (string, error) {
 	if len(c.UnixSocketPath) > 0 {
 		return "", nil
 	}
@@ -200,7 +219,17 @@ func (c *SyslogConfig) GetListenAddr() (string, error) {
 	}
 }
 
-func (c *SyslogConfig) Export() []byte {
+func (c *TcpSourceConfig) Export() []byte {
+	b, _ := json.Marshal(c)
+	return b
+}
+
+func (c *UdpSourceConfig) Export() []byte {
+	b, _ := json.Marshal(c)
+	return b
+}
+
+func (c *RelpSourceConfig) Export() []byte {
 	b, _ := json.Marshal(c)
 	return b
 }
@@ -210,8 +239,8 @@ func (c *FilterSubConfig) Export() []byte {
 	return b
 }
 
-func ImportSyslogConfig(data []byte) (*SyslogConfig, error) {
-	c := SyslogConfig{}
+func ImportSyslogConfig(data []byte) (*FilterSubConfig, error) {
+	c := FilterSubConfig{}
 	err := json.Unmarshal(data, &c)
 	if err != nil {
 		return nil, fmt.Errorf("Can't unmarshal the syslog config: %s", err.Error())
@@ -421,7 +450,9 @@ func InitLoad(ctx context.Context, confDir string, params consul.ConnParams, r k
 }
 
 func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix string, logger log15.Logger) error {
-	rawSyslogConf := map[string]map[string]string{}
+	rawTcpSourceConf := map[string]map[string]string{}
+	rawUdpSourceConf := map[string]map[string]string{}
+	rawRelpSourceConf := map[string]map[string]string{}
 	rawJournalConf := map[string]string{}
 	rawKafkaConf := map[string]string{}
 	rawStoreConf := map[string]string{}
@@ -435,12 +466,30 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 		k = strings.Trim(k[prefixLen:], "/")
 		splits := strings.Split(k, "/")
 		switch splits[0] {
-		case "syslog":
+		case "tcp_source":
 			if len(splits) == 3 {
-				if _, ok := rawSyslogConf[splits[1]]; !ok {
-					rawSyslogConf[splits[1]] = map[string]string{}
+				if _, ok := rawTcpSourceConf[splits[1]]; !ok {
+					rawTcpSourceConf[splits[1]] = map[string]string{}
 				}
-				rawSyslogConf[splits[1]][splits[2]] = v
+				rawTcpSourceConf[splits[1]][splits[2]] = v
+			} else {
+				logger.Debug("Ignoring Consul KV", "key", k, "value", v)
+			}
+		case "udp_source":
+			if len(splits) == 3 {
+				if _, ok := rawUdpSourceConf[splits[1]]; !ok {
+					rawUdpSourceConf[splits[1]] = map[string]string{}
+				}
+				rawUdpSourceConf[splits[1]][splits[2]] = v
+			} else {
+				logger.Debug("Ignoring Consul KV", "key", k, "value", v)
+			}
+		case "relp_source":
+			if len(splits) == 3 {
+				if _, ok := rawRelpSourceConf[splits[1]]; !ok {
+					rawRelpSourceConf[splits[1]] = map[string]string{}
+				}
+				rawRelpSourceConf[splits[1]][splits[2]] = v
 			} else {
 				logger.Debug("Ignoring Consul KV", "key", k, "value", v)
 			}
@@ -496,16 +545,46 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 
 	var vi *viper.Viper
 
-	syslogConfs := []SyslogConfig{}
-	for _, syslogConf := range rawSyslogConf {
+	tcpSourceConfs := []TcpSourceConfig{}
+	for _, syslogConf := range rawTcpSourceConf {
 		vi = viper.New()
 		for k, v := range syslogConf {
 			vi.Set(k, v)
 		}
-		sconf := &SyslogConfig{}
-		err := vi.Unmarshal(sconf)
+		sconf := TcpSourceConfig{}
+		err := vi.Unmarshal(&sconf)
 		if err == nil {
-			syslogConfs = append(syslogConfs, *sconf)
+			tcpSourceConfs = append(tcpSourceConfs, sconf)
+		} else {
+			return err
+		}
+	}
+
+	udpSourceConfs := []UdpSourceConfig{}
+	for _, syslogConf := range rawUdpSourceConf {
+		vi = viper.New()
+		for k, v := range syslogConf {
+			vi.Set(k, v)
+		}
+		sconf := UdpSourceConfig{}
+		err := vi.Unmarshal(&sconf)
+		if err == nil {
+			udpSourceConfs = append(udpSourceConfs, sconf)
+		} else {
+			return err
+		}
+	}
+
+	relpSourceConfs := []RelpSourceConfig{}
+	for _, syslogConf := range rawRelpSourceConf {
+		vi = viper.New()
+		for k, v := range syslogConf {
+			vi.Set(k, v)
+		}
+		sconf := RelpSourceConfig{}
+		err := vi.Unmarshal(&sconf)
+		if err == nil {
+			relpSourceConfs = append(relpSourceConfs, sconf)
 		} else {
 			return err
 		}
@@ -609,8 +688,9 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 		}
 		c.Main = mainConf
 	}
-
-	c.Syslog = append(c.Syslog, syslogConfs...)
+	c.TcpSource = append(c.TcpSource, tcpSourceConfs...)
+	c.UdpSource = append(c.UdpSource, udpSourceConfs...)
+	c.RelpSource = append(c.RelpSource, relpSourceConfs...)
 	c.Parsers = append(c.Parsers, parsersConf...)
 
 	return nil
@@ -675,88 +755,74 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 		return ConfigurationCheckError{ErrString: "Kafka version can't be parsed", Err: err}
 	}
 
-	if len(c.Syslog) == 0 {
-		syslogConf := SyslogConfig{
-			Port:     2514,
-			BindAddr: "127.0.0.1",
-			Format:   "rfc5424",
-			Protocol: "relp",
-			FilterSubConfig: FilterSubConfig{
-				TopicTmpl:     "rsyslog-{{.Appname}}",
-				PartitionTmpl: "mypk-{{.Hostname}}",
-			},
-		}
-		c.Syslog = []SyslogConfig{syslogConf}
+	syslogConfs := []SyslogSourceConfig{}
+	for i := range c.TcpSource {
+		syslogConfs = append(syslogConfs, &c.TcpSource[i])
 	}
+	for i := range c.UdpSource {
+		syslogConfs = append(syslogConfs, &c.UdpSource[i])
+	}
+	for i := range c.RelpSource {
+		syslogConfs = append(syslogConfs, &c.RelpSource[i])
+	}
+	for _, syslogConf := range syslogConfs {
+		baseConf := syslogConf.GetSyslogConf()
+		filterConf := syslogConf.GetFilterConf()
 
-	for i, syslogConf := range c.Syslog {
-		switch syslogConf.Protocol {
-		case "relp", "tcp", "udp":
-		default:
-			return ConfigurationCheckError{ErrString: "Unknown protocol"}
-		}
-		if syslogConf.UnixSocketPath == "" {
-			if syslogConf.BindAddr == "" {
-				c.Syslog[i].BindAddr = "127.0.0.1"
+		if baseConf.UnixSocketPath == "" {
+			if baseConf.BindAddr == "" {
+				baseConf.BindAddr = "127.0.0.1"
 			}
-			if syslogConf.Port == 0 {
-				switch c.Syslog[i].Protocol {
-				case "relp":
-					c.Syslog[i].Port = 2514
-				case "tcp", "udp":
-					c.Syslog[i].Port = 1514
-				default:
-					return ConfigurationCheckError{ErrString: "Unknown protocol"}
-				}
+			if baseConf.Port == 0 {
+				baseConf.Port = syslogConf.DefaultPort()
 			}
 		}
 
-		if syslogConf.Format == "" {
-			c.Syslog[i].Format = "auto"
+		if baseConf.Format == "" {
+			baseConf.Format = "auto"
 		}
-		if syslogConf.TopicTmpl == "" {
-			c.Syslog[i].TopicTmpl = "rsyslog-{{.Appname}}"
+		if filterConf.TopicTmpl == "" {
+			filterConf.TopicTmpl = "rsyslog-{{.Appname}}"
 		}
-		if syslogConf.PartitionTmpl == "" {
-			c.Syslog[i].PartitionTmpl = "mypk-{{.Hostname}}"
+		if filterConf.PartitionTmpl == "" {
+			filterConf.PartitionTmpl = "mypk-{{.Hostname}}"
 		}
-		if syslogConf.KeepAlivePeriod == 0 {
-			c.Syslog[i].KeepAlivePeriod = 75 * time.Second
+		if baseConf.KeepAlivePeriod == 0 {
+			baseConf.KeepAlivePeriod = 75 * time.Second
 		}
-		if syslogConf.Timeout == 0 {
-			c.Syslog[i].Timeout = time.Minute
+		if baseConf.Timeout == 0 {
+			baseConf.Timeout = time.Minute
 		}
-		if syslogConf.Encoding == "" {
-			c.Syslog[i].Encoding = "utf8"
+		if baseConf.Encoding == "" {
+			baseConf.Encoding = "utf8"
 		}
 
-		if len(c.Syslog[i].TopicTmpl) > 0 {
-			_, err = template.New("topic").Parse(c.Syslog[i].TopicTmpl)
+		if len(filterConf.TopicTmpl) > 0 {
+			_, err = template.New("topic").Parse(filterConf.TopicTmpl)
 			if err != nil {
 				return ConfigurationCheckError{ErrString: "Error compiling the topic template", Err: err}
 			}
 		}
-		if len(c.Syslog[i].PartitionTmpl) > 0 {
-			_, err = template.New("partition").Parse(c.Syslog[i].PartitionTmpl)
+		if len(filterConf.PartitionTmpl) > 0 {
+			_, err = template.New("partition").Parse(filterConf.PartitionTmpl)
 			if err != nil {
 				return ConfigurationCheckError{ErrString: "Error compiling the partition key template", Err: err}
 			}
 		}
 
-		_, err = c.Syslog[i].GetListenAddr()
+		_, err = baseConf.GetListenAddr()
 		if err != nil {
 			return ConfigurationCheckError{Err: err}
 		}
-	}
 
-	for _, syslogConf := range c.Syslog {
-		switch syslogConf.Format {
+		switch baseConf.Format {
 		case "rfc5424", "rfc3164", "json", "auto":
 		default:
-			if _, ok := parsersNames[syslogConf.Format]; !ok {
-				return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown parser: '%s'", syslogConf.Format)}
+			if _, ok := parsersNames[baseConf.Format]; !ok {
+				return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown parser: '%s'", baseConf.Format)}
 			}
 		}
+		syslogConf.SetConfID()
 	}
 
 	if c.Journald.Enabled {
@@ -789,9 +855,6 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 		c.Store.Secret = ""
 	}
 
-	for i := range c.Syslog {
-		c.Syslog[i].SetConfID()
-	}
 	c.Journald.SetConfID()
 	c.Accounting.SetConfID()
 	c.KafkaDest.Partitioner = strings.TrimSpace(strings.ToLower(c.KafkaDest.Partitioner))

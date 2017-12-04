@@ -5,8 +5,10 @@ import (
 	"sync"
 )
 
+type Func func() error
+
 // Chain executes the provided funcs until an error is returned.
-func Chain(funs ...func() error) (err error) {
+func Chain(funs ...Func) (err error) {
 	for _, f := range funs {
 		err = f()
 		if err != nil {
@@ -17,7 +19,7 @@ func Chain(funs ...func() error) (err error) {
 }
 
 // All executes all the provided funcs and returns the first error.
-func All(funs ...func() error) (err error) {
+func All(funs ...Func) (err error) {
 	errs := make([]error, 0, len(funs))
 	for _, f := range funs {
 		errs = append(errs, f())
@@ -50,7 +52,7 @@ func AnyErr(errs ...error) (err error) {
 }
 
 // Parallel executes the provided funcs in parallel and returns one of the returned errors if any.
-func Parallel(funs ...func() error) error {
+func Parallel(funs ...Func) error {
 	var wg sync.WaitGroup
 	errs := make([]error, 0, len(funs))
 	errChan := make(chan error)

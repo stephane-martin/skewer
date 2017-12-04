@@ -76,7 +76,7 @@ func (s *JournalService) Start(test bool) (infos []model.ListenerInfo, err error
 			return infos, err
 		}
 	}
-	s.reader.Start(s.Conf.Encoding)
+	s.reader.Start()
 
 	s.wgroup.Add(1)
 	go func() {
