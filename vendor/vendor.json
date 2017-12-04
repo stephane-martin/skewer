@@ -39,6 +39,12 @@
 			"revisionTime": "2016-03-05T23:33:25Z"
 		},
 		{
+			"checksumSHA1": "0dZ44xUU5xMNJGSpPerNJJ9zK9E=",
+			"path": "github.com/Shopify/sarama",
+			"revision": "6a8d89d71d22bbdc14b6cb52778889a710be19a7",
+			"revisionTime": "2017-11-29T14:03:49Z"
+		},
+		{
 			"checksumSHA1": "qtjd74+bErubh+qyv3s+lWmn9wc=",
 			"path": "github.com/StackExchange/wmi",
 			"revision": "ea383cf3ba6ec950874b8486cd72356d007c768f",
@@ -211,6 +217,14 @@
 			"path": "github.com/bkaradzic/go-lz4",
 			"revision": "7224d8d8f27ef618c0a95f1ae69dbb0488abc33a",
 			"revisionTime": "2016-09-24T22:28:19Z"
+		},
+		{
+			"checksumSHA1": "g422DtOm5KcZIN1loplFH6NAn7Y=",
+			"path": "github.com/bsm/sarama-cluster",
+			"revision": "abf039439f66c1ce78017f560b490612552f6472",
+			"revisionTime": "2017-11-14T15:25:29Z",
+			"version": "v2.1.10",
+			"versionExact": "v2.1.10"
 		},
 		{
 			"checksumSHA1": "PYXuf7wvcj492uWhjvmXlyyQUYc=",
