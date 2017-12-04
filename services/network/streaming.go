@@ -17,6 +17,7 @@ type StreamHandler interface {
 
 type TCPListenerConf struct {
 	Listener net.Listener
+	Port     int
 	Conf     conf.TcpSourceConfig
 }
 
@@ -64,18 +65,21 @@ func (s *StreamingService) initTCPListeners() []model.ListenerInfo {
 				s.UnixSocketPaths = append(s.UnixSocketPaths, syslogConf.UnixSocketPath)
 			}
 		} else {
-			listenAddr, _ := syslogConf.GetListenAddr()
-			l, err := s.Binder.Listen("tcp", listenAddr)
-			if err != nil {
-				s.Logger.Warn("Error listening on stream (TCP or RELP)", "listen_addr", listenAddr, "error", err)
-			} else {
-				s.Logger.Debug("Listener", "protocol", "stream", "bind_addr", syslogConf.BindAddr, "port", syslogConf.Port, "format", syslogConf.Format)
-				nb++
-				lc := TCPListenerConf{
-					Listener: l,
-					Conf:     syslogConf,
+			listenAddrs, _ := syslogConf.GetListenAddrs()
+			for port, listenAddr := range listenAddrs {
+				l, err := s.Binder.Listen("tcp", listenAddr)
+				if err != nil {
+					s.Logger.Warn("Error listening on stream (TCP or RELP)", "listen_addr", listenAddr, "error", err)
+				} else {
+					s.Logger.Debug("Listener", "protocol", "stream", "addr", listenAddr, "format", syslogConf.Format)
+					nb++
+					lc := TCPListenerConf{
+						Listener: l,
+						Port:     port,
+						Conf:     syslogConf,
+					}
+					s.TcpListeners = append(s.TcpListeners, lc)
 				}
-				s.TcpListeners = append(s.TcpListeners, lc)
 			}
 		}
 	}
@@ -90,7 +94,7 @@ func (s *StreamingService) initTCPListeners() []model.ListenerInfo {
 	for _, tcpc := range s.TcpListeners {
 		infos = append(infos, model.ListenerInfo{
 			BindAddr: tcpc.Conf.BindAddr,
-			Port:     tcpc.Conf.Port,
+			Port:     tcpc.Port,
 			Protocol: "tcp_or_relp",
 		})
 	}

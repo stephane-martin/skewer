@@ -203,20 +203,27 @@ func convertClientAuthType(auth_type string) tls.ClientAuthType {
 	}
 }
 
-func (c *SyslogSourceBaseConfig) GetListenAddr() (string, error) {
+func (c *SyslogSourceBaseConfig) GetListenAddrs() (addrs map[int]string, err error) {
+	addrs = map[int]string{}
 	if len(c.UnixSocketPath) > 0 {
-		return "", nil
+		return
 	}
 	bindIP := net.ParseIP(c.BindAddr)
 	if bindIP == nil {
-		return "", fmt.Errorf("bind_addr is not an IP address: %s", c.BindAddr)
+		return nil, fmt.Errorf("bind_addr is not an IP address: %s", c.BindAddr)
 	}
 
 	if bindIP.IsUnspecified() {
-		return fmt.Sprintf(":%d", c.Port), nil
+		for _, port := range c.Ports {
+			addrs[port] = fmt.Sprintf(":%d", port)
+		}
 	} else {
-		return fmt.Sprintf("%s:%d", bindIP.String(), c.Port), nil
+		ip := bindIP.String()
+		for _, port := range c.Ports {
+			addrs[port] = fmt.Sprintf("%s:%d", ip, port)
+		}
 	}
+	return
 }
 
 func (c *TcpSourceConfig) Export() []byte {
@@ -773,8 +780,8 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 			if baseConf.BindAddr == "" {
 				baseConf.BindAddr = "127.0.0.1"
 			}
-			if baseConf.Port == 0 {
-				baseConf.Port = syslogConf.DefaultPort()
+			if len(baseConf.Ports) == 0 {
+				baseConf.Ports = []int{syslogConf.DefaultPort()}
 			}
 		}
 
@@ -810,7 +817,7 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 			}
 		}
 
-		_, err = baseConf.GetListenAddr()
+		_, err = baseConf.GetListenAddrs()
 		if err != nil {
 			return ConfigurationCheckError{Err: err}
 		}

@@ -27,7 +27,7 @@ func deriveDeepCopy(dst, src *BaseConfig) {
 		} else {
 			dst.TcpSource = make([]TcpSourceConfig, len(src.TcpSource))
 		}
-		copy(dst.TcpSource, src.TcpSource)
+		deriveDeepCopy_(dst.TcpSource, src.TcpSource)
 	}
 	if src.UdpSource == nil {
 		dst.UdpSource = nil
@@ -45,7 +45,7 @@ func deriveDeepCopy(dst, src *BaseConfig) {
 		} else {
 			dst.UdpSource = make([]UdpSourceConfig, len(src.UdpSource))
 		}
-		copy(dst.UdpSource, src.UdpSource)
+		deriveDeepCopy_1(dst.UdpSource, src.UdpSource)
 	}
 	if src.RelpSource == nil {
 		dst.RelpSource = nil
@@ -63,7 +63,7 @@ func deriveDeepCopy(dst, src *BaseConfig) {
 		} else {
 			dst.RelpSource = make([]RelpSourceConfig, len(src.RelpSource))
 		}
-		copy(dst.RelpSource, src.RelpSource)
+		deriveDeepCopy_2(dst.RelpSource, src.RelpSource)
 	}
 	dst.Store = src.Store
 	if src.Parsers == nil {
@@ -89,7 +89,7 @@ func deriveDeepCopy(dst, src *BaseConfig) {
 	dst.Accounting = src.Accounting
 	dst.Main = src.Main
 	field := new(KafkaDestConfig)
-	deriveDeepCopy_(field, &src.KafkaDest)
+	deriveDeepCopy_3(field, &src.KafkaDest)
 	dst.KafkaDest = *field
 	dst.UdpDest = src.UdpDest
 	dst.TcpDest = src.TcpDest
@@ -99,7 +99,34 @@ func deriveDeepCopy(dst, src *BaseConfig) {
 }
 
 // deriveDeepCopy_ recursively copies the contents of src into dst.
-func deriveDeepCopy_(dst, src *KafkaDestConfig) {
+func deriveDeepCopy_(dst, src []TcpSourceConfig) {
+	for src_i, src_value := range src {
+		field := new(TcpSourceConfig)
+		deriveDeepCopy_4(field, &src_value)
+		dst[src_i] = *field
+	}
+}
+
+// deriveDeepCopy_1 recursively copies the contents of src into dst.
+func deriveDeepCopy_1(dst, src []UdpSourceConfig) {
+	for src_i, src_value := range src {
+		field := new(UdpSourceConfig)
+		deriveDeepCopy_5(field, &src_value)
+		dst[src_i] = *field
+	}
+}
+
+// deriveDeepCopy_2 recursively copies the contents of src into dst.
+func deriveDeepCopy_2(dst, src []RelpSourceConfig) {
+	for src_i, src_value := range src {
+		field := new(RelpSourceConfig)
+		deriveDeepCopy_6(field, &src_value)
+		dst[src_i] = *field
+	}
+}
+
+// deriveDeepCopy_3 recursively copies the contents of src into dst.
+func deriveDeepCopy_3(dst, src *KafkaDestConfig) {
 	dst.TlsBaseConfig = src.TlsBaseConfig
 	dst.BaseDestConfig = src.BaseDestConfig
 	dst.Insecure = src.Insecure
@@ -143,4 +170,65 @@ func deriveDeepCopy_(dst, src *KafkaDestConfig) {
 	dst.RetrySendMax = src.RetrySendMax
 	dst.RetrySendBackoff = src.RetrySendBackoff
 	dst.Partitioner = src.Partitioner
+}
+
+// deriveDeepCopy_4 recursively copies the contents of src into dst.
+func deriveDeepCopy_4(dst, src *TcpSourceConfig) {
+	field := new(SyslogSourceBaseConfig)
+	deriveDeepCopy_7(field, &src.SyslogSourceBaseConfig)
+	dst.SyslogSourceBaseConfig = *field
+	dst.FilterSubConfig = src.FilterSubConfig
+	dst.TlsBaseConfig = src.TlsBaseConfig
+	dst.ClientAuthType = src.ClientAuthType
+	dst.ConfID = src.ConfID
+}
+
+// deriveDeepCopy_5 recursively copies the contents of src into dst.
+func deriveDeepCopy_5(dst, src *UdpSourceConfig) {
+	field := new(SyslogSourceBaseConfig)
+	deriveDeepCopy_7(field, &src.SyslogSourceBaseConfig)
+	dst.SyslogSourceBaseConfig = *field
+	dst.FilterSubConfig = src.FilterSubConfig
+	dst.ConfID = src.ConfID
+}
+
+// deriveDeepCopy_6 recursively copies the contents of src into dst.
+func deriveDeepCopy_6(dst, src *RelpSourceConfig) {
+	field := new(SyslogSourceBaseConfig)
+	deriveDeepCopy_7(field, &src.SyslogSourceBaseConfig)
+	dst.SyslogSourceBaseConfig = *field
+	dst.FilterSubConfig = src.FilterSubConfig
+	dst.TlsBaseConfig = src.TlsBaseConfig
+	dst.ClientAuthType = src.ClientAuthType
+	dst.ConfID = src.ConfID
+}
+
+// deriveDeepCopy_7 recursively copies the contents of src into dst.
+func deriveDeepCopy_7(dst, src *SyslogSourceBaseConfig) {
+	if src.Ports == nil {
+		dst.Ports = nil
+	} else {
+		if dst.Ports != nil {
+			if len(src.Ports) > len(dst.Ports) {
+				if cap(dst.Ports) >= len(src.Ports) {
+					dst.Ports = (dst.Ports)[:len(src.Ports)]
+				} else {
+					dst.Ports = make([]int, len(src.Ports))
+				}
+			} else if len(src.Ports) < len(dst.Ports) {
+				dst.Ports = (dst.Ports)[:len(src.Ports)]
+			}
+		} else {
+			dst.Ports = make([]int, len(src.Ports))
+		}
+		copy(dst.Ports, src.Ports)
+	}
+	dst.BindAddr = src.BindAddr
+	dst.UnixSocketPath = src.UnixSocketPath
+	dst.Format = src.Format
+	dst.DontParseSD = src.DontParseSD
+	dst.KeepAlive = src.KeepAlive
+	dst.KeepAlivePeriod = src.KeepAlivePeriod
+	dst.Timeout = src.Timeout
+	dst.Encoding = src.Encoding
 }

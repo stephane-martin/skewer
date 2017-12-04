@@ -254,27 +254,29 @@ func (s *UdpServiceImpl) ListenPacket() []model.ListenerInfo {
 				go s.handleConnection(conn, syslogConf)
 			}
 		} else {
-			listenAddr, _ := syslogConf.GetListenAddr()
-			conn, err := s.Binder.ListenPacket("udp", listenAddr)
-			if err != nil {
-				s.Logger.Warn("Listen UDP error", "error", err)
-			} else {
-				s.Logger.Debug(
-					"UDP listener",
-					"protocol", "udp",
-					"bind_addr", syslogConf.BindAddr,
-					"port", syslogConf.Port,
-					"format", syslogConf.Format,
-				)
-				udpinfos = append(udpinfos, model.ListenerInfo{
-					BindAddr: syslogConf.BindAddr,
-					Port:     syslogConf.Port,
-					Protocol: "udp",
-				})
-				conn.(*binder.FilePacketConn).PacketConn.(*net.UDPConn).SetReadBuffer(65536)
-				conn.(*binder.FilePacketConn).PacketConn.(*net.UDPConn).SetReadBuffer(65536)
-				s.wg.Add(1)
-				go s.handleConnection(conn, syslogConf)
+			listenAddrs, _ := syslogConf.GetListenAddrs()
+			for port, listenAddr := range listenAddrs {
+				conn, err := s.Binder.ListenPacket("udp", listenAddr)
+				if err != nil {
+					s.Logger.Warn("Listen UDP error", "error", err)
+				} else {
+					s.Logger.Debug(
+						"UDP listener",
+						"protocol", "udp",
+						"bind_addr", syslogConf.BindAddr,
+						"port", port,
+						"format", syslogConf.Format,
+					)
+					udpinfos = append(udpinfos, model.ListenerInfo{
+						BindAddr: syslogConf.BindAddr,
+						Port:     port,
+						Protocol: "udp",
+					})
+					conn.(*binder.FilePacketConn).PacketConn.(*net.UDPConn).SetReadBuffer(65536)
+					conn.(*binder.FilePacketConn).PacketConn.(*net.UDPConn).SetReadBuffer(65536)
+					s.wg.Add(1)
+					go s.handleConnection(conn, syslogConf)
+				}
 			}
 		}
 	}

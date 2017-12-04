@@ -350,7 +350,7 @@ type SyslogSourceConfig interface {
 }
 
 type SyslogSourceBaseConfig struct {
-	Port            int           `mapstructure:"port" toml:"port" json:"port"`
+	Ports           []int         `mapstructure:"ports" toml:"ports" json:"ports"`
 	BindAddr        string        `mapstructure:"bind_addr" toml:"bind_addr" json:"bind_addr"`
 	UnixSocketPath  string        `mapstructure:"unix_socket_path" toml:"unix_socket_path" json:"unix_socket_path"`
 	Format          string        `mapstructure:"format" toml:"format" json:"format"`
