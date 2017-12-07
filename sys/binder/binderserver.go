@@ -91,7 +91,7 @@ func BinderPacket(addr string) (conn net.PacketConn, err error) {
 	return conn, nil
 }
 
-func Binder(parentsHandles []int, logger log15.Logger) (err error) {
+func Binder(parentsHandles []uintptr, logger log15.Logger) (err error) {
 	for _, handle := range parentsHandles {
 		err = binderOne(handle, logger)
 		if err != nil {
@@ -101,9 +101,9 @@ func Binder(parentsHandles []int, logger log15.Logger) (err error) {
 	return nil
 }
 
-func binderOne(parentFD int, logger log15.Logger) error {
+func binderOne(parentFD uintptr, logger log15.Logger) error {
 	logger = logger.New("class", "binder")
-	parentFile := os.NewFile(uintptr(parentFD), "parent_file")
+	parentFile := os.NewFile(parentFD, "parent_file")
 
 	c, err := net.FileConn(parentFile)
 	if err != nil {

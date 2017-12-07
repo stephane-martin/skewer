@@ -31,8 +31,8 @@ import (
 )
 
 type spair struct {
-	child  int
-	parent int
+	child  uintptr
+	parent uintptr
 }
 
 func getSocketPair(typ int) (spair, error) {
@@ -40,11 +40,11 @@ func getSocketPair(typ int) (spair, error) {
 	if err != nil {
 		return spair{}, fmt.Errorf("socketpair error: %s", err)
 	}
-	return spair{child: a, parent: b}, nil
+	return spair{child: uintptr(a), parent: uintptr(b)}, nil
 }
 
-func getLoggerConn(handle int) (loggerConn *net.UnixConn) {
-	c, _ := net.FileConn(os.NewFile(uintptr(handle), "logger"))
+func getLoggerConn(handle uintptr) (loggerConn *net.UnixConn) {
+	c, _ := net.FileConn(os.NewFile(handle, "logger"))
 	conn := c.(*net.UnixConn)
 	conn.SetReadBuffer(65536)
 	conn.SetWriteBuffer(65536)
@@ -217,17 +217,17 @@ func execServeParent() (err error) {
 	loggerSockets := map[string]spair{}
 
 	for _, h := range cmd.Handles {
-		if strings.HasSuffix(h, "_BINDER") {
-			binderSockets[h], err = getSocketPair(syscall.SOCK_STREAM)
+		if h.Type == cmd.BINDER {
+			binderSockets[h.Service], err = getSocketPair(syscall.SOCK_STREAM)
 		} else {
-			loggerSockets[h], err = getSocketPair(syscall.SOCK_DGRAM)
+			loggerSockets[h.Service], err = getSocketPair(syscall.SOCK_DGRAM)
 		}
 		if err != nil {
 			return makeErr("Can't create the required socketpairs", err)
 		}
 	}
 
-	binderParents := []int{}
+	binderParents := []uintptr{}
 	for _, s := range binderSockets {
 		binderParents = append(binderParents, s.parent)
 	}
@@ -258,10 +258,10 @@ func execServeParent() (err error) {
 
 	extraFiles := []*os.File{}
 	for _, h := range cmd.Handles {
-		if strings.HasSuffix(h, "_BINDER") {
-			extraFiles = append(extraFiles, os.NewFile(uintptr(binderSockets[h].child), h))
+		if h.Type == cmd.BINDER {
+			extraFiles = append(extraFiles, os.NewFile(binderSockets[h.Service].child, h.Service))
 		} else {
-			extraFiles = append(extraFiles, os.NewFile(uintptr(loggerSockets[h].child), h))
+			extraFiles = append(extraFiles, os.NewFile(loggerSockets[h.Service].child, h.Service))
 		}
 	}
 	rOpenBsdSecretPipe, wOpenBsdSecretPipe, err := os.Pipe()
@@ -290,10 +290,10 @@ func execServeParent() (err error) {
 
 	rOpenBsdSecretPipe.Close()
 	for _, h := range cmd.Handles {
-		if strings.HasSuffix(h, "_BINDER") {
-			syscall.Close(binderSockets[h].child)
+		if h.Type == cmd.BINDER {
+			syscall.Close(int(binderSockets[h.Service].child))
 		} else {
-			syscall.Close(loggerSockets[h].child)
+			syscall.Close(int(loggerSockets[h.Service].child))
 		}
 	}
 	ring.WriteRingPass(wOpenBsdSecretPipe)
@@ -404,6 +404,7 @@ func fixLinuxParentPrivileges(logger log15.Logger) {
 }
 
 func main() {
+	// calculate the process name
 	name := strings.Trim(os.Args[0], "./ \n\r")
 	spl := strings.Split(name, "/")
 	if len(spl) > 0 {
@@ -424,7 +425,7 @@ func main() {
 	sid := os.Getenv("SKEWER_SESSION")
 
 	switch name {
-	case "skewer-conf":
+	case services.Types2Names[services.Configuration]:
 		dumpable.SetNonDumpable()
 		capabilities.NoNewPriv()
 		signal.Ignore(syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
@@ -464,7 +465,7 @@ func main() {
 		}
 		cleanup("", nil, logger, cancelLogger)
 
-	case "confined-skewer-journal":
+	case services.Types2ConfinedNames[services.Journal]:
 		// journal is a special case, as /run/log/journal and /var/log/journal
 		// can not be bind-mounted (probably because of setgid bits)
 		dumpable.SetNonDumpable()
@@ -491,7 +492,14 @@ func main() {
 			cleanup("execve error", err, logger, cancelLogger)
 		}
 
-	case "confined-skewer-accounting", "confined-skewer-tcp", "confined-skewer-udp", "confined-skewer-relp", "confined-skewer-store", "confined-skewer-conf":
+	case services.Types2ConfinedNames[services.Accounting],
+		services.Types2ConfinedNames[services.TCP],
+		services.Types2ConfinedNames[services.UDP],
+		services.Types2ConfinedNames[services.RELP],
+		services.Types2ConfinedNames[services.Store],
+		services.Types2ConfinedNames[services.Configuration],
+		services.Types2ConfinedNames[services.KafkaSource]:
+
 		path, err := osext.Executable()
 		if err != nil {
 			cleanup("Error getting executable path", err, logger, cancelLogger)
@@ -524,7 +532,14 @@ func main() {
 			cleanup("execve error", err, logger, cancelLogger)
 		}
 
-	case "skewer-tcp", "skewer-udp", "skewer-relp", "skewer-journal", "skewer-store", "skewer-accounting":
+	case services.Types2Names[services.TCP],
+		services.Types2Names[services.UDP],
+		services.Types2Names[services.RELP],
+		services.Types2Names[services.Journal],
+		services.Types2Names[services.Store],
+		services.Types2Names[services.Accounting],
+		services.Types2Names[services.KafkaSource]:
+
 		if name == "skewer-store" {
 			runtime.GOMAXPROCS(128)
 		}
@@ -597,7 +612,7 @@ func main() {
 		if err != nil {
 			cleanup("Pledge setup error", err, logger, cancelLogger)
 		}
-		err = services.Launch(services.NetworkServiceMap[name], os.Getenv("SKEWER_TEST") == "TRUE", ring, binderClient, logger, pipe)
+		err = services.Launch(services.Names2Types[name], os.Getenv("SKEWER_TEST") == "TRUE", ring, binderClient, logger, pipe)
 		if err != nil {
 			cleanup("Plugin encountered a fatal error", err, logger, cancelLogger)
 		}

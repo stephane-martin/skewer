@@ -15,19 +15,20 @@ import (
 	"github.com/stephane-martin/skewer/sys/kring"
 )
 
-type NetworkServiceType int
+type Types int
 
 const (
-	TCP NetworkServiceType = iota
+	TCP Types = iota
 	UDP
 	RELP
 	Journal
 	Store
 	Accounting
 	KafkaSource
+	Configuration
 )
 
-var NetworkServiceMap map[string]NetworkServiceType = map[string]NetworkServiceType{
+var Names2Types map[string]Types = map[string]Types{
 	"skewer-tcp":         TCP,
 	"skewer-udp":         UDP,
 	"skewer-relp":        RELP,
@@ -35,14 +36,18 @@ var NetworkServiceMap map[string]NetworkServiceType = map[string]NetworkServiceT
 	"skewer-store":       Store,
 	"skewer-accounting":  Accounting,
 	"skewer-kafkasource": KafkaSource,
+	"skewer-conf":        Configuration,
 }
 
-var ReverseNetworkServiceMap map[NetworkServiceType]string
+var Types2Names map[Types]string
+var Types2ConfinedNames map[Types]string
 
 func init() {
-	ReverseNetworkServiceMap = map[NetworkServiceType]string{}
-	for k, v := range NetworkServiceMap {
-		ReverseNetworkServiceMap[v] = k
+	Types2Names = map[Types]string{}
+	Types2ConfinedNames = map[Types]string{}
+	for k, v := range Names2Types {
+		Types2Names[v] = k
+		Types2ConfinedNames[v] = "confined-" + k
 	}
 }
 
@@ -75,7 +80,7 @@ func ConfigureAndStartService(s NetworkService, c conf.BaseConfig, test bool) ([
 
 }
 
-func ProviderFactory(t NetworkServiceType, r kring.Ring, reporter *base.Reporter, gen chan ulid.ULID, b *binder.BinderClient, l log15.Logger, pipe *os.File) NetworkService {
+func ProviderFactory(t Types, r kring.Ring, reporter *base.Reporter, gen chan ulid.ULID, b *binder.BinderClient, l log15.Logger, pipe *os.File) NetworkService {
 	switch t {
 	case TCP:
 		return network.NewTcpService(reporter, gen, b, l)

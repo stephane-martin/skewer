@@ -15,6 +15,7 @@ import (
 	"github.com/awnumar/memguard"
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/cobra"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/consul"
@@ -48,8 +49,21 @@ var UidFlag string
 var GidFlag string
 var DumpableFlag bool
 var profile bool
-var Handles []string
-var HandlesMap map[string]int
+
+var Handles []ServiceHandle
+var HandlesMap map[ServiceHandle]uintptr
+
+type HandleType uint8
+
+const (
+	BINDER HandleType = iota
+	LOGGER
+)
+
+type ServiceHandle struct {
+	Service string
+	Type    HandleType
+}
 
 func init() {
 	RootCmd.AddCommand(serveCobraCmd)
@@ -66,26 +80,34 @@ func init() {
 	serveCobraCmd.Flags().BoolVar(&DumpableFlag, "dumpable", false, "if set, the skewer process will be traceable/dumpable")
 	serveCobraCmd.Flags().BoolVar(&profile, "profile", false, "if set, profile memory")
 
-	Handles = []string{
-		"CHILD_BINDER",
-		"TCP_BINDER",
-		"UDP_BINDER",
-		"RELP_BINDER",
-		"CHILD_LOGGER",
-		"TCP_LOGGER",
-		"UDP_LOGGER",
-		"RELP_LOGGER",
-		"JOURNAL_LOGGER",
-		"CONFIG_LOGGER",
-		"STORE_LOGGER",
-		"ACCT_LOGGER",
-		"KAFKASOURCE_LOGGER",
+	Handles = []ServiceHandle{
+		ServiceHandle{"child", BINDER},
+		ServiceHandle{services.Types2Names[services.TCP], BINDER},
+		ServiceHandle{services.Types2Names[services.UDP], BINDER},
+		ServiceHandle{services.Types2Names[services.RELP], BINDER},
+		ServiceHandle{"child", LOGGER},
+		ServiceHandle{services.Types2Names[services.TCP], LOGGER},
+		ServiceHandle{services.Types2Names[services.UDP], LOGGER},
+		ServiceHandle{services.Types2Names[services.RELP], LOGGER},
+		ServiceHandle{services.Types2Names[services.Journal], LOGGER},
+		ServiceHandle{services.Types2Names[services.Configuration], LOGGER},
+		ServiceHandle{services.Types2Names[services.Store], LOGGER},
+		ServiceHandle{services.Types2Names[services.Accounting], LOGGER},
+		ServiceHandle{services.Types2Names[services.KafkaSource], LOGGER},
 	}
 
-	HandlesMap = map[string]int{}
+	HandlesMap = map[ServiceHandle]uintptr{}
 	for i, h := range Handles {
-		HandlesMap[h] = i + 3
+		HandlesMap[h] = uintptr(i + 3)
 	}
+}
+
+func LoggerHdl(typ services.Types) uintptr {
+	return HandlesMap[ServiceHandle{services.Types2Names[typ], LOGGER}]
+}
+
+func BinderHdl(typ services.Types) uintptr {
+	return HandlesMap[ServiceHandle{services.Types2Names[typ], BINDER}]
 }
 
 // ExecuteChild sets up the environment for the serve command and starts it.
@@ -94,18 +116,18 @@ func ExecuteChild() (err error) {
 	if len(sessionID) == 0 {
 		return fmt.Errorf("Empty session ID")
 	}
-	wOpenBsdSecretPipe := os.NewFile(16, "ringsecretpipe")
-	var bsdSecret *memguard.LockedBuffer
+	ringSecretPipe := os.NewFile(16, "ringsecretpipe")
+	var ringSecret *memguard.LockedBuffer
 	buf := make([]byte, 32)
-	_, err = wOpenBsdSecretPipe.Read(buf)
+	_, err = ringSecretPipe.Read(buf)
 	if err != nil {
 		return err
 	}
-	bsdSecret, err = memguard.NewImmutableFromBytes(buf)
+	ringSecret, err = memguard.NewImmutableFromBytes(buf)
 	if err != nil {
 		return err
 	}
-	creds := kring.RingCreds{Secret: bsdSecret, SessionID: ulid.MustParse(sessionID)}
+	creds := kring.RingCreds{Secret: ringSecret, SessionID: ulid.MustParse(sessionID)}
 	ring := kring.GetRing(creds)
 	secret, err := ring.GetBoxSecret()
 	if err != nil {
@@ -144,7 +166,7 @@ type serveChild struct {
 	consulParams   consul.ConnParams
 	consulRegistry *consul.Registry
 	store          *services.StorePlugin
-	controllers    map[services.NetworkServiceType]*services.PluginController
+	controllers    map[services.Types]*services.PluginController
 	metricsServer  *metrics.MetricsServer
 	signPrivKey    *memguard.LockedBuffer
 	ring           kring.Ring
@@ -155,7 +177,8 @@ func newServeChild(ring kring.Ring) (*serveChild, error) {
 	if err != nil {
 		return nil, err
 	}
-	conn, err := net.FileConn(os.NewFile(uintptr(HandlesMap["CHILD_LOGGER"]), "logger"))
+	childLoggerHdl := HandlesMap[ServiceHandle{"child", LOGGER}]
+	conn, err := net.FileConn(os.NewFile(childLoggerHdl, "logger"))
 	if err != nil {
 		return nil, err
 	}
@@ -212,10 +235,14 @@ func (ch *serveChild) cleanup() {
 // ShutdownControllers definitely shutdowns the plugin processes.
 func (ch *serveChild) ShutdownControllers() {
 	funcs := []utils.Func{}
-	for _, t := range services.NetworkServiceMap {
-		if t != services.Store {
+	for _, t := range services.Names2Types {
+		typ := t
+		switch typ {
+		case services.Store, services.Configuration:
+			// shutdown them later
+		default:
 			funcs = append(funcs, func() error {
-				ch.StopController(t, true)
+				ch.StopController(typ, true)
 				return nil
 			})
 		}
@@ -233,12 +260,11 @@ func (ch *serveChild) ShutdownControllers() {
 	if ch.consulRegistry != nil {
 		ch.consulRegistry.WaitFinished() // wait that the services have been unregistered from Consul
 	}
-	ch.cancelLogger()
-	time.Sleep(time.Second)
+	ch.confService.Stop()
 }
 
 func (ch *serveChild) setupConfiguration() error {
-	ch.confService = services.NewConfigurationService(ch.signPrivKey, HandlesMap["CONFIG_LOGGER"], ch.logger)
+	ch.confService = services.NewConfigurationService(ch.signPrivKey, LoggerHdl(services.Configuration), ch.logger)
 	ch.confService.SetConfDir(configDirName)
 	ch.confService.SetConsulParams(ch.consulParams)
 	err := ch.confService.Start(ch.ring)
@@ -279,7 +305,7 @@ func (ch *serveChild) setupConsulRegistry() error {
 
 func (ch *serveChild) setupStore() (st *services.StorePlugin, err error) {
 	f := services.ControllerFactory(ch.ring, ch.signPrivKey, nil, ch.consulRegistry, ch.logger)
-	st = f.NewStore(HandlesMap["STORE_LOGGER"])
+	st = f.NewStore(LoggerHdl(services.Store))
 	st.SetConf(*ch.conf)
 	err = st.Create(testFlag, DumpableFlag, storeDirname, "", "")
 	if err != nil {
@@ -307,47 +333,60 @@ func (ch *serveChild) setupSignKey() error {
 	return nil
 }
 
-func setupController(f *services.CFactory, typ services.NetworkServiceType) *services.PluginController {
-	var binder int
-	var logger int
+func setupController(f *services.CFactory, typ services.Types) *services.PluginController {
 	switch typ {
-	case services.RELP:
-		binder = HandlesMap["RELP_BINDER"]
-		logger = HandlesMap["RELP_LOGGER"]
-	case services.TCP:
-		binder = HandlesMap["TCP_BINDER"]
-		logger = HandlesMap["TCP_LOGGER"]
-	case services.UDP:
-		binder = HandlesMap["UDP_BINDER"]
-		logger = HandlesMap["UDP_LOGGER"]
-	case services.Journal:
-		logger = HandlesMap["JOURNAL_LOGGER"]
-	case services.Accounting:
-		logger = HandlesMap["ACCT_LOGGER"]
-	case services.KafkaSource:
-		logger = HandlesMap["KAFKASOURCE_LOGGER"]
+	case services.Configuration, services.Store:
+		return nil
+	default:
+		return f.New(typ, BinderHdl(typ), LoggerHdl(typ))
 	}
-	return f.New(typ, binder, logger)
 }
 
 func (ch *serveChild) setupControllers() {
-	ch.controllers = map[services.NetworkServiceType]*services.PluginController{}
+	ch.controllers = map[services.Types]*services.PluginController{}
 	factory := services.ControllerFactory(ch.ring, ch.signPrivKey, ch.store, ch.consulRegistry, ch.logger)
-	for _, typ := range []services.NetworkServiceType{services.RELP, services.TCP, services.UDP, services.Journal, services.Accounting} {
-		ch.controllers[typ] = setupController(factory, typ)
+	for typ := range services.Types2Names {
+		switch typ {
+		case services.Store, services.Configuration:
+		default:
+			ch.controllers[typ] = setupController(factory, typ)
+		}
 	}
 }
 
 // StartControllers starts all the processes that produce syslog messages.
 func (ch *serveChild) StartControllers() error {
-	return utils.All(
-		ch.StartRelp,
-		ch.StartTcp,
-		ch.StartUdp,
-		ch.StartJournal,
-		ch.StartAccounting,
-		ch.StartKafkaSource,
-	)
+	funcs := []utils.Func{}
+	for t := range services.Types2Names {
+		typ := t
+		switch typ {
+		case services.Store, services.Configuration:
+		default:
+			funcs = append(funcs, func() error {
+				return ch.StartController(typ)
+			})
+		}
+	}
+	return utils.All(funcs...)
+}
+
+func (ch *serveChild) StartController(typ services.Types) error {
+	switch typ {
+	case services.RELP:
+		return ch.StartRelp()
+	case services.TCP:
+		return ch.StartTcp()
+	case services.UDP:
+		return ch.StartUdp()
+	case services.Journal:
+		return ch.StartJournal()
+	case services.Accounting:
+		return ch.StartAccounting()
+	case services.KafkaSource:
+		return ch.StartKafkaSource()
+	default:
+		return nil
+	}
 }
 
 func (ch *serveChild) StartKafkaSource() error {
@@ -470,10 +509,10 @@ func (ch *serveChild) StartUdp() error {
 }
 
 // StopController stops a process of specified type.
-func (ch *serveChild) StopController(typ services.NetworkServiceType, doShutdown bool) {
+func (ch *serveChild) StopController(typ services.Types, doShutdown bool) {
 	switch typ {
-	case services.TCP, services.UDP, services.RELP, services.Accounting:
-		ch.controllers[typ].Shutdown(5 * time.Second)
+	case services.Store, services.Configuration:
+		return
 	case services.Journal:
 		if journald.Supported {
 			if doShutdown {
@@ -485,6 +524,8 @@ func (ch *serveChild) StopController(typ services.NetworkServiceType, doShutdown
 				ch.controllers[services.Journal].Stop()
 			}
 		}
+	default:
+		ch.controllers[typ].Shutdown(5 * time.Second)
 	}
 }
 
@@ -502,35 +543,19 @@ func (ch *serveChild) Reload() (err error) {
 	if err != nil {
 		return err
 	}
-	err = utils.All(
-		func() error {
-			if !journald.Supported {
-				return nil
-			}
-			ch.StopController(services.Journal, false)
-			return ch.StartJournal()
-		},
-		func() error {
-			ch.StopController(services.Accounting, false)
-			return ch.StartAccounting()
-		},
-		func() error {
-			ch.StopController(services.RELP, false)
-			return ch.StartRelp()
-		},
-		func() error {
-			ch.StopController(services.TCP, false)
-			return ch.StartTcp()
-		},
-		func() error {
-			ch.StopController(services.UDP, false)
-			return ch.StartUdp()
-		},
-		func() error {
-			ch.StopController(services.KafkaSource, false)
-			return ch.StartKafkaSource()
-		},
-	)
+	funcs := []utils.Func{}
+	for t := range services.Types2Names {
+		typ := t
+		switch typ {
+		case services.Store, services.Configuration:
+		default:
+			funcs = append(funcs, func() error {
+				ch.StopController(typ, false)
+				return ch.StartController(typ)
+			})
+		}
+	}
+	err = utils.All(funcs...)
 	if err != nil {
 		return err
 	}
@@ -541,16 +566,17 @@ func (ch *serveChild) Reload() (err error) {
 
 func (ch *serveChild) setupMetrics(logger log15.Logger) {
 	ch.metricsServer = &metrics.MetricsServer{}
-	ch.metricsServer.NewConf(
-		ch.conf.Metrics,
-		logger,
-		ch.controllers[services.Journal],
-		ch.controllers[services.RELP],
-		ch.controllers[services.TCP],
-		ch.controllers[services.UDP],
-		ch.controllers[services.Accounting],
-		ch.store,
-	)
+	controllers := []prometheus.Gatherer{}
+	for typ := range services.Types2Names {
+		switch typ {
+		case services.Configuration:
+		case services.Store:
+			controllers = append(controllers, ch.store)
+		default:
+			controllers = append(controllers, ch.controllers[typ])
+		}
+	}
+	ch.metricsServer.NewConf(ch.conf.Metrics, logger, controllers...)
 }
 
 // Serve starts the controllers and reacts to signals and events.

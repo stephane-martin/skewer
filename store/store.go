@@ -393,19 +393,22 @@ func (s *MessageStore) WaitFinished() {
 func (s *MessageStore) StoreAllSyslogConfigs(c conf.BaseConfig) (err error) {
 	funcs := []utils.Func{}
 
-	for _, tcpConf := range c.TcpSource {
+	for _, c := range c.TcpSource {
+		tcpConf := c
 		funcs = append(funcs, func() error {
 			return s.StoreSyslogConfig(tcpConf.ConfID, tcpConf.FilterSubConfig)
 		})
 	}
 
-	for _, udpConf := range c.UdpSource {
+	for _, c := range c.UdpSource {
+		udpConf := c
 		funcs = append(funcs, func() error {
 			return s.StoreSyslogConfig(udpConf.ConfID, udpConf.FilterSubConfig)
 		})
 	}
 
-	for _, relpConf := range c.RelpSource {
+	for _, c := range c.RelpSource {
+		relpConf := c
 		funcs = append(funcs, func() error {
 			return s.StoreSyslogConfig(relpConf.ConfID, relpConf.FilterSubConfig)
 		})

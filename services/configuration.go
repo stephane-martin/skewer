@@ -44,12 +44,12 @@ type ConfigurationService struct {
 	logger       log15.Logger
 	stdinMu      *sync.Mutex
 	confdir      string
-	loggerHandle int
+	loggerHandle uintptr
 	signKey      *memguard.LockedBuffer
 	stdinWriter  *utils.SigWriter
 }
 
-func NewConfigurationService(signKey *memguard.LockedBuffer, childLoggerHandle int, l log15.Logger) *ConfigurationService {
+func NewConfigurationService(signKey *memguard.LockedBuffer, childLoggerHandle uintptr, l log15.Logger) *ConfigurationService {
 	c := ConfigurationService{
 		loggerHandle: childLoggerHandle,
 		logger:       l,

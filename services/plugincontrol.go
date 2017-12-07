@@ -42,12 +42,12 @@ var NOLISTENER = errors.New("")
 
 // PluginController launches and controls the plugins services
 type PluginController struct {
-	typ NetworkServiceType
+	typ Types
 
 	conf conf.BaseConfig
 
-	binderHandle int
-	loggerHandle int
+	binderHandle uintptr
+	loggerHandle uintptr
 	pipe         *os.File
 	logger       log15.Logger
 	stasher      *StorePlugin
@@ -91,7 +91,7 @@ func ControllerFactory(ring kring.Ring, signKey *memguard.LockedBuffer, stasher 
 	return &f
 }
 
-func (f *CFactory) New(typ NetworkServiceType, binderHandle int, loggerHandle int) *PluginController {
+func (f *CFactory) New(typ Types, binderHandle uintptr, loggerHandle uintptr) *PluginController {
 	s := PluginController{
 		typ:          typ,
 		stasher:      f.stasher,
@@ -107,7 +107,7 @@ func (f *CFactory) New(typ NetworkServiceType, binderHandle int, loggerHandle in
 	return &s
 }
 
-func (f *CFactory) NewStore(loggerHandle int) *StorePlugin {
+func (f *CFactory) NewStore(loggerHandle uintptr) *StorePlugin {
 	s := &StorePlugin{PluginController: f.New(Store, 0, loggerHandle)}
 	s.MessageQueue = queue.NewMessageQueue()
 	s.pushwg = &sync.WaitGroup{}
@@ -186,7 +186,7 @@ func (s *PluginController) Shutdown(killTimeOut time.Duration) {
 		return
 	}
 	s.createdMu.Unlock()
-	name := ReverseNetworkServiceMap[s.typ]
+	name := Types2Names[s.typ]
 
 	select {
 	case <-s.ShutdownChan:
@@ -228,7 +228,7 @@ func (s *PluginController) SetConf(c conf.BaseConfig) {
 
 func (s *PluginController) kill(misbevave bool) {
 	if misbevave {
-		s.logger.Crit("killing misbehaving plugin", "type", ReverseNetworkServiceMap[s.typ])
+		s.logger.Crit("killing misbehaving plugin", "type", Types2Names[s.typ])
 	}
 	s.stdinMu.Lock()
 	s.cmd.Process.Kill()
@@ -250,7 +250,7 @@ func (s *PluginController) listenpipe(secret *memguard.LockedBuffer) {
 	default:
 		return
 	}
-	name := ReverseNetworkServiceMap[s.typ]
+	name := Types2Names[s.typ]
 	scanner := bufio.NewScanner(s.pipe)
 	scanner.Split(utils.MakeDecryptSplit(secret))
 	scanner.Buffer(make([]byte, 0, 132000), 132000)
@@ -279,7 +279,7 @@ func (s *PluginController) listenpipe(secret *memguard.LockedBuffer) {
 
 func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndError {
 	startErrorChan := make(chan infosAndError)
-	name := ReverseNetworkServiceMap[s.typ]
+	name := Types2Names[s.typ]
 
 	var once sync.Once
 	startError := func(err error, infos []model.ListenerInfo) {
@@ -459,7 +459,7 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 
 // Start asks the controlled plugin to start the operations.
 func (s *PluginController) Start() (infos []model.ListenerInfo, err error) {
-	name := ReverseNetworkServiceMap[s.typ]
+	name := Types2Names[s.typ]
 	s.createdMu.Lock()
 	s.startedMu.Lock()
 	if !s.created {
@@ -519,7 +519,7 @@ func (s *PluginController) Start() (infos []model.ListenerInfo, err error) {
 	return infos, nil
 }
 
-func setupCmd(name string, r kring.Ring, binderHandle int, loggerHandle int, messagePipe *os.File, test bool) (*exec.Cmd, io.WriteCloser, io.ReadCloser, error) {
+func setupCmd(name string, r kring.Ring, binderHandle, loggerHandle uintptr, messagePipe *os.File, test bool) (*exec.Cmd, io.WriteCloser, io.ReadCloser, error) {
 	exe, err := osext.Executable()
 	if err != nil {
 		return nil, nil, nil, err
@@ -581,7 +581,7 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 	s.ShutdownChan = make(chan struct{})
 	s.ExitCode = 0
 	var err error
-	name := ReverseNetworkServiceMap[s.typ]
+	name := Types2Names[s.typ]
 	if s.typ != Accounting {
 		acctPath = ""
 	}

@@ -24,14 +24,14 @@ func Wout(header []byte, msg []byte) (err error) {
 	return err
 }
 
-func Launch(typ NetworkServiceType, test bool, ring kring.Ring, binderClient *binder.BinderClient, logger log15.Logger, pipe *os.File) error {
+func Launch(typ Types, test bool, ring kring.Ring, binderClient *binder.BinderClient, logger log15.Logger, pipe *os.File) error {
 	if ring == nil {
 		return fmt.Errorf("No ring")
 	}
 	generator := utils.Generator(context.Background(), logger)
 
 	var command string
-	name := ReverseNetworkServiceMap[typ]
+	name := Types2Names[typ]
 	hasConf := false
 
 	reporter := base.NewReporter(name, logger, pipe)
