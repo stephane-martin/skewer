@@ -53,21 +53,22 @@ var RDestinations = map[DestinationType]byte{
 // BaseConfig is the root of all configuration parameters.
 type BaseConfig struct {
 	//Syslog     []SyslogConfig     `mapstructure:"syslog" toml:"syslog" json:"syslog"`
-	TcpSource  []TcpSourceConfig  `mapstructure:"tcp_source" toml:"tcp_source" json:"tcp_source"`
-	UdpSource  []UdpSourceConfig  `mapstructure:"udp_source" toml:"udp_source" json:"udp_source"`
-	RelpSource []RelpSourceConfig `mapstructure:"relp_source" toml:"relp_source" json:"relp_source"`
-	Store      StoreConfig        `mapstructure:"store" toml:"store" json:"store"`
-	Parsers    []ParserConfig     `mapstructure:"parser" toml:"parser" json:"parser"`
-	Journald   JournaldConfig     `mapstructure:"journald" toml:"journald" json:"journald"`
-	Metrics    MetricsConfig      `mapstructure:"metrics" toml:"metrics" json:"metrics"`
-	Accounting AccountingConfig   `mapstructure:"accounting" toml:"accounting" json:"accounting"`
-	Main       MainConfig         `mapstructure:"main" toml:"main" json:"main"`
-	KafkaDest  KafkaDestConfig    `mapstructure:"kafka_destination" toml:"kafka_destination" json:"kafka_destination"`
-	UdpDest    UdpDestConfig      `mapstructure:"udp_destination" toml:"udp_destination" json:"udp_destination"`
-	TcpDest    TcpDestConfig      `mapstructure:"tcp_destination" toml:"tcp_destination" json:"tcp_destination"`
-	RelpDest   RelpDestConfig     `mapstructure:"relp_destination" toml:"relp_destination" json:"relp_destination"`
-	FileDest   FileDestConfig     `mapstructure:"file_destination" toml:"file_destination" json:"file_destination"`
-	StderrDest StderrDestConfig   `mapstructure:"stderr_destination" toml:"stderr_destination" json:"stderr_destination"`
+	TcpSource   []TcpSourceConfig   `mapstructure:"tcp_source" toml:"tcp_source" json:"tcp_source"`
+	UdpSource   []UdpSourceConfig   `mapstructure:"udp_source" toml:"udp_source" json:"udp_source"`
+	RelpSource  []RelpSourceConfig  `mapstructure:"relp_source" toml:"relp_source" json:"relp_source"`
+	KafkaSource []KafkaSourceConfig `mapstructure:"kafka_source" toml:"kafka_source" json:"kafka_source"`
+	Store       StoreConfig         `mapstructure:"store" toml:"store" json:"store"`
+	Parsers     []ParserConfig      `mapstructure:"parser" toml:"parser" json:"parser"`
+	Journald    JournaldConfig      `mapstructure:"journald" toml:"journald" json:"journald"`
+	Metrics     MetricsConfig       `mapstructure:"metrics" toml:"metrics" json:"metrics"`
+	Accounting  AccountingConfig    `mapstructure:"accounting" toml:"accounting" json:"accounting"`
+	Main        MainConfig          `mapstructure:"main" toml:"main" json:"main"`
+	KafkaDest   KafkaDestConfig     `mapstructure:"kafka_destination" toml:"kafka_destination" json:"kafka_destination"`
+	UdpDest     UdpDestConfig       `mapstructure:"udp_destination" toml:"udp_destination" json:"udp_destination"`
+	TcpDest     TcpDestConfig       `mapstructure:"tcp_destination" toml:"tcp_destination" json:"tcp_destination"`
+	RelpDest    RelpDestConfig      `mapstructure:"relp_destination" toml:"relp_destination" json:"relp_destination"`
+	FileDest    FileDestConfig      `mapstructure:"file_destination" toml:"file_destination" json:"file_destination"`
+	StderrDest  StderrDestConfig    `mapstructure:"stderr_destination" toml:"stderr_destination" json:"stderr_destination"`
 }
 
 // MainConfig lists general/global parameters.
@@ -184,14 +185,15 @@ func (s *StoreConfig) DecryptSecret(m *memguard.LockedBuffer) (locked *memguard.
 	return locked, nil
 }
 
-type BaseDestConfig struct {
-	Format string `mapstructure:"format" toml:"format" json:"format"`
+type KafkaDestConfig struct {
+	KafkaBaseConfig         `mapstructure:",squash"`
+	KafkaProducerBaseConfig `mapstructure:",squash"`
+	TlsBaseConfig           `mapstructure:",squash"`
+	Insecure                bool   `mapstructure:"insecure" toml:"insecure" json:"insecure"`
+	Format                  string `mapstructure:"format" toml:"format" json:"format"`
 }
 
-type KafkaDestConfig struct {
-	TlsBaseConfig            `mapstructure:",squash"`
-	BaseDestConfig           `mapstructure:",squash"`
-	Insecure                 bool          `mapstructure:"insecure" toml:"insecure" json:"insecure"`
+type KafkaBaseConfig struct {
 	Brokers                  []string      `mapstructure:"brokers" toml:"brokers" json:"brokers"`
 	ClientID                 string        `mapstructure:"client_id" toml:"client_id" json:"client_id"`
 	Version                  string        `mapstructure:"version" toml:"version" json:"version"`
@@ -204,25 +206,40 @@ type KafkaDestConfig struct {
 	MetadataRetryMax         int           `mapstructure:"metadata_retry_max" toml:"metadata_retry_max" json:"metadata_retry_max"`
 	MetadataRetryBackoff     time.Duration `mapstructure:"metadata_retry_backoff" toml:"metadata_retry_backoff" json:"metadata_retry_backoff"`
 	MetadataRefreshFrequency time.Duration `mapstructure:"metadata_refresh_frequency" toml:"metadata_refresh_frequency" json:"metadata_refresh_frequency"`
-	MessageBytesMax          int           `mapstructure:"message_bytes_max" toml:"message_bytes_max" json:"message_bytes_max"`
-	RequiredAcks             int16         `mapstructure:"required_acks" toml:"required_acks" json:"required_acks"`
-	ProducerTimeout          time.Duration `mapstructure:"producer_timeout" toml:"producer_timeout" json:"producer_timeout"`
-	Compression              string        `mapstructure:"compression" toml:"compression" json:"compression"`
-	FlushBytes               int           `mapstructure:"flush_bytes" toml:"flush_bytes" json:"flush_bytes"`
-	FlushMessages            int           `mapstructure:"flush_messages" toml:"flush_messages" json:"flush_messages"`
-	FlushFrequency           time.Duration `mapstructure:"flush_frequency" toml:"flush_frequency" json:"flush_frequency"`
-	FlushMessagesMax         int           `mapstructure:"flush_messages_max" toml:"flush_messages_max" json:"flush_messages_max"`
-	RetrySendMax             int           `mapstructure:"retry_send_max" toml:"retry_send_max" json:"retry_send_max"`
-	RetrySendBackoff         time.Duration `mapstructure:"retry_send_backoff" toml:"retry_send_backoff" json:"retry_send_backoff"`
-	Partitioner              string        `mapstructure:"partitioner" toml:"partitioner" json:"partitioner"`
+}
+
+type KafkaConsumerBaseConfig struct {
+	RetryBackoff          time.Duration `mapstructure:"retry_backoff" toml:"retry_backoff" json:"retry_backoff"`
+	MinFetchBytes         int32         `mapstructure:"min_fetch_bytes" toml:"min_fetch_bytes" json:"min_fetch_bytes"`
+	DefaultFetchBytes     int32         `mapstructure:"default_fetch_bytes" toml:"default_fetch_bytes" json:"default_fetch_bytes"`
+	MaxFetchBytes         int32         `mapstructure:"max_fetch_bytes" toml:"max_fetch_bytes" json:"max_fetch_bytes"`
+	MaxWaitTime           time.Duration `mapstructure:"max_wait_time" toml:"max_wait_time" json:"max_wait_time"`
+	MaxProcessingTime     time.Duration `mapstructure:"max_processing_time" toml:"max_processing_time" json:"max_processing_time"`
+	OffsetsCommitInterval time.Duration `mapstructure:"offsets_commit_interval" toml:"offsets_commit_interval" json:"offsets_commit_interval"`
+	OffsetsInitial        int64         `mapstructure:"offsets_initial" toml:"offsets_initial" json:"offsets_initial"`
+	OffsetsRetention      time.Duration `mapstructure:"offsets_retention" toml:"offsets_retention" json:"offsets_retention"`
+}
+
+type KafkaProducerBaseConfig struct {
+	MessageBytesMax  int           `mapstructure:"message_bytes_max" toml:"message_bytes_max" json:"message_bytes_max"`
+	RequiredAcks     int16         `mapstructure:"required_acks" toml:"required_acks" json:"required_acks"`
+	ProducerTimeout  time.Duration `mapstructure:"producer_timeout" toml:"producer_timeout" json:"producer_timeout"`
+	Compression      string        `mapstructure:"compression" toml:"compression" json:"compression"`
+	Partitioner      string        `mapstructure:"partitioner" toml:"partitioner" json:"partitioner"`
+	FlushBytes       int           `mapstructure:"flush_bytes" toml:"flush_bytes" json:"flush_bytes"`
+	FlushMessages    int           `mapstructure:"flush_messages" toml:"flush_messages" json:"flush_messages"`
+	FlushFrequency   time.Duration `mapstructure:"flush_frequency" toml:"flush_frequency" json:"flush_frequency"`
+	FlushMessagesMax int           `mapstructure:"flush_messages_max" toml:"flush_messages_max" json:"flush_messages_max"`
+	RetrySendMax     int           `mapstructure:"retry_send_max" toml:"retry_send_max" json:"retry_send_max"`
+	RetrySendBackoff time.Duration `mapstructure:"retry_send_backoff" toml:"retry_send_backoff" json:"retry_send_backoff"`
 }
 
 type TcpUdpRelpDestBaseConfig struct {
-	BaseDestConfig `mapstructure:",squash"`
 	Host           string        `mapstructure:"host" toml:"host" json:"host"`
 	Port           int           `mapstructure:"port" toml:"port" json:"port"`
 	UnixSocketPath string        `mapstructure:"unix_socket_path" toml:"unix_socket_path" json:"unix_socket_path"`
 	Rebind         time.Duration `mapstructure:"rebind" toml:"rebind" json:"rebind"`
+	Format         string        `mapstructure:"format" toml:"format" json:"format"`
 }
 
 type UdpDestConfig struct {
@@ -247,7 +264,6 @@ type TcpDestConfig struct {
 }
 
 type FileDestConfig struct {
-	BaseDestConfig  `mapstructure:",squash"`
 	Filename        string        `mapstructure:"filename" toml:"filename" json:"filename"`
 	Sync            bool          `mapstructure:"sync" toml:"sync" json:"sync"`
 	SyncPeriod      time.Duration `mapstructure:"sync_period" toml:"sync_period" json:"sync_period"`
@@ -255,10 +271,11 @@ type FileDestConfig struct {
 	OpenFileTimeout time.Duration `mapstructure:"open_file_timeout" toml:"open_file_timeout" json:"open_file_timeout"`
 	Gzip            bool          `mapstructure:"gzip" toml:"gzip" json:"gzip"`
 	GzipLevel       int           `mapstructure:"gzip_level" toml:"gzip_level" json:"gzip_level"`
+	Format          string        `mapstructure:"format" toml:"format" json:"format"`
 }
 
 type StderrDestConfig struct {
-	BaseDestConfig `mapstructure:",squash"`
+	Format string `mapstructure:"format" toml:"format" json:"format"`
 }
 
 type FilterSubConfig struct {
@@ -359,6 +376,22 @@ type SyslogSourceBaseConfig struct {
 	KeepAlivePeriod time.Duration `mapstructure:"keepalive_period" toml:"keepalive_period" json:"keepalive_period"`
 	Timeout         time.Duration `mapstructure:"timeout" toml:"timeout" json:"timeout"`
 	Encoding        string        `mapstructure:"encoding" toml:"encoding" json:"encoding"`
+}
+
+type KafkaSourceConfig struct {
+	KafkaBaseConfig         `mapstructure:",squash"`
+	KafkaConsumerBaseConfig `mapstructure:",squash"`
+	FilterSubConfig         `mapstructure:",squash"`
+	TlsBaseConfig           `mapstructure:",squash"`
+	Insecure                bool          `mapstructure:"insecure" toml:"insecure" json:"insecure"`
+	Format                  string        `mapstructure:"format" toml:"format" json:"format"`
+	Encoding                string        `mapstructure:"encoding" toml:"encoding" json:"encoding"`
+	ConfID                  ulid.ULID     `mapstructure:"-" toml:"-" json:"conf_id"`
+	SessionTimeout          time.Duration `mapstructure:"session_timeout" toml:"session_timeout" json:"session_timeout"`
+	HeartbeatInterval       time.Duration `mapstructure:"heartbeat_interval" toml:"heartbeat_interval" json:"heartbeat_interval"`
+	OffsetsMaxRetry         int           `mapstructure:"offsets_max_retry" toml:"offsets_max_retry" json:"offsets_max_retry"`
+	GroupID                 string        `mapstructure:"group_ip" toml:"group_id" json:"group_id"`
+	Topics                  []string      `mapstructure:"topics" toml:"topics" json:"topics"`
 }
 
 type TlsBaseConfig struct {

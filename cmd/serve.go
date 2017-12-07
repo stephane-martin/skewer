@@ -79,6 +79,7 @@ func init() {
 		"CONFIG_LOGGER",
 		"STORE_LOGGER",
 		"ACCT_LOGGER",
+		"KAFKASOURCE_LOGGER",
 	}
 
 	HandlesMap = map[string]int{}
@@ -93,7 +94,7 @@ func ExecuteChild() (err error) {
 	if len(sessionID) == 0 {
 		return fmt.Errorf("Empty session ID")
 	}
-	wOpenBsdSecretPipe := os.NewFile(15, "openbsdpipe")
+	wOpenBsdSecretPipe := os.NewFile(16, "ringsecretpipe")
 	var bsdSecret *memguard.LockedBuffer
 	buf := make([]byte, 32)
 	_, err = wOpenBsdSecretPipe.Read(buf)
@@ -210,28 +211,17 @@ func (ch *serveChild) cleanup() {
 
 // ShutdownControllers definitely shutdowns the plugin processes.
 func (ch *serveChild) ShutdownControllers() {
-	utils.Parallel(
-		func() error {
-			ch.StopController(services.RELP, true)
-			return nil
-		},
-		func() error {
-			ch.StopController(services.Accounting, true)
-			return nil
-		},
-		func() error {
-			ch.StopController(services.Journal, true)
-			return nil
-		},
-		func() error {
-			ch.StopController(services.TCP, true)
-			return nil
-		},
-		func() error {
-			ch.StopController(services.UDP, true)
-			return nil
-		},
-	)
+	funcs := []utils.Func{}
+	for _, t := range services.NetworkServiceMap {
+		if t != services.Store {
+			funcs = append(funcs, func() error {
+				ch.StopController(t, true)
+				return nil
+			})
+		}
+	}
+	utils.Parallel(funcs...)
+
 	ch.logger.Debug("The RELP service has been stopped")
 	ch.logger.Debug("Stopped accounting service")
 	ch.logger.Debug("Stopped journald service")
@@ -334,6 +324,8 @@ func setupController(f *services.CFactory, typ services.NetworkServiceType) *ser
 		logger = HandlesMap["JOURNAL_LOGGER"]
 	case services.Accounting:
 		logger = HandlesMap["ACCT_LOGGER"]
+	case services.KafkaSource:
+		logger = HandlesMap["KAFKASOURCE_LOGGER"]
 	}
 	return f.New(typ, binder, logger)
 }
@@ -354,7 +346,24 @@ func (ch *serveChild) StartControllers() error {
 		ch.StartUdp,
 		ch.StartJournal,
 		ch.StartAccounting,
+		ch.StartKafkaSource,
 	)
+}
+
+func (ch *serveChild) StartKafkaSource() error {
+	if len(ch.conf.KafkaSource) > 0 {
+		ch.logger.Info("Kafka sources are enabled")
+		err := ch.controllers[services.KafkaSource].Create(testFlag, DumpableFlag, "", "", "")
+		if err != nil {
+			return fmt.Errorf("Error creating the kafka source plugin: %s", err)
+		}
+		_, err = ch.controllers[services.KafkaSource].Start()
+		if err != nil {
+			return fmt.Errorf("Error starting the kafka source plugin: %s", err)
+		}
+		ch.logger.Debug("Kafka source plugin has been started")
+	}
+	return nil
 }
 
 // StartAccounting starts the Accounting process.
@@ -516,6 +525,10 @@ func (ch *serveChild) Reload() (err error) {
 		func() error {
 			ch.StopController(services.UDP, false)
 			return ch.StartUdp()
+		},
+		func() error {
+			ch.StopController(services.KafkaSource, false)
+			return ch.StartKafkaSource()
 		},
 	)
 	if err != nil {

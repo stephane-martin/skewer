@@ -15,12 +15,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	sarama "github.com/Shopify/sarama"
 	"github.com/oklog/ulid"
 	"github.com/pquerna/ffjson/ffjson"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"golang.org/x/text/encoding"
-	sarama "gopkg.in/Shopify/sarama.v1"
 
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/conf"
@@ -548,7 +548,7 @@ func (s *RelpServiceImpl) Parse() {
 
 	var raw *model.RawTcpMessage
 	var parser Parser
-	var syslogMsg model.SyslogMessage
+	var syslogMsg *model.SyslogMessage
 	var parsedMsg model.FullMessage
 	var err, f, nonf error
 	var decoder *encoding.Decoder
@@ -588,7 +588,7 @@ func (s *RelpServiceImpl) Parse() {
 			s.Pool.Put(raw)
 			continue
 		}
-		if syslogMsg.Empty() {
+		if syslogMsg == nil {
 			s.forwarder.ForwardSucc(raw.ConnID, raw.Txnr)
 			s.Pool.Put(raw)
 			continue
@@ -596,7 +596,7 @@ func (s *RelpServiceImpl) Parse() {
 
 		parsedMsg = model.FullMessage{
 			Parsed: model.ParsedMessage{
-				Fields:         syslogMsg,
+				Fields:         *syslogMsg,
 				Client:         raw.Client,
 				LocalPort:      raw.LocalPort,
 				UnixSocketPath: raw.UnixSocketPath,
@@ -883,7 +883,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, c conf.TcpSourceConfig) {
 	s.AddConnection(conn)
 	connID := s.forwarder.AddConn()
 	scanner := bufio.NewScanner(conn)
-	logger := s.Logger
+	logger := s.Logger.New("ConnID", connID)
 
 	defer func() {
 		logger.Info("Scanning the RELP stream has ended", "error", scanner.Err())
@@ -921,27 +921,12 @@ func (h RelpHandler) HandleConnection(conn net.Conn, c conf.TcpSourceConfig) {
 		"local_port", localPort,
 		"unix_socket_path", path,
 		"format", config.Format,
-		"connid", connID,
 	)
 	logger.Info("New client connection")
 	s.metrics.ClientConnectionCounter.WithLabelValues("relp", client, localPortStr, path).Inc()
 
 	s.wg.Add(1)
 	go s.handleResponses(conn, connID, client, logger)
-
-	/*
-		var producer sarama.AsyncProducer
-		if s.direct && !s.test {
-			producer, err = s.kafkaConf.GetAsyncProducer()
-			if err != nil {
-				s.metrics.KafkaConnectionErrorCounter.Inc()
-				logger.Warn("Can't get a kafka producer. Aborting handleConn.")
-				return
-			}
-			// AsyncClose will eventually terminate the goroutine just below
-			defer producer.AsyncClose()
-		}
-	*/
 
 	timeout := config.Timeout
 	if timeout > 0 {

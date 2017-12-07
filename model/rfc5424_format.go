@@ -23,7 +23,7 @@ func isASCII(s []byte) bool {
 var SP []byte = []byte(" ")
 var DASH []byte = []byte("-")
 
-func ParseRfc5424Format(m []byte, decoder *encoding.Decoder, dont_parse_sd bool) (smsg SyslogMessage, err error) {
+func ParseRfc5424Format(m []byte, decoder *encoding.Decoder, dont_parse_sd bool) (smsg *SyslogMessage, err error) {
 	// HEADER = PRI VERSION SP TIMESTAMP SP HOSTNAME SP APP-NAME SP PROCID SP MSGID
 	// PRI = "<" PRIVAL ">"
 	// SYSLOG-MSG = HEADER SP STRUCTURED-DATA [SP MSG]
@@ -33,19 +33,19 @@ func ParseRfc5424Format(m []byte, decoder *encoding.Decoder, dont_parse_sd bool)
 	}
 	m, err = decoder.Bytes(m)
 	if err != nil {
-		return smsg, &InvalidEncodingError{Err: err}
+		return nil, &InvalidEncodingError{Err: err}
 	}
 
 	m = bytes.TrimSpace(m)
 	splits := bytes.SplitN(m, SP, 7)
 
 	if len(splits) < 7 {
-		return smsg, &NotEnoughPartsError{len(splits)}
+		return nil, &NotEnoughPartsError{len(splits)}
 	}
-
+	smsg = &SyslogMessage{}
 	smsg.Priority, smsg.Facility, smsg.Severity, smsg.Version, err = parsePriority(splits[0])
 	if err != nil {
-		return smsg, err
+		return nil, err
 	}
 
 	n := time.Now().UnixNano()
@@ -91,7 +91,7 @@ func ParseRfc5424Format(m []byte, decoder *encoding.Decoder, dont_parse_sd bool)
 	} else if bytes.HasPrefix(structured_and_msg, []byte("[")) {
 		s1, s2, err := splitStructuredData(structured_and_msg)
 		if err != nil {
-			return smsg, err
+			return nil, err
 		}
 		smsg.Message = string(s2)
 		if dont_parse_sd {
@@ -100,14 +100,14 @@ func ParseRfc5424Format(m []byte, decoder *encoding.Decoder, dont_parse_sd bool)
 			smsg.Structured = ""
 			props, err := parseStructData(s1)
 			if err != nil {
-				return smsg, err
+				return nil, err
 			}
 			if len(props) > 0 {
 				smsg.Properties = props
 			}
 		}
 	} else {
-		return smsg, &InvalidStructuredDataError{"Structured data is not nil but does not start with '['"}
+		return nil, &InvalidStructuredDataError{"Structured data is not nil but does not start with '['"}
 	}
 
 	return smsg, nil

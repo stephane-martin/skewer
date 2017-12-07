@@ -3,8 +3,8 @@ package conf
 import (
 	"os"
 
+	sarama "github.com/Shopify/sarama"
 	"github.com/spf13/viper"
-	sarama "gopkg.in/Shopify/sarama.v1"
 )
 
 type defaultFunc func(v *viper.Viper, prefixed bool)
@@ -139,8 +139,9 @@ func SetKafkaDefaults(v *viper.Viper, prefixed bool) {
 	if prefixed {
 		prefix = "kafka_destination."
 	}
+	// common parameters
 	v.SetDefault(prefix+"brokers", []string{"kafka1", "kafka2", "kafka3"})
-	v.SetDefault(prefix+"client_id", "skewer")
+	v.SetDefault(prefix+"client_id", "skewerd")
 	v.SetDefault(prefix+"version", "0.10.1.0")
 	v.SetDefault(prefix+"channel_buffer_size", 256)
 	v.SetDefault(prefix+"max_open_requests", 5)
@@ -151,17 +152,20 @@ func SetKafkaDefaults(v *viper.Viper, prefixed bool) {
 	v.SetDefault(prefix+"metadata_retry_max", 3)
 	v.SetDefault(prefix+"metadata_retry_backoff", "250ms")
 	v.SetDefault(prefix+"metadata_refresh_frequency", "10m")
+
+	// producer parameters
 	v.SetDefault(prefix+"message_bytes_max", 1000000)
 	v.SetDefault(prefix+"required_acks", sarama.WaitForAll)
-	v.SetDefault(prefix+"producer_timeout", "10s")
-	v.SetDefault(prefix+"compression", "snappy")
 	v.SetDefault(prefix+"flush_bytes", 0)
 	v.SetDefault(prefix+"flush_messages", 0)
 	v.SetDefault(prefix+"flush_frequency", 0)
 	v.SetDefault(prefix+"flush_messages_max", 0)
 	v.SetDefault(prefix+"retry_send_max", 3)
 	v.SetDefault(prefix+"retry_send_backoff", "100ms")
+	v.SetDefault(prefix+"producer_timeout", "10s")
+	v.SetDefault(prefix+"compression", "snappy")
 	v.SetDefault(prefix+"partitioner", "hash")
+
 	v.SetDefault(prefix+"format", "fulljson")
 }
 

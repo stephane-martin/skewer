@@ -255,12 +255,6 @@ func (s *PluginController) listenpipe(secret *memguard.LockedBuffer) {
 	scanner.Split(utils.MakeDecryptSplit(secret))
 	scanner.Buffer(make([]byte, 0, 132000), 132000)
 
-	defer func() {
-		if secret != nil {
-			secret.Destroy()
-		}
-	}()
-
 	var err error
 	var buf []byte
 	var message model.FullMessage

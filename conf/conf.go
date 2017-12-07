@@ -17,7 +17,8 @@ import (
 	"text/template"
 	"time"
 
-	sarama "gopkg.in/Shopify/sarama.v1"
+	sarama "github.com/Shopify/sarama"
+	cluster "github.com/bsm/sarama-cluster"
 
 	"github.com/BurntSushi/toml"
 	"github.com/hashicorp/errwrap"
@@ -37,14 +38,19 @@ func (source BaseConfig) Clone() BaseConfig {
 func newBaseConf() BaseConfig {
 	brokers := []string{}
 	baseConf := BaseConfig{
-		TcpSource:  []TcpSourceConfig{},
-		UdpSource:  []UdpSourceConfig{},
-		RelpSource: []RelpSourceConfig{},
-		KafkaDest:  KafkaDestConfig{Brokers: brokers},
-		Store:      StoreConfig{},
-		Parsers:    []ParserConfig{},
-		Journald:   JournaldConfig{},
-		Metrics:    MetricsConfig{},
+		TcpSource:   []TcpSourceConfig{},
+		UdpSource:   []UdpSourceConfig{},
+		RelpSource:  []RelpSourceConfig{},
+		KafkaSource: []KafkaSourceConfig{},
+		KafkaDest: KafkaDestConfig{
+			KafkaBaseConfig: KafkaBaseConfig{
+				Brokers: brokers,
+			},
+		},
+		Store:    StoreConfig{},
+		Parsers:  []ParserConfig{},
+		Journald: JournaldConfig{},
+		Metrics:  MetricsConfig{},
 	}
 	return baseConf
 }
@@ -79,6 +85,8 @@ var V0_10_0_0 = KafkaVersion{0, 10, 0, 0}
 var V0_10_0_1 = KafkaVersion{0, 10, 0, 1}
 var V0_10_1_0 = KafkaVersion{0, 10, 1, 0}
 var V0_10_2_0 = KafkaVersion{0, 10, 2, 0}
+var V0_11_0_0 = KafkaVersion{0, 11, 0, 0}
+var V1_0_0_0 = KafkaVersion{1, 0, 0, 0}
 
 func ParseVersion(v string) (skv sarama.KafkaVersion, e error) {
 	var ver KafkaVersion
@@ -92,6 +100,12 @@ func ParseVersion(v string) (skv sarama.KafkaVersion, e error) {
 }
 
 func (l KafkaVersion) ToSaramaVersion() (v sarama.KafkaVersion, e error) {
+	if l.Greater(V1_0_0_0) {
+		return sarama.V1_0_0_0, nil
+	}
+	if l.Greater(V0_11_0_0) {
+		return sarama.V0_11_0_0, nil
+	}
 	if l.Greater(V0_10_2_0) {
 		return sarama.V0_10_2_0, nil
 	}
@@ -168,6 +182,10 @@ func (c *JournaldConfig) SetConfID() {
 }
 
 func (c *AccountingConfig) SetConfID() {
+	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
+}
+
+func (c *KafkaSourceConfig) SetConfID() {
 	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
 }
 
@@ -255,23 +273,75 @@ func ImportSyslogConfig(data []byte) (*FilterSubConfig, error) {
 	return &c, nil
 }
 
-func (c *KafkaDestConfig) GetSaramaConfig() (*sarama.Config, error) {
-	s := sarama.NewConfig()
+func (c *KafkaSourceConfig) GetSaramaConsumerConfig() (*cluster.Config, error) {
+	s := cluster.NewConfig()
 	s.ClientID = c.ClientID
 	s.ChannelBufferSize = c.ChannelBufferSize
+
 	s.Net.MaxOpenRequests = c.MaxOpenRequests
 	s.Net.DialTimeout = c.DialTimeout
 	s.Net.ReadTimeout = c.ReadTimeout
 	s.Net.WriteTimeout = c.WriteTimeout
 	s.Net.KeepAlive = c.KeepAlive
+
 	s.Metadata.Retry.Backoff = c.MetadataRetryBackoff
 	s.Metadata.Retry.Max = c.MetadataRetryMax
 	s.Metadata.RefreshFrequency = c.MetadataRefreshFrequency
+
+	s.Consumer.Retry.Backoff = c.RetryBackoff
+	s.Consumer.Fetch.Default = c.DefaultFetchBytes
+	s.Consumer.Fetch.Max = c.MaxFetchBytes
+	s.Consumer.Fetch.Min = c.MinFetchBytes
+	s.Consumer.MaxWaitTime = c.MaxWaitTime
+	s.Consumer.MaxProcessingTime = c.MaxProcessingTime
+	s.Consumer.Offsets.CommitInterval = c.OffsetsCommitInterval
+	s.Consumer.Offsets.Initial = c.OffsetsInitial
+	s.Consumer.Offsets.Retention = c.OffsetsRetention
+	s.Consumer.Return.Errors = true
+
+	v, _ := ParseVersion(c.Version) // the ignored error has been checked at launch
+	s.Version = v
+
+	if c.TLSEnabled {
+		tlsConf, err := utils.NewTLSConfig("", c.CAFile, c.CAPath, c.CertFile, c.KeyFile, c.Insecure)
+		if err == nil {
+			s.Net.TLS.Enable = true
+			s.Net.TLS.Config = tlsConf
+		} else {
+			return nil, errwrap.Wrapf("Error building the TLS configuration for Kafka: {{err}}", err)
+		}
+
+	}
+
+	s.Group.Offsets.Retry.Max = c.OffsetsMaxRetry
+	s.Group.Session.Timeout = c.SessionTimeout
+	s.Group.Heartbeat.Interval = c.HeartbeatInterval
+	s.Group.Return.Notifications = false
+
+	return s, nil
+}
+
+func (c *KafkaDestConfig) GetSaramaProducerConfig() (*sarama.Config, error) {
+	s := sarama.NewConfig()
+	s.ClientID = c.ClientID
+	s.ChannelBufferSize = c.ChannelBufferSize
+
+	s.Net.MaxOpenRequests = c.MaxOpenRequests
+	s.Net.DialTimeout = c.DialTimeout
+	s.Net.ReadTimeout = c.ReadTimeout
+	s.Net.WriteTimeout = c.WriteTimeout
+	s.Net.KeepAlive = c.KeepAlive
+
+	s.Metadata.Retry.Backoff = c.MetadataRetryBackoff
+	s.Metadata.Retry.Max = c.MetadataRetryMax
+	s.Metadata.RefreshFrequency = c.MetadataRefreshFrequency
+
 	s.Producer.MaxMessageBytes = c.MessageBytesMax
 	s.Producer.RequiredAcks = sarama.RequiredAcks(c.RequiredAcks)
 	s.Producer.Timeout = c.ProducerTimeout
 	s.Producer.Return.Errors = true
 	s.Producer.Return.Successes = true
+
 	s.Producer.Flush.Bytes = c.FlushBytes
 	s.Producer.Flush.Frequency = c.FlushFrequency
 	s.Producer.Flush.Messages = c.FlushMessages
@@ -320,7 +390,7 @@ func (c *KafkaDestConfig) GetSaramaConfig() (*sarama.Config, error) {
 }
 
 func (c *KafkaDestConfig) GetAsyncProducer() (sarama.AsyncProducer, error) {
-	conf, err := c.GetSaramaConfig()
+	conf, err := c.GetSaramaProducerConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -332,11 +402,23 @@ func (c *KafkaDestConfig) GetAsyncProducer() (sarama.AsyncProducer, error) {
 }
 
 func (c *KafkaDestConfig) GetClient() (sarama.Client, error) {
-	conf, err := c.GetSaramaConfig()
+	conf, err := c.GetSaramaProducerConfig()
 	if err != nil {
 		return nil, err
 	}
 	cl, err := sarama.NewClient(c.Brokers, conf)
+	if err == nil {
+		return cl, nil
+	}
+	return nil, KafkaError{Err: err}
+}
+
+func (c *KafkaSourceConfig) GetClient() (*cluster.Consumer, error) {
+	conf, err := c.GetSaramaConsumerConfig()
+	if err != nil {
+		return nil, err
+	}
+	cl, err := cluster.NewConsumer(c.Brokers, c.GroupID, c.Topics, conf)
 	if err == nil {
 		return cl, nil
 	}
@@ -715,7 +797,7 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 	for _, parserConf := range c.Parsers {
 		name := strings.TrimSpace(parserConf.Name)
 		switch name {
-		case "rfc5424", "rfc3164", "json", "auto":
+		case "rfc5424", "rfc3164", "json", "fulljson", "auto":
 			return ConfigurationCheckError{ErrString: "Parser configuration must not use a reserved name"}
 		case "":
 			return ConfigurationCheckError{ErrString: "Empty parser name"}
@@ -772,6 +854,8 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 	for i := range c.RelpSource {
 		syslogConfs = append(syslogConfs, &c.RelpSource[i])
 	}
+
+	// set default values for TCP, UDP and RELP sources.
 	for _, syslogConf := range syslogConfs {
 		baseConf := syslogConf.GetSyslogConf()
 		filterConf := syslogConf.GetFilterConf()
@@ -794,16 +878,15 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 		if filterConf.PartitionTmpl == "" {
 			filterConf.PartitionTmpl = "mypk-{{.Hostname}}"
 		}
-		if baseConf.KeepAlivePeriod == 0 {
+		if baseConf.KeepAlivePeriod <= 0 {
 			baseConf.KeepAlivePeriod = 75 * time.Second
 		}
-		if baseConf.Timeout == 0 {
+		if baseConf.Timeout <= 0 {
 			baseConf.Timeout = time.Minute
 		}
 		if baseConf.Encoding == "" {
 			baseConf.Encoding = "utf8"
 		}
-
 		if len(filterConf.TopicTmpl) > 0 {
 			_, err = template.New("topic").Parse(filterConf.TopicTmpl)
 			if err != nil {
@@ -816,20 +899,129 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 				return ConfigurationCheckError{ErrString: "Error compiling the partition key template", Err: err}
 			}
 		}
-
 		_, err = baseConf.GetListenAddrs()
 		if err != nil {
 			return ConfigurationCheckError{Err: err}
 		}
 
 		switch baseConf.Format {
-		case "rfc5424", "rfc3164", "json", "auto":
+		case "rfc5424", "rfc3164", "json", "fulljson", "auto":
 		default:
 			if _, ok := parsersNames[baseConf.Format]; !ok {
 				return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown parser: '%s'", baseConf.Format)}
 			}
 		}
 		syslogConf.SetConfID()
+	}
+
+	// set default paramaters for kafka sources
+	for i := range c.KafkaSource {
+		conf := &(c.KafkaSource[i])
+		if len(conf.GroupID) == 0 {
+			conf.GroupID = "skewer"
+		}
+		if conf.OffsetsMaxRetry <= 0 {
+			conf.OffsetsMaxRetry = 3
+		}
+		if conf.HeartbeatInterval <= 0 {
+			conf.HeartbeatInterval = 3 * time.Second
+		}
+		if conf.SessionTimeout <= 0 {
+			conf.SessionTimeout = 30 * time.Second
+		}
+		if len(conf.Format) == 0 {
+			conf.Format = "fulljson"
+		}
+		if len(conf.Encoding) == 0 {
+			conf.Encoding = "utf8"
+		}
+		if len(conf.ClientID) == 0 {
+			conf.ClientID = "skewers"
+		}
+		if len(conf.Version) == 0 {
+			conf.Version = "0.10.1.0"
+		}
+		_, err = ParseVersion(conf.Version)
+		if err != nil {
+			return ConfigurationCheckError{ErrString: "Kafka version can't be parsed", Err: err}
+		}
+		if conf.ChannelBufferSize == 0 {
+			conf.ChannelBufferSize = 256
+		}
+		if conf.MaxOpenRequests == 0 {
+			conf.MaxOpenRequests = 5
+		}
+		if conf.DialTimeout == 0 {
+			conf.DialTimeout = 30 * time.Second
+		}
+		if conf.ReadTimeout == 0 {
+			conf.ReadTimeout = 30 * time.Second
+		}
+		if conf.WriteTimeout == 0 {
+			conf.WriteTimeout = 30 * time.Second
+		}
+		if conf.MetadataRetryMax == 0 {
+			conf.MetadataRetryMax = 3
+		}
+		if conf.MetadataRetryBackoff == 0 {
+			conf.MetadataRetryBackoff = 250 * time.Millisecond
+		}
+		if conf.MetadataRefreshFrequency == 0 {
+			conf.MetadataRefreshFrequency = 10 * time.Minute
+		}
+		if conf.RetryBackoff == 0 {
+			conf.RetryBackoff = 2 * time.Second
+		}
+		if conf.MinFetchBytes == 0 {
+			conf.MinFetchBytes = 1
+		}
+		if conf.DefaultFetchBytes == 0 {
+			conf.DefaultFetchBytes = 32768
+		}
+		if conf.MaxFetchBytes == 0 {
+			conf.MaxFetchBytes = sarama.MaxResponseSize
+		}
+		if conf.MaxWaitTime == 0 {
+			conf.MaxWaitTime = 250 * time.Millisecond
+		}
+		if conf.MaxProcessingTime == 0 {
+			conf.MaxProcessingTime = 100 * time.Millisecond
+		}
+		if conf.OffsetsCommitInterval == 0 {
+			conf.OffsetsCommitInterval = time.Second
+		}
+		if conf.OffsetsInitial == 0 {
+			conf.OffsetsInitial = sarama.OffsetOldest
+		}
+
+		switch conf.Format {
+		case "rfc5424", "rfc3164", "json", "fulljson", "auto":
+		default:
+			if _, ok := parsersNames[conf.Format]; !ok {
+				return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown parser: '%s'", conf.Format)}
+			}
+		}
+
+		if conf.TopicTmpl == "" {
+			conf.TopicTmpl = "rsyslog-{{.Appname}}"
+		}
+		if conf.PartitionTmpl == "" {
+			conf.PartitionTmpl = "mypk-{{.Hostname}}"
+		}
+		if len(conf.TopicTmpl) > 0 {
+			_, err = template.New("topic").Parse(conf.TopicTmpl)
+			if err != nil {
+				return ConfigurationCheckError{ErrString: "Error compiling the topic template", Err: err}
+			}
+		}
+		if len(conf.PartitionTmpl) > 0 {
+			_, err = template.New("partition").Parse(conf.PartitionTmpl)
+			if err != nil {
+				return ConfigurationCheckError{ErrString: "Error compiling the partition key template", Err: err}
+			}
+		}
+
+		conf.SetConfID()
 	}
 
 	if c.Journald.Enabled {

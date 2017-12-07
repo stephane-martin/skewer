@@ -40,6 +40,19 @@ type RawMessage struct {
 	ConfID         ulid.ULID
 }
 
+type RawKafkaMessage struct {
+	Brokers    string
+	Format     string
+	Encoding   string
+	ConfID     ulid.ULID
+	ConsumerID uint32
+	Message    []byte
+	UID        ulid.ULID
+	Topic      string
+	Partition  int32
+	Offset     int64
+}
+
 type RawTcpMessage struct {
 	RawMessage
 	Message []byte
@@ -58,7 +71,7 @@ type Parser struct {
 	format string
 }
 
-func (p *Parser) Parse(m []byte, decoder *encoding.Decoder, dont_parse_sd bool) (SyslogMessage, error) {
+func (p *Parser) Parse(m []byte, decoder *encoding.Decoder, dont_parse_sd bool) (*SyslogMessage, error) {
 	return Parse(m, p.format, decoder, dont_parse_sd)
 }
 
@@ -86,13 +99,15 @@ func Fuzz(m []byte) int {
 }
 
 func GetParser(format string) *Parser {
-	if format == "rfc5424" || format == "rfc3164" || format == "json" || format == "auto" {
+	switch format {
+	case "rfc5424", "rfc3164", "json", "fulljson", "auto":
 		return &Parser{format: format}
+	default:
+		return nil
 	}
-	return nil
 }
 
-func Parse(m []byte, format string, decoder *encoding.Decoder, dont_parse_sd bool) (sm SyslogMessage, err error) {
+func Parse(m []byte, format string, decoder *encoding.Decoder, dont_parse_sd bool) (sm *SyslogMessage, err error) {
 
 	switch format {
 	case "rfc5424":
@@ -101,12 +116,17 @@ func Parse(m []byte, format string, decoder *encoding.Decoder, dont_parse_sd boo
 		sm, err = ParseRfc3164Format(m, decoder)
 	case "json":
 		sm, err = ParseJsonFormat(m, decoder)
+	case "fulljson":
+		sm, err = ParseFullJsonFormat(m, decoder)
 	case "auto":
 		if len(m) == 0 {
 			return sm, &EmptyMessageError{}
 		}
 		if m[0] == byte('{') {
 			sm, err = ParseJsonFormat(m, decoder)
+			if err != nil {
+				sm, err = ParseFullJsonFormat(m, decoder)
+			}
 		} else if m[0] != byte('<') {
 			sm, err = ParseRfc3164Format(m, decoder)
 		} else {
@@ -126,22 +146,6 @@ func Parse(m []byte, format string, decoder *encoding.Decoder, dont_parse_sd boo
 		return sm, &UnknownFormatError{format}
 	}
 	return sm, err
-	// special handling of JSON messages produced by go-audit
-	/*
-		if sm.Appname == "go-audit" {
-			var auditMsg AuditMessageGroup
-			err = json.Unmarshal([]byte(sm.Message), &auditMsg)
-			if err != nil {
-				return sm, nil
-			}
-			sm.AuditSubMessages = auditMsg.Msgs
-			if len(auditMsg.UidMap) > 0 {
-				sm.Properties = map[string]map[string]string{}
-				sm.Properties["uid_map"] = auditMsg.UidMap
-			}
-			sm.Message = ""
-		}
-	*/
 }
 
 func TopicNameIsValid(name string) bool {

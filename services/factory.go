@@ -24,15 +24,17 @@ const (
 	Journal
 	Store
 	Accounting
+	KafkaSource
 )
 
 var NetworkServiceMap map[string]NetworkServiceType = map[string]NetworkServiceType{
-	"skewer-tcp":        TCP,
-	"skewer-udp":        UDP,
-	"skewer-relp":       RELP,
-	"skewer-journal":    Journal,
-	"skewer-store":      Store,
-	"skewer-accounting": Accounting,
+	"skewer-tcp":         TCP,
+	"skewer-udp":         UDP,
+	"skewer-relp":        RELP,
+	"skewer-journal":     Journal,
+	"skewer-store":       Store,
+	"skewer-accounting":  Accounting,
+	"skewer-kafkasource": KafkaSource,
 }
 
 var ReverseNetworkServiceMap map[NetworkServiceType]string
@@ -64,6 +66,9 @@ func ConfigureAndStartService(s NetworkService, c conf.BaseConfig, test bool) ([
 		return s.Start(test)
 	case *storeServiceImpl:
 		return s.SetConfAndRestart(c, test)
+	case *network.KafkaServiceImpl:
+		s.SetConf(c.KafkaSource, c.Parsers, c.Main.InputQueueSize)
+		return s.Start(test)
 	default:
 		return nil, fmt.Errorf("Unknown network service: %T", s)
 	}
@@ -96,6 +101,8 @@ func ProviderFactory(t NetworkServiceType, r kring.Ring, reporter *base.Reporter
 		}
 	case Store:
 		return NewStoreService(l, r, pipe)
+	case KafkaSource:
+		return network.NewKafkaService(reporter, gen, l)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown service type: %d\n", t)
 		return nil

@@ -42,7 +42,6 @@ type SyslogMessage struct {
 	Properties map[string]map[string]string `json:"properties" msg:"properties"`
 }
 
-// ffjson: nodecoder
 type ParsedMessage struct {
 	Fields         SyslogMessage `json:"fields" msg:"fields"`
 	Client         string        `json:"client,omitempty" msg:"client"`

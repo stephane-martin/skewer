@@ -1,6 +1,6 @@
 package model
 
-import sarama "gopkg.in/Shopify/sarama.v1"
+import sarama "github.com/Shopify/sarama"
 
 func IsFatalKafkaError(e error) bool {
 	switch e {

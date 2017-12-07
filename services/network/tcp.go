@@ -22,7 +22,6 @@ import (
 	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/queue/tcp"
-	"golang.org/x/text/encoding"
 )
 
 type TcpServerStatus int
@@ -39,29 +38,31 @@ type tcpMetrics struct {
 }
 
 func NewTcpMetrics() *tcpMetrics {
-	m := &tcpMetrics{}
-	m.IncomingMsgsCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "skw_incoming_messages_total",
-			Help: "total number of messages that were received",
-		},
-		[]string{"protocol", "client", "port", "path"},
-	)
-	m.ClientConnectionCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "skw_client_connections_total",
-			Help: "total number of client connections",
-		},
-		[]string{"protocol", "client", "port", "path"},
-	)
-	m.ParsingErrorCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "skw_parsing_errors_total",
-			Help: "total number of times there was a parsing error",
-		},
-		[]string{"protocol", "client", "parser_name"},
-	)
-	return m
+	m := tcpMetrics{
+		IncomingMsgsCounter: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "skw_incoming_messages_total",
+				Help: "total number of messages that were received",
+			},
+			[]string{"protocol", "client", "port", "path"},
+		),
+
+		ClientConnectionCounter: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "skw_client_connections_total",
+				Help: "total number of client connections",
+			},
+			[]string{"protocol", "client", "port", "path"},
+		),
+		ParsingErrorCounter: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "skw_parsing_errors_total",
+				Help: "total number of times there was a parsing error",
+			},
+			[]string{"protocol", "client", "parser_name"},
+		),
+	}
+	return &m
 }
 
 type TcpServiceImpl struct {
@@ -157,75 +158,70 @@ func (s *TcpServiceImpl) SetConf(sc []conf.TcpSourceConfig, pc []conf.ParserConf
 		return &model.RawTcpMessage{Message: make([]byte, messageSize)}
 	}}
 	s.StreamingService.SetConf(sc, pc, queueSize, messageSize)
-	s.rawMessagesQueue = tcp.NewRing(s.QueueSize)
+	s.rawMessagesQueue = tcp.NewRing(queueSize)
+}
+
+func (s *TcpServiceImpl) ParseOne(env *ParsersEnv, raw *model.RawTcpMessage) {
+	// be sure to free the raw pointer
+	defer s.Pool.Put(raw)
+
+	logger := s.Logger.New(
+		"protocol", "tcp",
+		"client", raw.Client,
+		"local_port", raw.LocalPort,
+		"unix_socket_path", raw.UnixSocketPath,
+		"format", raw.Format,
+	)
+
+	decoder := utils.SelectDecoder(raw.Encoding)
+	parser := env.GetParser(raw.Format)
+
+	if parser == nil {
+		logger.Error("Unknown parser")
+		return
+	}
+
+	syslogMsg, err := parser.Parse(raw.Message[:raw.Size], decoder, raw.DontParseSD)
+	if err != nil {
+		s.metrics.ParsingErrorCounter.WithLabelValues("tcp", raw.Client, raw.Format).Inc()
+		logger.Info("Parsing error", "Message", raw.Message, "error", err)
+		return
+	}
+	if syslogMsg == nil {
+		return
+	}
+
+	fatal, nonfatal := s.reporter.Stash(model.FullMessage{
+		Parsed: model.ParsedMessage{
+			Fields:         *syslogMsg,
+			Client:         raw.Client,
+			LocalPort:      raw.LocalPort,
+			UnixSocketPath: raw.UnixSocketPath,
+		},
+		Uid:    <-s.generator,
+		ConfId: raw.ConfID,
+	})
+
+	if fatal != nil {
+		logger.Error("Fatal error stashing TCP message", "error", fatal)
+		// TODO: shutdown
+	} else if nonfatal != nil {
+		logger.Warn("Non-fatal error stashing TCP message", "error", nonfatal)
+	}
 }
 
 // Parse fetch messages from the raw queue, parse them, and push them to be sent.
 func (s *TcpServiceImpl) Parse() {
 	defer s.wg.Done()
 
-	e := NewParsersEnv(s.ParserConfigs, s.Logger)
-
-	var syslogMsg model.SyslogMessage
-	var err, fatal, nonfatal error
-	var raw *model.RawTcpMessage
-	var decoder *encoding.Decoder
-	var parser Parser
-	var logger log15.Logger
+	env := NewParsersEnv(s.ParserConfigs, s.Logger)
 
 	for {
-		raw, err = s.rawMessagesQueue.Get()
+		raw, err := s.rawMessagesQueue.Get()
 		if raw == nil || err != nil {
 			break
 		}
-
-		logger = s.Logger.New(
-			"protocol", "tcp",
-			"client", raw.Client,
-			"local_port", raw.LocalPort,
-			"unix_socket_path", raw.UnixSocketPath,
-			"format", raw.Format,
-		)
-
-		decoder = utils.SelectDecoder(raw.Encoding)
-		parser = e.GetParser(raw.Format)
-		if parser == nil {
-			logger.Crit("Unknown parser")
-			return
-		}
-
-		syslogMsg, err = parser.Parse(raw.Message[:raw.Size], decoder, raw.DontParseSD)
-		if err != nil {
-			s.Pool.Put(raw)
-			s.metrics.ParsingErrorCounter.WithLabelValues("tcp", raw.Client, raw.Format).Inc()
-			logger.Info("Parsing error", "Message", raw.Message, "error", err)
-			continue
-		}
-		if syslogMsg.Empty() {
-			s.Pool.Put(raw)
-			continue
-		}
-
-		fatal, nonfatal = s.reporter.Stash(model.FullMessage{
-			Parsed: model.ParsedMessage{
-				Fields:         syslogMsg,
-				Client:         raw.Client,
-				LocalPort:      raw.LocalPort,
-				UnixSocketPath: raw.UnixSocketPath,
-			},
-			Uid:    <-s.generator,
-			ConfId: raw.ConfID,
-		})
-
-		s.Pool.Put(raw)
-
-		if fatal != nil {
-			logger.Error("Fatal error stashing TCP message", "error", fatal)
-
-			// todo: shutdown
-		} else if nonfatal != nil {
-			logger.Warn("Non-fatal error stashing TCP message", "error", nonfatal)
-		}
+		s.ParseOne(env, raw)
 	}
 }
 

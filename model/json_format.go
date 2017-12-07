@@ -11,24 +11,41 @@ import (
 	"golang.org/x/text/encoding/unicode"
 )
 
-func ParseJsonFormat(m []byte, decoder *encoding.Decoder) (msg SyslogMessage, rerr error) {
+func ParseFullJsonFormat(m []byte, decoder *encoding.Decoder) (msg *SyslogMessage, rerr error) {
 	// we ignore decoder, JSON is always UTF-8
 	decoder = unicode.UTF8.NewDecoder()
 
 	var err error
 	m, err = decoder.Bytes(m)
 	if err != nil {
-		return msg, &InvalidEncodingError{Err: err}
+		return nil, &InvalidEncodingError{Err: err}
+	}
+	sourceMsg := ParsedMessage{}
+	err = ffjson.Unmarshal(m, &sourceMsg)
+	if err != nil {
+		return nil, &UnmarshalingJsonError{err}
+	}
+	return &sourceMsg.Fields, nil
+}
+
+func ParseJsonFormat(m []byte, decoder *encoding.Decoder) (msg *SyslogMessage, rerr error) {
+	// we ignore decoder, JSON is always UTF-8
+	decoder = unicode.UTF8.NewDecoder()
+
+	var err error
+	m, err = decoder.Bytes(m)
+	if err != nil {
+		return nil, &InvalidEncodingError{Err: err}
 	}
 	sourceMsg := JsonRsyslogMessage{}
 	err = ffjson.Unmarshal(m, &sourceMsg)
 	if err != nil {
-		return msg, &UnmarshalingJsonError{err}
+		return nil, &UnmarshalingJsonError{err}
 	}
 
 	pri, err := strconv.Atoi(sourceMsg.Priority)
 	if err != nil {
-		return msg, &InvalidPriorityError{}
+		return nil, &InvalidPriorityError{}
 	}
 
 	n := time.Now()
@@ -38,7 +55,7 @@ func ParseJsonFormat(m []byte, decoder *encoding.Decoder) (msg SyslogMessage, re
 	if sourceMsg.TimeReported != "-" && len(sourceMsg.TimeReported) > 0 {
 		r, err := time.Parse(time.RFC3339Nano, sourceMsg.TimeReported)
 		if err != nil {
-			return msg, &TimeError{}
+			return nil, &TimeError{}
 		}
 		reported = r
 	}
@@ -46,7 +63,7 @@ func ParseJsonFormat(m []byte, decoder *encoding.Decoder) (msg SyslogMessage, re
 	if sourceMsg.TimeGenerated != "-" && len(sourceMsg.TimeGenerated) > 0 {
 		g, err := time.Parse(time.RFC3339Nano, sourceMsg.TimeGenerated)
 		if err != nil {
-			return msg, &TimeError{}
+			return nil, &TimeError{}
 		}
 		generated = g
 	}
@@ -76,7 +93,7 @@ func ParseJsonFormat(m []byte, decoder *encoding.Decoder) (msg SyslogMessage, re
 		structured = strings.TrimSpace(sourceMsg.Structured)
 	}
 
-	msg = SyslogMessage{
+	msg = &SyslogMessage{
 		Priority:         Priority(pri),
 		Facility:         Facility(pri / 8),
 		Severity:         Severity(pri % 8),

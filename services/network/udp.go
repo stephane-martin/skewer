@@ -107,7 +107,7 @@ func (s *UdpServiceImpl) Parse() {
 
 	e := NewParsersEnv(s.ParserConfigs, s.Logger)
 
-	var syslogMsg model.SyslogMessage
+	var syslogMsg *model.SyslogMessage
 	var err, fatal, nonfatal error
 	var raw *model.RawUdpMessage
 	var decoder *encoding.Decoder
@@ -142,14 +142,14 @@ func (s *UdpServiceImpl) Parse() {
 			logger.Info("Parsing error", "Message", raw.Message, "error", err)
 			continue
 		}
-		if syslogMsg.Empty() {
+		if syslogMsg == nil {
 			s.Pool.Put(raw)
 			continue
 		}
 
 		fatal, nonfatal = s.stasher.Stash(model.FullMessage{
 			Parsed: model.ParsedMessage{
-				Fields:         syslogMsg,
+				Fields:         *syslogMsg,
 				Client:         raw.Client,
 				LocalPort:      raw.LocalPort,
 				UnixSocketPath: raw.UnixSocketPath,

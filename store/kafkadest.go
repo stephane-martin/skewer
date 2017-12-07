@@ -6,13 +6,13 @@ import (
 	"sync"
 	"time"
 
+	sarama "github.com/Shopify/sarama"
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
-	sarama "gopkg.in/Shopify/sarama.v1"
 )
 
 type kafkaDestination struct {

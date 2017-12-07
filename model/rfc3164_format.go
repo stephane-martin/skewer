@@ -24,7 +24,7 @@ func pair2str(s1 []byte, s2 []byte) (string, string) {
 	return string(s1), string(s2)
 }
 
-func ParseRfc3164Format(m []byte, decoder *encoding.Decoder) (smsg SyslogMessage, err error) {
+func ParseRfc3164Format(m []byte, decoder *encoding.Decoder) (smsg *SyslogMessage, err error) {
 	if decoder == nil {
 		decoder = unicode.UTF8.NewDecoder()
 	}
@@ -34,7 +34,8 @@ func ParseRfc3164Format(m []byte, decoder *encoding.Decoder) (smsg SyslogMessage
 	}
 	m = bytes.TrimSpace(m)
 
-	def_smsg := SyslogMessage{Message: string(m)}
+	def_smsg := &SyslogMessage{Message: string(m)}
+	smsg = &SyslogMessage{}
 	n := time.Now().UnixNano()
 	def_smsg.TimeGeneratedNum = n
 	def_smsg.TimeReportedNum = n

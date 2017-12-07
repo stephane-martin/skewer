@@ -11,9 +11,13 @@ LDFLAGS=-ldflags '-X github.com/stephane-martin/skewer/cmd.Version=${VERSION} -X
 SOURCES = $(shell find . -type f -name '*.go' -not -path "./vendor/*")
 SUBDIRS = $(shell find . -type d -regex './[a-z].*' -not -path './vendor*' -not -path '*.shapesdoc' | xargs)
 
-$(BINARY): ${SOURCES} model/types_gen.go utils/logging/types_gen.go conf/derived.gen.go utils/logging/derived.gen.go metrics/derived.gen.go consul/derived.gen.go sys/derived.gen.go model/derived.gen.go model/types_ffjson.go sys/scomp/derived.gen.go sys/namespaces/derived.gen.go utils/queue/tcp/ring.go utils/queue/udp/ring.go
+$(BINARY): ${SOURCES} model/types_gen.go utils/logging/types_gen.go conf/derived.gen.go utils/logging/derived.gen.go metrics/derived.gen.go consul/derived.gen.go sys/derived.gen.go model/derived.gen.go model/types_ffjson.go sys/scomp/derived.gen.go sys/namespaces/derived.gen.go utils/queue/tcp/ring.go utils/queue/udp/ring.go utils/queue/kafka/ring.go 
 	test -n "${GOPATH}"  # test $$GOPATH
 	go build ${LDFLAGS} -o ${BINARY}
+
+utils/queue/kafka/ring.go: utils/queue/ring.go
+	test -n "${GOPATH}"  # test $$GOPATH
+	genny -in=utils/queue/ring.go -out=utils/queue/kafka/ring.go -pkg=kafka gen Data=model.RawKafkaMessage
 
 utils/queue/tcp/ring.go: utils/queue/ring.go
 	test -n "${GOPATH}"  # test $$GOPATH

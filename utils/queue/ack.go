@@ -45,9 +45,6 @@ func (q *AckQueue) Get() (ulid.ULID, conf.DestinationType, error) {
 	tail := q.tail
 	next := tail.next
 	if next != nil {
-		//q.tail = next
-		//tail.msg = next.msg
-		//s = tail.msg
 		(*ackNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.tail)), unsafe.Pointer(next))).uid = next.uid
 		q.pool.Put(tail)
 		return next.uid, next.dest, nil

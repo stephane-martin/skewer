@@ -70,15 +70,10 @@ func (s *Reporter) SetSecret(secret *memguard.LockedBuffer) {
 }
 
 func (s *Reporter) pushqueue() {
+	// TODO: close the pipe at the end ?
 	var m *model.FullMessage
 	var b []byte
 	var err error
-
-	defer func() {
-		if s.secret != nil {
-			//s.secret.Destroy()
-		}
-	}()
 
 	for s.queue.Wait(0) {
 		for s.queue.Wait(100 * time.Millisecond) {
