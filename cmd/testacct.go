@@ -20,7 +20,7 @@ var testacctCmd = &cobra.Command{
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		buf := make([]byte, accounting.Ssize)
 		var acct accounting.Acct
 		tick := accounting.Tick()

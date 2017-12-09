@@ -38,7 +38,7 @@ func BinderListen(ctx context.Context, logger log15.Logger, schan chan *BinderCo
 	}
 
 	if lnet == "unix" || lnet == "unixpacket" {
-		os.Chmod(laddr, 0777)
+		_ = os.Chmod(laddr, 0777)
 		l.(*net.UnixListener).SetUnlinkOnClose(true)
 	}
 
@@ -46,7 +46,7 @@ func BinderListen(ctx context.Context, logger log15.Logger, schan chan *BinderCo
 
 	go func() {
 		<-ctx.Done()
-		l.Close()
+		_ = l.Close()
 	}()
 
 	go func() {
@@ -80,12 +80,12 @@ func BinderPacket(addr string) (conn net.PacketConn, err error) {
 	}
 
 	if lnet == "unixgram" {
-		os.Chmod(laddr, 0777)
-		conn.(*net.UnixConn).SetReadBuffer(65536)
-		conn.(*net.UnixConn).SetWriteBuffer(65536)
+		_ = os.Chmod(laddr, 0777)
+		_ = conn.(*net.UnixConn).SetReadBuffer(65536)
+		_ = conn.(*net.UnixConn).SetWriteBuffer(65536)
 	} else {
-		conn.(*net.UDPConn).SetReadBuffer(65535)
-		conn.(*net.UDPConn).SetWriteBuffer(65535)
+		_ = conn.(*net.UDPConn).SetReadBuffer(65535)
+		_ = conn.(*net.UDPConn).SetWriteBuffer(65535)
 	}
 
 	return conn, nil
@@ -107,7 +107,7 @@ func binderOne(parentFD uintptr, logger log15.Logger) error {
 
 	c, err := net.FileConn(parentFile)
 	if err != nil {
-		parentFile.Close()
+		_ = parentFile.Close()
 		return err
 	}
 	childConn := c.(*net.UnixConn)
@@ -128,7 +128,7 @@ func binderOne(parentFD uintptr, logger log15.Logger) error {
 			select {
 			case <-ctx.Done():
 				for _, conn := range packetconnections {
-					conn.Close()
+					_ = conn.Close()
 				}
 				return
 			case bc := <-pchan:
@@ -139,12 +139,12 @@ func binderOne(parentFD uintptr, logger log15.Logger) error {
 							if unixc, unixok := packetconnections[uid].(*net.UnixConn); unixok {
 								path := unixc.LocalAddr().String()
 								if !strings.HasPrefix(path, "@") {
-									os.Remove(path)
+									_ = os.Remove(path)
 								}
 							}
-							packetconnections[uid].Close()
+							_ = packetconnections[uid].Close()
 							if f, ok := connfiles[uid]; ok {
-								f.Close()
+								_ = f.Close()
 								delete(connfiles, uid)
 							}
 						}
@@ -153,19 +153,19 @@ func binderOne(parentFD uintptr, logger log15.Logger) error {
 						// close one UDP connection
 						f, ok := connfiles[bc.Uid]
 						if ok {
+							_ = f.Close()
 							delete(connfiles, bc.Uid)
-							f.Close()
 						}
 						conn, ok := packetconnections[bc.Uid]
 						if ok {
 							if unixc, unixok := conn.(*net.UnixConn); unixok {
 								path := unixc.LocalAddr().String()
 								if !strings.HasPrefix(path, "@") {
-									os.Remove(path)
+									_ = os.Remove(path)
 								}
 							}
+							_ = conn.Close()
 							delete(packetconnections, bc.Uid)
-							conn.Close()
 						}
 					}
 				} else {
@@ -185,16 +185,19 @@ func binderOne(parentFD uintptr, logger log15.Logger) error {
 						rights := syscall.UnixRights(int(connFile.Fd()))
 						logger.Debug("Sending new connection to child", "uid", bc.Uid, "addr", bc.Addr)
 						smsg = fmt.Sprintf("newconn %s %s\n", bc.Uid, bc.Addr)
-						childConn.WriteMsgUnix([]byte(smsg), rights, nil)
+						_, _, err := childConn.WriteMsgUnix([]byte(smsg), rights, nil)
+						if err != nil {
+							logger.Warn("Failed to send FD to binder client", "error", err)
+						}
 					}
 				}
 			case bc := <-schan:
 				if bc.Conn == nil {
 					if len(bc.Uid) == 0 {
 						for uid := range connections {
-							connections[uid].Close()
+							_ = connections[uid].Close()
 							if f, ok := connfiles[uid]; ok {
-								f.Close()
+								_ = f.Close()
 								delete(connfiles, uid)
 							}
 						}
@@ -202,13 +205,13 @@ func binderOne(parentFD uintptr, logger log15.Logger) error {
 					} else {
 						f, ok := connfiles[bc.Uid]
 						if ok {
+							_ = f.Close()
 							delete(connfiles, bc.Uid)
-							f.Close()
 						}
 						conn, ok := connections[bc.Uid]
 						if ok {
+							_ = conn.Close()
 							delete(connections, bc.Uid)
-							conn.Close()
 						}
 					}
 				} else {
@@ -228,7 +231,10 @@ func binderOne(parentFD uintptr, logger log15.Logger) error {
 						rights := syscall.UnixRights(int(connFile.Fd()))
 						logger.Debug("Sending new connection to child", "uid", bc.Uid, "addr", bc.Addr)
 						smsg = fmt.Sprintf("newconn %s %s\n", bc.Uid, bc.Addr)
-						childConn.WriteMsgUnix([]byte(smsg), rights, nil)
+						_, _, err := childConn.WriteMsgUnix([]byte(smsg), rights, nil)
+						if err != nil {
+							logger.Warn("Failed to send FD to binder client", "error", err)
+						}
 					} else {
 						logger.Warn("conn.File() error", "error", err)
 					}
@@ -259,11 +265,16 @@ func binderOne(parentFD uintptr, logger log15.Logger) error {
 					if IsStream(lnet) {
 						l, err := BinderListen(ctx, logger, schan, generator, addr)
 						if err == nil {
-							listeners[addr] = l
-							childConn.Write([]byte(fmt.Sprintf("confirmlisten %s", addr)))
+							_, err := childConn.Write([]byte(fmt.Sprintf("confirmlisten %s", addr)))
+							if err != nil {
+								logger.Warn("Failed to confirm listen to client", "error", err)
+								_ = l.Close()
+							} else {
+								listeners[addr] = l
+							}
 						} else {
 							logger.Warn("Listen error", "error", err, "addr", addr)
-							childConn.Write([]byte(fmt.Sprintf("error %s %s", addr, err.Error())))
+							_, _ = childConn.Write([]byte(fmt.Sprintf("error %s %s", addr, err.Error())))
 						}
 					} else {
 						c, err := BinderPacket(addr)
@@ -272,7 +283,7 @@ func binderOne(parentFD uintptr, logger log15.Logger) error {
 							pchan <- &BinderPacketConn{Addr: addr, Conn: c, Uid: uid.String()}
 						} else {
 							logger.Warn("ListenPacket error", "error", err, "addr", addr)
-							childConn.Write([]byte(fmt.Sprintf("error %s %s", addr, err.Error())))
+							_, _ = childConn.Write([]byte(fmt.Sprintf("error %s %s", addr, err.Error())))
 						}
 					}
 				}
@@ -283,14 +294,14 @@ func binderOne(parentFD uintptr, logger log15.Logger) error {
 			case "stoplisten":
 				l, ok := listeners[args]
 				if ok {
-					l.Close()
+					_ = l.Close()
 					delete(listeners, args)
 				}
 				logger.Debug("Asked to stop listening", "addr", args)
-				childConn.Write([]byte(fmt.Sprintf("stopped %s\n", args)))
+				_, _ = childConn.Write([]byte(fmt.Sprintf("stopped %s\n", args)))
 			case "reset":
 				for _, l := range listeners {
-					l.Close()
+					_ = l.Close()
 				}
 				listeners = map[string]net.Listener{}
 				schan <- &BinderConn{}

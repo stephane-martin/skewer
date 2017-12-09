@@ -20,7 +20,7 @@ type Ring interface {
 	DeleteSignaturePubKey() error
 	WriteRingPass(io.Writer) error
 	GetSessionID() ulid.ULID
-	Destroy()
+	Destroy() error
 }
 
 func NewSecret() (m *memguard.LockedBuffer, err error) {
@@ -52,6 +52,6 @@ func NewCreds() (creds RingCreds, err error) {
 	return creds, nil
 }
 
-func destroySem(sessionID ulid.ULID) {
-	semaphore.Destroy(fmt.Sprintf("skw%s", sessionID.String()))
+func destroySem(sessionID ulid.ULID) error {
+	return semaphore.Destroy(fmt.Sprintf("skw%s", sessionID.String()))
 }

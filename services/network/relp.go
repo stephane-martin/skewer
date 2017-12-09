@@ -79,13 +79,13 @@ func bytes2txnr(b []byte) int {
 
 func (f *ackForwarder) Received(connID uintptr, txnr int) {
 	if c, ok := f.comm.Load(connID); ok {
-		c.(*queue.IntQueue).Put(txnr)
+		_ = c.(*queue.IntQueue).Put(txnr)
 	}
 }
 
 func (f *ackForwarder) Commit(connID uintptr) {
 	if c, ok := f.comm.Load(connID); ok {
-		c.(*queue.IntQueue).Get()
+		_, _ = c.(*queue.IntQueue).Get()
 	}
 }
 
@@ -102,7 +102,7 @@ func (f *ackForwarder) NextToCommit(connID uintptr) int {
 
 func (f *ackForwarder) ForwardSucc(connID uintptr, txnr int) {
 	if q, ok := f.succ.Load(connID); ok {
-		q.(*queue.IntQueue).Put(txnr)
+		_ = q.(*queue.IntQueue).Put(txnr)
 	}
 }
 
@@ -119,7 +119,7 @@ func (f *ackForwarder) GetSucc(connID uintptr) int {
 
 func (f *ackForwarder) ForwardFail(connID uintptr, txnr int) {
 	if q, ok := f.fail.Load(connID); ok {
-		q.(*queue.IntQueue).Put(txnr)
+		_ = q.(*queue.IntQueue).Put(txnr)
 	}
 }
 
@@ -296,7 +296,7 @@ func (s *RelpService) Start(test bool) (infos []model.ListenerInfo, err error) {
 			switch state {
 			case FinalStopped:
 				//s.impl.Logger.Debug("The RELP service has been definitely halted")
-				s.reporter.Report([]model.ListenerInfo{})
+				_ = s.reporter.Report([]model.ListenerInfo{})
 				return
 
 			case Stopped:
@@ -304,9 +304,15 @@ func (s *RelpService) Start(test bool) (infos []model.ListenerInfo, err error) {
 				s.impl.SetConf(s.sc, s.pc, s.kc, s.QueueSize)
 				infos, err := s.impl.Start(test)
 				if err == nil {
-					s.reporter.Report(infos)
+					err = s.reporter.Report(infos)
+					if err != nil {
+						// TODO
+					}
 				} else {
-					s.reporter.Report([]model.ListenerInfo{})
+					err = s.reporter.Report([]model.ListenerInfo{})
+					if err != nil {
+						// TODO
+					}
 					s.impl.Logger.Warn("The RELP service has failed to start", "error", err)
 					s.impl.StopAndWait()
 				}
@@ -609,7 +615,7 @@ func (s *RelpServiceImpl) Parse() {
 
 		if s.direct {
 			// send message directly to kafka
-			s.parsedMessagesQueue.Put(parsedMsg)
+			_ = s.parsedMessagesQueue.Put(parsedMsg)
 			continue
 		}
 		// else send message to the Store
@@ -930,7 +936,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, c conf.TcpSourceConfig) {
 
 	timeout := config.Timeout
 	if timeout > 0 {
-		conn.SetReadDeadline(time.Now().Add(timeout))
+		_ = conn.SetReadDeadline(time.Now().Add(timeout))
 	}
 	scanner.Split(utils.RelpSplit)
 	scanner.Buffer(make([]byte, 0, 132000), 132000)
@@ -1001,8 +1007,12 @@ Loop:
 			rawmsg.Format = config.Format
 			rawmsg.ConnID = connID
 			copy(rawmsg.Message, data)
+			err := s.rawMessagesQueue.Put(rawmsg)
+			if err != nil {
+				s.Logger.Error("Failed to enqueue new raw RELP message", "error", err)
+				return
+			}
 			s.metrics.IncomingMsgsCounter.WithLabelValues("relp", client, localPortStr, path).Inc()
-			s.rawMessagesQueue.Put(rawmsg)
 			//logger.Debug("RELP client received a syslog message")
 		default:
 			logger.Warn("Unknown RELP command", "command", command)
@@ -1010,7 +1020,7 @@ Loop:
 			return
 		}
 		if timeout > 0 {
-			conn.SetReadDeadline(time.Now().Add(timeout))
+			_ = conn.SetReadDeadline(time.Now().Add(timeout))
 		}
 
 	}

@@ -16,22 +16,10 @@ import (
 
 var stdoutLock sync.Mutex
 
-// SUCC = "SUCCESS" as byte array.
 var SUCC = []byte("SUCCESS")
 var SYSLOG = []byte("syslog")
 var INFOS = []byte("infos")
 var SP = []byte(" ")
-
-/*
-// Wout writes a message to the controller via stdout
-func Wout(header []byte, m []byte, secret *memguard.LockedBuffer) (err error) {
-	stdoutLock.Lock()
-	// LEN HEADER ENCRYPTEDMSG
-	err = utils.W(os.Stdout, header, m, secret)
-	stdoutLock.Unlock()
-	return
-}
-*/
 
 // Reporter is used by plugins to report new syslog messages to the controller.
 type Reporter struct {
@@ -45,7 +33,7 @@ type Reporter struct {
 	pipeWriter   *utils.EncryptWriter
 }
 
-// NewReporter creates a controller.
+// NewReporter creates a reported.
 func NewReporter(name string, l log15.Logger, pipe *os.File) *Reporter {
 	rep := Reporter{
 		name:         name,
@@ -126,8 +114,8 @@ func (s *Reporter) Stash(m model.FullMessage) (fatal, nonfatal error) {
 		return nil, nil
 	}
 
-	s.queue.Put(m)
-	return nil, nil
+	fatal = s.queue.Put(m) // fatal is set when the queue has been disposed
+	return fatal, nil
 }
 
 // Report reports information about the actual listening ports to the controller.

@@ -103,10 +103,10 @@ func (s *StreamingService) initTCPListeners() []model.ListenerInfo {
 
 func (s *StreamingService) resetTCPListeners() {
 	for _, l := range s.TcpListeners {
-		l.Listener.Close()
+		_ = l.Listener.Close()
 	}
 	for _, l := range s.UnixListeners {
-		l.Listener.Close()
+		_ = l.Listener.Close()
 	}
 }
 

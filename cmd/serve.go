@@ -116,6 +116,7 @@ func ExecuteChild() (err error) {
 	if len(sessionID) == 0 {
 		return fmt.Errorf("Empty session ID")
 	}
+	// TODO: replace "16"
 	ringSecretPipe := os.NewFile(16, "ringsecretpipe")
 	var ringSecret *memguard.LockedBuffer
 	buf := make([]byte, 32)
@@ -187,8 +188,8 @@ func newServeChild(ring kring.Ring) (*serveChild, error) {
 	c.shutdownCtx, c.shutdown = context.WithCancel(c.globalCtx)
 
 	loggerConn := conn.(*net.UnixConn)
-	loggerConn.SetReadBuffer(65536)
-	loggerConn.SetWriteBuffer(65536)
+	_ = loggerConn.SetReadBuffer(65536)
+	_ = loggerConn.SetWriteBuffer(65536)
 	c.loggerCtx, c.cancelLogger = context.WithCancel(context.Background())
 	c.logger = logging.NewRemoteLogger(c.loggerCtx, loggerConn, secret).New("proc", "child")
 	return &c, nil
@@ -229,7 +230,7 @@ func (ch *serveChild) cleanup() {
 	if ch.signPrivKey != nil {
 		ch.signPrivKey.Destroy()
 	}
-	ch.ring.Destroy()
+	_ = ch.ring.Destroy()
 }
 
 // ShutdownControllers definitely shutdowns the plugin processes.
@@ -247,7 +248,10 @@ func (ch *serveChild) ShutdownControllers() {
 			})
 		}
 	}
-	utils.Parallel(funcs...)
+	err := utils.Parallel(funcs...)
+	if err != nil {
+		ch.logger.Error("Error shutting down controllers", "error", err)
+	}
 
 	ch.logger.Debug("The RELP service has been stopped")
 	ch.logger.Debug("Stopped accounting service")
@@ -603,7 +607,10 @@ func (ch *serveChild) Serve() error {
 				Addr:    "127.0.0.1:6600",
 				Handler: mux,
 			}
-			server.ListenAndServe()
+			err = server.ListenAndServe()
+			if err != nil {
+				ch.logger.Warn("Error starting the pprof HTTP server", "error", err)
+			}
 		}()
 	}
 

@@ -92,8 +92,6 @@ func (q *MessageQueue) Put(m model.FullMessage) error {
 	n.msg = &m
 	n.next = nil
 	(*messageNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.head)), unsafe.Pointer(n))).next = n
-	// q.head.next = n
-	// q.head = n
 	return nil
 }
 

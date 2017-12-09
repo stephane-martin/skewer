@@ -175,7 +175,7 @@ func newEnv(filterFunc, topicFunc, topicTmpl, partitionKeyFunc, partitionKeyTmpl
 	e.jsParsers = map[string]goja.Callable{}
 
 	e.runtime = goja.New()
-	e.runtime.RunString(jsSyslogMessage)
+	_, _ = e.runtime.RunString(jsSyslogMessage)
 	v := e.runtime.Get("NewSyslogMessage")
 	e.jsNewSyslogMessage, _ = goja.AssertFunction(v)
 	v = e.runtime.Get("SyslogMessageToGo")

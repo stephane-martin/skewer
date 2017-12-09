@@ -97,7 +97,7 @@ func (fwder *fwderImpl) forwardByDest(ctx context.Context, store Store, bc conf.
 		return
 	}
 
-	defer dest.Close()
+	defer func() { _ = dest.Close() }()
 
 	// listen for destination fatal errors
 	fwder.wg.Add(1)

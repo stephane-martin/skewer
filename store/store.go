@@ -234,15 +234,24 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 
 	// only once, push back messages from previous run that may have been stuck in the sent queue
 	store.logger.Debug("reset messages stuck in sent")
-	store.resetStuckInSent()
+	err = store.resetStuckInSent()
+	if err != nil {
+		return nil, err
+	}
 
 	// prune orphaned messages
 	store.logger.Debug("prune orphaned messages")
-	store.pruneOrphaned()
+	err = store.pruneOrphaned()
+	if err != nil {
+		return nil, err
+	}
 
 	// count existing messages in badger and report to metrics
 	store.logger.Debug("init store metrics")
-	store.initGauge()
+	err = store.initGauge()
+	if err != nil {
+		return nil, err
+	}
 
 	store.FatalErrorChan = make(chan struct{})
 	store.ticker = time.NewTicker(time.Minute)
@@ -299,7 +308,10 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 			*/
 
 			case <-store.ticker.C:
-				store.resetFailures()
+				err := store.resetFailures()
+				if err != nil {
+					store.logger.Warn("Error resetting failures", "error", err)
+				}
 			case <-ctx.Done():
 				store.ticker.Stop()
 				//store.logger.Debug("Store ticker has been stopped")
@@ -456,9 +468,9 @@ func (s *MessageStore) GetSyslogConfig(confID ulid.ULID) (*conf.FilterSubConfig,
 	return c, nil
 }
 
-func (s *MessageStore) initGauge() {
+func (s *MessageStore) initGauge() error {
 	s.metrics.BadgerGauge.WithLabelValues("syslogconf", "").Set(float64(s.syslogConfigsDB.Count(nil)))
-	s.badger.View(func(txn *badger.Txn) error {
+	return s.badger.View(func(txn *badger.Txn) error {
 		for dname, dtype := range conf.Destinations {
 			s.metrics.BadgerGauge.WithLabelValues("messages", dname).Set(float64(s.backend.GetPartition(Messages, dtype).Count(txn)))
 			s.metrics.BadgerGauge.WithLabelValues("ready", dname).Set(float64(s.backend.GetPartition(Ready, dtype).Count(txn)))
@@ -712,8 +724,8 @@ func (s *MessageStore) PurgeBadger() {
 }
 
 func (s *MessageStore) Stash(m model.FullMessage) (fatal error, nonfatal error) {
-	s.toStashQueue.Put(m)
-	return nil, nil
+	fatal = s.toStashQueue.Put(m)
+	return fatal, nil
 }
 
 func (s *MessageStore) ingestByDest(queue map[ulid.ULID]([]byte), dest conf.DestinationType, txn *badger.Txn) (err error) {
@@ -920,7 +932,7 @@ func sortAck(acks []queue.UidDest) (res map[conf.DestinationType]([]ulid.ULID)) 
 
 func (s *MessageStore) ACK(uid ulid.ULID, dest conf.DestinationType) {
 	s.metrics.AckCounter.WithLabelValues("ack", conf.DestinationNames[dest]).Inc()
-	s.ackQueue.Put(uid, dest)
+	_ = s.ackQueue.Put(uid, dest)
 }
 
 func (s *MessageStore) doACK(acks []queue.UidDest) {
@@ -988,7 +1000,7 @@ func (s *MessageStore) ackByDest(uids []ulid.ULID, dtype conf.DestinationType) {
 
 func (s *MessageStore) NACK(uid ulid.ULID, dest conf.DestinationType) {
 	s.metrics.AckCounter.WithLabelValues("nack", conf.DestinationNames[dest]).Inc()
-	s.nackQueue.Put(uid, dest)
+	_ = s.nackQueue.Put(uid, dest)
 }
 
 func (s *MessageStore) nackByDest(uids []ulid.ULID, dest conf.DestinationType) {
@@ -1035,7 +1047,7 @@ func (s *MessageStore) nackByDest(uids []ulid.ULID, dest conf.DestinationType) {
 
 func (s *MessageStore) PermError(uid ulid.ULID, dest conf.DestinationType) {
 	s.metrics.AckCounter.WithLabelValues("permerror", conf.DestinationNames[dest]).Inc()
-	s.permerrorsQueue.Put(uid, dest)
+	_ = s.permerrorsQueue.Put(uid, dest)
 }
 
 func (s *MessageStore) permErrorByDest(uids []ulid.ULID, dest conf.DestinationType) {

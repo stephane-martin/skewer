@@ -51,7 +51,7 @@ func (s *BaseService) AddConnection(conn io.Closer) {
 func (s *BaseService) RemoveConnection(conn io.Closer) {
 	s.connMutex.Lock()
 	if _, ok := s.Connections[conn]; ok {
-		conn.Close()
+		_ = conn.Close()
 		delete(s.Connections, conn)
 	}
 	s.connMutex.Unlock()
@@ -60,11 +60,14 @@ func (s *BaseService) RemoveConnection(conn io.Closer) {
 func (s *BaseService) CloseConnections() {
 	s.connMutex.Lock()
 	for conn, _ := range s.Connections {
-		conn.Close()
+		_ = conn.Close()
 	}
 	for _, path := range s.UnixSocketPaths {
 		if !strings.HasPrefix(path, "@") {
-			os.Remove(path)
+			err := os.Remove(path)
+			if err != nil {
+				s.Logger.Warn("Error deleting unix socket path", "error", err)
+			}
 		}
 	}
 	s.Connections = map[io.Closer]bool{}

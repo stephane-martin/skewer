@@ -127,8 +127,8 @@ func (c *ConfigurationService) Start(r kring.Ring) error {
 		err = cmd.Start()
 	}
 	if err != nil {
-		stdin.Close()
-		stdout.Close()
+		_ = stdin.Close()
+		_ = stdout.Close()
 		close(c.output)
 		return err
 	}
@@ -151,7 +151,7 @@ func (c *ConfigurationService) Start(r kring.Ring) error {
 			if kill {
 				c.logger.Warn("Killing configuration service")
 				c.stdinMu.Lock()
-				cmd.Process.Kill()
+				_ = cmd.Process.Kill()
 				c.stdinMu.Unlock()
 			}
 
@@ -168,7 +168,7 @@ func (c *ConfigurationService) Start(r kring.Ring) error {
 			case <-time.After(3 * time.Second):
 				c.logger.Warn("Timeout: killing configuration service")
 				c.stdinMu.Lock()
-				cmd.Process.Kill()
+				_ = cmd.Process.Kill()
 				c.stdinMu.Unlock()
 				err = cmd.Wait()
 			}
@@ -274,7 +274,10 @@ func writeNewConf(ctx context.Context, updated chan *conf.BaseConfig, logger log
 				confb, err := json.Marshal(newconf)
 				if err == nil {
 					// TODO: sign configuration
-					WConf([]byte("newconf"), confb)
+					err = WConf([]byte("newconf"), confb)
+					if err != nil {
+						logger.Warn("Error sending new configuration", "error", err)
+					}
 				} else {
 					logger.Warn("Error serializing new configuration", "error", err)
 				}
@@ -295,8 +298,13 @@ func start(confdir string, params consul.ConnParams, r kring.Ring, logger log15.
 	if err == nil {
 		confb, err := json.Marshal(gconf)
 		if err == nil {
-			WConf([]byte("started"), utils.NOW)
-			WConf([]byte("newconf"), confb)
+			err = utils.Chain(
+				func() error { return WConf([]byte("started"), utils.NOW) },
+				func() error { return WConf([]byte("newconf"), confb) },
+			)
+			if err != nil {
+				return nil, err
+			}
 			go writeNewConf(ctx, updated, logger)
 		} else {
 			cancel()
@@ -334,7 +342,7 @@ func LaunchConfProvider(r kring.Ring, logger log15.Logger) error {
 			var err error
 			cancel, err = start(confdir, params, r, logger)
 			if err != nil {
-				WConf([]byte("starterror"), []byte(err.Error()))
+				_ = WConf([]byte("starterror"), []byte(err.Error()))
 				return err
 			}
 
@@ -345,7 +353,10 @@ func LaunchConfProvider(r kring.Ring, logger log15.Logger) error {
 					cancel()
 				}
 				cancel = newcancel
-				WConf([]byte("reloaded"), utils.NOW)
+				err := WConf([]byte("reloaded"), utils.NOW)
+				if err != nil {
+					return err
+				}
 			} else {
 				logger.Warn("Error reloading configuration", "error", err)
 			}
@@ -369,6 +380,9 @@ func LaunchConfProvider(r kring.Ring, logger log15.Logger) error {
 				return fmt.Errorf("Empty consulparams command")
 			}
 		case "stop":
+			if cancel != nil {
+				cancel()
+			}
 			return nil
 		default:
 			return fmt.Errorf("Unknown command")

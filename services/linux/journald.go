@@ -90,8 +90,15 @@ func (s *JournalService) Start(test bool) (infos []model.ListenerInfo, err error
 			m, err = q.Get()
 			if m != nil && err == nil {
 				m.ConfId = s.Conf.ConfID
-				s.stasher.Stash(*m)
-				s.metrics.IncomingMsgsCounter.WithLabelValues("journald", hostname, "", "").Inc()
+				f, nf := s.stasher.Stash(*m)
+				if nf != nil {
+					s.logger.Warn("Non-fatal error stashing journal message", "error", nf)
+				} else if f != nil {
+					s.logger.Error("Fatal error stashing journal message", "error", f)
+					s.Shutdown()
+				} else {
+					s.metrics.IncomingMsgsCounter.WithLabelValues("journald", hostname, "", "").Inc()
+				}
 			}
 		}
 	}()

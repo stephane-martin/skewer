@@ -20,7 +20,7 @@ type MetricsServer struct {
 
 func (m *MetricsServer) Stop() {
 	if m.server != nil {
-		m.server.Close()
+		_ = m.server.Close()
 		m.server = nil
 	}
 }
@@ -62,7 +62,10 @@ func (m *MetricsServer) NewConf(c conf.MetricsConfig, logger log15.Logger, gathe
 
 		go func() {
 			// actually listen
-			m.server.ListenAndServe()
+			err := m.server.ListenAndServe()
+			if err != nil {
+				logger.Error("Error starting the HTTP metric server", "error", err)
+			}
 		}()
 	}
 }

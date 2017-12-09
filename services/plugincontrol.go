@@ -211,7 +211,7 @@ func (s *PluginController) Shutdown(killTimeOut time.Duration) {
 			case <-time.After(killTimeOut):
 				// after timeout kill the process
 				s.logger.Warn("Plugin failed to shutdown before timeout", "type", name)
-				s.kill(false)
+				_ = s.kill(false)
 				<-s.ShutdownChan
 				<-s.StopChan
 			}
@@ -226,13 +226,14 @@ func (s *PluginController) SetConf(c conf.BaseConfig) {
 	s.conf = c
 }
 
-func (s *PluginController) kill(misbevave bool) {
+func (s *PluginController) kill(misbevave bool) (err error) {
 	if misbevave {
 		s.logger.Crit("killing misbehaving plugin", "type", Types2Names[s.typ])
 	}
 	s.stdinMu.Lock()
-	s.cmd.Process.Kill()
+	err = s.cmd.Process.Kill()
 	s.stdinMu.Unlock()
+	return err
 }
 
 type infosAndError struct {
@@ -266,7 +267,11 @@ func (s *PluginController) listenpipe(secret *memguard.LockedBuffer) {
 			s.logger.Error("Unexpected error decrypting message from the plugin pipe", "type", name, "error", err)
 			return
 		}
-		s.stasher.Stash(message)
+		err = s.stasher.Stash(message)
+		if err != nil {
+			s.logger.Error("Error stashing message", "error", err)
+			return
+		}
 
 	}
 	err = scanner.Err()
@@ -314,14 +319,14 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 				// child process is still alive, but we are in the defer(). why ?
 				if kill {
 					// the child misbehaved and deserved to be killed
-					s.kill(true)
+					_ = s.kill(true)
 					<-s.ShutdownChan
 					s.created = false
 				} else if normalStop {
 					s.logger.Debug("Plugin child process has stopped normally", "type", name)
 				} else {
 					// should not happen, we assume an anomaly
-					s.kill(true)
+					_ = s.kill(true)
 					<-s.ShutdownChan
 					s.created = false
 				}
@@ -357,7 +362,12 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 					m = model.FullMessage{}
 					err := m.Decrypt(secret, parts[1])
 					if err == nil {
-						s.stasher.Stash(m)
+						err = s.stasher.Stash(m)
+						if err != nil {
+							s.logger.Error("Error stashing message", "error", err)
+							kill = true
+							return
+						}
 					} else {
 						s.logger.Warn("Plugin sent a badly encoded log line", "error", err)
 						kill = true
@@ -544,10 +554,10 @@ func setupCmd(name string, r kring.Ring, binderHandle, loggerHandle uintptr, mes
 	}
 	files = append(files, rPipe)
 	err = r.WriteRingPass(wPipe)
+	_ = wPipe.Close()
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	wPipe.Close()
 	if test {
 		envs = append(envs, "SKEWER_TEST=TRUE")
 	}
@@ -603,8 +613,8 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 		if capabilities.CapabilitiesSupported {
 			s.cmd, s.stdin, s.stdout, err = setupCmd(fmt.Sprintf("confined-%s", name), s.ring, s.binderHandle, s.loggerHandle, pipew, test)
 			if err != nil {
-				piper.Close()
-				pipew.Close()
+				_ = piper.Close()
+				_ = pipew.Close()
 				close(s.ShutdownChan)
 				s.createdMu.Unlock()
 				return err
@@ -618,17 +628,17 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 		if err != nil || !capabilities.CapabilitiesSupported {
 			s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.ring, s.binderHandle, s.loggerHandle, pipew, test)
 			if err != nil {
-				piper.Close()
-				pipew.Close()
+				_ = piper.Close()
+				_ = pipew.Close()
 				close(s.ShutdownChan)
 				s.createdMu.Unlock()
 				return err
 			}
 			err = s.cmd.Start()
 		}
-		pipew.Close()
+		_ = pipew.Close()
 		if err != nil {
-			piper.Close()
+			_ = piper.Close()
 		}
 
 	case Store:
@@ -642,8 +652,8 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 		if capabilities.CapabilitiesSupported {
 			s.cmd, s.stdin, s.stdout, err = setupCmd(fmt.Sprintf("confined-%s", name), s.ring, s.binderHandle, s.loggerHandle, piper, test)
 			if err != nil {
-				piper.Close()
-				pipew.Close()
+				_ = piper.Close()
+				_ = pipew.Close()
 				close(s.ShutdownChan)
 				s.createdMu.Unlock()
 				return err
@@ -657,17 +667,17 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 		if err != nil || !capabilities.CapabilitiesSupported {
 			s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.ring, s.binderHandle, s.loggerHandle, piper, test)
 			if err != nil {
-				piper.Close()
-				pipew.Close()
+				_ = piper.Close()
+				_ = pipew.Close()
 				close(s.ShutdownChan)
 				s.createdMu.Unlock()
 				return err
 			}
 			err = s.cmd.Start()
 		}
-		piper.Close()
+		_ = piper.Close()
 		if err != nil {
-			pipew.Close()
+			_ = pipew.Close()
 		}
 
 	default:
@@ -774,15 +784,15 @@ func (s *StorePlugin) Shutdown(killTimeOut time.Duration) {
 		}
 	}
 
-	s.pipe.Close()                           // signal the child that we are done sending messages
+	_ = s.pipe.Close()                       // signal the store that we are done sending messages
 	s.PluginController.Shutdown(killTimeOut) // shutdown the child
 }
 
 // Stash stores the given message into the Store
-func (s *StorePlugin) Stash(m model.FullMessage) {
+func (s *StorePlugin) Stash(m model.FullMessage) error {
 	// this method is called very frequently, so we avoid to lock anything
 	// the MessageQueue ensures that we write the messages sequentially to the store child
-	s.MessageQueue.Put(m)
+	return s.MessageQueue.Put(m)
 }
 
 func (s *StorePlugin) Start() (infos []model.ListenerInfo, err error) {

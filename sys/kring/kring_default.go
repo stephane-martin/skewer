@@ -28,13 +28,19 @@ func GetDefRing(creds RingCreds) Ring {
 	return &r
 }
 
-func (r *defring) Destroy() {
+func (r *defring) Destroy() error {
 	r.creds.Secret.Destroy()
 	if r.sh != nil {
-		r.sh.Close()
-		r.sh.Delete()
+		err := r.sh.Close()
+		if err != nil {
+			return err
+		}
+		err = r.sh.Delete()
+		if err != nil {
+			return err
+		}
 	}
-	semaphore.Destroy(r.semName)
+	return semaphore.Destroy(r.semName)
 }
 
 func NewDefRing() (Ring, error) {
@@ -85,8 +91,11 @@ func (r *defring) NewSignaturePubkey() (privkey *memguard.LockedBuffer, err erro
 		return nil, err
 	}
 	defer func() {
-		sem.Unlock()
-		sem.Close()
+		err := sem.Unlock()
+		if err != nil {
+			panic(err)
+		}
+		_ = sem.Close()
 	}()
 
 	sh := r.sh
@@ -95,7 +104,12 @@ func (r *defring) NewSignaturePubkey() (privkey *memguard.LockedBuffer, err erro
 		if err != nil {
 			return nil, err
 		}
-		defer sh.Close()
+		defer func() {
+			err = sh.Close()
+			if err != nil {
+				privkey = nil
+			}
+		}()
 	}
 
 	mybag := (*bag)(sh.Pointer())
@@ -119,8 +133,11 @@ func (r *defring) GetSignaturePubkey() (pubkey *memguard.LockedBuffer, err error
 		return nil, err
 	}
 	defer func() {
-		sem.Unlock()
-		sem.Close()
+		err := sem.Unlock()
+		if err != nil {
+			panic(err)
+		}
+		_ = sem.Close()
 	}()
 
 	sh := r.sh
@@ -129,15 +146,20 @@ func (r *defring) GetSignaturePubkey() (pubkey *memguard.LockedBuffer, err error
 		if err != nil {
 			return nil, err
 		}
-		defer sh.Close()
+		defer func() {
+			err = sh.Close()
+			if err != nil {
+				pubkey = nil
+			}
+		}()
 	}
 
 	mybag := (*bag)(sh.Pointer())
-	key, err := mybag.GetSigPubKey(r.creds)
+	pubkey, err = mybag.GetSigPubKey(r.creds)
 	if err != nil {
 		return nil, err
 	}
-	return key, nil
+	return pubkey, nil
 }
 
 func (r *defring) NewBoxSecret() (secret *memguard.LockedBuffer, err error) {
@@ -155,8 +177,11 @@ func (r *defring) NewBoxSecret() (secret *memguard.LockedBuffer, err error) {
 		return nil, err
 	}
 	defer func() {
-		sem.Unlock()
-		sem.Close()
+		err := sem.Unlock()
+		if err != nil {
+			panic(err)
+		}
+		_ = sem.Close()
 	}()
 
 	sh := r.sh
@@ -165,7 +190,12 @@ func (r *defring) NewBoxSecret() (secret *memguard.LockedBuffer, err error) {
 		if err != nil {
 			return nil, err
 		}
-		defer sh.Close()
+		defer func() {
+			err = sh.Close()
+			if err != nil {
+				secret = nil
+			}
+		}()
 	}
 
 	mybag := (*bag)(sh.Pointer())
@@ -186,8 +216,11 @@ func (r *defring) GetBoxSecret() (secret *memguard.LockedBuffer, err error) {
 		return nil, err
 	}
 	defer func() {
-		sem.Unlock()
-		sem.Close()
+		err := sem.Unlock()
+		if err != nil {
+			panic(err)
+		}
+		_ = sem.Close()
 	}()
 
 	sh := r.sh
@@ -196,7 +229,12 @@ func (r *defring) GetBoxSecret() (secret *memguard.LockedBuffer, err error) {
 		if err != nil {
 			return nil, err
 		}
-		defer sh.Close()
+		defer func() {
+			err = sh.Close()
+			if err != nil {
+				secret = nil
+			}
+		}()
 	}
 
 	mybag := (*bag)(sh.Pointer())

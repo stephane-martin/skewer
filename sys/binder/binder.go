@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/inconshreveable/log15"
+	"github.com/stephane-martin/skewer/utils"
 )
 
 func IsStream(lnet string) bool {
@@ -30,10 +31,18 @@ type FileConn struct {
 }
 
 func (c *FileConn) Close() error {
-	err := c.Conn.Close()
-	c.f.Close()
-	c.parentConn.Write([]byte(fmt.Sprintf("closeconn %s\n", c.uid)))
-	return err
+	return utils.All(
+		func() error {
+			return c.Conn.Close()
+		},
+		func() error {
+			return c.f.Close()
+		},
+		func() (err error) {
+			_, err = c.parentConn.Write([]byte(fmt.Sprintf("closeconn %s\n", c.uid)))
+			return err
+		},
+	)
 }
 
 type FilePacketConn struct {
@@ -45,10 +54,18 @@ type FilePacketConn struct {
 }
 
 func (c *FilePacketConn) Close() error {
-	err := c.PacketConn.Close()
-	c.f.Close()
-	c.parentConn.Write([]byte(fmt.Sprintf("closeconn %s\n", c.uid)))
-	return err
+	return utils.All(
+		func() error {
+			return c.PacketConn.Close()
+		},
+		func() error {
+			return c.f.Close()
+		},
+		func() (err error) {
+			_, err = c.parentConn.Write([]byte(fmt.Sprintf("closeconn %s\n", c.uid)))
+			return err
+		},
+	)
 }
 
 type BinderClient struct {
@@ -242,11 +259,14 @@ func (c *BinderClient) Listen(lnet string, laddr string) (net.Listener, error) {
 		ichan = c.IncomingConn[addr]
 	}
 	c.iconnMu.Unlock()
-	c.parentConn.Write([]byte(fmt.Sprintf("listen %s\n", addr)))
+	_, err := c.parentConn.Write([]byte(fmt.Sprintf("listen %s\n", addr)))
+	if err != nil {
+		return nil, err
+	}
 
 	confirmation, more := <-ichan
 	if !more {
-		return nil, &net.OpError{Err: fmt.Errorf("Closed ichan?!"), Op: "Listen"}
+		return nil, &net.OpError{Err: fmt.Errorf("closed ichan"), Op: "Listen"}
 	} else if len(confirmation.err) > 0 {
 		return nil, &net.OpError{Err: fmt.Errorf(confirmation.err), Op: "Listen"}
 	} else {
@@ -263,7 +283,10 @@ func (c *BinderClient) ListenPacket(lnet string, laddr string) (net.PacketConn, 
 		ichan = c.IncomingPacketConn[addr]
 	}
 	c.ipacketMu.Unlock()
-	c.parentConn.Write([]byte(fmt.Sprintf("listen %s\n", addr)))
+	_, err := c.parentConn.Write([]byte(fmt.Sprintf("listen %s\n", addr)))
+	if err != nil {
+		return nil, err
+	}
 	conn, more := <-ichan
 	c.ipacketMu.Lock()
 	delete(c.IncomingPacketConn, addr)
@@ -279,21 +302,30 @@ func (c *BinderClient) ListenPacket(lnet string, laddr string) (net.PacketConn, 
 
 func (c *BinderClient) StopListen(addr string) {
 	c.iconnMu.Lock()
-	c.parentConn.Write([]byte(fmt.Sprintf("stoplisten %s\n", addr)))
 	ichan, ok := c.IncomingConn[addr]
 	delete(c.IncomingConn, addr)
 	if ok && ichan != nil {
 		close(ichan)
 	}
 	c.iconnMu.Unlock()
+	_, _ = c.parentConn.Write([]byte(fmt.Sprintf("stoplisten %s\n", addr)))
 }
 
-func (c *BinderClient) Quit() {
-	c.parentConn.Write([]byte("byebye\n"))
-	c.parentConn.Close()
-	c.childFile.Close()
+func (c *BinderClient) Quit() error {
+	return utils.All(
+		func() (err error) {
+			_, err = c.parentConn.Write([]byte("byebye\n"))
+			return err
+		},
+		func() error {
+			return c.parentConn.Close()
+		},
+		func() error {
+			return c.childFile.Close()
+		},
+	)
 }
 
 func (c *BinderClient) Reset() {
-	c.parentConn.Write([]byte("reset\n"))
+	_, _ = c.parentConn.Write([]byte("reset\n"))
 }

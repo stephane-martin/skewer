@@ -134,15 +134,24 @@ func (s *AccountingService) readFile(f *os.File, tick int64, hostname string, si
 		} else if err != nil {
 			return fmt.Errorf("Unexpected error while reading the accounting file: %s", err)
 		} else {
-			s.stasher.Stash(s.makeMessage(buf, tick, hostname))
-			s.metrics.IncomingMsgsCounter.WithLabelValues("accounting", hostname, "", "").Inc()
+			f, nf := s.stasher.Stash(s.makeMessage(buf, tick, hostname))
+			if nf != nil {
+				s.logger.Warn("Error stashing accounting message", "error", nf)
+			} else if f != nil {
+				s.logger.Error("Fatal error stashing accounting message", "error", f)
+				return f
+			} else {
+				s.metrics.IncomingMsgsCounter.WithLabelValues("accounting", hostname, "", "").Inc()
+			}
 		}
 	}
 }
 
 func (s *AccountingService) doStart(watcher *fsnotify.Watcher, hostname string, f *os.File, tick int64) {
-	defer s.wgroup.Done()
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+		s.wgroup.Done()
+	}()
 	var err error
 
 	err = watcher.Add(s.Conf.Path)
@@ -164,7 +173,7 @@ Read:
 			continue Read
 		} else if err != nil {
 			s.logger.Error(err.Error())
-			watcher.Close()
+			_ = watcher.Close()
 			return
 		}
 
@@ -193,12 +202,12 @@ Read:
 					return
 				case fsnotify.Remove:
 					s.logger.Error("Accounting file has been removed ?!", "notifypath", ev.Name)
-					watcher.Close()
+					_ = watcher.Close()
 					return
 				default:
 				}
 			case <-s.stopchan:
-				watcher.Close()
+				_ = watcher.Close()
 				return
 			}
 		}

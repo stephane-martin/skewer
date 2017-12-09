@@ -46,8 +46,8 @@ func getSocketPair(typ int) (spair, error) {
 func getLoggerConn(handle uintptr) (loggerConn *net.UnixConn) {
 	c, _ := net.FileConn(os.NewFile(handle, "logger"))
 	conn := c.(*net.UnixConn)
-	conn.SetReadBuffer(65536)
-	conn.SetWriteBuffer(65536)
+	_ = conn.SetReadBuffer(65536)
+	_ = conn.SetWriteBuffer(65536)
 	return conn
 }
 
@@ -194,8 +194,8 @@ func execServeParent() (err error) {
 
 	defer func() {
 		boxsecret.Destroy()
-		ring.DeleteBoxSecret()
-		ring.Destroy()
+		_ = ring.DeleteBoxSecret()
+		_ = ring.Destroy()
 	}()
 
 	if !cmd.DumpableFlag {
@@ -251,7 +251,7 @@ func execServeParent() (err error) {
 	logger.Debug("Target user", "uid", numuid, "gid", numgid)
 
 	// execute child under the new user
-	exe, err := osext.Executable() // custom Executable function to support OpenBSD
+	exe, err := osext.Executable() // custom Executable() function to support OpenBSD
 	if err != nil {
 		return makeErr("Error getting executable name", err)
 	}
@@ -264,11 +264,12 @@ func execServeParent() (err error) {
 			extraFiles = append(extraFiles, os.NewFile(loggerSockets[h.Service].child, h.Service))
 		}
 	}
-	rOpenBsdSecretPipe, wOpenBsdSecretPipe, err := os.Pipe()
+	rRingSecretPipe, wRingSecretPipe, err := os.Pipe()
 	if err != nil {
 		return makeErr("Error creating OpenBSD-secret pipe", err)
 	}
-	extraFiles = append(extraFiles, rOpenBsdSecretPipe)
+	// TODO: replace "16"
+	extraFiles = append(extraFiles, rRingSecretPipe)
 
 	childProcess := exec.Cmd{
 		Args:       append([]string{"skewer-child"}, os.Args[1:]...),
@@ -284,20 +285,20 @@ func execServeParent() (err error) {
 		childProcess.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uint32(numuid), Gid: uint32(numgid)}}
 	}
 	err = childProcess.Start()
+	_ = rRingSecretPipe.Close()
 	if err != nil {
 		return makeErr("Error starting child", err)
 	}
 
-	rOpenBsdSecretPipe.Close()
 	for _, h := range cmd.Handles {
 		if h.Type == cmd.BINDER {
-			syscall.Close(int(binderSockets[h.Service].child))
+			_ = syscall.Close(int(binderSockets[h.Service].child))
 		} else {
-			syscall.Close(int(loggerSockets[h.Service].child))
+			_ = syscall.Close(int(loggerSockets[h.Service].child))
 		}
 	}
-	ring.WriteRingPass(wOpenBsdSecretPipe)
-	wOpenBsdSecretPipe.Close()
+	_ = ring.WriteRingPass(wRingSecretPipe)
+	_ = wRingSecretPipe.Close()
 
 	sigChan := make(chan os.Signal, 10)
 	once := sync.Once{}
@@ -306,11 +307,11 @@ func execServeParent() (err error) {
 			logger.Debug("parent received signal", "signal", sig)
 			switch sig {
 			case syscall.SIGTERM:
-				once.Do(func() { childProcess.Process.Signal(sig) })
+				once.Do(func() { _ = childProcess.Process.Signal(sig) })
 				return
 			case syscall.SIGHUP:
 				// reload configuration
-				childProcess.Process.Signal(sig)
+				_ = childProcess.Process.Signal(sig)
 			case syscall.SIGUSR1:
 				// log rotation
 				logging.SetLogging(rootlogger, cmd.LoglevelFlag, cmd.LogjsonFlag, cmd.SyslogFlag, cmd.LogfilenameFlag)
@@ -324,7 +325,7 @@ func execServeParent() (err error) {
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT, syscall.SIGUSR1)
 	logger.Debug("PIDs", "parent", os.Getpid(), "child", childProcess.Process.Pid)
 
-	childProcess.Process.Wait()
+	_, _ = childProcess.Process.Wait()
 	return nil
 }
 
@@ -419,7 +420,7 @@ func main() {
 
 	if runtime.GOOS == "openbsd" {
 		// so that we execute IP capabilities probes before the call to pledge
-		net.Dial("udp4", "127.0.0.1:80")
+		_, _ = net.Dial("udp4", "127.0.0.1:80")
 	}
 
 	sid := os.Getenv("SKEWER_SESSION")
@@ -443,7 +444,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "Could not create BSD secret:", err)
 			os.Exit(-1)
 		}
-		rPipe.Close()
+		_ = rPipe.Close()
 		sessionID := ulid.MustParse(sid)
 		ring := kring.GetRing(kring.RingCreds{Secret: bsdSecret, SessionID: sessionID})
 
@@ -583,7 +584,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "Could not create BSD secret:", err)
 			os.Exit(-1)
 		}
-		rPipe.Close()
+		_ = rPipe.Close()
 		sessionID := ulid.MustParse(sid)
 		ring := kring.GetRing(kring.RingCreds{Secret: bsdSecret, SessionID: sessionID})
 		if loggerHandle > 0 {

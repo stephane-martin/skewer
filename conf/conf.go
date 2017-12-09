@@ -70,7 +70,7 @@ func Default() (BaseConfig, error) {
 	return baseConf, nil
 }
 
-func (c *BaseConfig) String() string {
+func (c *BaseConfig) String() (string, error) {
 	return c.Export()
 }
 
@@ -785,11 +785,14 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 	return nil
 }
 
-func (c *BaseConfig) Export() string {
+func (c *BaseConfig) Export() (string, error) {
 	buf := new(bytes.Buffer)
 	encoder := toml.NewEncoder(buf)
-	encoder.Encode(c)
-	return buf.String()
+	err := encoder.Encode(c)
+	if err != nil {
+		return "", err
+	}
+	return buf.String(), nil
 }
 
 func (c *BaseConfig) Complete(r kring.Ring) (err error) {

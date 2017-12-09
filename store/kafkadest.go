@@ -108,8 +108,9 @@ func (d *kafkaDestination) Send(message model.FullMessage, partitionKey string, 
 	return nil
 }
 
-func (d *kafkaDestination) Close() {
+func (d *kafkaDestination) Close() error {
 	d.producer.AsyncClose()
+	return nil
 }
 
 func (d *kafkaDestination) Fatal() chan struct{} {

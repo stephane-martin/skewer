@@ -34,7 +34,7 @@ Listen:
 			break Listen
 		default:
 			r := Record{}
-			c.SetReadDeadline(time.Now().Add(2 * time.Second))
+			_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
 			n, _, err = c.ReadFrom(enc[:])
 			if err != nil {
 				if e, ok := err.(net.Error); ok {
@@ -62,7 +62,7 @@ Listen:
 				logr.Ctx = append(logr.Ctx, k)
 				logr.Ctx = append(logr.Ctx, r.Ctx[k])
 			}
-			h.Log(&logr)
+			_ = h.Log(&logr)
 		}
 	}
 }

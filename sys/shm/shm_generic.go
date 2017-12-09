@@ -41,8 +41,8 @@ func Create(regionName string, size int) (s *SharedMem, err error) {
 	}
 	s.mem, err = mmap.MapRegion(s.f, size, mmap.RDWR, 0, 0)
 	if err != nil {
-		s.f.Close()
-		Delete(regionName)
+		_ = s.f.Close()
+		_ = Delete(regionName)
 		return nil, err
 	}
 	return s, nil
@@ -59,7 +59,7 @@ func Open(regionName string) (s *SharedMem, err error) {
 	}
 	s.mem, err = mmap.MapRegion(s.f, -1, mmap.RDWR, 0, 0)
 	if err != nil {
-		s.f.Close()
+		_ = s.f.Close()
 		return nil, err
 	}
 	return s, nil

@@ -31,9 +31,9 @@ func GetRing(creds RingCreds) Ring {
 	return &ring{creds: creds}
 }
 
-func (r *ring) Destroy() {
+func (r *ring) Destroy() error {
 	r.creds.Secret.Destroy()
-	destroySem(r.creds.SessionID)
+	return destroySem(r.creds.SessionID)
 }
 
 func NewRing() (r Ring, err error) {

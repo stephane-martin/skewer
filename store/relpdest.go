@@ -67,7 +67,7 @@ func NewRelpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perm
 
 	defer func() {
 		if d.conn != nil && err != nil {
-			d.conn.Close()
+			_ = d.conn.Close()
 		}
 	}()
 
@@ -80,10 +80,10 @@ func NewRelpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perm
 			return nil, err
 		}
 		tcpconn := c.(*net.TCPConn)
-		tcpconn.SetNoDelay(true)
+		_ = tcpconn.SetNoDelay(true)
 		if bc.RelpDest.KeepAlive {
-			tcpconn.SetKeepAlive(true)
-			tcpconn.SetKeepAlivePeriod(bc.RelpDest.KeepAlivePeriod)
+			_ = tcpconn.SetKeepAlive(true)
+			_ = tcpconn.SetKeepAlivePeriod(bc.RelpDest.KeepAlivePeriod)
 		}
 		d.conn = tcpconn
 	} else {
@@ -106,7 +106,7 @@ func NewRelpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perm
 	if err != nil {
 		return nil, err
 	}
-	d.conn.SetReadDeadline(time.Now().Add(bc.RelpDest.ConnTimeout))
+	_ = d.conn.SetReadDeadline(time.Now().Add(bc.RelpDest.ConnTimeout))
 	txnr, retcode, _, err := d.scan()
 	if err != nil {
 		return nil, err
@@ -137,7 +137,7 @@ func NewRelpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perm
 
 func (d *relpDestination) handleRspAnswers() {
 	for {
-		d.conn.SetReadDeadline(time.Now().Add(d.relpTimeout))
+		_ = d.conn.SetReadDeadline(time.Now().Add(d.relpTimeout))
 		txnr, retcode, _, err := d.scan()
 		if err != nil {
 			d.logger.Info("RELP destination read error", "error", err)
@@ -218,16 +218,17 @@ func (d *relpDestination) Send(message model.FullMessage, partitionKey string, p
 	return
 }
 
-func (d *relpDestination) Close() {
-	d.wclose()
-	d.conn.SetReadDeadline(time.Now().Add(time.Second))
-	d.scan()
-	d.conn.Close()
+func (d *relpDestination) Close() (err error) {
+	_ = d.wclose()
+	_ = d.conn.SetReadDeadline(time.Now().Add(time.Second))
+	_, _, _, _ = d.scan()
+	err = d.conn.Close()
 	// NACK all pending messages
 	d.txnr2msgid.Range(func(k interface{}, v interface{}) bool {
 		d.nack(v.([16]byte), conf.Relp)
 		return true
 	})
+	return err
 }
 
 func (d *relpDestination) Fatal() chan struct{} {

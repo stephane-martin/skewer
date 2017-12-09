@@ -40,7 +40,7 @@ func Launch(typ Types, test bool, ring kring.Ring, binderClient *binder.BinderCl
 	svc := ProviderFactory(typ, ring, reporter, generator, binderClient, logger, pipe)
 	if svc == nil {
 		err := fmt.Errorf("The Service Factory returned 'nil' for plugin '%s'", name)
-		Wout(STARTERROR, []byte(err.Error()))
+		_ = Wout(STARTERROR, []byte(err.Error()))
 		return err
 	}
 
@@ -60,7 +60,7 @@ func Launch(typ Types, test bool, ring kring.Ring, binderClient *binder.BinderCl
 		select {
 		case <-fatalChan:
 			svc.Shutdown()
-			Wout(SHUTDOWN, []byte("fatal"))
+			_ = Wout(SHUTDOWN, []byte("fatal"))
 			return fmt.Errorf("Store fatal error in plugin '%s'", name)
 		default:
 		}
@@ -71,7 +71,7 @@ func Launch(typ Types, test bool, ring kring.Ring, binderClient *binder.BinderCl
 		case "start":
 			if !hasConf {
 				err := fmt.Errorf("Configuration was not provided to plugin '%s' before start", name)
-				Wout([]byte("syslogconferror"), []byte(err.Error()))
+				_ = Wout([]byte("syslogconferror"), []byte(err.Error()))
 				return err
 			}
 
@@ -80,7 +80,7 @@ func Launch(typ Types, test bool, ring kring.Ring, binderClient *binder.BinderCl
 				logger.Debug("Encrypting messages from plugin", "type", name)
 				secret, err := ring.GetBoxSecret()
 				if err != nil {
-					Wout(STARTERROR, []byte(err.Error()))
+					_ = Wout(STARTERROR, []byte(err.Error()))
 					return err
 				}
 				reporter.SetSecret(secret)
@@ -88,19 +88,31 @@ func Launch(typ Types, test bool, ring kring.Ring, binderClient *binder.BinderCl
 			reporter.Start()
 			infos, err := ConfigureAndStartService(svc, globalConf, test)
 			if err != nil {
-				Wout(STARTERROR, []byte(err.Error()))
+				_ = Wout(STARTERROR, []byte(err.Error()))
 				return err
 			} else if len(infos) == 0 && (typ == TCP || typ == UDP) {
 				// only TCP and UDP directly report info about their effective listening ports
 				svc.Stop()
-				Wout([]byte("nolistenererror"), []byte("plugin is inactive"))
+				err := Wout([]byte("nolistenererror"), []byte("plugin is inactive"))
+				if err != nil {
+					return err
+				}
 			} else if typ == TCP {
 				infosb, _ := json.Marshal(infos)
-				Wout(STARTED, infosb)
-				reporter.Report(infos)
+				err := Wout(STARTED, infosb)
+				if err != nil {
+					return err
+				}
+				err = reporter.Report(infos)
+				if err != nil {
+					return err
+				}
 			} else {
 				infosb, _ := json.Marshal(infos)
-				Wout(STARTED, infosb)
+				err := Wout(STARTED, infosb)
+				if err != nil {
+					return err
+				}
 			}
 			if typ == Store {
 				// monitor the Store fatal errors
@@ -108,13 +120,16 @@ func Launch(typ Types, test bool, ring kring.Ring, binderClient *binder.BinderCl
 			}
 		case "stop":
 			svc.Stop()
-			Wout(STOPPED, base.SUCC)
+			err := Wout(STOPPED, base.SUCC)
+			if err != nil {
+				return err
+			}
 			// here we *do not return*. So the plugin process continues to live
 			// and to listen for subsequent control commands
 		case "shutdown":
 			logger.Debug("provider is asked to stop", "type", name)
 			svc.Shutdown()
-			Wout(SHUTDOWN, base.SUCC)
+			_ = Wout(SHUTDOWN, base.SUCC)
 			// at the end of shutdown command, we *return*. So the plugin
 			// process stops right now.
 			return nil
@@ -125,7 +140,7 @@ func Launch(typ Types, test bool, ring kring.Ring, binderClient *binder.BinderCl
 				globalConf = c
 				hasConf = true
 			} else {
-				Wout(CONFERROR, []byte(err.Error()))
+				_ = Wout(CONFERROR, []byte(err.Error()))
 				return err
 			}
 		case "gathermetrics":

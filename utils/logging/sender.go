@@ -27,7 +27,7 @@ func NewRemoteLogger(ctx context.Context, remote *net.UnixConn, secret *memguard
 	logger.SetHandler(&h)
 
 	go func() {
-		defer h.Close()
+		defer func() { _ = h.Close() }()
 
 		var rbis Record
 		var r *log15.Record

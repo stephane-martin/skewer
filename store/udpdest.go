@@ -43,7 +43,7 @@ func NewUdpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perme
 
 	defer func() {
 		if d.conn != nil && err != nil {
-			d.conn.Close()
+			_ = d.conn.Close()
 		}
 	}()
 
@@ -111,8 +111,8 @@ func (d *udpDestination) Send(message model.FullMessage, partitionKey string, pa
 	return
 }
 
-func (d *udpDestination) Close() {
-	d.conn.Close()
+func (d *udpDestination) Close() error {
+	return d.conn.Close()
 }
 
 func (d *udpDestination) Fatal() chan struct{} {

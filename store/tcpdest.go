@@ -50,7 +50,7 @@ func NewTcpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perme
 
 	defer func() {
 		if d.conn != nil && err != nil {
-			d.conn.Close()
+			_ = d.conn.Close()
 		}
 	}()
 
@@ -66,10 +66,10 @@ func NewTcpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perme
 			logger.Error("Error connecting on TCP", "error", err)
 			return nil, err
 		}
-		tcpconn.SetNoDelay(true)
+		_ = tcpconn.SetNoDelay(true)
 		if bc.TcpDest.KeepAlive {
-			tcpconn.SetKeepAlive(true)
-			tcpconn.SetKeepAlivePeriod(bc.TcpDest.KeepAlivePeriod)
+			_ = tcpconn.SetKeepAlive(true)
+			_ = tcpconn.SetKeepAlivePeriod(bc.TcpDest.KeepAlivePeriod)
 		}
 		d.conn = tcpconn
 	} else {
@@ -131,8 +131,8 @@ func (d *tcpDestination) Send(message model.FullMessage, partitionKey string, pa
 	return
 }
 
-func (d *tcpDestination) Close() {
-	d.conn.Close()
+func (d *tcpDestination) Close() error {
+	return d.conn.Close()
 }
 
 func (d *tcpDestination) Fatal() chan struct{} {

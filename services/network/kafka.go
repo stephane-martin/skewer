@@ -151,13 +151,15 @@ func (s *KafkaServiceImpl) ParseOne(env *ParsersEnv, raw *model.RawKafkaMessage)
 		return
 	}
 	// be sure to ack the message to kafka
-	defer ackQueue.Put(queue.KafkaProducerAck{
-		Offset: raw.Offset,
-		TopicPartition: queue.TopicPartition{
-			Partition: raw.Partition,
-			Topic:     raw.Topic,
-		},
-	})
+	defer func() {
+		_ = ackQueue.Put(queue.KafkaProducerAck{
+			Offset: raw.Offset,
+			TopicPartition: queue.TopicPartition{
+				Partition: raw.Partition,
+				Topic:     raw.Topic,
+			},
+		})
+	}()
 
 	logger := s.logger.New(
 		"protocol", "kafka",
@@ -218,7 +220,9 @@ func (s *KafkaServiceImpl) handleConsumer(config conf.KafkaSourceConfig, consume
 	nextToACK := map[queue.TopicPartition]int64{}
 
 	go func() {
-		defer consumer.Close()
+		defer func() {
+			_ = consumer.Close()
+		}()
 		processedMsgs := map[queue.TopicPartition](map[int64]bool){}
 
 		for ackQueue.Wait() {
@@ -267,7 +271,13 @@ func (s *KafkaServiceImpl) handleConsumer(config conf.KafkaSourceConfig, consume
 			raw.Topic = msg.Topic
 			raw.Partition = msg.Partition
 			raw.Offset = msg.Offset
-			s.rawMessagesQueue.Put(raw)
+			err := s.rawMessagesQueue.Put(raw)
+			if err != nil {
+				// rawMessagesQueue has been disposed
+				s.rawpool.Put(raw)
+				s.logger.Warn("Error queueing kafka message", "error", err)
+				return
+			}
 		case <-s.stopChan:
 			return
 		}

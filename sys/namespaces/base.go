@@ -40,7 +40,7 @@ func myWalk(root string) []string {
 			return nil
 		}
 	}
-	filepath.Walk(root, walk)
+	_ = filepath.Walk(root, walk)
 	return deriveKeys(shared_libs)
 
 }

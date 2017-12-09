@@ -137,9 +137,14 @@ func (s *storeServiceImpl) doStart(test bool, mu *sync.Mutex) ([]model.ListenerI
 				message := model.FullMessage{}
 				_, err = message.UnmarshalMsg(scanner.Bytes())
 				if err == nil {
-					s.st.Stash(message)
+					err, _ = s.st.Stash(message)
+					if err != nil {
+						s.logger.Error("Error pushing message to the store queue", "error", err)
+						go func() { s.Shutdown() }()
+						return
+					}
 				} else {
-					s.logger.Warn("Unexpected error decoding message from the Store pipe", "error", err)
+					s.logger.Error("Unexpected error decoding message from the Store pipe", "error", err)
 					go func() { s.Shutdown() }()
 					return
 				}
@@ -192,13 +197,19 @@ func (s *storeServiceImpl) doStart(test bool, mu *sync.Mutex) ([]model.ListenerI
 			// instance because it received a SIGHUP).
 			// that's why we need the mutex stuff in Start(),
 			// Stop(), SetConfAndRestart() methods.
+			tryStart := func() error {
+				select {
+				case <-s.shutdownCtx.Done():
+					return nil
+				case <-time.After(10 * time.Second):
+					_, err := s.Start(test)
+					return err
+				}
+			}
 			s.logger.Warn("The forwarder reported a connection error")
 			s.Stop()
-			select {
-			case <-s.shutdownCtx.Done():
-				return
-			case <-time.After(10 * time.Second):
-				s.Start(test)
+			for tryStart() != nil {
+				s.logger.Warn("Failed to start the forwarder", "error", "err")
 			}
 		}
 	}()
@@ -248,7 +259,7 @@ func (s *storeServiceImpl) Shutdown() {
 	s.shutdownStore()
 	s.logger.Debug("Store service waits for end of store goroutines")
 	s.st.WaitFinished()
-	s.pipe.Close()
+	_ = s.pipe.Close()
 }
 
 // Gather returns the metrics for the Store and the Kafka forwarder

@@ -268,7 +268,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TcpSourceConfig)
 
 	timeout := config.Timeout
 	if timeout > 0 {
-		conn.SetReadDeadline(time.Now().Add(timeout))
+		_ = conn.SetReadDeadline(time.Now().Add(timeout))
 	}
 	scanner := bufio.NewScanner(conn)
 	scanner.Buffer(make([]byte, 0, s.MaxMessageSize), s.MaxMessageSize)
@@ -283,13 +283,12 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TcpSourceConfig)
 
 	for scanner.Scan() {
 		if timeout > 0 {
-			conn.SetReadDeadline(time.Now().Add(timeout))
+			_ = conn.SetReadDeadline(time.Now().Add(timeout))
 		}
 		buf = scanner.Bytes()
 		if len(buf) == 0 {
 			continue
 		}
-		s.metrics.IncomingMsgsCounter.WithLabelValues("tcp", client, localPort, path).Inc()
 		rawmsg = s.Pool.Get().(*model.RawTcpMessage)
 		rawmsg.Client = client
 		rawmsg.LocalPort = localPortInt
@@ -300,7 +299,13 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TcpSourceConfig)
 		rawmsg.Encoding = config.Encoding
 		rawmsg.Format = config.Format
 		copy(rawmsg.Message, buf)
-		s.rawMessagesQueue.Put(rawmsg)
+		err := s.rawMessagesQueue.Put(rawmsg)
+		if err != nil {
+			// rawMessagesQueue has been disposed
+			logger.Warn("Error queueing TCP raw message", "error", err)
+			return
+		}
+		s.metrics.IncomingMsgsCounter.WithLabelValues("tcp", client, localPort, path).Inc()
 	}
 	logger.Info("End of TCP client connection", "error", scanner.Err())
 }

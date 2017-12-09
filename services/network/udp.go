@@ -248,8 +248,8 @@ func (s *UdpServiceImpl) ListenPacket() []model.ListenerInfo {
 					Protocol:       "udp",
 				})
 				s.UnixSocketPaths = append(s.UnixSocketPaths, syslogConf.UnixSocketPath)
-				conn.(*binder.FilePacketConn).PacketConn.(*net.UnixConn).SetReadBuffer(65536)
-				conn.(*binder.FilePacketConn).PacketConn.(*net.UnixConn).SetWriteBuffer(65536)
+				_ = conn.(*binder.FilePacketConn).PacketConn.(*net.UnixConn).SetReadBuffer(65536)
+				_ = conn.(*binder.FilePacketConn).PacketConn.(*net.UnixConn).SetWriteBuffer(65536)
 				s.wg.Add(1)
 				go s.handleConnection(conn, syslogConf)
 			}
@@ -272,8 +272,8 @@ func (s *UdpServiceImpl) ListenPacket() []model.ListenerInfo {
 						Port:     port,
 						Protocol: "udp",
 					})
-					conn.(*binder.FilePacketConn).PacketConn.(*net.UDPConn).SetReadBuffer(65536)
-					conn.(*binder.FilePacketConn).PacketConn.(*net.UDPConn).SetReadBuffer(65536)
+					_ = conn.(*binder.FilePacketConn).PacketConn.(*net.UDPConn).SetReadBuffer(65536)
+					_ = conn.(*binder.FilePacketConn).PacketConn.(*net.UDPConn).SetReadBuffer(65536)
 					s.wg.Add(1)
 					go s.handleConnection(conn, syslogConf)
 				}
@@ -341,7 +341,11 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.UdpSourceC
 			rawmsg.Client = strings.Split(remote.String(), ":")[0]
 		}
 
-		s.rawMessagesQueue.Put(rawmsg)
+		err := s.rawMessagesQueue.Put(rawmsg)
+		if err != nil {
+			logger.Warn("Error queueing UDP message", "error", err)
+			return
+		}
 		s.metrics.IncomingMsgsCounter.WithLabelValues("udp", rawmsg.Client, localPortS, path).Inc()
 	}
 }

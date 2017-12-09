@@ -56,7 +56,9 @@ func (d *stderrDestination) Send(message model.FullMessage, partitionKey string,
 	return err
 }
 
-func (d *stderrDestination) Close() {}
+func (d *stderrDestination) Close() error {
+	return nil
+}
 
 func (d *stderrDestination) Fatal() chan struct{} {
 	return d.fatal

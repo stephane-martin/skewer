@@ -50,8 +50,11 @@ func storeSecret(service string, creds RingCreds, label string, data *memguard.L
 		return err
 	}
 	defer func() {
-		sem.Unlock()
-		sem.Close()
+		err := sem.Unlock()
+		if err != nil {
+			panic(err)
+		}
+		_ = sem.Close()
 	}()
 	return keychain.AddItem(item)
 }
@@ -74,8 +77,11 @@ func getItem(service string, creds RingCreds, label string) (res []byte, err err
 		return nil, err
 	}
 	defer func() {
-		sem.Unlock()
-		sem.Close()
+		err := sem.Unlock()
+		if err != nil {
+			panic(err)
+		}
+		_ = sem.Close()
 	}()
 	results, err := keychain.QueryItem(query)
 	if err != nil {
@@ -168,8 +174,11 @@ func (r *ring) DeleteBoxSecret() error {
 		return err
 	}
 	defer func() {
-		sem.Unlock()
-		sem.Close()
+		err := sem.Unlock()
+		if err != nil {
+			panic(err)
+		}
+		_ = sem.Close()
 	}()
 
 	return keychain.DeleteGenericPasswordItem("skewer-secret", sessionStr)
@@ -186,16 +195,19 @@ func (r *ring) DeleteSignaturePubKey() error {
 		return err
 	}
 	defer func() {
-		sem.Unlock()
-		sem.Close()
+		err := sem.Unlock()
+		if err != nil {
+			panic(err)
+		}
+		_ = sem.Close()
 	}()
 
 	return keychain.DeleteGenericPasswordItem("skewer-sigpubkey", sessionStr)
 }
 
-func (r *ring) Destroy() {
+func (r *ring) Destroy() error {
 	r.creds.Secret.Destroy()
-	destroySem(r.creds.SessionID)
+	return destroySem(r.creds.SessionID)
 }
 
 func NewRing() (r Ring, err error) {

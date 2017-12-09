@@ -37,7 +37,7 @@ type Forwarder interface {
 type Destination interface {
 	Send(m model.FullMessage, partitionKey string, partitionNumber int32, topic string) error
 	Fatal() chan struct{}
-	Close()
+	Close() error
 	Gather() ([]*dto.MetricFamily, error)
 }
 

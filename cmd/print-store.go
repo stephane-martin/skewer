@@ -3,14 +3,12 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/inconshreveable/log15"
 	"github.com/spf13/cobra"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/consul"
 	"github.com/stephane-martin/skewer/store"
-	"github.com/stephane-martin/skewer/sys/shm"
 )
 
 // printStoreCmd represents the printStore command
@@ -72,25 +70,6 @@ var printStoreCmd = &cobra.Command{
 		for k, v := range sentMap {
 			fmt.Printf("%s %s\n", k, v)
 		}
-		fmt.Println()
-		sh, err := shm.Create("/blah", 64)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "shm create error:", err)
-			return
-		}
-		defer sh.Delete()
-		fmt.Printf("Shared memory is %d bytes long\n", sh.Len())
-
-		iptr := (*int64)(sh.Pointer())
-		*iptr = 9
-		sh.Close()
-		sh, err = shm.Open("/blah")
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "shm open error:", err)
-			return
-		}
-		iptr = (*int64)(sh.Pointer())
-		fmt.Printf("Store value: %d\n", *iptr)
 	},
 }
 

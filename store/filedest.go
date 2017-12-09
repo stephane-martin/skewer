@@ -190,8 +190,9 @@ func (d *fileDestination) Send(message model.FullMessage, partitionKey string, p
 	return err
 }
 
-func (d *fileDestination) Close() {
+func (d *fileDestination) Close() error {
 	d.files.closeall()
+	return nil
 }
 
 func (d *fileDestination) Fatal() chan struct{} {
