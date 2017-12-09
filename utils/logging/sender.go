@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"os"
 	"strconv"
 	"time"
 
@@ -31,7 +30,6 @@ func NewRemoteLogger(ctx context.Context, remote *net.UnixConn, secret *memguard
 
 		var rbis Record
 		var r *log15.Record
-		var more bool
 		done := ctx.Done()
 
 	Send:
@@ -39,47 +37,38 @@ func NewRemoteLogger(ctx context.Context, remote *net.UnixConn, secret *memguard
 			select {
 			case <-done:
 				return
-			case r, more = <-h.msgChan:
-				if more {
-					rbis = Record{Time: r.Time, Lvl: int(r.Lvl), Msg: r.Msg, Ctx: map[string]string{}}
-					l := len(r.Ctx)
-					var i int
-					var ok bool
-					label := ""
-					val := ""
-
-					for i < l {
-						label, ok = r.Ctx[i].(string)
-						if ok {
-							i++
-							if i < l {
-								val = formatValue(r.Ctx[i])
-								rbis.Ctx[label] = val
-								i++
-							}
-						}
-
-					}
-					dec, err := rbis.MarshalMsg(nil)
-					if err != nil {
-						fmt.Fprintln(os.Stderr, "BLAH", err)
-						continue Send
-					}
-					enc, err := sbox.Encrypt(dec, secret)
-					if err != nil {
-						fmt.Fprintln(os.Stderr, "BLEH", err)
-						continue Send
-					}
-					_, err = remote.Write(enc)
-					if err != nil {
-						fmt.Fprintln(os.Stderr, "BLEUH")
-						continue Send
-					} else {
-						//fmt.Fprintln(os.Stderr, n)
-					}
-				} else {
+			case r = <-h.msgChan:
+				if r == nil {
 					return
 				}
+				rbis = Record{Time: r.Time, Lvl: int(r.Lvl), Msg: r.Msg, Ctx: map[string]string{}}
+				l := len(r.Ctx)
+				var i int
+				var ok bool
+				label := ""
+				val := ""
+
+				for i < l {
+					label, ok = r.Ctx[i].(string)
+					if ok {
+						i++
+						if i < l {
+							val = formatValue(r.Ctx[i])
+							rbis.Ctx[label] = val
+							i++
+						}
+					}
+
+				}
+				dec, err := rbis.MarshalMsg(nil)
+				if err != nil {
+					continue Send
+				}
+				enc, err := sbox.Encrypt(dec, secret)
+				if err != nil {
+					continue Send
+				}
+				_, _ = remote.Write(enc)
 			}
 		}
 	}()
