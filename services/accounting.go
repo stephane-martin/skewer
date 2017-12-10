@@ -232,6 +232,7 @@ func (s *AccountingService) Start(test bool) (infos []model.ListenerInfo, err er
 		return
 	}
 
+	// TODO: this can slow down skewer start
 	err = readFileUntilEnd(f, accounting.Ssize)
 	if err != nil {
 		return

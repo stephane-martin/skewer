@@ -51,9 +51,11 @@ func SetFileDestDefaults(v *viper.Viper, prefixed bool) {
 	}
 	v.SetDefault(prefix+"filename", "/var/log/skewer/{{.Fields.Date}}/{{.Fields.Appname}}.log")
 	v.SetDefault(prefix+"sync", false)
-	v.SetDefault(prefix+"sync_period", "1s")
+	v.SetDefault(prefix+"sync_period", "5s")
+	v.SetDefault(prefix+"flush_period", "1s")
+	v.SetDefault(prefix+"buffer_size", 16384)
 	v.SetDefault(prefix+"open_files_cache", 128)
-	v.SetDefault(prefix+"open_file_timeout", "10m")
+	v.SetDefault(prefix+"open_file_timeout", "1m")
 	v.SetDefault(prefix+"gzip", false)
 	v.SetDefault(prefix+"gzip_level", 5)
 	v.SetDefault(prefix+"format", "file")

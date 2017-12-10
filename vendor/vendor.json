@@ -346,6 +346,13 @@
 			"revisionTime": "2017-03-18T15:58:57Z"
 		},
 		{
+			"checksumSHA1": "3SzDBz3k4I7iTgu23J8bX4nHQks=",
+			"path": "github.com/free/concurrent-writer",
+			"revision": "363b9993c91180a82babd49f530aa64902d364cd",
+			"revisionTime": "2017-11-17T21:28:31Z",
+			"tree": true
+		},
+		{
 			"checksumSHA1": "x2Km0Qy3WgJJnV19Zv25VwTJcBM=",
 			"path": "github.com/fsnotify/fsnotify",
 			"revision": "4da3e2cfbabc9f751898f250b49f2439785783a1",

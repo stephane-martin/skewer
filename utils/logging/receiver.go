@@ -4,9 +4,7 @@ package logging
 
 import (
 	"context"
-	"fmt"
 	"net"
-	"os"
 	"sync"
 	"time"
 
@@ -39,21 +37,24 @@ Listen:
 			if err != nil {
 				if e, ok := err.(net.Error); ok {
 					if !e.Timeout() {
-						fmt.Fprintln(os.Stderr, "AHEM", err)
+						l.Info("Error receiving logs", "error", err)
 					}
 				} else {
-					fmt.Fprintln(os.Stderr, "AHEM", err)
+					l.Info("Error receiving logs", "error", err)
 				}
+				continue Listen
+			}
+			if n == 0 {
 				continue Listen
 			}
 			dec, err = sbox.Decrypt(enc[:n], secret)
 			if err != nil {
-				fmt.Fprintln(os.Stderr, "AHEUM", err)
+				l.Warn("Error decrypting logs", "error", err)
 				continue Listen
 			}
 			_, err = r.UnmarshalMsg(dec)
 			if err != nil {
-				fmt.Fprintln(os.Stderr, "FICK", err)
+				l.Warn("Error decoding logs", "error", err)
 				continue Listen
 			}
 			logr := log15.Record{Lvl: log15.Lvl(r.Lvl), Msg: r.Msg, Time: r.Time, KeyNames: keyNames}

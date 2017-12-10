@@ -10,6 +10,13 @@ import (
 )
 
 func Encrypt(message []byte, secret *memguard.LockedBuffer) (encrypted []byte, err error) {
+	if secret == nil {
+		return nil, fmt.Errorf("Encrypt: nil secret")
+	}
+	buf := secret.Buffer()
+	if buf == nil {
+		return nil, fmt.Errorf("Encrypt: empty secret")
+	}
 	prenonce := make([]byte, 24)
 	_, err = rand.Read(prenonce)
 	if err != nil {
@@ -18,15 +25,22 @@ func Encrypt(message []byte, secret *memguard.LockedBuffer) (encrypted []byte, e
 	var nonce [24]byte
 	copy(nonce[:], prenonce)
 
-	encrypted = secretbox.Seal(nonce[:], message, &nonce, (*[32]byte)(unsafe.Pointer(&secret.Buffer()[0])))
+	encrypted = secretbox.Seal(nonce[:], message, &nonce, (*[32]byte)(unsafe.Pointer(&(buf[0]))))
 	return encrypted, nil
 }
 
 func Decrypt(encrypted []byte, secret *memguard.LockedBuffer) (decrypted []byte, err error) {
+	if secret == nil {
+		return nil, fmt.Errorf("Decrypt: nil secret")
+	}
+	buf := secret.Buffer()
+	if buf == nil {
+		return nil, fmt.Errorf("Decrypt: empty secret")
+	}
 	var nonce [24]byte
 	var ok bool
 	copy(nonce[:], encrypted[:24])
-	decrypted, ok = secretbox.Open(nil, encrypted[24:], &nonce, (*[32]byte)(unsafe.Pointer(&secret.Buffer()[0])))
+	decrypted, ok = secretbox.Open(nil, encrypted[24:], &nonce, (*[32]byte)(unsafe.Pointer(&(buf[0]))))
 	if !ok {
 		return nil, fmt.Errorf("Error decrypting value")
 	}
