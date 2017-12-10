@@ -72,6 +72,25 @@ type global struct {
 	throwerProperty Value
 }
 
+type Flag int
+
+const (
+	FLAG_NOT_SET Flag = iota
+	FLAG_FALSE
+	FLAG_TRUE
+)
+
+func (f Flag) Bool() bool {
+	return f == FLAG_TRUE
+}
+
+func ToFlag(b bool) Flag {
+	if b {
+		return FLAG_TRUE
+	}
+	return FLAG_FALSE
+}
+
 type RandSource func() float64
 
 type Runtime struct {
@@ -296,6 +315,11 @@ func (r *Runtime) NewObject() (v *Object) {
 	return r.newBaseObject(r.global.ObjectPrototype, classObject).val
 }
 
+// CreateObject creates an object with given prototype. Equivalent of Object.create(proto).
+func (r *Runtime) CreateObject(proto *Object) *Object {
+	return r.newBaseObject(proto, classObject).val
+}
+
 func (r *Runtime) NewTypeError(args ...interface{}) *Object {
 	msg := ""
 	if len(args) > 0 {
@@ -347,6 +371,38 @@ func (r *Runtime) newNativeFuncObj(v *Object, call func(FunctionCall) Value, con
 		f._putProp("prototype", proto, false, false, false)
 	}
 	return f
+}
+
+func (r *Runtime) newNativeConstructor(call func(ConstructorCall) *Object, name string, length int) *Object {
+	v := &Object{runtime: r}
+
+	f := &nativeFuncObject{
+		baseFuncObject: baseFuncObject{
+			baseObject: baseObject{
+				class:      classFunction,
+				val:        v,
+				extensible: true,
+				prototype:  r.global.FunctionPrototype,
+			},
+		},
+	}
+
+	f.f = func(c FunctionCall) Value {
+		return f.defaultConstruct(call, c.Arguments)
+	}
+
+	f.construct = func(args []Value) *Object {
+		return f.defaultConstruct(call, args)
+	}
+
+	v.self = f
+	f.init(name, length)
+
+	proto := r.NewObject()
+	proto.self._putProp("constructor", v, true, false, true)
+	f._putProp("prototype", proto, true, false, false)
+
+	return v
 }
 
 func (r *Runtime) newNativeFunc(call func(FunctionCall) Value, construct func(args []Value) *Object, name string, proto *Object, length int) *Object {
@@ -867,6 +923,8 @@ func (r *Runtime) ToValue(i interface{}) Value {
 		}
 	case func(FunctionCall) Value:
 		return r.newNativeFunc(i, nil, "", nil, 0)
+	case func(ConstructorCall) *Object:
+		return r.newNativeConstructor(i, "", 0)
 	case int:
 		return intToValue(int64(i))
 	case int8:
@@ -883,18 +941,21 @@ func (r *Runtime) ToValue(i interface{}) Value {
 		} else {
 			return floatToValue(float64(i))
 		}
-	case uint64:
-		if i <= math.MaxInt64 {
-			return intToValue(int64(i))
-		} else {
-			return floatToValue(float64(i))
-		}
 	case uint8:
 		return intToValue(int64(i))
 	case uint16:
 		return intToValue(int64(i))
 	case uint32:
 		return intToValue(int64(i))
+	case uint64:
+		if i <= math.MaxInt64 {
+			return intToValue(int64(i))
+		}
+		return floatToValue(float64(i))
+	case float32:
+		return floatToValue(float64(i))
+	case float64:
+		return floatToValue(i)
 	case map[string]interface{}:
 		obj := &Object{runtime: r}
 		m := &objectGoMapSimple{
@@ -944,7 +1005,7 @@ func (r *Runtime) ToValue(i interface{}) Value {
 
 	switch value.Kind() {
 	case reflect.Map:
-		if value.Type().Name() == "" {
+		if value.Type().NumMethod() == 0 {
 			switch value.Type().Key().Kind() {
 			case reflect.String, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 				reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
@@ -1309,6 +1370,15 @@ func AssertFunction(v Value) (Callable, bool) {
 	if obj, ok := v.(*Object); ok {
 		if f, ok := obj.self.assertCallable(); ok {
 			return func(this Value, args ...Value) (ret Value, err error) {
+				defer func() {
+					if x := recover(); x != nil {
+						if ex, ok := x.(*InterruptedError); ok {
+							err = ex
+						} else {
+							panic(x)
+						}
+					}
+				}()
 				ex := obj.runtime.vm.try(func() {
 					ret = f(FunctionCall{
 						This:      this,
@@ -1345,4 +1415,27 @@ func Undefined() Value {
 // Null returns JS null value.
 func Null() Value {
 	return _undefined
+}
+
+func tryFunc(f func()) (err error) {
+	defer func() {
+		if x := recover(); x != nil {
+			switch x := x.(type) {
+			case *Exception:
+				err = x
+			case *InterruptedError:
+				err = x
+			case Value:
+				err = &Exception{
+					val: x,
+				}
+			default:
+				panic(x)
+			}
+		}
+	}()
+
+	f()
+
+	return nil
 }

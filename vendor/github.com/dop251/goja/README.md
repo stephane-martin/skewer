@@ -47,6 +47,8 @@ are converted to the corresponding JavaScript primitives.
 
 *func(FunctionCall) Value* is treated as a native JavaScript function.
 
+*func(ConstructorCall) Value* is treated as a JavaScript constructor (see Native Constructors).
+
 *map[string]interface{}* is converted into a host object that largely behaves like a JavaScript Object.
 
 *[]interface{}* is converted into a host object that behaves largely like a JavaScript Array, however it's not extensible
@@ -59,10 +61,16 @@ the appropriate Go types. If conversion is not possible, a TypeError is thrown.
 
 A slice type is converted into a generic reflect based host object that behaves similar to an unexpandable Array.
 
+A map type with numeric or string keys and no methods is converted into a host object where properties are map keys.
+
+A map type with methods is converted into a host object where properties are method names,
+the map values are not accessible. This is to avoid ambiguity between m\["Property"\] and m.Property.
+
 Any other type is converted to a generic reflect based host object. Depending on the underlying type it behaves similar
 to a Number, String, Boolean or Object.
 
-Note that the underlying type is not lost, calling Export() returns the original Go value. This applies to all
+Note that these conversions wrap the original value which means any changes made inside JS
+are reflected on the value and calling Export() returns the original value. This applies to all
 reflect based types.
 
 Exporting Values from JS
@@ -71,6 +79,38 @@ Exporting Values from JS
 A JS value can be exported into its default Go representation using Value.Export() method.
 
 Alternatively it can be exported into a specific Go variable using Runtime.ExportTo() method.
+
+Native Constructors
+-------------------
+
+In order to implement a constructor function in Go:
+```go
+func MyObject(call goja.ConstructorCall) Value {
+    // call.This contains the newly created object as per http://www.ecma-international.org/ecma-262/5.1/index.html#sec-13.2.2
+    // call.Arguments contain arguments passed to the function
+
+    call.This.Set("method", method)
+
+    //...
+
+    // If return value is a non-nil *Object, it will be used instead of call.This
+    // This way it is possible to return a Go struct or a map converted
+    // into goja.Value using runtime.ToValue(), however in this case
+    // instanceof will not work as expected.
+    return nil
+}
+
+runtime.Set("MyObject", MyObject)
+
+```
+
+Then it can be used in JS as follows:
+
+```js
+var o = new MyObject(arg);
+var o1 = MyObject(arg); // same thing
+o instanceof MyObject && o1 instanceof MyObject; // true
+```
 
 Regular Expressions
 -------------------
