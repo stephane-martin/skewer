@@ -116,8 +116,7 @@ func ExecuteChild() (err error) {
 	if len(sessionID) == 0 {
 		return fmt.Errorf("Empty session ID")
 	}
-	// TODO: replace "16"
-	ringSecretPipe := os.NewFile(16, "ringsecretpipe")
+	ringSecretPipe := os.NewFile(uintptr(len(Handles)+3), "ringsecretpipe")
 	var ringSecret *memguard.LockedBuffer
 	buf := make([]byte, 32)
 	_, err = ringSecretPipe.Read(buf)

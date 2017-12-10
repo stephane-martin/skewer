@@ -268,7 +268,6 @@ func execServeParent() (err error) {
 	if err != nil {
 		return makeErr("Error creating OpenBSD-secret pipe", err)
 	}
-	// TODO: replace "16"
 	extraFiles = append(extraFiles, rRingSecretPipe)
 
 	childProcess := exec.Cmd{

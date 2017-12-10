@@ -165,6 +165,7 @@ Read:
 	for {
 		err = s.readFile(f, tick, hostname, accounting.Ssize)
 		if err == ErrTruncated {
+			// file truncation was detected
 			_, err = f.Seek(0, 0)
 			if err != nil {
 				s.logger.Error("Error when seeking to the beginning of the accounting file", "error", err)
@@ -172,7 +173,7 @@ Read:
 			}
 			continue Read
 		} else if err != nil {
-			s.logger.Error(err.Error())
+			s.logger.Error("Error reading the accounting file", "error")
 			_ = watcher.Close()
 			return
 		}
@@ -232,19 +233,23 @@ func (s *AccountingService) Start(test bool) (infos []model.ListenerInfo, err er
 		return
 	}
 
-	// TODO: this can slow down skewer start
-	err = readFileUntilEnd(f, accounting.Ssize)
-	if err != nil {
-		return
-	}
-
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return
 	}
 
 	s.wgroup.Add(1)
-	go s.doStart(watcher, hostname, f, tick)
+	go func() {
+		defer s.wgroup.Done()
+		err = readFileUntilEnd(f, accounting.Ssize)
+		if err != nil {
+			s.logger.Error("Error reading the accounting file for the first time", "error", err)
+			s.Stop()
+			return
+		}
+		s.wgroup.Add(1)
+		go s.doStart(watcher, hostname, f, tick)
+	}()
 	return
 }
 
