@@ -58,6 +58,8 @@ type KafkaServiceImpl struct {
 	stopChan         chan struct{}
 	rawpool          *sync.Pool
 	queues           *queue.KafkaQueues
+	fatalErrorChan   chan struct{}
+	fatalOnce        *sync.Once
 }
 
 func NewKafkaService(reporter *base.Reporter, gen chan ulid.ULID, l log15.Logger) *KafkaServiceImpl {
@@ -90,6 +92,8 @@ func (s *KafkaServiceImpl) Start(test bool) (infos []model.ListenerInfo, err err
 	infos = []model.ListenerInfo{}
 	s.queues = queue.NewQueueFactory()
 	s.stopChan = make(chan struct{})
+	s.fatalErrorChan = make(chan struct{})
+	s.fatalOnce = &sync.Once{}
 	for _, config := range s.configs {
 		s.wg.Add(1)
 		go s.startOne(config)
@@ -101,6 +105,14 @@ func (s *KafkaServiceImpl) Start(test bool) (infos []model.ListenerInfo, err err
 	}
 
 	return infos, nil
+}
+
+func (s *KafkaServiceImpl) FatalError() chan struct{} {
+	return s.fatalErrorChan
+}
+
+func (s *KafkaServiceImpl) dofatal() {
+	s.fatalOnce.Do(func() { close(s.fatalErrorChan) })
 }
 
 func (s *KafkaServiceImpl) startOne(config conf.KafkaSourceConfig) {
@@ -195,7 +207,7 @@ func (s *KafkaServiceImpl) ParseOne(env *ParsersEnv, raw *model.RawKafkaMessage)
 
 	if fatal != nil {
 		logger.Error("Fatal error stashing Kafka message", "error", fatal)
-		// TODO: shutdown
+		close(s.fatalErrorChan)
 	} else if nonfatal != nil {
 		logger.Warn("Non-fatal error stashing Kafka message", "error", nonfatal)
 	}
@@ -255,7 +267,7 @@ func (s *KafkaServiceImpl) handleConsumer(config conf.KafkaSourceConfig, consume
 		select {
 		case err := <-consumer.Errors():
 			if model.IsFatalKafkaError(err) {
-				s.logger.Warn("Kafka consumer fatal error", "error", err)
+				s.logger.Warn("Kafka consumer error", "error", err)
 				return
 			}
 			s.logger.Info("Kafka consumer non fatal error", "error", err)

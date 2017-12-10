@@ -36,14 +36,16 @@ func NewAccountingMetrics() *accountingMetrics {
 }
 
 type AccountingService struct {
-	stasher   *base.Reporter
-	logger    log15.Logger
-	wgroup    *sync.WaitGroup
-	generator chan ulid.ULID
-	metrics   *accountingMetrics
-	registry  *prometheus.Registry
-	Conf      conf.AccountingConfig
-	stopchan  chan struct{}
+	stasher        *base.Reporter
+	logger         log15.Logger
+	wgroup         *sync.WaitGroup
+	generator      chan ulid.ULID
+	metrics        *accountingMetrics
+	registry       *prometheus.Registry
+	Conf           conf.AccountingConfig
+	stopchan       chan struct{}
+	fatalErrorChan chan struct{}
+	fatalOnce      *sync.Once
 }
 
 func NewAccountingService(stasher *base.Reporter, gen chan ulid.ULID, l log15.Logger) (*AccountingService, error) {
@@ -136,7 +138,7 @@ func (s *AccountingService) readFile(f *os.File, tick int64, hostname string, si
 		} else {
 			f, nf := s.stasher.Stash(s.makeMessage(buf, tick, hostname))
 			if nf != nil {
-				s.logger.Warn("Error stashing accounting message", "error", nf)
+				s.logger.Warn("Non-fatal error stashing accounting message", "error", nf)
 			} else if f != nil {
 				s.logger.Error("Fatal error stashing accounting message", "error", f)
 				return f
@@ -169,12 +171,15 @@ Read:
 			_, err = f.Seek(0, 0)
 			if err != nil {
 				s.logger.Error("Error when seeking to the beginning of the accounting file", "error", err)
+				_ = watcher.Close()
+				s.dofatal()
 				return
 			}
 			continue Read
 		} else if err != nil {
 			s.logger.Error("Error reading the accounting file", "error")
 			_ = watcher.Close()
+			s.dofatal()
 			return
 		}
 
@@ -196,6 +201,8 @@ Read:
 						s.logger.Info("Accounting file has been reopened", "path", s.Conf.Path)
 					} else {
 						s.logger.Error("Error reopening accounting file", "error", err, "path", s.Conf.Path)
+						_ = watcher.Close()
+						s.dofatal()
 						return
 					}
 					s.wgroup.Add(1)
@@ -204,6 +211,7 @@ Read:
 				case fsnotify.Remove:
 					s.logger.Error("Accounting file has been removed ?!", "notifypath", ev.Name)
 					_ = watcher.Close()
+					s.dofatal()
 					return
 				default:
 				}
@@ -217,9 +225,19 @@ Read:
 
 }
 
+func (s *AccountingService) FatalError() chan struct{} {
+	return s.fatalErrorChan
+}
+
+func (s *AccountingService) dofatal() {
+	s.fatalOnce.Do(func() { close(s.fatalErrorChan) })
+}
+
 func (s *AccountingService) Start(test bool) (infos []model.ListenerInfo, err error) {
 	infos = []model.ListenerInfo{}
 	s.stopchan = make(chan struct{})
+	s.fatalErrorChan = make(chan struct{})
+	s.fatalOnce = &sync.Once{}
 	tick := accounting.Tick()
 	var f *os.File
 
@@ -244,7 +262,8 @@ func (s *AccountingService) Start(test bool) (infos []model.ListenerInfo, err er
 		err = readFileUntilEnd(f, accounting.Ssize)
 		if err != nil {
 			s.logger.Error("Error reading the accounting file for the first time", "error", err)
-			s.Stop()
+			_ = watcher.Close()
+			s.dofatal()
 			return
 		}
 		s.wgroup.Add(1)

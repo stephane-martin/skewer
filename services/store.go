@@ -39,7 +39,7 @@ type storeServiceImpl struct {
 // NewStoreService creates a StoreService.
 // The StoreService is responsible to manage the lifecycle of the Store and the
 // Kafka Forwarder that is fed by the Store.
-func NewStoreService(l log15.Logger, ring kring.Ring, pipe *os.File) StoreService {
+func NewStoreService(l log15.Logger, ring kring.Ring, pipe *os.File) NetworkService {
 	if pipe == nil {
 		l.Crit("The Store was not given a message pipe")
 		return nil
@@ -74,9 +74,9 @@ func (s *storeServiceImpl) SetConfAndRestart(c conf.BaseConfig, test bool) ([]mo
 	return s.doStart(test, nil)
 }
 
-// Errors return a channel to signal the Store fatal errors.
-// Typically no space left on disk.
-func (s *storeServiceImpl) Errors() chan struct{} {
+func (s *storeServiceImpl) FatalError() chan struct{} {
+	// Errors return a channel to signal the Store fatal errors.
+	// (Typically no space left on disk.)
 	return s.st.Errors()
 }
 

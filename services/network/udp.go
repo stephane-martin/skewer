@@ -30,15 +30,17 @@ const (
 
 type UdpServiceImpl struct {
 	base.BaseService
-	UdpConfigs []conf.UdpSourceConfig
-	status     UdpServerStatus
-	statusChan chan UdpServerStatus
-	stasher    *base.Reporter
-	handler    PacketHandler
-	generator  chan ulid.ULID
-	metrics    *udpMetrics
-	registry   *prometheus.Registry
-	wg         sync.WaitGroup
+	UdpConfigs     []conf.UdpSourceConfig
+	status         UdpServerStatus
+	statusChan     chan UdpServerStatus
+	stasher        *base.Reporter
+	handler        PacketHandler
+	generator      chan ulid.ULID
+	metrics        *udpMetrics
+	registry       *prometheus.Registry
+	wg             sync.WaitGroup
+	fatalErrorChan chan struct{}
+	fatalOnce      *sync.Once
 
 	rawMessagesQueue *udp.Ring
 }
@@ -162,7 +164,7 @@ func (s *UdpServiceImpl) Parse() {
 
 		if fatal != nil {
 			logger.Error("Fatal error stashing UDP message", "error", fatal)
-			// todo: shutdown
+			s.dofatal()
 		} else if nonfatal != nil {
 			logger.Warn("Non-fatal error stashing UDP message", "error", nonfatal)
 		}
@@ -184,6 +186,8 @@ func (s *UdpServiceImpl) Start(test bool) ([]model.ListenerInfo, error) {
 		return nil, errors.ServerNotStopped
 	}
 	s.statusChan = make(chan UdpServerStatus, 1)
+	s.fatalErrorChan = make(chan struct{})
+	s.fatalOnce = &sync.Once{}
 
 	// start the parsers
 	cpus := runtime.NumCPU()
@@ -203,6 +207,14 @@ func (s *UdpServiceImpl) Start(test bool) ([]model.ListenerInfo, error) {
 	}
 	s.UnlockStatus()
 	return infos, nil
+}
+
+func (s *UdpServiceImpl) FatalError() chan struct{} {
+	return s.fatalErrorChan
+}
+
+func (s *UdpServiceImpl) dofatal() {
+	s.fatalOnce.Do(func() { close(s.fatalErrorChan) })
 }
 
 func (s *UdpServiceImpl) Shutdown() {

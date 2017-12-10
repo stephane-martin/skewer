@@ -74,6 +74,8 @@ type TcpServiceImpl struct {
 	metrics          *tcpMetrics
 	registry         *prometheus.Registry
 	rawMessagesQueue *tcp.Ring
+	fatalErrorChan   chan struct{}
+	fatalOnce        *sync.Once
 }
 
 func NewTcpService(reporter *base.Reporter, gen chan ulid.ULID, b *binder.BinderClient, l log15.Logger) *TcpServiceImpl {
@@ -105,6 +107,8 @@ func (s *TcpServiceImpl) Start(test bool) ([]model.ListenerInfo, error) {
 		return nil, errors.ServerNotStopped
 	}
 	s.statusChan = make(chan TcpServerStatus, 1)
+	s.fatalErrorChan = make(chan struct{})
+	s.fatalOnce = &sync.Once{}
 
 	// start listening on the required ports
 	infos := s.initTCPListeners()
@@ -124,6 +128,14 @@ func (s *TcpServiceImpl) Start(test bool) ([]model.ListenerInfo, error) {
 	}
 	s.UnlockStatus()
 	return infos, nil
+}
+
+func (s *TcpServiceImpl) dofatal() {
+	s.fatalOnce.Do(func() { close(s.fatalErrorChan) })
+}
+
+func (s *TcpServiceImpl) FatalError() chan struct{} {
+	return s.fatalErrorChan
 }
 
 // Shutdown is just Stop for the TCP service
@@ -204,7 +216,7 @@ func (s *TcpServiceImpl) ParseOne(env *ParsersEnv, raw *model.RawTcpMessage) {
 
 	if fatal != nil {
 		logger.Error("Fatal error stashing TCP message", "error", fatal)
-		// TODO: shutdown
+		s.dofatal()
 	} else if nonfatal != nil {
 		logger.Warn("Non-fatal error stashing TCP message", "error", nonfatal)
 	}

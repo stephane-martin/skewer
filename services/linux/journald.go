@@ -12,7 +12,6 @@ import (
 	"github.com/stephane-martin/skewer/journald"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/base"
-	"github.com/stephane-martin/skewer/sys/capabilities"
 )
 
 type journalMetrics struct {
@@ -32,14 +31,16 @@ func NewJournalMetrics() *journalMetrics {
 }
 
 type JournalService struct {
-	stasher   *base.Reporter
-	reader    journald.JournaldReader
-	logger    log15.Logger
-	Conf      conf.JournaldConfig
-	wgroup    *sync.WaitGroup
-	generator chan ulid.ULID
-	metrics   *journalMetrics
-	registry  *prometheus.Registry
+	stasher        *base.Reporter
+	reader         journald.JournaldReader
+	logger         log15.Logger
+	Conf           conf.JournaldConfig
+	wgroup         *sync.WaitGroup
+	generator      chan ulid.ULID
+	metrics        *journalMetrics
+	registry       *prometheus.Registry
+	fatalErrorChan chan struct{}
+	fatalOnce      *sync.Once
 }
 
 func NewJournalService(stasher *base.Reporter, gen chan ulid.ULID, l log15.Logger) (*JournalService, error) {
@@ -52,14 +53,19 @@ func NewJournalService(stasher *base.Reporter, gen chan ulid.ULID, l log15.Logge
 		wgroup:    &sync.WaitGroup{},
 	}
 	s.registry.MustRegister(s.metrics.IncomingMsgsCounter)
-	if capabilities.CapabilitiesSupported {
-		l.Debug("Capabilities", "caps", capabilities.GetCaps())
-	}
 	return &s, nil
 }
 
 func (s *JournalService) Gather() ([]*dto.MetricFamily, error) {
 	return s.registry.Gather()
+}
+
+func (s *JournalService) FatalError() chan struct{} {
+	return s.fatalErrorChan
+}
+
+func (s *JournalService) dofatal() {
+	s.fatalOnce.Do(func() { close(s.fatalErrorChan) })
 }
 
 func (s *JournalService) Start(test bool) (infos []model.ListenerInfo, err error) {
@@ -77,6 +83,8 @@ func (s *JournalService) Start(test bool) (infos []model.ListenerInfo, err error
 		}
 	}
 	s.reader.Start()
+	s.fatalErrorChan = make(chan struct{})
+	s.fatalOnce = &sync.Once{}
 
 	s.wgroup.Add(1)
 	go func() {
@@ -95,7 +103,7 @@ func (s *JournalService) Start(test bool) (infos []model.ListenerInfo, err error
 					s.logger.Warn("Non-fatal error stashing journal message", "error", nf)
 				} else if f != nil {
 					s.logger.Error("Fatal error stashing journal message", "error", f)
-					s.Shutdown()
+					s.dofatal()
 				} else {
 					s.metrics.IncomingMsgsCounter.WithLabelValues("journald", hostname, "", "").Inc()
 				}

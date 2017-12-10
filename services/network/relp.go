@@ -275,6 +275,10 @@ func NewRelpService(r *base.Reporter, gen chan ulid.ULID, b *binder.BinderClient
 	return s
 }
 
+func (s *RelpService) FatalError() chan struct{} {
+	return nil // the RELP service will restart itself when fatal error happens
+}
+
 func (s *RelpService) Gather() ([]*dto.MetricFamily, error) {
 	return s.impl.registry.Gather()
 }

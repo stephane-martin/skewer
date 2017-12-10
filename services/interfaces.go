@@ -8,9 +8,5 @@ type NetworkService interface {
 	Stop()
 	Shutdown()
 	Gather() ([]*dto.MetricFamily, error)
-}
-
-type StoreService interface {
-	NetworkService
-	Errors() chan struct{}
+	FatalError() chan struct{}
 }

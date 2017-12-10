@@ -114,10 +114,7 @@ func Launch(typ Types, test bool, ring kring.Ring, binderClient *binder.BinderCl
 					return err
 				}
 			}
-			if typ == Store {
-				// monitor the Store fatal errors
-				fatalChan = svc.(StoreService).Errors()
-			}
+			fatalChan = svc.FatalError()
 		case "stop":
 			svc.Stop()
 			err := Wout(STOPPED, base.SUCC)
