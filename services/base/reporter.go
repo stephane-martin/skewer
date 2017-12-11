@@ -36,10 +36,12 @@ type Reporter struct {
 // NewReporter creates a reporter.
 func NewReporter(name string, l log15.Logger, pipe *os.File) *Reporter {
 	rep := Reporter{
-		name:         name,
-		logger:       l,
-		pipe:         pipe,
-		bufferedPipe: bufio.NewWriter(pipe),
+		name:   name,
+		logger: l,
+		pipe:   pipe,
+	}
+	if pipe != nil {
+		rep.bufferedPipe = bufio.NewWriter(pipe)
 	}
 	return &rep
 }
@@ -54,7 +56,9 @@ func (s *Reporter) Start() {
 func (s *Reporter) SetSecret(secret *memguard.LockedBuffer) {
 	s.secret = secret
 	s.stdoutWriter = utils.NewEncryptWriter(os.Stdout, s.secret)
-	s.pipeWriter = utils.NewEncryptWriter(s.bufferedPipe, s.secret)
+	if s.pipe != nil {
+		s.pipeWriter = utils.NewEncryptWriter(s.bufferedPipe, s.secret)
+	}
 }
 
 func (s *Reporter) pushqueue() {

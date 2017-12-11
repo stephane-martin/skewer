@@ -744,7 +744,7 @@ func (s *StorePlugin) pushqueue(secret *memguard.LockedBuffer) {
 	writeToStore := utils.NewEncryptWriter(bufpipe, secret)
 
 	for {
-		messages = s.MessageQueue.GetMany(1000)
+		messages = s.MessageQueue.GetMany(s.conf.Store.BatchSize)
 		if len(messages) == 0 {
 			return
 		}
