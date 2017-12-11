@@ -113,7 +113,7 @@ func (c *ConfigurationService) Start(r kring.Ring) error {
 			close(c.output)
 			return err
 		}
-		err = namespaces.StartInNamespaces(cmd, false, "", c.confdir, "")
+		err = namespaces.StartInNamespaces(cmd, false, "", c.confdir, "", "")
 	}
 	if err != nil {
 		c.logger.Warn("Starting configuration service in user namespace has failed", "error", err)

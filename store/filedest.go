@@ -244,11 +244,11 @@ func (o *openedFiles) open(filename string) (fi *openedFile, err error) {
 	}
 
 	runtime.GC() // ensure that the file is really closed before reopening it
+	o.logger.Debug("Opening file", "filename", filename)
 	f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return nil, err
 	}
-	o.logger.Debug("Opening file", "filename", filename)
 
 	fi = newOpenedFile(f, filename, closeAt, o.bufferSize, o.gzip, o.gziplevel)
 	o.files.Store(filename, fi)

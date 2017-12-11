@@ -329,12 +329,9 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 	for _, dest := range conf.Destinations {
 		store.wg.Add(1)
 		go func(d conf.DestinationType) {
-			//lok := store.readyMutexes[d]
 			var wg sync.WaitGroup
-			//cond := store.availConditions[d]
 			c := store.OutputsChans[d]
 			doneChan := ctx.Done()
-			//lok.Lock()
 
 			defer func() {
 				//lok.Unlock()
@@ -353,23 +350,22 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 					default:
 						messages = store.retrieve(1000, d)
 						if len(messages) > 0 {
+							//store.logger.Debug("Messages to be sent to destination", "dest", d, "nb", len(messages))
 							break wait_messages
 						} else {
 							time.Sleep(100 * time.Millisecond)
-							//cond.Wait()
 						}
 					}
 				}
-				// ensure at most one outputMsgs is running
-				wg.Wait()
+
+				wg.Wait() // ensure at most one outputMsgs is running
 				store.wg.Add(1)
 				wg.Add(1)
-				go func() {
-					store.outputMsgs(doneChan, messages, d)
+				go func(msgs map[ulid.ULID]*model.FullMessage) {
+					store.outputMsgs(doneChan, msgs, d)
 					store.wg.Done()
 					wg.Done()
-				}()
-
+				}(messages)
 			}
 		}(dest)
 	}
@@ -397,9 +393,11 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 
 func (s *MessageStore) outputMsgs(doneChan <-chan struct{}, messages map[ulid.ULID]*model.FullMessage, dest conf.DestinationType) {
 	if len(messages) == 0 {
+		s.logger.Debug("WOT?! 0 message were given for output", "dest", dest, "nb")
 		return
 	}
 	output := s.Outputs(dest)
+	//s.logger.Debug("ABOUT to send messages to output channel", "dest", dest, "nb", len(messages))
 	for _, msg := range messages {
 		select {
 		case output <- msg:
@@ -407,6 +405,7 @@ func (s *MessageStore) outputMsgs(doneChan <-chan struct{}, messages map[ulid.UL
 			return
 		}
 	}
+	//s.logger.Debug("DONE sending messages to output", "dest", dest)
 }
 
 func (s *MessageStore) WaitFinished() {
@@ -643,7 +642,7 @@ func (s *MessageStore) resetFailures() (err error) {
 
 func (s *MessageStore) resetFailuresByDest(dest conf.DestinationType) (err error) {
 	var t time.Time
-	failedDB := s.backend.GetPartition(Sent, dest)
+	failedDB := s.backend.GetPartition(Failed, dest)
 	readyDB := s.backend.GetPartition(Ready, dest)
 
 	for {

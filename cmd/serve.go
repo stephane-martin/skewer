@@ -310,7 +310,14 @@ func (ch *serveChild) setupStore() (st *services.StorePlugin, err error) {
 	f := services.ControllerFactory(ch.ring, ch.signPrivKey, nil, ch.consulRegistry, ch.logger)
 	st = f.NewStore(LoggerHdl(services.Store))
 	st.SetConf(*ch.conf)
-	err = st.Create(testFlag, DumpableFlag, storeDirname, "", "")
+
+	tmpl := ""
+	dests, _ := ch.conf.Main.GetDestinations()
+	if (dests & conf.File) != 0 {
+		tmpl = ch.conf.FileDest.Filename
+	}
+
+	err = st.Create(testFlag, DumpableFlag, storeDirname, "", "", tmpl)
 	if err != nil {
 		return nil, fmt.Errorf("Can't create the message Store: %s", err)
 	}
@@ -395,7 +402,7 @@ func (ch *serveChild) StartController(typ services.Types) error {
 func (ch *serveChild) StartKafkaSource() error {
 	if len(ch.conf.KafkaSource) > 0 {
 		ch.logger.Info("Kafka sources are enabled")
-		err := ch.controllers[services.KafkaSource].Create(testFlag, DumpableFlag, "", "", "")
+		err := ch.controllers[services.KafkaSource].Create(testFlag, DumpableFlag, "", "", "", "")
 		if err != nil {
 			return fmt.Errorf("Error creating the kafka source plugin: %s", err)
 		}
@@ -413,7 +420,7 @@ func (ch *serveChild) StartKafkaSource() error {
 func (ch *serveChild) StartAccounting() error {
 	if ch.conf.Accounting.Enabled {
 		ch.logger.Info("Process accounting is enabled")
-		err := ch.controllers[services.Accounting].Create(testFlag, DumpableFlag, "", "", ch.conf.Accounting.Path)
+		err := ch.controllers[services.Accounting].Create(testFlag, DumpableFlag, "", "", ch.conf.Accounting.Path, "")
 		if err != nil {
 			return fmt.Errorf("Error creating the accounting plugin: %s", err)
 		}
@@ -435,7 +442,7 @@ func (ch *serveChild) StartJournal() error {
 			ctl := ch.controllers[services.Journal]
 			ch.logger.Info("Journald service is enabled")
 			// in fact Create() will only do something the first time startJournal() is called
-			err := ctl.Create(testFlag, DumpableFlag, "", "", "")
+			err := ctl.Create(testFlag, DumpableFlag, "", "", "", "")
 			if err != nil {
 				return fmt.Errorf("Error creating Journald plugin: %s", err)
 			}
@@ -457,7 +464,7 @@ func (ch *serveChild) StartJournal() error {
 // StartRelp starts the Relp process.
 func (ch *serveChild) StartRelp() error {
 	ctl := ch.controllers[services.RELP]
-	err := ctl.Create(testFlag, DumpableFlag, "", "", "")
+	err := ctl.Create(testFlag, DumpableFlag, "", "", "", "")
 	if err != nil {
 		return fmt.Errorf("Error creating RELP plugin: %s", err)
 	}
@@ -473,7 +480,7 @@ func (ch *serveChild) StartRelp() error {
 // StartTcp starts the TCP process.
 func (ch *serveChild) StartTcp() error {
 	ctl := ch.controllers[services.TCP]
-	err := ctl.Create(testFlag, DumpableFlag, "", "", "")
+	err := ctl.Create(testFlag, DumpableFlag, "", "", "", "")
 	if err != nil {
 		return fmt.Errorf("Error creating TCP plugin: %s", err)
 	}
@@ -494,7 +501,7 @@ func (ch *serveChild) StartTcp() error {
 // StartUdp starts the UDP process.
 func (ch *serveChild) StartUdp() error {
 	ctl := ch.controllers[services.UDP]
-	err := ctl.Create(testFlag, DumpableFlag, "", "", "")
+	err := ctl.Create(testFlag, DumpableFlag, "", "", "", "")
 	if err != nil {
 		return fmt.Errorf("Error creating UDP plugin: %s", err)
 	}

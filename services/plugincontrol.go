@@ -580,7 +580,7 @@ func setupCmd(name string, r kring.Ring, binderHandle, loggerHandle uintptr, mes
 	return cmd, in, out, nil
 }
 
-func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, acctPath string) error {
+func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, acctPath, fileDestTmpl string) error {
 	// if the provider process already lives, Create() just returns
 	s.createdMu.Lock()
 	if s.created {
@@ -594,6 +594,9 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 	name := Types2Names[s.typ]
 	if s.typ != Accounting {
 		acctPath = ""
+	}
+	if s.typ != Store {
+		fileDestTmpl = ""
 	}
 
 	switch s.typ {
@@ -619,7 +622,7 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 				s.createdMu.Unlock()
 				return err
 			}
-			err = namespaces.StartInNamespaces(s.cmd, dumpable, "", "", acctPath)
+			err = namespaces.StartInNamespaces(s.cmd, dumpable, "", "", acctPath, "")
 		}
 
 		if err != nil {
@@ -658,8 +661,7 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 				s.createdMu.Unlock()
 				return err
 			}
-			// TODO: if file destination is enabled, we should bind-mount the root dir
-			err = namespaces.StartInNamespaces(s.cmd, dumpable, storePath, "", "")
+			err = namespaces.StartInNamespaces(s.cmd, dumpable, storePath, "", "", fileDestTmpl)
 		}
 
 		if err != nil {

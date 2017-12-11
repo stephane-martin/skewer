@@ -24,13 +24,66 @@ type mountPoint struct {
 	Data   string
 }
 
-func StartInNamespaces(command *exec.Cmd, dumpable bool, storePath, confDir, acctPath string) error {
+func StartInNamespaces(command *exec.Cmd, dumpable bool, storePath, confDir, acctPath, fileDestTmpl string) (err error) {
 	acctDir := ""
+	fileDestDir := ""
 	acctPath = strings.TrimSpace(acctPath)
+	fileDestTmpl = strings.TrimSpace(fileDestTmpl)
+	storePath = strings.TrimSpace(storePath)
+	confDir = strings.TrimSpace(confDir)
+
 	if len(acctPath) > 0 {
+		acctPath, err = filepath.Abs(acctPath)
+		if err != nil {
+			return err
+		}
 		acctDir = filepath.Dir(acctPath)
+		if !utils.IsDir(acctDir) {
+			return fmt.Errorf("Accounting path '%s' does not exist or is not a directory", acctDir)
+		}
 	}
-	command.Env = append(command.Env, setupEnv(storePath, confDir, acctDir)...)
+
+	if len(fileDestTmpl) > 0 {
+		fileDestTmpl, err = filepath.Abs(fileDestTmpl)
+		if err != nil {
+			return err
+		}
+		// ex for fileDestTmpl: "/var/log/skewer/{{.Fields.Date}}/{{.Fields.Appname}}.log"
+		n := strings.Index(fileDestTmpl, "{")
+		if n == -1 {
+			// static filename, not a template
+			fileDestDir = filepath.Dir(fileDestTmpl)
+		} else {
+			// take the prefix, eg "/var/log/skewer"
+			fileDestDir = strings.TrimRight(fileDestTmpl[:n], "/")
+		}
+		if !utils.IsDir(fileDestDir) {
+			return fmt.Errorf("Supposed to write logs to directory '%s', but it does not exist, or is not a directory", fileDestDir)
+		}
+
+	}
+
+	if len(storePath) > 0 {
+		storePath, err = filepath.Abs(storePath)
+		if err != nil {
+			return err
+		}
+		if !utils.IsDir(storePath) {
+			return fmt.Errorf("Store path '%s' does not exist, or is not a directory", storePath)
+		}
+	}
+
+	if len(confDir) > 0 {
+		confDir, err = filepath.Abs(confDir)
+		if err != nil {
+			return err
+		}
+		if !utils.IsDir(confDir) {
+			return fmt.Errorf("Configuration path '%s' does not exist, or is not a directory", confDir)
+		}
+	}
+
+	command.Env = append(command.Env, setupEnv(storePath, confDir, acctDir, fileDestDir)...)
 
 	command.SysProcAttr = &syscall.SysProcAttr{
 		Cloneflags: syscall.CLONE_NEWUSER | syscall.CLONE_NEWPID | syscall.CLONE_NEWUTS | syscall.CLONE_NEWNS,
@@ -55,7 +108,7 @@ func StartInNamespaces(command *exec.Cmd, dumpable bool, storePath, confDir, acc
 	if !dumpable {
 		dump.SetDumpable()
 	}
-	err := command.Start()
+	err = command.Start()
 	if !dumpable {
 		dump.SetNonDumpable()
 	}
@@ -434,32 +487,52 @@ func MakeChroot(targetExec string) (string, error) {
 		}
 	}
 
-	// bind mount the Store if needed
+	// RW bind-mount the Store if needed
 	storePath := strings.TrimSpace(os.Getenv("SKEWER_STORE_PATH"))
 	if len(storePath) > 0 {
-		if infos, err := os.Stat(storePath); err == nil {
-			if infos.IsDir() {
-				storePath, _ = filepath.Abs(storePath)
-				target := filepath.Join(root, "newroot", storePath)
-				os.MkdirAll(target, 0755)
-				syscall.Mount(
-					storePath, target, "bind",
-					syscall.MS_BIND|syscall.MS_REC|syscall.MS_NOEXEC|syscall.MS_NODEV|syscall.MS_NOSUID,
-					"",
-				)
-				syscall.Mount(
-					storePath, target, "bind",
-					syscall.MS_BIND|syscall.MS_REC|syscall.MS_NOEXEC|syscall.MS_NODEV|syscall.MS_NOSUID|syscall.MS_REMOUNT,
-					"",
-				)
-			}
+		fmt.Fprintln(os.Stderr, "STOREPATH", storePath)
+		if !utils.IsDir(storePath) {
+			return "", fmt.Errorf("Store path '%s' is not a directory", storePath)
 		}
+		target := filepath.Join(root, "newroot", storePath)
+		os.MkdirAll(target, 0755)
+		syscall.Mount(
+			storePath, target, "bind",
+			syscall.MS_BIND|syscall.MS_REC|syscall.MS_NOEXEC|syscall.MS_NODEV|syscall.MS_NOSUID,
+			"",
+		)
+		syscall.Mount(
+			storePath, target, "bind",
+			syscall.MS_BIND|syscall.MS_REC|syscall.MS_NOEXEC|syscall.MS_NODEV|syscall.MS_NOSUID|syscall.MS_REMOUNT,
+			"",
+		)
+	}
+
+	// RW bind-mount the directory where to write logs if needed
+	fileDestDir := strings.TrimSpace(os.Getenv("SKEWER_FILEDEST_DIR"))
+	if len(fileDestDir) > 0 {
+		fmt.Fprintln(os.Stderr, "FILEDESTDIR", fileDestDir)
+		if !utils.IsDir(fileDestDir) {
+			return "", fmt.Errorf("Destination path '%s' is not a directory", fileDestDir)
+		}
+		target := filepath.Join(root, "newroot", fileDestDir)
+		os.MkdirAll(target, 0755)
+		syscall.Mount(
+			fileDestDir, target, "bind",
+			syscall.MS_BIND|syscall.MS_REC|syscall.MS_NOEXEC|syscall.MS_NODEV|syscall.MS_NOSUID,
+			"",
+		)
+		syscall.Mount(
+			fileDestDir, target, "bind",
+			syscall.MS_BIND|syscall.MS_REC|syscall.MS_NOEXEC|syscall.MS_NODEV|syscall.MS_NOSUID|syscall.MS_REMOUNT,
+			"",
+		)
 	}
 
 	return root, nil
 }
 
-func setupEnv(storePath string, confDir string, acctDir string) (env []string) {
+func setupEnv(storePath string, confDir string, acctDir string, fileDestDir string) (env []string) {
 	env = []string{}
 	if ttyname.IsAtty(1) {
 		myTtyName, _ := ttyname.TtyName(1)
@@ -479,6 +552,11 @@ func setupEnv(storePath string, confDir string, acctDir string) (env []string) {
 	acctDir = strings.TrimSpace(acctDir)
 	if len(acctDir) > 0 {
 		env = append(env, fmt.Sprintf("SKEWER_ACCT_DIR=%s", acctDir))
+	}
+
+	fileDestDir = strings.TrimSpace(fileDestDir)
+	if len(fileDestDir) > 0 {
+		env = append(env, fmt.Sprintf("SKEWER_FILEDEST_DIR=%s", fileDestDir))
 	}
 
 	_, err := exec.LookPath("systemctl")
