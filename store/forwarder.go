@@ -154,7 +154,11 @@ func (fwder *fwderImpl) fwdMsg(m *model.FullMessage, envs map[ulid.ULID]*javascr
 		// create the environement for the javascript virtual machine
 		config, err = st.GetSyslogConfig(m.ConfId)
 		if err != nil {
-			fwder.logger.Warn("Could not find the stored configuration for a message", "confId", m.ConfId, "msgId", m.Uid)
+			fwder.logger.Warn(
+				"Could not find the stored configuration for a message",
+				"confId", ulid.ULID(m.ConfId).String(),
+				"msgId", ulid.ULID(m.Uid).String(),
+			)
 			st.PermError(m.Uid, dtype)
 			return err
 		}

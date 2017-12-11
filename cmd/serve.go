@@ -399,6 +399,7 @@ func (ch *serveChild) StartKafkaSource() error {
 		if err != nil {
 			return fmt.Errorf("Error creating the kafka source plugin: %s", err)
 		}
+		ch.controllers[services.KafkaSource].SetConf(*ch.conf)
 		_, err = ch.controllers[services.KafkaSource].Start()
 		if err != nil {
 			return fmt.Errorf("Error starting the kafka source plugin: %s", err)

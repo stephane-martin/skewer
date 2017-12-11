@@ -540,7 +540,7 @@ func main() {
 		services.Types2Names[services.Accounting],
 		services.Types2Names[services.KafkaSource]:
 
-		if name == "skewer-store" {
+		if name == services.Types2Names[services.Store] {
 			runtime.GOMAXPROCS(128)
 		}
 		signal.Ignore(syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)

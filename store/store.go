@@ -426,6 +426,13 @@ func (s *MessageStore) StoreAllSyslogConfigs(c conf.BaseConfig) (err error) {
 		})
 	}
 
+	for _, c := range c.KafkaSource {
+		kafkaConf := c
+		funcs = append(funcs, func() error {
+			return s.StoreSyslogConfig(kafkaConf.ConfID, kafkaConf.FilterSubConfig)
+		})
+	}
+
 	funcs = append(funcs, func() error {
 		return s.StoreSyslogConfig(c.Journald.ConfID, c.Journald.FilterSubConfig)
 	})

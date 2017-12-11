@@ -33,7 +33,7 @@ type Reporter struct {
 	pipeWriter   *utils.EncryptWriter
 }
 
-// NewReporter creates a reported.
+// NewReporter creates a reporter.
 func NewReporter(name string, l log15.Logger, pipe *os.File) *Reporter {
 	rep := Reporter{
 		name:         name,

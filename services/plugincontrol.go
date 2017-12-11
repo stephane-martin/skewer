@@ -247,7 +247,7 @@ func (s *PluginController) listenpipe(secret *memguard.LockedBuffer) {
 		return
 	}
 	switch s.typ {
-	case RELP, TCP, UDP, Accounting, Journal:
+	case RELP, TCP, UDP, Accounting, Journal, KafkaSource:
 	default:
 		return
 	}
@@ -597,7 +597,7 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 	}
 
 	switch s.typ {
-	case RELP, TCP, UDP, Accounting, Journal:
+	case RELP, TCP, UDP, Accounting, Journal, KafkaSource:
 		// the plugin will use this pipe to report syslog messages
 		piper, pipew, err := os.Pipe()
 		if err != nil {
