@@ -6,7 +6,7 @@ import (
 	"os/exec"
 )
 
-func StartInNamespaces(command *exec.Cmd, dumpable bool, storePath string, confDir string, acctPath string) error {
+func StartInNamespaces(command *exec.Cmd, dumpable bool, storePath, confDir, acctPath, fileDestPath string) error {
 	return command.Start()
 }
 
