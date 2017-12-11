@@ -155,7 +155,6 @@ func (s *KafkaServiceImpl) Parse() {
 }
 
 func (s *KafkaServiceImpl) ParseOne(env *ParsersEnv, raw *model.RawKafkaMessage) {
-	s.logger.Debug("Got a kafka message", "msg", string(raw.Message))
 	// be sure to free the raw pointer
 	defer s.rawpool.Put(raw)
 	ackQueue := s.queues.Get(raw.ConsumerID)

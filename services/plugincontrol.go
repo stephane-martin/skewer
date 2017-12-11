@@ -507,7 +507,7 @@ func (s *PluginController) Start() (infos []model.ListenerInfo, err error) {
 		case infoserr := <-s.listen(secret):
 			rerr = infoserr.err
 			infos = infoserr.infos
-		case <-time.After(5 * time.Second):
+		case <-time.After(60 * time.Second):
 			close(s.StopChan)
 			rerr = fmt.Errorf("Plugin '%s' failed to start before timeout", name)
 		}
