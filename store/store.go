@@ -129,8 +129,9 @@ type MessageStore struct {
 	//readyMutexes    map[conf.DestinationType](*sync.Mutex)
 	//availConditions map[conf.DestinationType](*sync.Cond)
 
-	wg    *sync.WaitGroup
-	dests *Destinations
+	wg        *sync.WaitGroup
+	dests     *Destinations
+	batchSize uint32
 
 	ticker *time.Ticker
 	logger log15.Logger
@@ -184,6 +185,7 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 	store.logger = l.New("class", "MessageStore")
 	store.dests = &Destinations{}
 	store.dests.Store(dests)
+	store.batchSize = cfg.BatchSize
 
 	store.pool = &sync.Pool{
 		New: func() interface{} {
@@ -259,10 +261,12 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 	store.logger.Debug("launch store goroutines")
 	store.wg.Add(1)
 	go func() {
+		var ackBatchSize uint32 = store.batchSize * 4 / 5
+		var nackBatchSize uint32 = store.batchSize / 10
 		for queue.WaitManyAckQueues(store.ackQueue, store.nackQueue, store.permerrorsQueue) {
-			store.doACK(store.ackQueue.GetMany(300))
-			store.doNACK(store.nackQueue.GetMany(300))
-			store.doPermanentError(store.permerrorsQueue.GetMany(300))
+			store.doACK(store.ackQueue.GetMany(ackBatchSize))
+			store.doNACK(store.nackQueue.GetMany(nackBatchSize))
+			store.doPermanentError(store.permerrorsQueue.GetMany(nackBatchSize))
 		}
 		//store.logger.Debug("Store goroutine WaitAck ended")
 		store.wg.Done()
@@ -283,7 +287,7 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 	go func() {
 		var err error
 		for store.toStashQueue.Wait(0) {
-			_, err = store.ingest(store.toStashQueue.GetMany(1000))
+			_, err = store.ingest(store.toStashQueue.GetMany(store.batchSize))
 			if err != nil {
 				store.logger.Warn("Ingestion error", "error", err)
 			}
@@ -348,7 +352,7 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 					case <-doneChan:
 						return
 					default:
-						messages = store.retrieve(1000, d)
+						messages = store.retrieve(store.batchSize, d)
 						if len(messages) > 0 {
 							//store.logger.Debug("Messages to be sent to destination", "dest", d, "nb", len(messages))
 							break wait_messages
@@ -650,7 +654,7 @@ func (s *MessageStore) resetFailuresByDest(dest conf.DestinationType) (err error
 		//cond := s.availConditions[dest]
 		txn := s.badger.NewTransaction(true)
 		now := time.Now()
-		iter := failedDB.KeyValueIterator(1000, txn)
+		iter := failedDB.KeyValueIterator(s.batchSize/5, txn)
 		uids := []ulid.ULID{}
 		invalidUids := []ulid.ULID{}
 
@@ -836,7 +840,7 @@ func (s *MessageStore) ReleaseMsg(msg *model.FullMessage) {
 	s.pool.Put(msg)
 }
 
-func (s *MessageStore) retrieve(n int, dest conf.DestinationType) (messages map[ulid.ULID]*model.FullMessage) {
+func (s *MessageStore) retrieve(n uint32, dest conf.DestinationType) (messages map[ulid.ULID]*model.FullMessage) {
 	txn := s.badger.NewTransaction(true)
 	defer txn.Discard()
 
@@ -846,7 +850,7 @@ func (s *MessageStore) retrieve(n int, dest conf.DestinationType) (messages map[
 	messages = map[ulid.ULID]*model.FullMessage{}
 
 	iter := readyDB.KeyIterator(n, txn)
-	var fetched int = 0
+	var fetched uint32
 	invalidEntries := []ulid.ULID{}
 	var message *model.FullMessage
 

@@ -183,30 +183,45 @@ func (p *partitionImpl) Count(txn *badger.Txn) int {
 	return l
 }
 
-func (p *partitionImpl) KeyIterator(prefetchSize int, txn *badger.Txn) PartitionKeyIterator {
+const MaxUint = ^uint(0)
+const MaxInt = int(MaxUint >> 1)
+
+func (p *partitionImpl) KeyIterator(prefetchSize uint32, txn *badger.Txn) PartitionKeyIterator {
 	n := false
 	if txn == nil {
 		txn = p.parent.NewTransaction(false)
 		n = true
 	}
+	var prefetch int
+	if uint64(prefetchSize) > uint64(MaxInt) {
+		prefetch = MaxInt
+	} else {
+		prefetch = int(prefetchSize)
+	}
 	opts := badger.IteratorOptions{
 		PrefetchValues: false,
-		PrefetchSize:   prefetchSize,
+		PrefetchSize:   int(prefetch),
 	}
 	iter := txn.NewIterator(opts)
 	//iter := p.parent.NewIterator(opts)
 	return &partitionIterImpl{partition: p, iterator: iter, txn: txn, n: n}
 }
 
-func (p *partitionImpl) KeyValueIterator(prefetchSize int, txn *badger.Txn) PartitionKeyValueIterator {
+func (p *partitionImpl) KeyValueIterator(prefetchSize uint32, txn *badger.Txn) PartitionKeyValueIterator {
 	n := false
 	if txn == nil {
 		txn = p.parent.NewTransaction(false)
 		n = true
 	}
+	var prefetch int
+	if uint64(prefetchSize) > uint64(MaxInt) {
+		prefetch = MaxInt
+	} else {
+		prefetch = int(prefetchSize)
+	}
 	opts := badger.IteratorOptions{
 		PrefetchValues: true,
-		PrefetchSize:   prefetchSize,
+		PrefetchSize:   prefetch,
 	}
 	iter := txn.NewIterator(opts)
 	//iter := p.parent.NewIterator(opts)

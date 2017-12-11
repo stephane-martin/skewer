@@ -53,11 +53,11 @@ func NewEncryptedPartition(p Partition, secret *memguard.LockedBuffer) Partition
 	return &EncryptedDB{p: p, secret: secret}
 }
 
-func (encDB *EncryptedDB) KeyIterator(prefetchSize int, txn *badger.Txn) PartitionKeyIterator {
+func (encDB *EncryptedDB) KeyIterator(prefetchSize uint32, txn *badger.Txn) PartitionKeyIterator {
 	return encDB.p.KeyIterator(prefetchSize, txn)
 }
 
-func (encDB *EncryptedDB) KeyValueIterator(prefetchSize int, txn *badger.Txn) PartitionKeyValueIterator {
+func (encDB *EncryptedDB) KeyValueIterator(prefetchSize uint32, txn *badger.Txn) PartitionKeyValueIterator {
 	return &encryptedIterator{iter: encDB.p.KeyValueIterator(prefetchSize, txn), p: encDB}
 }
 

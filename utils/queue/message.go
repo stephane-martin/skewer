@@ -95,19 +95,17 @@ func (q *MessageQueue) Put(m model.FullMessage) error {
 	return nil
 }
 
-func (q *MessageQueue) GetMany(max int) []*model.FullMessage {
+func (q *MessageQueue) GetMany(max uint32) []*model.FullMessage {
 	var elt *model.FullMessage
 	var err error
 	res := make([]*model.FullMessage, 0, max)
-	for {
+	var i uint32
+	for i = 0; i < max; i++ {
 		elt, err = q.Get()
 		if elt == nil || err != nil {
 			break
 		}
 		res = append(res, elt)
-		if len(res) == max {
-			break
-		}
 	}
 	return res
 }

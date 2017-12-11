@@ -112,10 +112,11 @@ type ParserConfig struct {
 }
 
 type StoreConfig struct {
-	Dirname string `mapstructure:"-" toml:"-" json:"dirname"`
-	Maxsize int64  `mapstructure:"max_size" toml:"max_size" json:"max_size"`
-	FSync   bool   `mapstructure:"fsync" toml:"fsync" json:"fsync"`
-	Secret  string `mapstructure:"secret" toml:"-" json:"secret"`
+	Dirname   string `mapstructure:"-" toml:"-" json:"dirname"`
+	Maxsize   int64  `mapstructure:"max_size" toml:"max_size" json:"max_size"`
+	FSync     bool   `mapstructure:"fsync" toml:"fsync" json:"fsync"`
+	Secret    string `mapstructure:"secret" toml:"-" json:"secret"`
+	BatchSize uint32 `mapstructure:"batch_size" toml:"batch_size" json:"batch_size"`
 }
 
 // the Secret in StoreConfig will be encrypted with the session secret in Complete()

@@ -117,21 +117,19 @@ type UidDest struct {
 	Dest conf.DestinationType
 }
 
-func (q *AckQueue) GetMany(max int) (res []UidDest) {
+func (q *AckQueue) GetMany(max uint32) (res []UidDest) {
 	var uid ulid.ULID
 	var dest conf.DestinationType
 	var err error
 
 	res = make([]UidDest, 0, max)
-	for {
+	var i uint32
+	for i = 0; i < max; i++ {
 		uid, dest, err = q.Get()
 		if uid == utils.EmptyUID || err != nil {
 			break
 		}
 		res = append(res, UidDest{Uid: uid, Dest: dest})
-		if len(res) == max {
-			break
-		}
 	}
 	return res
 }

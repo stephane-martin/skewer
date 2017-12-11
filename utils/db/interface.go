@@ -31,6 +31,6 @@ type Partition interface {
 	AddMany(m map[ulid.ULID][]byte, txn *badger.Txn) error
 	Get(key ulid.ULID, txn *badger.Txn) ([]byte, error)
 	Exists(key ulid.ULID, txn *badger.Txn) (bool, error)
-	KeyIterator(prefetchSize int, txn *badger.Txn) PartitionKeyIterator
-	KeyValueIterator(prefetchSize int, txn *badger.Txn) PartitionKeyValueIterator
+	KeyIterator(prefetchSize uint32, txn *badger.Txn) PartitionKeyIterator
+	KeyValueIterator(prefetchSize uint32, txn *badger.Txn) PartitionKeyValueIterator
 }
