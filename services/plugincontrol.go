@@ -658,6 +658,7 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 				s.createdMu.Unlock()
 				return err
 			}
+			// TODO: if file destination is enabled, we should bind-mount the root dir
 			err = namespaces.StartInNamespaces(s.cmd, dumpable, storePath, "", "")
 		}
 
