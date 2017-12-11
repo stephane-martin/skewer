@@ -126,8 +126,8 @@ type MessageStore struct {
 	metrics  *storeMetrics
 	registry *prometheus.Registry
 
-	readyMutexes    map[conf.DestinationType](*sync.Mutex)
-	availConditions map[conf.DestinationType](*sync.Cond)
+	//readyMutexes    map[conf.DestinationType](*sync.Mutex)
+	//availConditions map[conf.DestinationType](*sync.Cond)
 
 	wg    *sync.WaitGroup
 	dests *Destinations
@@ -196,12 +196,12 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 	store.nackQueue = queue.NewAckQueue()
 	store.permerrorsQueue = queue.NewAckQueue()
 
-	store.readyMutexes = map[conf.DestinationType](*sync.Mutex){}
-	store.availConditions = map[conf.DestinationType](*sync.Cond){}
-	for _, dest := range conf.Destinations {
-		store.readyMutexes[dest] = &sync.Mutex{}
-		store.availConditions[dest] = sync.NewCond(store.readyMutexes[dest])
-	}
+	//store.readyMutexes = map[conf.DestinationType](*sync.Mutex){}
+	//store.availConditions = map[conf.DestinationType](*sync.Cond){}
+	//for _, dest := range conf.Destinations {
+	//	store.readyMutexes[dest] = &sync.Mutex{}
+	//	store.availConditions[dest] = sync.NewCond(store.readyMutexes[dest])
+	//}
 
 	store.wg = &sync.WaitGroup{}
 
@@ -329,14 +329,15 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 	for _, dest := range conf.Destinations {
 		store.wg.Add(1)
 		go func(d conf.DestinationType) {
-			lok := store.readyMutexes[d]
-			cond := store.availConditions[d]
+			//lok := store.readyMutexes[d]
+			var wg sync.WaitGroup
+			//cond := store.availConditions[d]
 			c := store.OutputsChans[d]
 			doneChan := ctx.Done()
-			lok.Lock()
+			//lok.Lock()
 
 			defer func() {
-				lok.Unlock()
+				//lok.Unlock()
 				close(c)
 				//store.logger.Debug("End of retrieve goroutine", "dest", d)
 				store.wg.Done()
@@ -354,23 +355,33 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 						if len(messages) > 0 {
 							break wait_messages
 						} else {
-							cond.Wait()
+							time.Sleep(100 * time.Millisecond)
+							//cond.Wait()
 						}
 					}
 				}
-				store.outputMsgs(doneChan, messages, d)
+				// ensure at most one outputMsgs is running
+				wg.Wait()
+				store.wg.Add(1)
+				wg.Add(1)
+				go func() {
+					store.outputMsgs(doneChan, messages, d)
+					store.wg.Done()
+					wg.Done()
+				}()
+
 			}
 		}(dest)
 	}
 
-	go func() {
-		<-ctx.Done()
-		for _, dtype := range conf.Destinations {
-			store.readyMutexes[dtype].Lock()
-			store.availConditions[dtype].Signal()
-			store.readyMutexes[dtype].Unlock()
-		}
-	}()
+	//go func() {
+	//<-ctx.Done()
+	//for _, dtype := range conf.Destinations {
+	//store.readyMutexes[dtype].Lock()
+	//store.availConditions[dtype].Signal()
+	//store.readyMutexes[dtype].Unlock()
+	//}
+	//}()
 
 	go func() {
 		store.wg.Wait()
@@ -636,8 +647,8 @@ func (s *MessageStore) resetFailuresByDest(dest conf.DestinationType) (err error
 	readyDB := s.backend.GetPartition(Ready, dest)
 
 	for {
-		lok := s.readyMutexes[dest]
-		cond := s.availConditions[dest]
+		//lok := s.readyMutexes[dest]
+		//cond := s.availConditions[dest]
 		txn := s.badger.NewTransaction(true)
 		now := time.Now()
 		iter := failedDB.KeyValueIterator(1000, txn)
@@ -682,14 +693,14 @@ func (s *MessageStore) resetFailuresByDest(dest conf.DestinationType) (err error
 			return nil
 		}
 
-		lok.Lock()
+		//lok.Lock()
 		readyBatch := map[ulid.ULID][]byte{}
 		for _, uid := range uids {
 			readyBatch[uid] = []byte("true")
 		}
 		err = readyDB.AddMany(readyBatch, txn)
 		if err != nil {
-			lok.Unlock()
+			//lok.Unlock()
 			s.logger.Warn("Error pushing entries from failed queue to ready queue", "error", err)
 			txn.Discard()
 			return err
@@ -697,7 +708,7 @@ func (s *MessageStore) resetFailuresByDest(dest conf.DestinationType) (err error
 
 		err = failedDB.DeleteMany(uids, txn)
 		if err != nil {
-			lok.Unlock()
+			//lok.Unlock()
 			s.logger.Warn("Error deleting entries from failed queue", "error", err)
 			txn.Discard()
 			return err
@@ -705,14 +716,14 @@ func (s *MessageStore) resetFailuresByDest(dest conf.DestinationType) (err error
 
 		err = txn.Commit(nil)
 		if err == nil {
-			cond.Signal()
-			lok.Unlock()
+			//cond.Signal()
+			//lok.Unlock()
 			s.metrics.BadgerGauge.WithLabelValues("failed", conf.DestinationNames[dest]).Sub(float64(len(invalidUids)))
 			s.metrics.BadgerGauge.WithLabelValues("ready", conf.DestinationNames[dest]).Add(float64(len(uids)))
 			s.metrics.BadgerGauge.WithLabelValues("failed", conf.DestinationNames[dest]).Sub(float64(len(uids)))
 		} else {
 			s.logger.Warn("Error commiting resetFailures", "error", err)
-			lok.Unlock()
+			//lok.Unlock()
 			return err
 		}
 	}
@@ -779,15 +790,17 @@ func (s *MessageStore) ingest(queue []*model.FullMessage) (n int, err error) {
 
 	dests := s.Destinations()
 
-	for _, dest := range dests {
-		s.readyMutexes[dest].Lock()
-	}
-
-	unlock := func() {
-		for i := len(dests) - 1; i >= 0; i-- {
-			s.readyMutexes[dests[i]].Unlock()
+	/*
+		for _, dest := range dests {
+			s.readyMutexes[dest].Lock()
 		}
-	}
+
+		unlock := func() {
+			for i := len(dests) - 1; i >= 0; i-- {
+				s.readyMutexes[dests[i]].Unlock()
+			}
+		}
+	*/
 
 	txn := s.badger.NewTransaction(true)
 	defer txn.Discard()
@@ -795,7 +808,7 @@ func (s *MessageStore) ingest(queue []*model.FullMessage) (n int, err error) {
 	for _, dest := range dests {
 		err = s.ingestByDest(marshalledQueue, dest, txn)
 		if err != nil {
-			unlock()
+			//unlock()
 			return 0, err
 		}
 	}
@@ -803,18 +816,18 @@ func (s *MessageStore) ingest(queue []*model.FullMessage) (n int, err error) {
 	err = txn.Commit(nil)
 	if err == nil {
 		for _, dest := range dests {
-			s.availConditions[dest].Signal()
+			//s.availConditions[dest].Signal()
 			s.metrics.BadgerGauge.WithLabelValues("messages", conf.DestinationNames[dest]).Add(float64(len(marshalledQueue)))
 			s.metrics.BadgerGauge.WithLabelValues("ready", conf.DestinationNames[dest]).Add(float64(len(marshalledQueue)))
 		}
-		unlock()
+		//unlock()
 
 		return len(marshalledQueue), nil
 	} else if err == badger.ErrConflict {
-		unlock()
+		//unlock()
 		return s.ingest(queue)
 	} else {
-		unlock()
+		//unlock()
 		return 0, err
 	}
 
