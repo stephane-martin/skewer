@@ -168,6 +168,151 @@ func (s *MessageStore) SetDestinations(dests conf.DestinationType) {
 	s.dests.Store(dests)
 }
 
+func (s *MessageStore) receiveAcks() {
+	defer s.wg.Done()
+	var ackBatchSize uint32 = s.batchSize * 4 / 5
+	var nackBatchSize uint32 = s.batchSize / 10
+	for queue.WaitManyAckQueues(s.ackQueue, s.nackQueue, s.permerrorsQueue) {
+		s.doACK(s.ackQueue.GetMany(ackBatchSize))
+		s.doNACK(s.nackQueue.GetMany(nackBatchSize))
+		s.doPermanentError(s.permerrorsQueue.GetMany(nackBatchSize))
+	}
+}
+
+func (s *MessageStore) cleanup(ctx context.Context) {
+	<-ctx.Done()
+	s.toStashQueue.Dispose()
+	s.ackQueue.Dispose()
+	s.nackQueue.Dispose()
+	s.permerrorsQueue.Dispose()
+
+	s.wg.Done()
+	s.wg.Wait()
+	s.closeBadgers()
+	close(s.closedChan)
+}
+
+func (s *MessageStore) consumeStashQueue() {
+	defer s.wg.Done()
+	var err error
+	for s.toStashQueue.Wait(0) {
+		_, err = s.ingest(s.toStashQueue.GetMany(s.batchSize))
+		if err != nil {
+			s.logger.Warn("Ingestion error", "error", err)
+		}
+	}
+}
+
+/*
+	if err == badger.ErrNoRoom {
+		TODO: check that in another place
+		store.logger.Crit("The store is full!")
+		close(store.FatalErrorChan) // signal the caller service than we should stop everything
+	} else {
+		store.logger.Warn("Store unexpected error", "error", err)
+	}
+*/
+
+func (s *MessageStore) tickResetFailures(ctx context.Context) {
+	defer s.wg.Done()
+	for {
+		select {
+		case <-s.ticker.C:
+			err := s.resetFailures()
+			if err != nil {
+				s.logger.Warn("Error resetting failures", "error", err)
+			}
+		case <-ctx.Done():
+			s.ticker.Stop()
+			//store.logger.Debug("Store ticker has been stopped")
+			return
+		}
+	}
+}
+
+func (s *MessageStore) forward(ctx context.Context, d conf.DestinationType) {
+	var wg sync.WaitGroup
+	c := s.OutputsChans[d]
+	fmt.Fprintln(os.Stderr, "DEST", d)
+	doneChan := ctx.Done()
+
+	defer func() {
+		wg.Wait()
+		close(c)
+		s.wg.Done()
+	}()
+
+	var messages map[ulid.ULID]*model.FullMessage
+	for {
+	wait_messages:
+		for {
+			select {
+			case <-doneChan:
+				return
+			default:
+				messages = s.retrieve(s.batchSize, d)
+				if len(messages) > 0 {
+					//store.logger.Debug("Messages to be sent to destination", "dest", d, "nb", len(messages))
+					break wait_messages
+				} else {
+					time.Sleep(100 * time.Millisecond)
+				}
+			}
+		}
+
+		wg.Wait() // ensure at most one outputMsgs is running
+		s.wg.Add(1)
+		wg.Add(1)
+		go func(msgs map[ulid.ULID]*model.FullMessage) {
+			s.outputMsgs(doneChan, msgs, d)
+			s.wg.Done()
+			wg.Done()
+		}(messages)
+	}
+}
+
+func (s *MessageStore) init(ctx context.Context) {
+	defer s.wg.Done()
+	s.FatalErrorChan = make(chan struct{})
+	s.ticker = time.NewTicker(time.Minute)
+
+	// only once, push back messages from previous run that may have been stuck in the sent queue
+	s.logger.Debug("reset messages stuck in sent")
+	err := s.resetStuckInSent()
+	if err != nil {
+		s.logger.Warn("Error resetting stuck sent messages", "errot", err)
+	}
+
+	// prune orphaned messages
+	s.logger.Debug("prune orphaned messages")
+	err = s.pruneOrphaned()
+	if err != nil {
+		s.logger.Warn("Error pruning orphaned messages", "error", err)
+	}
+
+	err = s.initGauge()
+	if err != nil {
+		s.logger.Warn("Error calculating initial store metrics", "error", err)
+	}
+
+	s.wg.Add(1)
+	go s.receiveAcks()
+
+	s.wg.Add(1)
+	go s.cleanup(ctx)
+
+	s.wg.Add(1)
+	go s.consumeStashQueue()
+
+	s.wg.Add(1)
+	go s.tickResetFailures(ctx)
+
+	for _, dest := range conf.Destinations {
+		s.wg.Add(1)
+		go s.forward(ctx, dest)
+	}
+}
+
 func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests conf.DestinationType, l log15.Logger) (*MessageStore, error) {
 	badgerOpts := badger.DefaultOptions
 	badgerOpts.Dir = cfg.Dirname
@@ -198,13 +343,6 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 	store.nackQueue = queue.NewAckQueue()
 	store.permerrorsQueue = queue.NewAckQueue()
 
-	//store.readyMutexes = map[conf.DestinationType](*sync.Mutex){}
-	//store.availConditions = map[conf.DestinationType](*sync.Cond){}
-	//for _, dest := range conf.Destinations {
-	//	store.readyMutexes[dest] = &sync.Mutex{}
-	//	store.availConditions[dest] = sync.NewCond(store.readyMutexes[dest])
-	//}
-
 	store.wg = &sync.WaitGroup{}
 
 	store.closedChan = make(chan struct{})
@@ -231,166 +369,15 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 		}
 	}
 	store.backend = NewBackend(kv, storeSecret)
-
 	store.syslogConfigsDB = db.NewPartition(kv, []byte("configs"))
 
-	// only once, push back messages from previous run that may have been stuck in the sent queue
-	store.logger.Debug("reset messages stuck in sent")
-	err = store.resetStuckInSent()
-	if err != nil {
-		return nil, err
-	}
-
-	// prune orphaned messages
-	store.logger.Debug("prune orphaned messages")
-	err = store.pruneOrphaned()
-	if err != nil {
-		return nil, err
-	}
-
-	// count existing messages in badger and report to metrics
-	store.logger.Debug("init store metrics")
-	err = store.initGauge()
-	if err != nil {
-		return nil, err
-	}
-
-	store.FatalErrorChan = make(chan struct{})
-	store.ticker = time.NewTicker(time.Minute)
-
-	store.logger.Debug("launch store goroutines")
-	store.wg.Add(1)
-	go func() {
-		var ackBatchSize uint32 = store.batchSize * 4 / 5
-		var nackBatchSize uint32 = store.batchSize / 10
-		for queue.WaitManyAckQueues(store.ackQueue, store.nackQueue, store.permerrorsQueue) {
-			store.doACK(store.ackQueue.GetMany(ackBatchSize))
-			store.doNACK(store.nackQueue.GetMany(nackBatchSize))
-			store.doPermanentError(store.permerrorsQueue.GetMany(nackBatchSize))
-		}
-		//store.logger.Debug("Store goroutine WaitAck ended")
-		store.wg.Done()
-	}()
-
-	store.wg.Add(1)
-	go func() {
-		<-ctx.Done()
-		//store.logger.Debug("Store is asked to stop")
-		store.toStashQueue.Dispose()
-		store.ackQueue.Dispose()
-		store.nackQueue.Dispose()
-		store.permerrorsQueue.Dispose()
-		store.wg.Done()
-	}()
-
-	store.wg.Add(1)
-	go func() {
-		var err error
-		for store.toStashQueue.Wait(0) {
-			_, err = store.ingest(store.toStashQueue.GetMany(store.batchSize))
-			if err != nil {
-				store.logger.Warn("Ingestion error", "error", err)
-			}
-		}
-		//store.logger.Debug("Store goroutine WaitMessages ended")
-		store.wg.Done()
-	}()
-
-	store.wg.Add(1)
-	go func() {
-		defer store.wg.Done()
-		for {
-			select {
-			/*
-				if err == badger.ErrNoRoom {
-					TODO: check that in another place
-					store.logger.Crit("The store is full!")
-					close(store.FatalErrorChan) // signal the caller service than we should stop everything
-				} else {
-					store.logger.Warn("Store unexpected error", "error", err)
-				}
-			*/
-
-			case <-store.ticker.C:
-				err := store.resetFailures()
-				if err != nil {
-					store.logger.Warn("Error resetting failures", "error", err)
-				}
-			case <-ctx.Done():
-				store.ticker.Stop()
-				//store.logger.Debug("Store ticker has been stopped")
-				return
-			}
-		}
-	}()
-
 	store.OutputsChans = map[conf.DestinationType](chan *model.FullMessage){}
-
 	for _, dest := range conf.Destinations {
 		store.OutputsChans[dest] = make(chan *model.FullMessage)
 	}
 
-	for _, dest := range conf.Destinations {
-		store.wg.Add(1)
-		go func(d conf.DestinationType) {
-			var wg sync.WaitGroup
-			c := store.OutputsChans[d]
-			doneChan := ctx.Done()
-
-			defer func() {
-				//lok.Unlock()
-				close(c)
-				//store.logger.Debug("End of retrieve goroutine", "dest", d)
-				store.wg.Done()
-			}()
-
-			var messages map[ulid.ULID]*model.FullMessage
-			for {
-			wait_messages:
-				for {
-					select {
-					case <-doneChan:
-						return
-					default:
-						messages = store.retrieve(store.batchSize, d)
-						if len(messages) > 0 {
-							//store.logger.Debug("Messages to be sent to destination", "dest", d, "nb", len(messages))
-							break wait_messages
-						} else {
-							time.Sleep(100 * time.Millisecond)
-						}
-					}
-				}
-
-				wg.Wait() // ensure at most one outputMsgs is running
-				store.wg.Add(1)
-				wg.Add(1)
-				go func(msgs map[ulid.ULID]*model.FullMessage) {
-					store.outputMsgs(doneChan, msgs, d)
-					store.wg.Done()
-					wg.Done()
-				}(messages)
-			}
-		}(dest)
-	}
-
-	//go func() {
-	//<-ctx.Done()
-	//for _, dtype := range conf.Destinations {
-	//store.readyMutexes[dtype].Lock()
-	//store.availConditions[dtype].Signal()
-	//store.readyMutexes[dtype].Unlock()
-	//}
-	//}()
-
-	go func() {
-		store.wg.Wait()
-		store.closeBadgers()
-		if storeSecret != nil {
-			storeSecret.Destroy()
-		}
-		close(store.closedChan)
-	}()
+	store.wg.Add(1)
+	go store.init(ctx)
 
 	return store, nil
 }
