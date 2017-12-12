@@ -35,7 +35,7 @@ func Launch(typ Types, test bool, ring kring.Ring, binderClient *binder.BinderCl
 	hasConf := false
 
 	reporter := base.NewReporter(name, logger, pipe)
-	defer reporter.Stop()
+	defer reporter.Stop() // will close the pipe
 
 	svc := ProviderFactory(typ, ring, reporter, generator, binderClient, logger, pipe)
 	if svc == nil {

@@ -62,7 +62,10 @@ func (s *Reporter) SetSecret(secret *memguard.LockedBuffer) {
 }
 
 func (s *Reporter) pushqueue() {
-	// TODO: close the pipe at the end ?
+	defer func() {
+		_ = s.bufferedPipe.Flush()
+		_ = s.pipe.Close()
+	}()
 	var m *model.FullMessage
 	var b []byte
 	var err error

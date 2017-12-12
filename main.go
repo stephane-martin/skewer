@@ -89,9 +89,9 @@ func cleanup(msg string, err error, logger log15.Logger, cancelLogger context.Ca
 	}
 	if cancelLogger != nil {
 		cancelLogger()
-		time.Sleep(100 * time.Millisecond)
 	}
 	memguard.DestroyAll()
+	time.Sleep(100 * time.Millisecond)
 }
 
 func earlyDropCaps(logger log15.Logger) {

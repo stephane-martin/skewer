@@ -247,9 +247,9 @@ func (s *PluginController) listenpipe(secret *memguard.LockedBuffer) {
 		return
 	}
 	switch s.typ {
-	case RELP, TCP, UDP, Accounting, Journal, KafkaSource:
-	default:
+	case Store, Configuration:
 		return
+	default:
 	}
 	name := Types2Names[s.typ]
 	scanner := bufio.NewScanner(s.pipe)
@@ -267,7 +267,7 @@ func (s *PluginController) listenpipe(secret *memguard.LockedBuffer) {
 			s.logger.Error("Unexpected error decrypting message from the plugin pipe", "type", name, "error", err)
 			return
 		}
-		err = s.stasher.Stash(message)
+		err = s.stasher.Stash(message) // send message to the Store controller
 		if err != nil {
 			s.logger.Error("Error stashing message", "error", err)
 			return
@@ -351,6 +351,7 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 			switch command {
 			case "syslog":
 				// the plugin emitted a syslog message to be sent to the Store
+				// in the general case the plugin should rather use the dedicated message pipe
 				if len(parts) == 2 {
 					if !initialized {
 						msg := "Plugin sent a syslog message before being initialized"

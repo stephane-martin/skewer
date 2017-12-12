@@ -256,17 +256,19 @@ func NewRelpMetrics() *relpMetrics {
 }
 
 type RelpService struct {
-	impl      *RelpServiceImpl
-	QueueSize uint64
-	logger    log15.Logger
-	reporter  *base.Reporter
-	direct    bool
-	b         *binder.BinderClient
-	sc        []conf.RelpSourceConfig
-	pc        []conf.ParserConfig
-	kc        conf.KafkaDestConfig
-	wg        sync.WaitGroup
-	gen       chan ulid.ULID
+	impl           *RelpServiceImpl
+	fatalErrorChan chan struct{}
+	fatalOnce      *sync.Once
+	QueueSize      uint64
+	logger         log15.Logger
+	reporter       *base.Reporter
+	direct         bool
+	b              *binder.BinderClient
+	sc             []conf.RelpSourceConfig
+	pc             []conf.ParserConfig
+	kc             conf.KafkaDestConfig
+	wg             sync.WaitGroup
+	gen            chan ulid.ULID
 }
 
 func NewRelpService(r *base.Reporter, gen chan ulid.ULID, b *binder.BinderClient, l log15.Logger) *RelpService {
@@ -276,7 +278,11 @@ func NewRelpService(r *base.Reporter, gen chan ulid.ULID, b *binder.BinderClient
 }
 
 func (s *RelpService) FatalError() chan struct{} {
-	return nil // the RELP service will restart itself when fatal error happens
+	return s.fatalErrorChan
+}
+
+func (s *RelpService) dofatal() {
+	s.fatalOnce.Do(func() { close(s.fatalErrorChan) })
 }
 
 func (s *RelpService) Gather() ([]*dto.MetricFamily, error) {
@@ -291,6 +297,8 @@ func (s *RelpService) Start(test bool) (infos []model.ListenerInfo, err error) {
 	//}
 	infos = []model.ListenerInfo{}
 	s.impl = NewRelpServiceImpl(s.direct, s.gen, s.reporter, s.b, s.logger)
+	s.fatalErrorChan = make(chan struct{})
+	s.fatalOnce = &sync.Once{}
 
 	s.wg.Add(1)
 	go func() {
@@ -310,15 +318,18 @@ func (s *RelpService) Start(test bool) (infos []model.ListenerInfo, err error) {
 				if err == nil {
 					err = s.reporter.Report(infos)
 					if err != nil {
-						// TODO
+						s.impl.Logger.Error("Failed to report infos. Fatal error.", "error", err)
+						s.dofatal()
 					}
 				} else {
+					s.impl.Logger.Warn("The RELP service has failed to start", "error", err)
 					err = s.reporter.Report([]model.ListenerInfo{})
 					if err != nil {
-						// TODO
+						s.impl.Logger.Error("Failed to report infos. Fatal error.", "error", err)
+						s.dofatal()
+					} else {
+						s.impl.StopAndWait()
 					}
-					s.impl.Logger.Warn("The RELP service has failed to start", "error", err)
-					s.impl.StopAndWait()
 				}
 
 			case Waiting:
