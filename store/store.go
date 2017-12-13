@@ -188,6 +188,7 @@ func (s *MessageStore) cleanup(ctx context.Context) {
 
 	s.wg.Done()
 	s.wg.Wait()
+	s.PurgeBadger()
 	s.closeBadgers()
 	close(s.closedChan)
 }
