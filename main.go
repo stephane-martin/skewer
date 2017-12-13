@@ -551,27 +551,27 @@ func main() {
 		var pipe *os.File
 		var err error
 		var handle uintptr = 3
-		var binderHandle uintptr
-		var loggerHandle uintptr
-		var messagePipeHandle uintptr
-		var bsdSecretPipeHandle uintptr
+		var binderHdl uintptr
+		var loggerHdl uintptr
+		var pipeHdl uintptr
+		var ringSecretHdl uintptr
 		var bsdSecret *memguard.LockedBuffer
 
 		if os.Getenv("SKEWER_HAS_BINDER") == "TRUE" {
-			binderHandle = handle
+			binderHdl = handle
 			handle++
 		}
 
 		if os.Getenv("SKEWER_HAS_LOGGER") == "TRUE" {
-			loggerHandle = handle
+			loggerHdl = handle
 			handle++
 		}
 		if os.Getenv("SKEWER_HAS_PIPE") == "TRUE" {
-			messagePipeHandle = handle
+			pipeHdl = handle
 			handle++
 		}
-		bsdSecretPipeHandle = handle
-		rPipe := os.NewFile(bsdSecretPipeHandle, "bsdpipe")
+		ringSecretHdl = handle
+		rPipe := os.NewFile(ringSecretHdl, "bsdpipe")
 		buf := make([]byte, 32)
 		_, err = rPipe.Read(buf)
 		if err != nil {
@@ -586,22 +586,22 @@ func main() {
 		_ = rPipe.Close()
 		sessionID := ulid.MustParse(sid)
 		ring := kring.GetRing(kring.RingCreds{Secret: bsdSecret, SessionID: sessionID})
-		if loggerHandle > 0 {
-			logger, err = getLogger(loggerCtx, name, ring, loggerHandle)
+		if loggerHdl > 0 {
+			logger, err = getLogger(loggerCtx, name, ring, loggerHdl)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Could not create logger for plugin:", err)
 				os.Exit(-1)
 			}
 		}
-		if binderHandle > 0 {
-			binderClient, _ = binder.NewBinderClient(os.NewFile(binderHandle, "binder"), logger)
+		if binderHdl > 0 {
+			binderClient, _ = binder.NewBinderClient(os.NewFile(binderHdl, "bfile"), logger)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Could not create binder for plugin:", err)
 				os.Exit(-1)
 			}
 		}
-		if messagePipeHandle > 0 {
-			pipe = os.NewFile(messagePipeHandle, "pipe")
+		if pipeHdl > 0 {
+			pipe = os.NewFile(pipeHdl, "pipe")
 		}
 
 		err = scomp.SetupSeccomp(name)
