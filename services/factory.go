@@ -5,7 +5,6 @@ import (
 	"os"
 
 	"github.com/inconshreveable/log15"
-	"github.com/oklog/ulid"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/base"
@@ -80,16 +79,16 @@ func ConfigureAndStartService(s NetworkService, c conf.BaseConfig, test bool) ([
 
 }
 
-func ProviderFactory(t Types, r kring.Ring, reporter *base.Reporter, gen chan ulid.ULID, b *binder.BinderClient, l log15.Logger, pipe *os.File) NetworkService {
+func ProviderFactory(t Types, r kring.Ring, reporter *base.Reporter, b *binder.BinderClient, l log15.Logger, pipe *os.File) NetworkService {
 	switch t {
 	case TCP:
-		return network.NewTcpService(reporter, gen, b, l)
+		return network.NewTcpService(reporter, b, l)
 	case UDP:
-		return network.NewUdpService(reporter, gen, b, l)
+		return network.NewUdpService(reporter, b, l)
 	case RELP:
-		return network.NewRelpService(reporter, gen, b, l)
+		return network.NewRelpService(reporter, b, l)
 	case Journal:
-		svc, err := linux.NewJournalService(reporter, gen, l)
+		svc, err := linux.NewJournalService(reporter, l)
 		if err == nil {
 			return svc
 		} else {
@@ -97,7 +96,7 @@ func ProviderFactory(t Types, r kring.Ring, reporter *base.Reporter, gen chan ul
 			return nil
 		}
 	case Accounting:
-		svc, err := NewAccountingService(reporter, gen, l)
+		svc, err := NewAccountingService(reporter, l)
 		if err == nil {
 			return svc
 		} else {
@@ -107,7 +106,7 @@ func ProviderFactory(t Types, r kring.Ring, reporter *base.Reporter, gen chan ul
 	case Store:
 		return NewStoreService(l, r, pipe)
 	case KafkaSource:
-		return network.NewKafkaService(reporter, gen, l)
+		return network.NewKafkaService(reporter, l)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown service type: %d\n", t)
 		return nil

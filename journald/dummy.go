@@ -4,7 +4,6 @@ package journald
 
 import (
 	"github.com/inconshreveable/log15"
-	"github.com/oklog/ulid"
 	"github.com/stephane-martin/skewer/utils/queue"
 )
 
@@ -14,7 +13,7 @@ type reader struct {
 	entries *queue.MessageQueue
 }
 
-func NewReader(generator chan ulid.ULID, logger log15.Logger) (JournaldReader, error) {
+func NewReader(logger log15.Logger) (JournaldReader, error) {
 	r := &reader{}
 	r.entries = queue.NewMessageQueue()
 	return r, nil

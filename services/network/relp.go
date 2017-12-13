@@ -268,12 +268,11 @@ type RelpService struct {
 	pc             []conf.ParserConfig
 	kc             conf.KafkaDestConfig
 	wg             sync.WaitGroup
-	gen            chan ulid.ULID
 }
 
-func NewRelpService(r *base.Reporter, gen chan ulid.ULID, b *binder.BinderClient, l log15.Logger) *RelpService {
-	s := &RelpService{b: b, logger: l, reporter: r, direct: true, gen: gen}
-	s.impl = NewRelpServiceImpl(s.direct, gen, r, s.b, s.logger)
+func NewRelpService(r *base.Reporter, b *binder.BinderClient, l log15.Logger) *RelpService {
+	s := &RelpService{b: b, logger: l, reporter: r, direct: true}
+	s.impl = NewRelpServiceImpl(s.direct, r, s.b, s.logger)
 	return s
 }
 
@@ -296,7 +295,7 @@ func (s *RelpService) Start(test bool) (infos []model.ListenerInfo, err error) {
 	//	s.logger.Debug("Capabilities", "caps", capabilities.GetCaps())
 	//}
 	infos = []model.ListenerInfo{}
-	s.impl = NewRelpServiceImpl(s.direct, s.gen, s.reporter, s.b, s.logger)
+	s.impl = NewRelpServiceImpl(s.direct, s.reporter, s.b, s.logger)
 	s.fatalErrorChan = make(chan struct{})
 	s.fatalOnce = &sync.Once{}
 
@@ -378,7 +377,6 @@ type RelpServiceImpl struct {
 	registry            *prometheus.Registry
 	reporter            *base.Reporter
 	direct              bool
-	gen                 chan ulid.ULID
 	rawMessagesQueue    *tcp.Ring
 	parsedMessagesQueue *queue.MessageQueue
 	parsewg             sync.WaitGroup
@@ -386,14 +384,13 @@ type RelpServiceImpl struct {
 	forwarder           *ackForwarder
 }
 
-func NewRelpServiceImpl(direct bool, gen chan ulid.ULID, reporter *base.Reporter, b *binder.BinderClient, logger log15.Logger) *RelpServiceImpl {
+func NewRelpServiceImpl(direct bool, reporter *base.Reporter, b *binder.BinderClient, logger log15.Logger) *RelpServiceImpl {
 	s := RelpServiceImpl{
 		status:    Stopped,
 		metrics:   NewRelpMetrics(),
 		registry:  prometheus.NewRegistry(),
 		reporter:  reporter,
 		direct:    direct,
-		gen:       gen,
 		configs:   map[ulid.ULID]conf.RelpSourceConfig{},
 		forwarder: newAckForwarder(),
 	}
@@ -575,6 +572,8 @@ func (s *RelpServiceImpl) Parse() {
 	var decoder *encoding.Decoder
 	var logger log15.Logger
 
+	gen := utils.NewGenerator()
+
 	for {
 		raw, err = s.rawMessagesQueue.Get()
 		if err != nil {
@@ -634,7 +633,7 @@ func (s *RelpServiceImpl) Parse() {
 			continue
 		}
 		// else send message to the Store
-		parsedMsg.Uid = <-s.gen
+		parsedMsg.Uid = gen.Uid()
 		f, nonf = s.reporter.Stash(parsedMsg)
 		if f == nil && nonf == nil {
 			s.forwarder.ForwardSucc(parsedMsg.ConnID, parsedMsg.Txnr)

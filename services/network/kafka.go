@@ -8,7 +8,6 @@ import (
 
 	cluster "github.com/bsm/sarama-cluster"
 	"github.com/inconshreveable/log15"
-	"github.com/oklog/ulid"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
@@ -48,7 +47,6 @@ type KafkaServiceImpl struct {
 	configs          []conf.KafkaSourceConfig
 	parserConfigs    []conf.ParserConfig
 	reporter         *base.Reporter
-	generator        chan ulid.ULID
 	metrics          *kafkaMetrics
 	registry         *prometheus.Registry
 	rawMessagesQueue *kafka.Ring
@@ -62,14 +60,13 @@ type KafkaServiceImpl struct {
 	fatalOnce        *sync.Once
 }
 
-func NewKafkaService(reporter *base.Reporter, gen chan ulid.ULID, l log15.Logger) *KafkaServiceImpl {
+func NewKafkaService(reporter *base.Reporter, l log15.Logger) *KafkaServiceImpl {
 	s := KafkaServiceImpl{
-		reporter:  reporter,
-		generator: gen,
-		metrics:   newKafkaMetrics(),
-		registry:  prometheus.NewRegistry(),
-		logger:    l.New("class", "KafkaService"),
-		stopChan:  make(chan struct{}),
+		reporter: reporter,
+		metrics:  newKafkaMetrics(),
+		registry: prometheus.NewRegistry(),
+		logger:   l.New("class", "KafkaService"),
+		stopChan: make(chan struct{}),
 	}
 	s.registry.MustRegister(s.metrics.IncomingMsgsCounter, s.metrics.ParsingErrorCounter)
 	return &s
@@ -263,6 +260,8 @@ func (s *KafkaServiceImpl) handleConsumer(config conf.KafkaSourceConfig, consume
 		}
 	}()
 
+	gen := utils.NewGenerator()
+
 	for {
 		select {
 		case err := <-consumer.Errors():
@@ -273,7 +272,7 @@ func (s *KafkaServiceImpl) handleConsumer(config conf.KafkaSourceConfig, consume
 			s.logger.Info("Kafka consumer non fatal error", "error", err)
 		case msg := <-consumer.Messages():
 			raw := s.rawpool.Get().(*model.RawKafkaMessage)
-			raw.UID = <-s.generator
+			raw.UID = gen.Uid()
 			raw.Brokers = brokers
 			raw.ConfID = config.ConfID
 			raw.ConsumerID = ackQueue.ID()

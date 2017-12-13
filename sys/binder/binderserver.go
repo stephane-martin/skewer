@@ -10,7 +10,6 @@ import (
 	"syscall"
 
 	"github.com/inconshreveable/log15"
-	"github.com/oklog/ulid"
 	"github.com/stephane-martin/skewer/utils"
 )
 
@@ -26,7 +25,7 @@ type BinderPacketConn struct {
 	Addr string
 }
 
-func BinderListen(ctx context.Context, logger log15.Logger, schan chan *BinderConn, generator chan ulid.ULID, addr string) (net.Listener, error) {
+func BinderListen(ctx context.Context, logger log15.Logger, schan chan *BinderConn, addr string) (net.Listener, error) {
 	parts := strings.SplitN(addr, ":", 2)
 	lnet := parts[0]
 	laddr := parts[1]
@@ -50,11 +49,11 @@ func BinderListen(ctx context.Context, logger log15.Logger, schan chan *BinderCo
 	}()
 
 	go func() {
+		gen := utils.NewGenerator()
 		for {
 			c, err := l.Accept()
 			if err == nil {
-				uid := <-generator
-				uids := uid.String()
+				uids := gen.Uid().String()
 				logger.Debug("New accepted connection", "uid", uids, "addr", addr)
 				schan <- &BinderConn{Uid: uids, Conn: c, Addr: addr}
 			} else {
@@ -113,8 +112,6 @@ func binderOne(parentFD uintptr, logger log15.Logger) error {
 	childConn := c.(*net.UnixConn)
 
 	ctx, cancel := context.WithCancel(context.Background())
-
-	generator := utils.Generator(ctx, logger)
 
 	schan := make(chan *BinderConn)
 	pchan := make(chan *BinderPacketConn)
@@ -244,10 +241,9 @@ func binderOne(parentFD uintptr, logger log15.Logger) error {
 	}()
 
 	go func() {
-		defer func() {
-			cancel()
-		}()
+		defer cancel()
 		scanner := bufio.NewScanner(childConn)
+		gen := utils.NewGenerator()
 
 		listeners := map[string]net.Listener{}
 		var rmsg string
@@ -263,7 +259,7 @@ func binderOne(parentFD uintptr, logger log15.Logger) error {
 				for _, addr := range strings.Split(args, " ") {
 					lnet := strings.SplitN(addr, ":", 2)[0]
 					if IsStream(lnet) {
-						l, err := BinderListen(ctx, logger, schan, generator, addr)
+						l, err := BinderListen(ctx, logger, schan, addr)
 						if err == nil {
 							_, err := childConn.Write([]byte(fmt.Sprintf("confirmlisten %s", addr)))
 							if err != nil {
@@ -279,8 +275,7 @@ func binderOne(parentFD uintptr, logger log15.Logger) error {
 					} else {
 						c, err := BinderPacket(addr)
 						if err == nil {
-							uid := <-generator
-							pchan <- &BinderPacketConn{Addr: addr, Conn: c, Uid: uid.String()}
+							pchan <- &BinderPacketConn{Addr: addr, Conn: c, Uid: gen.Uid().String()}
 						} else {
 							logger.Warn("ListenPacket error", "error", err, "addr", addr)
 							_, _ = childConn.Write([]byte(fmt.Sprintf("error %s %s", addr, err.Error())))

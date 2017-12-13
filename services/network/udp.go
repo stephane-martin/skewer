@@ -8,7 +8,6 @@ import (
 	"sync"
 
 	"github.com/inconshreveable/log15"
-	"github.com/oklog/ulid"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
@@ -35,7 +34,6 @@ type UdpServiceImpl struct {
 	statusChan     chan UdpServerStatus
 	stasher        *base.Reporter
 	handler        PacketHandler
-	generator      chan ulid.ULID
 	metrics        *udpMetrics
 	registry       *prometheus.Registry
 	wg             sync.WaitGroup
@@ -77,13 +75,12 @@ func NewUdpMetrics() *udpMetrics {
 	return m
 }
 
-func NewUdpService(stasher *base.Reporter, gen chan ulid.ULID, b *binder.BinderClient, l log15.Logger) *UdpServiceImpl {
+func NewUdpService(stasher *base.Reporter, b *binder.BinderClient, l log15.Logger) *UdpServiceImpl {
 	s := UdpServiceImpl{
 		status:     UdpStopped,
 		metrics:    NewUdpMetrics(),
 		registry:   prometheus.NewRegistry(),
 		stasher:    stasher,
-		generator:  gen,
 		UdpConfigs: []conf.UdpSourceConfig{},
 	}
 	s.BaseService.Init()
@@ -115,6 +112,8 @@ func (s *UdpServiceImpl) Parse() {
 	var decoder *encoding.Decoder
 	var parser Parser
 	var logger log15.Logger
+
+	gen := utils.NewGenerator()
 
 	for {
 		raw, err = s.rawMessagesQueue.Get()
@@ -156,7 +155,7 @@ func (s *UdpServiceImpl) Parse() {
 				LocalPort:      raw.LocalPort,
 				UnixSocketPath: raw.UnixSocketPath,
 			},
-			Uid:    <-s.generator,
+			Uid:    gen.Uid(),
 			ConfId: raw.ConfID,
 		})
 

@@ -10,13 +10,13 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/inconshreveable/log15"
-	"github.com/oklog/ulid"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/accounting"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/base"
+	"github.com/stephane-martin/skewer/utils"
 )
 
 type accountingMetrics struct {
@@ -39,7 +39,6 @@ type AccountingService struct {
 	stasher        *base.Reporter
 	logger         log15.Logger
 	wgroup         *sync.WaitGroup
-	generator      chan ulid.ULID
 	metrics        *accountingMetrics
 	registry       *prometheus.Registry
 	Conf           conf.AccountingConfig
@@ -48,14 +47,13 @@ type AccountingService struct {
 	fatalOnce      *sync.Once
 }
 
-func NewAccountingService(stasher *base.Reporter, gen chan ulid.ULID, l log15.Logger) (*AccountingService, error) {
+func NewAccountingService(stasher *base.Reporter, l log15.Logger) (*AccountingService, error) {
 	s := AccountingService{
-		stasher:   stasher,
-		logger:    l.New("class", "accounting"),
-		wgroup:    &sync.WaitGroup{},
-		generator: gen,
-		metrics:   NewAccountingMetrics(),
-		registry:  prometheus.NewRegistry(),
+		stasher:  stasher,
+		logger:   l.New("class", "accounting"),
+		wgroup:   &sync.WaitGroup{},
+		metrics:  NewAccountingMetrics(),
+		registry: prometheus.NewRegistry(),
 	}
 	s.registry.MustRegister(s.metrics.IncomingMsgsCounter)
 	return &s, nil
@@ -78,13 +76,12 @@ func readFileUntilEnd(f *os.File, size int) (err error) {
 	}
 }
 
-func (s *AccountingService) makeMessage(buf []byte, tick int64, hostname string) model.FullMessage {
+func (s *AccountingService) makeMessage(buf []byte, tick int64, hostname string, gen *utils.Generator) model.FullMessage {
 	acct := accounting.MakeAcct(buf, tick)
 	props := acct.Properties()
-	uid := <-s.generator
 	return model.FullMessage{
 		ConfId: s.Conf.ConfID,
-		Uid:    uid,
+		Uid:    gen.Uid(),
 		Parsed: model.ParsedMessage{
 			Client:         hostname,
 			LocalPort:      0,
@@ -115,6 +112,7 @@ func (s *AccountingService) readFile(f *os.File, tick int64, hostname string, si
 	var fsize int64
 	var infos os.FileInfo
 	buf := make([]byte, accounting.Ssize)
+	gen := utils.NewGenerator()
 	for {
 		_, err = io.ReadAtLeast(f, buf, size)
 		if err == io.EOF || err == io.ErrUnexpectedEOF {
@@ -136,7 +134,7 @@ func (s *AccountingService) readFile(f *os.File, tick int64, hostname string, si
 		} else if err != nil {
 			return fmt.Errorf("Unexpected error while reading the accounting file: %s", err)
 		} else {
-			f, nf := s.stasher.Stash(s.makeMessage(buf, tick, hostname))
+			f, nf := s.stasher.Stash(s.makeMessage(buf, tick, hostname, gen))
 			if nf != nil {
 				s.logger.Warn("Non-fatal error stashing accounting message", "error", nf)
 			} else if f != nil {

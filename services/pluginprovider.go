@@ -3,7 +3,6 @@ package services
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -28,7 +27,6 @@ func Launch(typ Types, test bool, ring kring.Ring, binderClient *binder.BinderCl
 	if ring == nil {
 		return fmt.Errorf("No ring")
 	}
-	generator := utils.Generator(context.Background(), logger)
 
 	var command string
 	name := Types2Names[typ]
@@ -37,7 +35,7 @@ func Launch(typ Types, test bool, ring kring.Ring, binderClient *binder.BinderCl
 	reporter := base.NewReporter(name, logger, pipe)
 	defer reporter.Stop() // will close the pipe
 
-	svc := ProviderFactory(typ, ring, reporter, generator, binderClient, logger, pipe)
+	svc := ProviderFactory(typ, ring, reporter, binderClient, logger, pipe)
 	if svc == nil {
 		err := fmt.Errorf("The Service Factory returned 'nil' for plugin '%s'", name)
 		_ = Wout(STARTERROR, []byte(err.Error()))

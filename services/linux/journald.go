@@ -5,7 +5,6 @@ import (
 	"sync"
 
 	"github.com/inconshreveable/log15"
-	"github.com/oklog/ulid"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
@@ -36,21 +35,19 @@ type JournalService struct {
 	logger         log15.Logger
 	Conf           conf.JournaldConfig
 	wgroup         *sync.WaitGroup
-	generator      chan ulid.ULID
 	metrics        *journalMetrics
 	registry       *prometheus.Registry
 	fatalErrorChan chan struct{}
 	fatalOnce      *sync.Once
 }
 
-func NewJournalService(stasher *base.Reporter, gen chan ulid.ULID, l log15.Logger) (*JournalService, error) {
+func NewJournalService(stasher *base.Reporter, l log15.Logger) (*JournalService, error) {
 	s := JournalService{
-		stasher:   stasher,
-		generator: gen,
-		metrics:   NewJournalMetrics(),
-		registry:  prometheus.NewRegistry(),
-		logger:    l.New("class", "journald"),
-		wgroup:    &sync.WaitGroup{},
+		stasher:  stasher,
+		metrics:  NewJournalMetrics(),
+		registry: prometheus.NewRegistry(),
+		logger:   l.New("class", "journald"),
+		wgroup:   &sync.WaitGroup{},
 	}
 	s.registry.MustRegister(s.metrics.IncomingMsgsCounter)
 	return &s, nil
@@ -77,7 +74,7 @@ func (s *JournalService) Start(test bool) (infos []model.ListenerInfo, err error
 
 	if s.reader == nil {
 		// create the low level journald reader if needed
-		s.reader, err = journald.NewReader(s.generator, s.logger)
+		s.reader, err = journald.NewReader(s.logger)
 		if err != nil {
 			return infos, err
 		}

@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/inconshreveable/log15"
-	"github.com/oklog/ulid"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
@@ -70,7 +69,6 @@ type TcpServiceImpl struct {
 	status           TcpServerStatus
 	statusChan       chan TcpServerStatus
 	reporter         *base.Reporter
-	generator        chan ulid.ULID
 	metrics          *tcpMetrics
 	registry         *prometheus.Registry
 	rawMessagesQueue *tcp.Ring
@@ -78,13 +76,12 @@ type TcpServiceImpl struct {
 	fatalOnce        *sync.Once
 }
 
-func NewTcpService(reporter *base.Reporter, gen chan ulid.ULID, b *binder.BinderClient, l log15.Logger) *TcpServiceImpl {
+func NewTcpService(reporter *base.Reporter, b *binder.BinderClient, l log15.Logger) *TcpServiceImpl {
 	s := TcpServiceImpl{
-		status:    TcpStopped,
-		reporter:  reporter,
-		generator: gen,
-		metrics:   NewTcpMetrics(),
-		registry:  prometheus.NewRegistry(),
+		status:   TcpStopped,
+		reporter: reporter,
+		metrics:  NewTcpMetrics(),
+		registry: prometheus.NewRegistry(),
 	}
 	s.StreamingService.init()
 	s.registry.MustRegister(s.metrics.ClientConnectionCounter, s.metrics.IncomingMsgsCounter, s.metrics.ParsingErrorCounter)
@@ -173,7 +170,7 @@ func (s *TcpServiceImpl) SetConf(sc []conf.TcpSourceConfig, pc []conf.ParserConf
 	s.rawMessagesQueue = tcp.NewRing(queueSize)
 }
 
-func (s *TcpServiceImpl) ParseOne(env *ParsersEnv, raw *model.RawTcpMessage) {
+func (s *TcpServiceImpl) ParseOne(raw *model.RawTcpMessage, env *ParsersEnv, gen *utils.Generator) {
 	// be sure to free the raw pointer
 	defer s.Pool.Put(raw)
 
@@ -210,7 +207,7 @@ func (s *TcpServiceImpl) ParseOne(env *ParsersEnv, raw *model.RawTcpMessage) {
 			LocalPort:      raw.LocalPort,
 			UnixSocketPath: raw.UnixSocketPath,
 		},
-		Uid:    <-s.generator,
+		Uid:    gen.Uid(),
 		ConfId: raw.ConfID,
 	})
 
@@ -227,13 +224,14 @@ func (s *TcpServiceImpl) Parse() {
 	defer s.wg.Done()
 
 	env := NewParsersEnv(s.ParserConfigs, s.Logger)
+	gen := utils.NewGenerator()
 
 	for {
 		raw, err := s.rawMessagesQueue.Get()
 		if raw == nil || err != nil {
 			break
 		}
-		s.ParseOne(env, raw)
+		s.ParseOne(raw, env, gen)
 	}
 }
 

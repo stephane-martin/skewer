@@ -11,7 +11,6 @@ import (
 
 	"github.com/coreos/go-systemd/sdjournal"
 	"github.com/inconshreveable/log15"
-	"github.com/oklog/ulid"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/queue"
@@ -26,7 +25,6 @@ type reader struct {
 	shutdownchan chan struct{}
 	wgroup       *sync.WaitGroup
 	logger       log15.Logger
-	generator    chan ulid.ULID
 }
 
 type Converter func(map[string]string) model.FullMessage
@@ -91,7 +89,7 @@ func EntryToSyslog(entry map[string]string) model.ParsedMessage {
 	}
 }
 
-func makeMapConverter(coding string, generator chan ulid.ULID) Converter {
+func makeMapConverter(coding string) Converter {
 	decoder := utils.SelectDecoder(coding)
 	return func(m map[string]string) model.FullMessage {
 		dest := make(map[string]string)
@@ -113,9 +111,9 @@ func makeMapConverter(coding string, generator chan ulid.ULID) Converter {
 	}
 }
 
-func NewReader(generator chan ulid.ULID, logger log15.Logger) (JournaldReader, error) {
+func NewReader(logger log15.Logger) (JournaldReader, error) {
 	var err error
-	r := &reader{logger: logger, generator: generator}
+	r := &reader{logger: logger}
 	r.journal, err = sdjournal.NewJournal()
 	if err != nil {
 		return nil, err
@@ -189,7 +187,7 @@ func (r *reader) Start() {
 		var err error
 		var nb uint64
 		var entry *sdjournal.JournalEntry
-		converter := makeMapConverter("utf8", r.generator)
+		converter := makeMapConverter("utf8")
 
 		for {
 			// get entries from journald

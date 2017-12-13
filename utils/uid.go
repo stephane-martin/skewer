@@ -1,46 +1,32 @@
 package utils
 
 import (
-	"context"
 	"math/rand"
 	"time"
 
-	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
 )
 
-// Generator returns a channel that produces new ULIDs.
-func Generator(ctx context.Context, logger log15.Logger) (out chan ulid.ULID) {
-	out = make(chan ulid.ULID)
-
-	go func() {
-		done := ctx.Done()
-		entropy := rand.New(rand.NewSource(time.Now().UnixNano()))
-		var uid ulid.ULID
-		var err error
-
-		for {
-			for {
-				uid, err = ulid.New(ulid.Timestamp(time.Now()), entropy)
-				if err != nil {
-					logger.Error("Error generating ULID", "error", err)
-				} else {
-					break
-				}
-			}
-			select {
-			case <-done:
-				return
-			case out <- uid:
-			}
-		}
-	}()
-
-	return out
+type Generator struct {
+	entropy *rand.Rand
 }
 
-// NewUid returns a random ULID.
+func NewGenerator() *Generator {
+	gen := Generator{
+		entropy: rand.New(rand.NewSource(time.Now().UnixNano())),
+	}
+	return &gen
+}
+
+func (g *Generator) Uid() (uid ulid.ULID) {
+	var err error
+	uid, err = ulid.New(ulid.Timestamp(time.Now()), g.entropy)
+	if err != nil {
+		panic(err)
+	}
+	return
+}
+
 func NewUid() (uid ulid.ULID) {
-	uid, _ = ulid.New(ulid.Timestamp(time.Now()), rand.New(rand.NewSource(time.Now().UnixNano())))
-	return uid
+	return NewGenerator().Uid()
 }
