@@ -12,18 +12,35 @@ to post bugs and ask questions.
 
 ## Features
 
-
 -   Listens on TCP, UDP or RELP
+-   Can fetch logs from Kafka
 -   Can fetch log messages from Journald (on Linux)
 -   Can fetch audit logs from the kernel (on Linux, by Journald)
+-   Can forward logs to Kafka
+-   Can forward logs to another syslog server
+-   Can write logs on the local filesystem
 -   Configuration can be provided as a configuration file, or optionally
-    fetched from Consul
+    fetched from Consul (not really finished)
 -   Can register the TCP and RELP listeners as services in Consul
 -   Custom message parsers and filters can be defined through Javascript
     functions
--   The client connections to Consul and Kafka can be secured with TLS
+-   The client connections to Consul, Kafka or remote syslog servers can be
+    secured with TLS
 -   The TCP and RELP services can be secured in TLS
 -   Works on Linux and MacOS (not tested on *BSD), does not work on Windows
+
+
+## Security
+
+-   Privilege separation: a multi-process architecture is implemented.
+-   Under Linux, the processes are contained in kernel namespaces ("better chroot").
+-   Under Linux, seccomp is used to restrict the available syscalls.
+-   Under Linux, capabilities are used so that the daemon can be safely started
+    under root.
+-   The IPC is based on anonymous unix sockets
+-   Furthermore, the IPC is encrypted using a per-session secret.
+-   The embedded database that transiantly store logs can encrypt the logs.
+-   Not done: Hashicorp's Vault integration.
 
 
 ## Use cases
@@ -70,10 +87,7 @@ to post bugs and ask questions.
 -   skewer uses the C Journald API to fetch messages from Journald. Journald
     messages are push to the Store, and afterwards sent to Kafka.
 
--   Each RELP service owns a Kafka client (`sarama` go library) and
-    independantly forwards its messages to Kafka.
-
--   The Store owns a single Kafka client to forward TCP/UDP/Journald/Audit
+-   The Store owns a single Kafka producer to forward TCP/UDP/Journald/Audit
     messages.
 
 
