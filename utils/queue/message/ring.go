@@ -2,7 +2,7 @@
 // Any changes will be lost if this file is regenerated.
 // see https://github.com/cheekybits/genny
 
-package udp
+package message
 
 import (
 	"sync/atomic"
@@ -14,12 +14,12 @@ import (
 
 type node struct {
 	position uint64
-	data     *model.RawUdpMessage
+	data     *model.FullMessage
 }
 
 type nodes []*node
 
-// Ring is a thread-safe bounded queue that stores model.RawUdpMessage messages.
+// Ring is a thread-safe bounded queue that stores model.FullMessage messages.
 type Ring struct {
 	_padding0      [8]uint64
 	queue          uint64
@@ -43,7 +43,7 @@ func (rb *Ring) init(size uint64) {
 // Put adds the provided item to the queue.  If the queue is full, this
 // call will block until an item is added to the queue or Dispose is called
 // on the queue.  An error will be returned if the queue is disposed.
-func (rb *Ring) Put(item *model.RawUdpMessage) error {
+func (rb *Ring) Put(item *model.FullMessage) error {
 	_, err := rb.put(item, false)
 	return err
 }
@@ -51,11 +51,11 @@ func (rb *Ring) Put(item *model.RawUdpMessage) error {
 // Offer adds the provided item to the queue if there is space.  If the queue
 // is full, this call will return false.  An error will be returned if the
 // queue is disposed.
-func (rb *Ring) Offer(item *model.RawUdpMessage) (bool, error) {
+func (rb *Ring) Offer(item *model.FullMessage) (bool, error) {
 	return rb.put(item, true)
 }
 
-func (rb *Ring) put(item *model.RawUdpMessage, offer bool) (bool, error) {
+func (rb *Ring) put(item *model.FullMessage, offer bool) (bool, error) {
 	var (
 		n *node
 		w utils.ExpWait
@@ -96,7 +96,7 @@ L:
 // if the queue is empty.  This call will unblock when an item is added
 // to the queue or Dispose is called on the queue.  An error will be returned
 // if the queue is disposed.
-func (rb *Ring) Get() (*model.RawUdpMessage, error) {
+func (rb *Ring) Get() (*model.FullMessage, error) {
 	return rb.Poll(0)
 }
 
@@ -105,7 +105,7 @@ func (rb *Ring) Get() (*model.RawUdpMessage, error) {
 // to the queue, Dispose is called on the queue, or the timeout is reached. An
 // error will be returned if the queue is disposed or a timeout occurs. A
 // non-positive timeout will block indefinitely.
-func (rb *Ring) Poll(timeout time.Duration) (*model.RawUdpMessage, error) {
+func (rb *Ring) Poll(timeout time.Duration) (*model.FullMessage, error) {
 	var (
 		n     *node
 		pos   = atomic.LoadUint64(&rb.dequeue)

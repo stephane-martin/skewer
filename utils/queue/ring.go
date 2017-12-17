@@ -1,7 +1,6 @@
 package queue
 
 import (
-	"runtime"
 	"sync/atomic"
 	"time"
 
@@ -55,8 +54,10 @@ func (rb *Ring) Offer(item *Data) (bool, error) {
 }
 
 func (rb *Ring) put(item *Data, offer bool) (bool, error) {
-	var n *node
-	var nb uint64
+	var (
+		n *node
+		w utils.ExpWait
+	)
 	pos := atomic.LoadUint64(&rb.queue)
 L:
 	for {
@@ -81,16 +82,7 @@ L:
 			return false, nil
 		}
 
-		if nb < 22 {
-			runtime.Gosched()
-		} else if nb < 24 {
-			time.Sleep(1000000)
-		} else if nb < 26 {
-			time.Sleep(10000000)
-		} else {
-			time.Sleep(100000000)
-		}
-		nb++
+		w.Wait()
 	}
 
 	n.data = item
