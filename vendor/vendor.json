@@ -830,6 +830,12 @@
 			"revisionTime": "2015-05-23T23:00:31Z"
 		},
 		{
+			"checksumSHA1": "3+1yp4CmG1E3wdnLhZ3u8Wkmdfk=",
+			"path": "github.com/zond/gotomic",
+			"revision": "c442ca1e4aa6e53bdcd0ef5b5d691564436a6867",
+			"revisionTime": "2016-09-12T09:35:11Z"
+		},
+		{
 			"checksumSHA1": "LthQ7a40qQdnXS2RT1/Rijz9IUU=",
 			"path": "golang.org/x/crypto",
 			"revision": "9f005a07e0d31d45e6656d241bb5c0f2efd4bc94",
