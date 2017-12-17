@@ -21,9 +21,9 @@ import (
 	"unsafe"
 )
 
-type Semaphore C.sem_t
+type PSemaphore C.sem_t
 
-func New(name string) (s *Semaphore, err error) {
+func New(name string) (s *PSemaphore, err error) {
 	if !strings.HasPrefix(name, "/") {
 		name = "/" + name
 	}
@@ -36,7 +36,7 @@ func New(name string) (s *Semaphore, err error) {
 		}
 		return nil, fmt.Errorf("sem_open returned SEM_FAILED")
 	}
-	return (*Semaphore)(semptr), nil
+	return (*PSemaphore)(semptr), nil
 }
 
 func Destroy(name string) (err error) {
@@ -53,7 +53,7 @@ func Destroy(name string) (err error) {
 	return nil
 }
 
-func (s *Semaphore) Lock() (err error) {
+func (s *PSemaphore) Lock() (err error) {
 	var ret C.int
 	ret, err = C.sem_wait((*C.sem_t)(s))
 	if ret != 0 {
@@ -62,7 +62,7 @@ func (s *Semaphore) Lock() (err error) {
 	return nil
 }
 
-func (s *Semaphore) TryLock() (err error) {
+func (s *PSemaphore) TryLock() (err error) {
 	var ret C.int
 	ret, err = C.sem_trywait((*C.sem_t)(s))
 	if ret != 0 {
@@ -71,7 +71,7 @@ func (s *Semaphore) TryLock() (err error) {
 	return nil
 }
 
-func (s *Semaphore) Unlock() (err error) {
+func (s *PSemaphore) Unlock() (err error) {
 	var ret C.int
 	ret, err = C.sem_post((*C.sem_t)(s))
 	if ret != 0 {
@@ -80,7 +80,7 @@ func (s *Semaphore) Unlock() (err error) {
 	return nil
 }
 
-func (s *Semaphore) Close() (err error) {
+func (s *PSemaphore) Close() (err error) {
 	var ret C.int
 	ret, err = C.sem_close((*C.sem_t)(s))
 	if ret != 0 {
