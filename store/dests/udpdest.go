@@ -1,4 +1,4 @@
-package store
+package dests
 
 import (
 	"context"
@@ -41,6 +41,11 @@ func NewUdpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perme
 
 	//d.registry.MustRegister(d.ackCounter)
 
+	d.encoder, err = model.NewEncoder(d.format)
+	if err != nil {
+		return nil, err
+	}
+
 	defer func() {
 		if d.conn != nil && err != nil {
 			_ = d.conn.Close()
@@ -55,11 +60,13 @@ func NewUdpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perme
 			return nil, err
 		}
 
-		d.conn, err = net.DialUDP("udp", nil, addr)
+		conn, err := net.DialUDP("udp", nil, addr)
 		if err != nil {
 			logger.Error("Error connecting on UDP", "error", err)
 			return nil, err
 		}
+		conn.SetWriteBuffer(65536)
+		d.conn = conn
 	} else {
 		addr, err := net.ResolveUnixAddr("unixgram", path)
 		if err != nil {
@@ -67,16 +74,13 @@ func NewUdpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perme
 			return nil, err
 		}
 
-		d.conn, err = net.DialUnix("unixgram", nil, addr)
+		conn, err := net.DialUnix("unixgram", nil, addr)
 		if err != nil {
 			logger.Error("Error connecting to unix socket", "error", err)
 			return nil, err
 		}
-	}
-
-	d.encoder, err = model.NewEncoder(d.conn, d.format)
-	if err != nil {
-		return nil, err
+		conn.SetWriteBuffer(65536)
+		d.conn = conn
 	}
 
 	rebind := bc.UdpDest.Rebind
@@ -99,16 +103,20 @@ func (d *udpDestination) Gather() ([]*dto.MetricFamily, error) {
 }
 
 func (d *udpDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
-	err = d.encoder.Encode(&message)
-	if err == nil {
-		d.ack(message.Uid, conf.Udp)
-	} else if model.IsEncodingError(err) {
+	var buf []byte
+	buf, err = model.ChainEncode(d.encoder, &message)
+	if err != nil {
 		d.permerr(message.Uid, conf.Udp)
-	} else {
+		return err
+	}
+	_, err = d.conn.Write(buf)
+	if err != nil {
 		d.nack(message.Uid, conf.Udp)
 		d.once.Do(func() { close(d.fatal) })
+		return err
 	}
-	return
+	d.ack(message.Uid, conf.Udp)
+	return nil
 }
 
 func (d *udpDestination) Close() error {

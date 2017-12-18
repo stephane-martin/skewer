@@ -1,0 +1,223 @@
+package clients
+
+import (
+	"fmt"
+	"net"
+	"strconv"
+	"sync"
+	"time"
+
+	"github.com/free/concurrent-writer/concurrent"
+	"github.com/oklog/ulid"
+	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/utils"
+)
+
+type SyslogTCPClient struct {
+	host            string
+	port            int
+	path            string
+	format          string
+	keepAlive       bool
+	keepAlivePeriod time.Duration
+	connTimeout     time.Duration
+	flushPeriod     time.Duration
+
+	lineFraming    bool
+	frameDelimiter uint8
+
+	conn    net.Conn
+	writer  *concurrent.Writer
+	encoder model.Encoder
+	ticker  *time.Ticker
+
+	ackChan  chan ulid.ULID
+	nackChan chan ulid.ULID
+
+	sync.Mutex
+}
+
+func NewSyslogTCPClient() *SyslogTCPClient {
+	return &SyslogTCPClient{}
+}
+
+func (c *SyslogTCPClient) Host(host string) *SyslogTCPClient {
+	c.host = host
+	return c
+}
+
+func (c *SyslogTCPClient) Port(port int) *SyslogTCPClient {
+	c.port = port
+	return c
+}
+
+func (c *SyslogTCPClient) Path(path string) *SyslogTCPClient {
+	c.path = path
+	return c
+}
+
+func (c *SyslogTCPClient) Format(format string) *SyslogTCPClient {
+	c.format = format
+	return c
+}
+
+func (c *SyslogTCPClient) KeepAlive(keepAlive bool) *SyslogTCPClient {
+	c.keepAlive = keepAlive
+	return c
+}
+
+func (c *SyslogTCPClient) KeepAlivePeriod(period time.Duration) *SyslogTCPClient {
+	c.keepAlivePeriod = period
+	return c
+}
+
+func (c *SyslogTCPClient) ConnTimeout(timeout time.Duration) *SyslogTCPClient {
+	c.connTimeout = timeout
+	return c
+}
+
+func (c *SyslogTCPClient) LineFraming(framing bool) *SyslogTCPClient {
+	c.lineFraming = framing
+	return c
+}
+
+func (c *SyslogTCPClient) FrameDelimiter(delimiter uint8) *SyslogTCPClient {
+	c.frameDelimiter = delimiter
+	return c
+}
+
+func (c *SyslogTCPClient) FlushPeriod(period time.Duration) *SyslogTCPClient {
+	c.flushPeriod = period
+	return c
+}
+
+func (c *SyslogTCPClient) Close() (err error) {
+	c.Lock()
+	defer c.Unlock()
+	if c.conn == nil {
+		return nil
+	}
+	if c.ticker != nil {
+		c.ticker.Stop()
+	}
+	err = c.Flush()
+	_ = c.conn.Close()
+	c.conn = nil
+	close(c.ackChan)
+	close(c.nackChan)
+	return
+}
+
+func (c *SyslogTCPClient) Connect() (err error) {
+	c.Lock()
+	defer func() {
+		if err != nil {
+			c.conn = nil
+			c.writer = nil
+			c.ackChan = nil
+			c.nackChan = nil
+		}
+		c.Unlock()
+	}()
+	if c.conn != nil {
+		return nil
+	}
+
+	c.encoder, err = model.NewEncoder(c.format)
+	if err != nil {
+		return err
+	}
+
+	var conn net.Conn
+
+	if len(c.path) == 0 {
+		if len(c.host) == 0 {
+			return fmt.Errorf("SyslogTCPClient: specify a host or a unix path")
+		}
+		if c.port == 0 {
+			return fmt.Errorf("SyslogTCPClient: specify a port")
+		}
+		hostport := net.JoinHostPort(c.host, strconv.FormatInt(int64(c.port), 10))
+		if c.connTimeout == 0 {
+			conn, err = net.Dial("tcp", hostport)
+		} else {
+			conn, err = net.DialTimeout("tcp", hostport, c.connTimeout)
+		}
+		if err != nil {
+			return err
+		}
+		tcpconn := conn.(*net.TCPConn)
+		_ = tcpconn.SetNoDelay(true)
+		if c.keepAlive {
+			_ = tcpconn.SetKeepAlive(true)
+			_ = tcpconn.SetKeepAlivePeriod(c.keepAlivePeriod)
+		}
+	} else {
+		if c.connTimeout == 0 {
+			conn, err = net.Dial("unix", c.path)
+		} else {
+			conn, err = net.DialTimeout("unix", c.path, c.connTimeout)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	c.ackChan = make(chan ulid.ULID)
+	c.nackChan = make(chan ulid.ULID)
+	c.conn = conn
+	if c.flushPeriod > 0 {
+		c.writer = concurrent.NewWriterAutoFlush(c.conn, 4096, 0.75)
+		c.ticker = time.NewTicker(c.flushPeriod)
+
+		go func() {
+			var err error
+			for range c.ticker.C {
+				err = c.Flush()
+				if utils.IsBrokenPipe(err) {
+					// TODO
+				}
+			}
+		}()
+	} else {
+		c.writer = nil
+		c.ticker = nil
+	}
+	return nil
+}
+
+func (c *SyslogTCPClient) Send(msg *model.FullMessage) (err error) {
+	// may be called concurrently
+	if c.conn == nil {
+		return fmt.Errorf("SyslogTCPClient: not connected")
+	}
+	var buf []byte
+	if c.lineFraming {
+		buf, err = model.ChainEncode(c.encoder, msg, []byte{c.frameDelimiter})
+	} else {
+		buf, err = model.FrameEncode(c.encoder, nil, msg)
+	}
+	if err != nil {
+		return err
+	}
+	if c.writer != nil {
+		_, err = c.writer.Write(buf)
+	} else {
+		_, err = c.conn.Write(buf)
+	}
+	return err
+}
+
+func (c *SyslogTCPClient) Flush() error {
+	if c.writer != nil {
+		return c.writer.Flush()
+	}
+	return nil
+}
+
+func (c *SyslogTCPClient) Ack() chan ulid.ULID {
+	return c.ackChan
+}
+
+func (c *SyslogTCPClient) Nack() chan ulid.ULID {
+	return c.nackChan
+}

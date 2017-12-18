@@ -234,7 +234,6 @@ func (s *MessageStore) tickResetFailures(ctx context.Context) {
 func (s *MessageStore) forward(ctx context.Context, d conf.DestinationType) {
 	var wg sync.WaitGroup
 	c := s.OutputsChans[d]
-	fmt.Fprintln(os.Stderr, "DEST", d)
 	doneChan := ctx.Done()
 
 	defer func() {

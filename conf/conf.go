@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"hash/fnv"
 	"net"
-	"os"
 	"strconv"
 	"strings"
 	"text/template"
@@ -836,7 +835,7 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 		c.FileDest.Format,
 		c.StderrDest.Format,
 	} {
-		_, err := model.NewEncoder(os.Stderr, frmt)
+		_, err := model.NewEncoder(frmt)
 		if err != nil {
 			return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown destination format: '%s'", frmt)}
 		}

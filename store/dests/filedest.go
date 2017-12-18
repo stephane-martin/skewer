@@ -1,4 +1,4 @@
-package store
+package dests
 
 import (
 	"bytes"
@@ -313,6 +313,7 @@ type fileDestination struct {
 	filenameTmpl *template.Template
 	files        *openedFiles
 	format       string
+	encoder      model.Encoder
 }
 
 func NewFileDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (dest Destination, err error) {
@@ -327,6 +328,10 @@ func NewFileDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perm
 		files:    newOpenedFiles(ctx, bc.FileDest, logger),
 	}
 	d.filenameTmpl, err = template.New("filename").Parse(bc.FileDest.Filename)
+	if err != nil {
+		return nil, err
+	}
+	d.encoder, err = model.NewEncoder(bc.FileDest.Format)
 	if err != nil {
 		return nil, err
 	}
@@ -351,32 +356,27 @@ func (d *fileDestination) Send(message model.FullMessage, partitionKey string, p
 		d.nack(message.Uid, conf.File)
 		return err
 	}
-	encoder, err := model.NewEncoder(f, d.format)
+	encoded, err := model.ChainEncode(d.encoder, &message, "\n")
 	if err != nil {
-		err = fmt.Errorf("Error getting encoder: %s", err)
 		d.permerr(message.Uid, conf.File)
 		return err
 	}
-	err = model.ChainEncode(encoder, &message, "\n")
-	if err == nil {
-		if f.Closed() {
-			err = f.MarkClosed()
-			if err == nil {
-				d.ack(message.Uid, conf.File)
-				return nil
-			}
-			d.nack(message.Uid, conf.File)
-			return err
-		}
-		d.ack(message.Uid, conf.File)
-		return nil
-	}
-	if model.IsEncodingError(err) {
-		d.permerr(message.Uid, conf.File)
-	} else {
+	_, err = f.Write(encoded)
+	if err != nil {
 		d.nack(message.Uid, conf.File)
+		return err
 	}
-	return err
+	if f.Closed() {
+		err = f.MarkClosed()
+		if err == nil {
+			d.ack(message.Uid, conf.File)
+			return nil
+		}
+		d.nack(message.Uid, conf.File)
+		return err
+	}
+	d.ack(message.Uid, conf.File)
+	return nil
 }
 
 func (d *fileDestination) Close() error {

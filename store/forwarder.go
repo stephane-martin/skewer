@@ -11,6 +11,7 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/javascript"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/store/dests"
 )
 
 /*
@@ -19,8 +20,6 @@ type forwarderMetrics struct {
 }
 */
 
-type storeCallback func(uid ulid.ULID, dest conf.DestinationType)
-
 type fwderImpl struct {
 	messageFilterCounter *prometheus.CounterVec
 	logger               log15.Logger
@@ -28,16 +27,16 @@ type fwderImpl struct {
 	wg                   *sync.WaitGroup
 	test                 bool
 	registry             *prometheus.Registry
-	dests                map[conf.DestinationType]Destination
+	destinations         map[conf.DestinationType]dests.Destination
 	once                 sync.Once
 }
 
 func NewForwarder(test bool, logger log15.Logger) (fwder Forwarder) {
 	f := fwderImpl{
-		test:     test,
-		logger:   logger.New("class", "kafkaForwarder"),
-		registry: prometheus.NewRegistry(),
-		dests:    map[conf.DestinationType]Destination{},
+		test:         test,
+		logger:       logger.New("class", "forwarder"),
+		registry:     prometheus.NewRegistry(),
+		destinations: map[conf.DestinationType]dests.Destination{},
 	}
 
 	f.messageFilterCounter = prometheus.NewCounterVec(
@@ -57,11 +56,11 @@ func NewForwarder(test bool, logger log15.Logger) (fwder Forwarder) {
 }
 
 func (fwder *fwderImpl) Gather() ([]*dto.MetricFamily, error) {
-	if len(fwder.dests) == 0 {
+	if len(fwder.destinations) == 0 {
 		return fwder.registry.Gather()
 	}
 	gatherers := prometheus.Gatherers{fwder.registry}
-	for _, d := range fwder.dests {
+	for _, d := range fwder.destinations {
 		gatherers = append(gatherers, d)
 	}
 	return gatherers.Gather()
@@ -77,7 +76,7 @@ func (fwder *fwderImpl) WaitFinished() {
 
 func (fwder *fwderImpl) Forward(ctx context.Context, from Store, bc conf.BaseConfig) {
 	fwder.fatalChan = make(chan struct{})
-	fwder.dests = map[conf.DestinationType]Destination{}
+	fwder.destinations = map[conf.DestinationType]dests.Destination{}
 	dests := from.Destinations()
 	for _, d := range dests {
 		fwder.wg.Add(1)
@@ -87,17 +86,20 @@ func (fwder *fwderImpl) Forward(ctx context.Context, from Store, bc conf.BaseCon
 
 func (fwder *fwderImpl) forwardByDest(ctx context.Context, store Store, bc conf.BaseConfig, desttype conf.DestinationType) {
 	var err error
-	var dest Destination
+	var dest dests.Destination
 	defer fwder.wg.Done()
 
-	dest, err = NewDestination(ctx, desttype, bc, store.ACK, store.NACK, store.PermError, fwder.logger)
+	dest, err = dests.NewDestination(ctx, desttype, bc, store.ACK, store.NACK, store.PermError, fwder.logger)
 	if err != nil {
 		fwder.logger.Error("Error setting up the destination", "error", err)
 		close(fwder.fatalChan)
 		return
 	}
 
-	defer func() { _ = dest.Close() }()
+	defer func() {
+		// be sure to Close the destination when we are done
+		_ = dest.Close()
+	}()
 
 	// listen for destination fatal errors
 	fwder.wg.Add(1)
@@ -115,7 +117,7 @@ func (fwder *fwderImpl) forwardByDest(ctx context.Context, store Store, bc conf.
 	fwder.fwdMsgsByDest(ctx, store, dest, desttype)
 }
 
-func (fwder *fwderImpl) fwdMsgsByDest(ctx context.Context, store Store, dest Destination, desttype conf.DestinationType) {
+func (fwder *fwderImpl) fwdMsgsByDest(ctx context.Context, store Store, dest dests.Destination, desttype conf.DestinationType) {
 	jsenvs := map[ulid.ULID]*javascript.Environment{}
 	done := ctx.Done()
 	outputs := store.Outputs(desttype)
@@ -142,7 +144,7 @@ func (fwder *fwderImpl) fwdMsgsByDest(ctx context.Context, store Store, dest Des
 	}
 }
 
-func (fwder *fwderImpl) fwdMsg(m *model.FullMessage, envs map[ulid.ULID]*javascript.Environment, st Store, dst Destination, dtype conf.DestinationType) (err error) {
+func (fwder *fwderImpl) fwdMsg(m *model.FullMessage, envs map[ulid.ULID]*javascript.Environment, st Store, dst dests.Destination, dtype conf.DestinationType) (err error) {
 	var errs []error
 	var config *conf.FilterSubConfig
 	var topic, partitionKey string

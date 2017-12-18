@@ -1,4 +1,4 @@
-package store
+package dests
 
 import (
 	"context"
@@ -36,7 +36,7 @@ func NewStderrDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, pe
 		fatal:    make(chan struct{}),
 	}
 
-	d.encoder, err = model.NewEncoder(os.Stderr, d.format)
+	d.encoder, err = model.NewEncoder(d.format)
 	if err != nil {
 		return nil, fmt.Errorf("Error getting encoder: %s", err)
 	}
@@ -45,15 +45,20 @@ func NewStderrDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, pe
 }
 
 func (d *stderrDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
-	err = model.ChainEncode(d.encoder, &message, "\n")
-	if err == nil {
-		d.ack(message.Uid, conf.Stderr)
-	} else if model.IsEncodingError(err) {
+	var buf []byte
+	buf, err = model.ChainEncode(d.encoder, &message, "\n")
+	if err != nil {
 		d.permerr(message.Uid, conf.Stderr)
-	} else {
-		d.nack(message.Uid, conf.Stderr)
+		return err
 	}
-	return err
+	_, err = os.Stderr.Write(buf)
+	if err != nil {
+		d.nack(message.Uid, conf.Stderr)
+		d.once.Do(func() { close(d.fatal) })
+		return err
+	}
+	d.ack(message.Uid, conf.Stderr)
+	return nil
 }
 
 func (d *stderrDestination) Close() error {

@@ -16,7 +16,6 @@ import (
 var sp = []byte(" ")
 
 type Encoder interface {
-	Encode(v interface{}) error
 	Enc(v interface{}, w io.Writer) error
 }
 
@@ -29,18 +28,18 @@ func IsEncodingError(err error) bool {
 	}
 }
 
-func NewEncoder(w io.Writer, frmt string) (Encoder, error) {
+func NewEncoder(frmt string) (Encoder, error) {
 	switch frmt {
 	case "rfc5424":
-		return newEncoder5424(w), nil
+		return newEncoder5424(), nil
 	case "rfc3164":
-		return newEncoder3164(w), nil
+		return newEncoder3164(), nil
 	case "json":
-		return newEncoderJson(w), nil
+		return newEncoderJson(), nil
 	case "fulljson":
-		return newEncoderFullJson(w), nil
+		return newEncoderFullJson(), nil
 	case "file":
-		return newEncoderFile(w), nil
+		return newEncoderFile(), nil
 	default:
 		return nil, fmt.Errorf("NewEncoder: unknown encoding format '%s'", frmt)
 	}
@@ -72,12 +71,8 @@ type encoderFile struct {
 	w io.Writer
 }
 
-func newEncoderFile(w io.Writer) *encoderFile {
-	return &encoderFile{w: w}
-}
-
-func (e *encoderFile) Encode(v interface{}) error {
-	return e.Enc(v, e.w)
+func newEncoderFile() *encoderFile {
+	return &encoderFile{}
 }
 
 func (e *encoderFile) Enc(v interface{}, w io.Writer) error {
@@ -126,12 +121,8 @@ type encoder5424 struct {
 	w io.Writer
 }
 
-func newEncoder5424(w io.Writer) *encoder5424 {
-	return &encoder5424{w: w}
-}
-
-func (e *encoder5424) Encode(v interface{}) error {
-	return e.Enc(v, e.w)
+func newEncoder5424() *encoder5424 {
+	return &encoder5424{}
 }
 
 func (e *encoder5424) Enc(v interface{}, w io.Writer) error {
@@ -152,12 +143,8 @@ type encoder3164 struct {
 	w io.Writer
 }
 
-func newEncoder3164(w io.Writer) *encoder3164 {
-	return &encoder3164{w: w}
-}
-
-func (e *encoder3164) Encode(v interface{}) error {
-	return e.Enc(v, e.w)
+func newEncoder3164() *encoder3164 {
+	return &encoder3164{}
 }
 
 func (e *encoder3164) Enc(v interface{}, w io.Writer) error {
@@ -178,12 +165,8 @@ type encoderJson struct {
 	w io.Writer
 }
 
-func newEncoderJson(w io.Writer) *encoderJson {
-	return &encoderJson{w: w}
-}
-
-func (e *encoderJson) Encode(v interface{}) error {
-	return e.Enc(v, e.w)
+func newEncoderJson() *encoderJson {
+	return &encoderJson{}
 }
 
 func (e *encoderJson) Enc(v interface{}, w io.Writer) error {
@@ -204,12 +187,8 @@ type encoderFullJson struct {
 	w io.Writer
 }
 
-func newEncoderFullJson(w io.Writer) *encoderFullJson {
-	return &encoderFullJson{w: w}
-}
-
-func (e *encoderFullJson) Encode(v interface{}) error {
-	return e.Enc(v, e.w)
+func newEncoderFullJson() *encoderFullJson {
+	return &encoderFullJson{}
 }
 
 func (e *encoderFullJson) Enc(v interface{}, w io.Writer) error {
@@ -224,30 +203,33 @@ func (e *encoderFullJson) Enc(v interface{}, w io.Writer) error {
 	}
 }
 
-func ChainEncode(e Encoder, objs ...interface{}) (err error) {
+func ChainEncode(e Encoder, objs ...interface{}) ([]byte, error) {
+	var err error
+	buf := bytes.NewBuffer(nil)
 	for _, obj := range objs {
-		err = e.Encode(obj)
+		err = e.Enc(obj, buf)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return buf.Bytes(), nil
 }
 
-func FrameEncode(e Encoder, delim []byte, objs ...interface{}) (err error) {
+func FrameEncode(e Encoder, delim []byte, objs ...interface{}) ([]byte, error) {
 	if len(objs) == 0 {
 		return ChainEncode(e, int(0), delim)
 	}
+	var err error
+	buf := bytes.NewBuffer(nil)
 	for i := 0; i < len(objs)-1; i++ {
-		err = e.Encode(objs[i])
+		err = e.Enc(objs[i], buf)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
-	buf := bytes.NewBuffer(nil)
 	err = e.Enc(objs[len(objs)-1], buf)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	b := buf.Bytes()
 	return ChainEncode(e, len(b), sp, b, delim)
