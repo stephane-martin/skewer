@@ -2,6 +2,9 @@ package utils
 
 import (
 	"errors"
+	"net"
+	"os"
+	"syscall"
 
 	"github.com/oklog/ulid"
 )
@@ -17,3 +20,20 @@ var ErrEmptyQueue = errors.New(`queue: empty queue`)
 
 // EmptyUID is a zero ULID
 var EmptyUID ulid.ULID
+
+func IsBrokenPipe(err error) bool {
+	if err == nil {
+		return false
+	}
+	if perr, ok := err.(*os.PathError); ok {
+		if serr, ok := (perr.Err).(*os.SyscallError); ok {
+			return serr.Err == syscall.EPIPE
+		}
+	}
+	if operr, ok := err.(*net.OpError); ok {
+		if serr, ok := (operr.Err).(*os.SyscallError); ok {
+			return serr.Err == syscall.EPIPE
+		}
+	}
+	return false
+}
