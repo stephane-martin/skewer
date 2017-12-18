@@ -249,19 +249,28 @@ type UdpDestConfig struct {
 
 type RelpDestConfig struct {
 	TcpUdpRelpDestBaseConfig `mapstructure:",squash"`
+	TlsBaseConfig            `mapstructure:",squash"`
+	Insecure                 bool          `mapstructure:"insecure" toml:"insecure" json:"insecure"`
 	KeepAlive                bool          `mapstructure:"keepalive" toml:"keepalive" json:"keepalive"`
 	KeepAlivePeriod          time.Duration `mapstructure:"keepalive_period" toml:"keepalive_period" json:"keepalive_period"`
-	WindowSize               int           `mapstructure:"window_size" toml:"window_size" json:"window_size"`
 	ConnTimeout              time.Duration `mapstructure:"connection_timeout" toml:"connection_timeout" json:"connection_timeout"`
-	RelpTimeout              time.Duration `mapstructure:"relp_timeout" toml:"relp_timeout" json:"relp_timeout"`
+	FlushPeriod              time.Duration `mapstructure:"flush_period" toml:"flush_period" json:"flush_period"`
+
+	WindowSize  int32         `mapstructure:"window_size" toml:"window_size" json:"window_size"`
+	RelpTimeout time.Duration `mapstructure:"relp_timeout" toml:"relp_timeout" json:"relp_timeout"`
 }
 
 type TcpDestConfig struct {
 	TcpUdpRelpDestBaseConfig `mapstructure:",squash"`
-	LineFraming              bool          `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
-	FrameDelimiter           uint8         `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
+	TlsBaseConfig            `mapstructure:",squash"`
+	Insecure                 bool          `mapstructure:"insecure" toml:"insecure" json:"insecure"`
 	KeepAlive                bool          `mapstructure:"keepalive" toml:"keepalive" json:"keepalive"`
 	KeepAlivePeriod          time.Duration `mapstructure:"keepalive_period" toml:"keepalive_period" json:"keepalive_period"`
+	ConnTimeout              time.Duration `mapstructure:"connection_timeout" toml:"connection_timeout" json:"connection_timeout"`
+	FlushPeriod              time.Duration `mapstructure:"flush_period" toml:"flush_period" json:"flush_period"`
+
+	LineFraming    bool  `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
+	FrameDelimiter uint8 `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
 }
 
 type FileDestConfig struct {

@@ -42,6 +42,7 @@ func SetRelpDestDefaults(v *viper.Viper, prefixed bool) {
 	v.SetDefault(prefix+"window_size", 128)
 	v.SetDefault(prefix+"connection_timeout", "10s")
 	v.SetDefault(prefix+"relp_timeout", "90s")
+	v.SetDefault(prefix+"flush_period", "1s")
 }
 
 func SetFileDestDefaults(v *viper.Viper, prefixed bool) {
@@ -90,6 +91,8 @@ func SetTcpDestDefaults(v *viper.Viper, prefixed bool) {
 	v.SetDefault(prefix+"delimiter", 10)
 	v.SetDefault(prefix+"keepalive", true)
 	v.SetDefault(prefix+"keepalive_period", "75s")
+	v.SetDefault(prefix+"connection_timeout", "10s")
+	v.SetDefault(prefix+"flush_period", "1s")
 }
 
 func SetMainDefaults(v *viper.Viper, prefixed bool) {
