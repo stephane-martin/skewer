@@ -64,11 +64,17 @@ func NewRemoteLogger(ctx context.Context, remote *net.UnixConn, secret *memguard
 				if err != nil {
 					continue Send
 				}
-				enc, err := sbox.Encrypt(dec, secret)
-				if err != nil {
-					continue Send
+				// ensure that we don't use secret after the logger has been canceled
+				select {
+				case <-done:
+					return
+				default:
+					enc, err := sbox.Encrypt(dec, secret)
+					if err != nil {
+						continue Send
+					}
+					_, _ = remote.Write(enc)
 				}
-				_, _ = remote.Write(enc)
 			}
 		}
 	}()
