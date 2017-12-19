@@ -203,6 +203,9 @@ func (c *SyslogTCPClient) Send(msg *model.FullMessage) (err error) {
 	if err != nil {
 		return err
 	}
+	if len(buf) == 0 {
+		return nil
+	}
 	if c.writer != nil {
 		_, err = c.writer.Write(buf)
 	} else {

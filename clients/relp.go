@@ -41,6 +41,7 @@ func NewTxnrMap(maxsize int32) *Txnr2UidMap {
 	return &m
 }
 
+// TODO: make txnr int32
 func (m *Txnr2UidMap) Put(txnr int, uid ulid.ULID) (err error) {
 	// if there is enough room in m, put (txnr, uid)
 	// if not, wait for some room
@@ -423,6 +424,10 @@ func (c *RELPClient) doSendOne(msg *model.FullMessage) (err error) {
 	buf, txnr, err := c.encode("syslog", msg)
 	if err != nil {
 		return NonEncodableError
+	}
+	if len(buf) == 0 {
+		c.ackChan <- msg.Uid
+		return nil
 	}
 	if c.writer == nil {
 		_, err = c.conn.Write(buf)
