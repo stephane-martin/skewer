@@ -15,44 +15,47 @@ import (
 type DestinationType uint64
 
 const (
-	Kafka  DestinationType = 1
-	Udp                    = 2
-	Tcp                    = 4
-	Relp                   = 8
-	File                   = 16
-	Stderr                 = 32
+	Kafka   DestinationType = 1
+	Udp                     = 2
+	Tcp                     = 4
+	Relp                    = 8
+	File                    = 16
+	Stderr                  = 32
+	Graylog                 = 64
 )
 
 var Destinations = map[string]DestinationType{
-	"kafka":  Kafka,
-	"udp":    Udp,
-	"tcp":    Tcp,
-	"relp":   Relp,
-	"file":   File,
-	"stderr": Stderr,
+	"kafka":   Kafka,
+	"udp":     Udp,
+	"tcp":     Tcp,
+	"relp":    Relp,
+	"file":    File,
+	"stderr":  Stderr,
+	"graylog": Graylog,
 }
 
 var DestinationNames = map[DestinationType]string{
-	Kafka:  "kafka",
-	Udp:    "udp",
-	Tcp:    "tcp",
-	Relp:   "relp",
-	File:   "file",
-	Stderr: "stderr",
+	Kafka:   "kafka",
+	Udp:     "udp",
+	Tcp:     "tcp",
+	Relp:    "relp",
+	File:    "file",
+	Stderr:  "stderr",
+	Graylog: "graylog",
 }
 
 var RDestinations = map[DestinationType]byte{
-	Kafka:  'k',
-	Udp:    'u',
-	Tcp:    't',
-	Relp:   'r',
-	File:   'f',
-	Stderr: 's',
+	Kafka:   'k',
+	Udp:     'u',
+	Tcp:     't',
+	Relp:    'r',
+	File:    'f',
+	Stderr:  's',
+	Graylog: 'g',
 }
 
 // BaseConfig is the root of all configuration parameters.
 type BaseConfig struct {
-	//Syslog     []SyslogConfig     `mapstructure:"syslog" toml:"syslog" json:"syslog"`
 	TcpSource   []TcpSourceConfig   `mapstructure:"tcp_source" toml:"tcp_source" json:"tcp_source"`
 	UdpSource   []UdpSourceConfig   `mapstructure:"udp_source" toml:"udp_source" json:"udp_source"`
 	RelpSource  []RelpSourceConfig  `mapstructure:"relp_source" toml:"relp_source" json:"relp_source"`
@@ -69,6 +72,7 @@ type BaseConfig struct {
 	RelpDest    RelpDestConfig      `mapstructure:"relp_destination" toml:"relp_destination" json:"relp_destination"`
 	FileDest    FileDestConfig      `mapstructure:"file_destination" toml:"file_destination" json:"file_destination"`
 	StderrDest  StderrDestConfig    `mapstructure:"stderr_destination" toml:"stderr_destination" json:"stderr_destination"`
+	GraylogDest GraylogDestConfig   `mapstructure:"graylog_destination" toml:"graylog_destination" json:"graylog_destination"`
 }
 
 // MainConfig lists general/global parameters.
@@ -233,6 +237,16 @@ type KafkaProducerBaseConfig struct {
 	FlushMessagesMax int           `mapstructure:"flush_messages_max" toml:"flush_messages_max" json:"flush_messages_max"`
 	RetrySendMax     int           `mapstructure:"retry_send_max" toml:"retry_send_max" json:"retry_send_max"`
 	RetrySendBackoff time.Duration `mapstructure:"retry_send_backoff" toml:"retry_send_backoff" json:"retry_send_backoff"`
+}
+
+type GraylogDestConfig struct {
+	Host             string        `mapstructure:"host" toml:"host" json:"host"`
+	Port             int           `mapstructure:"port" toml:"port" json:"port"`
+	Mode             string        `mapstructure:"mode" toml:"mode" json:"mode"`
+	MaxReconnect     int           `mapstructure:"max_reconnect" toml:"max_reconnect" json:"max_reconnect"`
+	ReconnectDelay   time.Duration `mapstructure:"reconnect_delay" toml:"reconnect_delay" json:"reconnect_delay"`
+	CompressionLevel int           `mapstructure:"compression_level" toml:"compression_level" json:"compression_level"`
+	CompressionType  string        `mapstructure:"compression_type" toml:"compression_type" json:"compression_type"`
 }
 
 type TcpUdpRelpDestBaseConfig struct {

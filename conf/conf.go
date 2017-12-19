@@ -820,6 +820,7 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 		return err
 	}
 
+	// note that Graylog destination does not have a Format option
 	c.UdpDest.Format = strings.TrimSpace(strings.ToLower(c.UdpDest.Format))
 	c.TcpDest.Format = strings.TrimSpace(strings.ToLower(c.TcpDest.Format))
 	c.RelpDest.Format = strings.TrimSpace(strings.ToLower(c.RelpDest.Format))

@@ -35,6 +35,8 @@ func NewDestination(
 		return NewFileDestination(ctx, bc, ack, nack, permerr, logger)
 	case conf.Stderr:
 		return NewStderrDestination(ctx, bc, ack, nack, permerr, logger)
+	case conf.Graylog:
+		return NewGraylogDestination(ctx, bc, ack, nack, permerr, logger)
 	default:
 		return nil, fmt.Errorf("Unknown destination type: %d", typ)
 	}

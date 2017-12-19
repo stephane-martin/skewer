@@ -17,10 +17,60 @@ import (
 //go:generate ffjson $GOFILE
 //msgp:ignore JsonRsyslogMessage
 
+var Facilities map[Facility]string = map[Facility]string{
+	0:  "kern",
+	1:  "user",
+	2:  "mail",
+	3:  "daemon",
+	4:  "auth",
+	5:  "syslog",
+	6:  "lpr",
+	7:  "news",
+	8:  "uucp",
+	9:  "clock",
+	10: "authpriv",
+	11: "ftp",
+	12: "ntp",
+	13: "logaudit",
+	14: "logalert",
+	15: "cron",
+	16: "local0",
+	17: "local1",
+	18: "local2",
+	19: "local3",
+	20: "local4",
+	21: "local5",
+	22: "local6",
+	23: "local7",
+}
+
+var RFacilities map[string]Facility
+
+func init() {
+	RFacilities = map[string]Facility{}
+	for k, v := range Facilities {
+		RFacilities[v] = k
+	}
+}
+
 type Priority int
 type Facility int
 type Severity int
 type Version int
+
+func (f Facility) String() string {
+	if s, ok := Facilities[f]; ok {
+		return s
+	}
+	return "user"
+}
+
+func FacilityFromString(s string) Facility {
+	if f, ok := RFacilities[s]; ok {
+		return f
+	}
+	return 1
+}
 
 // ffjson: nodecoder
 type SyslogMessage struct {

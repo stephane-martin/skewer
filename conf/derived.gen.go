@@ -114,6 +114,7 @@ func deriveDeepCopy(dst, src *BaseConfig) {
 	dst.RelpDest = src.RelpDest
 	dst.FileDest = src.FileDest
 	dst.StderrDest = src.StderrDest
+	dst.GraylogDest = src.GraylogDest
 }
 
 // deriveDeepCopy_ recursively copies the contents of src into dst.

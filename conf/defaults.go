@@ -1,6 +1,7 @@
 package conf
 
 import (
+	"compress/flate"
 	"os"
 
 	sarama "github.com/Shopify/sarama"
@@ -22,11 +23,26 @@ func SetDefaults(v *viper.Viper) {
 		SetRelpDestDefaults,
 		SetFileDestDefaults,
 		SetStderrDestDefaults,
+		SetGraylogDestDefaults,
 		SetMainDefaults,
 	}
 	for _, f := range funcs {
 		f(v, true)
 	}
+}
+
+func SetGraylogDestDefaults(v *viper.Viper, prefixed bool) {
+	prefix := ""
+	if prefixed {
+		prefix = "graylog_destination."
+	}
+	v.SetDefault(prefix+"host", "127.0.0.1")
+	v.SetDefault(prefix+"port", 12201)
+	v.SetDefault(prefix+"mode", "udp")
+	v.SetDefault(prefix+"max_reconnect", 3)
+	v.SetDefault(prefix+"reconnect_delay", "1s")
+	v.SetDefault(prefix+"compression_level", flate.BestSpeed)
+	v.SetDefault(prefix+"compression_type", "gzip")
 }
 
 func SetRelpDestDefaults(v *viper.Viper, prefixed bool) {
