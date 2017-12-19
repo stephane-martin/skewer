@@ -284,7 +284,11 @@ func (c *RELPClient) encode(command string, v interface{}) (buf []byte, txnr int
 	}
 	// if no error, we can increment txnr
 	txnr = atomic.AddInt32(&c.curtxnr, 1)
-	buf, _ = model.FrameEncode(c.encoder, endl, txnr, sp, command, sp, buf) // cannot fail
+	buf, err = model.FrameEncode(c.encoder, endl, txnr, sp, command, sp, buf) // cannot fail
+	if err != nil {
+		c.logger.Error("FrameEncode error, should not happen", "error", err)
+		return nil, 0, err
+	}
 	return buf, txnr, nil
 }
 

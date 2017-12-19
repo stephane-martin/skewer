@@ -59,11 +59,23 @@ func defaultEncode(v interface{}, w io.Writer) error {
 	case int:
 		_, err := w.Write([]byte(strconv.FormatInt(int64(val), 10)))
 		return err
+	case int32:
+		_, err := w.Write([]byte(strconv.FormatInt(int64(val), 10)))
+		return err
+	case int64:
+		_, err := w.Write([]byte(strconv.FormatInt(int64(val), 10)))
+		return err
+	case uint:
+		_, err := w.Write([]byte(strconv.FormatUint(uint64(val), 10)))
+		return err
+	case uint32:
+		_, err := w.Write([]byte(strconv.FormatUint(uint64(val), 10)))
+		return err
 	case uint64:
-		_, err := w.Write([]byte(strconv.FormatUint(val, 10)))
+		_, err := w.Write([]byte(strconv.FormatUint(uint64(val), 10)))
 		return err
 	default:
-		return fmt.Errorf("Dont know how to encode that type")
+		return fmt.Errorf("Dont know how to encode that type: '%T'", val)
 	}
 }
 
