@@ -13,7 +13,6 @@ import (
 	"github.com/stephane-martin/skewer/model"
 )
 
-
 type relpDestination struct {
 	logger     log15.Logger
 	fatal      chan struct{}
@@ -94,6 +93,8 @@ func NewRelpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perm
 			case uid, more := <-nackChan:
 				if more {
 					d.nack(uid, conf.Relp)
+					d.logger.Info("RELP server returned a NACK", "uid", uid.String())
+					d.once.Do(func() { close(d.fatal) })
 				} else {
 					nackChan = nil
 				}

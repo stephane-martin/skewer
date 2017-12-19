@@ -14,6 +14,7 @@ import (
 )
 
 var sp = []byte(" ")
+var endl = []byte("\n")
 
 type Encoder interface {
 	Enc(v interface{}, w io.Writer) error
@@ -227,24 +228,38 @@ func ChainEncode(e Encoder, objs ...interface{}) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func FrameEncode(e Encoder, delim []byte, objs ...interface{}) ([]byte, error) {
-	if len(objs) == 0 {
-		return ChainEncode(e, int(0), delim)
+func TcpOctetEncode(e Encoder, obj interface{}) ([]byte, error) {
+	if obj == nil {
+		return []byte{}, nil
 	}
 	var err error
 	buf := bytes.NewBuffer(nil)
-	for i := 0; i < len(objs)-1; i++ {
-		err = e.Enc(objs[i], buf)
-		if err != nil {
-			return nil, err
-		}
-	}
-	err = e.Enc(objs[len(objs)-1], buf)
+	err = e.Enc(obj, buf)
 	if err != nil {
 		return nil, err
 	}
-	b := buf.Bytes()
-	return ChainEncode(e, len(b), sp, b, delim)
+	data := buf.Bytes()
+	if len(data) == 0 {
+		return []byte{}, nil
+	}
+	return ChainEncode(e, len(data), sp, data)
+}
+
+func RelpEncode(e Encoder, txnr int32, command string, obj interface{}) ([]byte, error) {
+	if obj == nil {
+		return ChainEncode(e, txnr, sp, command, sp, int(0), endl)
+	}
+	var err error
+	buf := bytes.NewBuffer(nil)
+	err = e.Enc(obj, buf)
+	if err != nil {
+		return nil, err
+	}
+	data := buf.Bytes()
+	if len(data) == 0 {
+		return ChainEncode(e, txnr, sp, command, sp, int(0), endl)
+	}
+	return ChainEncode(e, txnr, sp, command, sp, len(data), sp, data, endl)
 }
 
 type ErrInvalid5424 struct {

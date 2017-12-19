@@ -190,12 +190,16 @@ func (c *SyslogTCPClient) Send(msg *model.FullMessage) (err error) {
 	if c.conn == nil {
 		return fmt.Errorf("SyslogTCPClient: not connected")
 	}
+	if msg == nil {
+		return nil
+	}
 	var buf []byte
 	if c.lineFraming {
 		buf, err = model.ChainEncode(c.encoder, msg, []byte{c.frameDelimiter})
 	} else {
-		buf, err = model.FrameEncode(c.encoder, nil, msg)
+		buf, err = model.TcpOctetEncode(c.encoder, msg)
 	}
+	// TODO: return explicit non encodable error
 	if err != nil {
 		return err
 	}
