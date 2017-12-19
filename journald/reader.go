@@ -91,6 +91,7 @@ func EntryToSyslog(entry map[string]string) model.ParsedMessage {
 
 func makeMapConverter(coding string) Converter {
 	decoder := utils.SelectDecoder(coding)
+	generator := utils.NewGenerator()
 	return func(m map[string]string) model.FullMessage {
 		dest := make(map[string]string)
 		var k, k2, v, v2 string
@@ -105,7 +106,7 @@ func makeMapConverter(coding string) Converter {
 			}
 		}
 		return model.FullMessage{
-			Uid:    <-generator,
+			Uid:    generator.Uid(),
 			Parsed: EntryToSyslog(dest),
 		}
 	}
