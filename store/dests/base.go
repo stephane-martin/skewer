@@ -7,6 +7,7 @@ var relpAckCounter *prometheus.CounterVec
 var kafkaAckCounter *prometheus.CounterVec
 
 func init() {
+	DestsRegistry = prometheus.NewRegistry()
 	relpAckCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "skw_relpdest_ack_total",
