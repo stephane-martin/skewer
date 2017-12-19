@@ -7,8 +7,6 @@ import (
 
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
-	"github.com/prometheus/client_golang/prometheus"
-	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/clients"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
@@ -17,10 +15,11 @@ import (
 var sp = []byte(" ")
 var zero ulid.ULID
 
+// TODO: metrics
+
 type tcpDestination struct {
 	logger      log15.Logger
 	fatal       chan struct{}
-	registry    *prometheus.Registry
 	ack         storeCallback
 	nack        storeCallback
 	permerr     storeCallback
@@ -48,13 +47,12 @@ func NewTcpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perme
 	}
 
 	d := &tcpDestination{
-		logger:   logger,
-		fatal:    make(chan struct{}),
-		registry: prometheus.NewRegistry(),
-		ack:      ack,
-		nack:     nack,
-		permerr:  permerr,
-		clt:      clt,
+		logger:  logger,
+		fatal:   make(chan struct{}),
+		ack:     ack,
+		nack:    nack,
+		permerr: permerr,
+		clt:     clt,
 	}
 
 	rebind := bc.TcpDest.Rebind
@@ -100,8 +98,4 @@ func (d *tcpDestination) Close() error {
 
 func (d *tcpDestination) Fatal() chan struct{} {
 	return d.fatal
-}
-
-func (d *tcpDestination) Gather() ([]*dto.MetricFamily, error) {
-	return d.registry.Gather()
 }

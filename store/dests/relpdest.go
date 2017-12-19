@@ -44,23 +44,15 @@ func NewRelpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perm
 	}
 
 	d := &relpDestination{
-		logger:   logger,
-		registry: prometheus.NewRegistry(),
-		ack:      ack,
-		nack:     nack,
-		permerr:  permerr,
-		fatal:    make(chan struct{}),
-		client:   clt,
+		logger:     logger,
+		registry:   prometheus.NewRegistry(),
+		ack:        ack,
+		nack:       nack,
+		permerr:    permerr,
+		fatal:      make(chan struct{}),
+		client:     clt,
+		ackCounter: relpAckCounter,
 	}
-
-	d.ackCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "skw_relpdest_ack_total",
-			Help: "number of RELP acknowledgments",
-		},
-		[]string{"status"},
-	)
-	d.registry.MustRegister(d.ackCounter)
 
 	rebind := bc.RelpDest.Rebind
 	if rebind > 0 {

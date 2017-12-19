@@ -7,33 +7,31 @@ import (
 	"sync"
 
 	"github.com/inconshreveable/log15"
-	"github.com/prometheus/client_golang/prometheus"
-	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 )
 
+// TODO: metrics
+
 type stderrDestination struct {
-	logger   log15.Logger
-	fatal    chan struct{}
-	registry *prometheus.Registry
-	once     sync.Once
-	ack      storeCallback
-	nack     storeCallback
-	permerr  storeCallback
-	format   string
-	encoder  model.Encoder
+	logger  log15.Logger
+	fatal   chan struct{}
+	once    sync.Once
+	ack     storeCallback
+	nack    storeCallback
+	permerr storeCallback
+	format  string
+	encoder model.Encoder
 }
 
 func NewStderrDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (dest Destination, err error) {
 	d := &stderrDestination{
-		logger:   logger,
-		registry: prometheus.NewRegistry(),
-		ack:      ack,
-		nack:     nack,
-		permerr:  permerr,
-		format:   bc.FileDest.Format,
-		fatal:    make(chan struct{}),
+		logger:  logger,
+		ack:     ack,
+		nack:    nack,
+		permerr: permerr,
+		format:  bc.FileDest.Format,
+		fatal:   make(chan struct{}),
 	}
 
 	d.encoder, err = model.NewEncoder(d.format)
@@ -67,8 +65,4 @@ func (d *stderrDestination) Close() error {
 
 func (d *stderrDestination) Fatal() chan struct{} {
 	return d.fatal
-}
-
-func (d *stderrDestination) Gather() ([]*dto.MetricFamily, error) {
-	return d.registry.Gather()
 }

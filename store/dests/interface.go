@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/inconshreveable/log15"
-	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 )
@@ -14,7 +13,6 @@ type Destination interface {
 	Send(m model.FullMessage, partitionKey string, partitionNumber int32, topic string) error
 	Fatal() chan struct{}
 	Close() error
-	Gather() ([]*dto.MetricFamily, error)
 }
 
 func NewDestination(

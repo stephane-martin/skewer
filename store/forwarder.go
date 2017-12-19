@@ -56,14 +56,7 @@ func NewForwarder(test bool, logger log15.Logger) (fwder Forwarder) {
 }
 
 func (fwder *fwderImpl) Gather() ([]*dto.MetricFamily, error) {
-	if len(fwder.destinations) == 0 {
-		return fwder.registry.Gather()
-	}
-	gatherers := prometheus.Gatherers{fwder.registry}
-	for _, d := range fwder.destinations {
-		gatherers = append(gatherers, d)
-	}
-	return gatherers.Gather()
+	return dests.DestsRegistry.Gather()
 }
 
 func (fwder *fwderImpl) Fatal() chan struct{} {

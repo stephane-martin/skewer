@@ -18,11 +18,11 @@ import (
 
 	"github.com/free/concurrent-writer/concurrent"
 	"github.com/inconshreveable/log15"
-	"github.com/prometheus/client_golang/prometheus"
-	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 )
+
+// TODO: metrics
 
 // ensure thread safety for the gzip writer
 type cGzipWriter struct {
@@ -305,7 +305,6 @@ func (o *openedFiles) closeall() {
 type fileDestination struct {
 	logger       log15.Logger
 	fatal        chan struct{}
-	registry     *prometheus.Registry
 	once         sync.Once
 	ack          storeCallback
 	nack         storeCallback
@@ -318,14 +317,13 @@ type fileDestination struct {
 
 func NewFileDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (dest Destination, err error) {
 	d := &fileDestination{
-		logger:   logger,
-		registry: prometheus.NewRegistry(),
-		ack:      ack,
-		nack:     nack,
-		permerr:  permerr,
-		format:   bc.FileDest.Format,
-		fatal:    make(chan struct{}),
-		files:    newOpenedFiles(ctx, bc.FileDest, logger),
+		logger:  logger,
+		ack:     ack,
+		nack:    nack,
+		permerr: permerr,
+		format:  bc.FileDest.Format,
+		fatal:   make(chan struct{}),
+		files:   newOpenedFiles(ctx, bc.FileDest, logger),
 	}
 	d.filenameTmpl, err = template.New("filename").Parse(bc.FileDest.Filename)
 	if err != nil {
@@ -386,8 +384,4 @@ func (d *fileDestination) Close() error {
 
 func (d *fileDestination) Fatal() chan struct{} {
 	return d.fatal
-}
-
-func (d *fileDestination) Gather() ([]*dto.MetricFamily, error) {
-	return d.registry.Gather()
 }

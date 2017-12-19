@@ -10,7 +10,6 @@ import (
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
 	"github.com/prometheus/client_golang/prometheus"
-	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 )
@@ -19,7 +18,6 @@ type kafkaDestination struct {
 	producer   sarama.AsyncProducer
 	logger     log15.Logger
 	fatal      chan struct{}
-	registry   *prometheus.Registry
 	ackCounter *prometheus.CounterVec
 	once       sync.Once
 	ack        storeCallback
@@ -30,22 +28,14 @@ type kafkaDestination struct {
 
 func NewKafkaDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (Destination, error) {
 	d := &kafkaDestination{
-		logger:   logger,
-		registry: prometheus.NewRegistry(),
-		ack:      ack,
-		nack:     nack,
-		permerr:  permerr,
-		format:   bc.KafkaDest.Format,
-		fatal:    make(chan struct{}),
+		logger:     logger,
+		ack:        ack,
+		nack:       nack,
+		permerr:    permerr,
+		format:     bc.KafkaDest.Format,
+		fatal:      make(chan struct{}),
+		ackCounter: kafkaAckCounter,
 	}
-	d.ackCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "skw_kafkadest_ack_total",
-			Help: "number of kafka acknowledgments",
-		},
-		[]string{"status", "topic"},
-	)
-	d.registry.MustRegister(d.ackCounter)
 	var err error
 	for {
 		d.producer, err = bc.KafkaDest.GetAsyncProducer()
@@ -82,10 +72,6 @@ func NewKafkaDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, per
 	}()
 
 	return d, nil
-}
-
-func (d *kafkaDestination) Gather() ([]*dto.MetricFamily, error) {
-	return d.registry.Gather()
 }
 
 func (d *kafkaDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) error {

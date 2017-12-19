@@ -34,9 +34,6 @@ type SyslogTCPClient struct {
 	ticker  *time.Ticker
 	logger  log15.Logger
 
-	ackChan  chan ulid.ULID
-	nackChan chan ulid.ULID
-
 	errorFlag int32
 	errorPrev error
 
@@ -109,8 +106,6 @@ func (c *SyslogTCPClient) Close() (err error) {
 	err = c.Flush()
 	_ = c.conn.Close()
 	c.conn = nil
-	close(c.ackChan)
-	close(c.nackChan)
 	return
 }
 
@@ -120,8 +115,6 @@ func (c *SyslogTCPClient) Connect() (err error) {
 		if err != nil {
 			c.conn = nil
 			c.writer = nil
-			c.ackChan = nil
-			c.nackChan = nil
 		}
 		c.Unlock()
 	}()
@@ -168,8 +161,6 @@ func (c *SyslogTCPClient) Connect() (err error) {
 			return err
 		}
 	}
-	c.ackChan = make(chan ulid.ULID)
-	c.nackChan = make(chan ulid.ULID)
 	c.conn = conn
 	if c.flushPeriod > 0 {
 		c.writer = concurrent.NewWriterAutoFlush(c.conn, 4096, 0.75)
@@ -242,9 +233,9 @@ func (c *SyslogTCPClient) Flush() error {
 }
 
 func (c *SyslogTCPClient) Ack() chan ulid.ULID {
-	return c.ackChan
+	return nil
 }
 
 func (c *SyslogTCPClient) Nack() chan ulid.ULID {
-	return c.nackChan
+	return nil
 }
