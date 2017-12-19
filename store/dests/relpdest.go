@@ -13,8 +13,6 @@ import (
 	"github.com/stephane-martin/skewer/model"
 )
 
-var OPEN = []byte("relp_version=0\nrelp_software=skewer\ncommands=syslog")
-var endl = []byte("\n")
 
 type relpDestination struct {
 	logger     log15.Logger

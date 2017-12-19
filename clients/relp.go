@@ -62,7 +62,7 @@ func (m *Txnr2UidMap) Get(txnr int) (uid ulid.ULID, err error) {
 		m.sem.Release()
 		return t.(ulid.ULID), nil
 	}
-	err = fmt.Errorf("Unknown txnr: %d", txnr)
+	err = fmt.Errorf("unknown txnr: %d", txnr)
 	return
 }
 
@@ -354,7 +354,7 @@ func (c *RELPClient) handleRspAnswers() {
 		c.sendWg.Wait() // wait for doSend to return
 		// now we can NACK the messages that we did not have a response for,
 		// as no more txnr2msgid entries will be added by doSend
-		keys := []int{}
+		keys := make([]int, 0)
 		c.txnr2msgid.ForEach(
 			func(txnr int, uid ulid.ULID) {
 				c.nackChan <- uid
@@ -406,7 +406,7 @@ func (c *RELPClient) handleRspAnswers() {
 	}
 }
 
-var NonEncodableError = fmt.Errorf("Non encodable message")
+var NonEncodableError = fmt.Errorf("non encodable message")
 
 func (c *RELPClient) doSendOne(msg *model.FullMessage) (err error) {
 	if msg == nil {

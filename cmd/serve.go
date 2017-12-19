@@ -81,19 +81,19 @@ func init() {
 	serveCobraCmd.Flags().BoolVar(&profile, "profile", false, "if set, profile memory")
 
 	Handles = []ServiceHandle{
-		ServiceHandle{"child", BINDER},
-		ServiceHandle{services.Types2Names[services.TCP], BINDER},
-		ServiceHandle{services.Types2Names[services.UDP], BINDER},
-		ServiceHandle{services.Types2Names[services.RELP], BINDER},
-		ServiceHandle{"child", LOGGER},
-		ServiceHandle{services.Types2Names[services.TCP], LOGGER},
-		ServiceHandle{services.Types2Names[services.UDP], LOGGER},
-		ServiceHandle{services.Types2Names[services.RELP], LOGGER},
-		ServiceHandle{services.Types2Names[services.Journal], LOGGER},
-		ServiceHandle{services.Types2Names[services.Configuration], LOGGER},
-		ServiceHandle{services.Types2Names[services.Store], LOGGER},
-		ServiceHandle{services.Types2Names[services.Accounting], LOGGER},
-		ServiceHandle{services.Types2Names[services.KafkaSource], LOGGER},
+		{"child", BINDER},
+		{services.Types2Names[services.TCP], BINDER},
+		{services.Types2Names[services.UDP], BINDER},
+		{services.Types2Names[services.RELP], BINDER},
+		{"child", LOGGER},
+		{services.Types2Names[services.TCP], LOGGER},
+		{services.Types2Names[services.UDP], LOGGER},
+		{services.Types2Names[services.RELP], LOGGER},
+		{services.Types2Names[services.Journal], LOGGER},
+		{services.Types2Names[services.Configuration], LOGGER},
+		{services.Types2Names[services.Store], LOGGER},
+		{services.Types2Names[services.Accounting], LOGGER},
+		{services.Types2Names[services.KafkaSource], LOGGER},
 	}
 
 	HandlesMap = map[ServiceHandle]uintptr{}
@@ -114,7 +114,7 @@ func BinderHdl(typ services.Types) uintptr {
 func ExecuteChild() (err error) {
 	sessionID := strings.TrimSpace(os.Getenv("SKEWER_SESSION"))
 	if len(sessionID) == 0 {
-		return fmt.Errorf("Empty session ID")
+		return fmt.Errorf("empty session ID")
 	}
 	ringSecretPipe := os.NewFile(uintptr(len(Handles)+3), "ringsecretpipe")
 	var ringSecret *memguard.LockedBuffer
@@ -135,11 +135,11 @@ func ExecuteChild() (err error) {
 	}
 	ch, err := newServeChild(ring)
 	if err != nil {
-		return fmt.Errorf("Fatal error initializing Child: %s", err)
+		return fmt.Errorf("fatal error initializing main child: %s", err)
 	}
 	err = ch.init()
 	if err != nil {
-		return fmt.Errorf("Fatal error initializing Serve: %s", err)
+		return fmt.Errorf("fatal error initializing Serve: %s", err)
 	}
 	defer func() {
 		ch.cleanup()
@@ -147,7 +147,7 @@ func ExecuteChild() (err error) {
 	}()
 	err = ch.Serve()
 	if err != nil {
-		return fmt.Errorf("Fatal error executing Serve: %s", err)
+		return fmt.Errorf("fatal error executing Serve: %s", err)
 	}
 	return nil
 }
@@ -234,7 +234,7 @@ func (ch *serveChild) cleanup() {
 
 // ShutdownControllers definitely shutdowns the plugin processes.
 func (ch *serveChild) ShutdownControllers() {
-	funcs := []utils.Func{}
+	funcs := make([]utils.Func, 0, len(services.Names2Types))
 	for _, t := range services.Names2Types {
 		typ := t
 		switch typ {
@@ -272,11 +272,11 @@ func (ch *serveChild) setupConfiguration() error {
 	ch.confService.SetConsulParams(ch.consulParams)
 	err := ch.confService.Start(ch.ring)
 	if err != nil {
-		return fmt.Errorf("Error starting the configuration service: %s", err)
+		return fmt.Errorf("error starting the configuration service: %s", err)
 	}
 	ch.confChan = ch.confService.Chan()
 	if ch.confChan == nil {
-		return fmt.Errorf("Error starting the configuration service")
+		return fmt.Errorf("error starting the configuration service")
 	}
 	ch.conf = <-ch.confChan
 	ch.conf.Store.Dirname = storeDirname
@@ -319,7 +319,7 @@ func (ch *serveChild) setupStore() (st *services.StorePlugin, err error) {
 
 	err = st.Create(testFlag, DumpableFlag, storeDirname, "", "", tmpl)
 	if err != nil {
-		return nil, fmt.Errorf("Can't create the message Store: %s", err)
+		return nil, fmt.Errorf("can't create the message Store: %s", err)
 	}
 	go func() {
 		<-st.ShutdownChan
@@ -328,7 +328,7 @@ func (ch *serveChild) setupStore() (st *services.StorePlugin, err error) {
 	}()
 	_, err = st.Start()
 	if err != nil {
-		return nil, fmt.Errorf("Can't start the forwarder: %s", err)
+		return nil, fmt.Errorf("can't start the forwarder: %s", err)
 	}
 	return st, nil
 }
@@ -337,7 +337,7 @@ func (ch *serveChild) setupSignKey() error {
 	ch.logger.Debug("Generating signature keys")
 	privkey, err := ch.ring.NewSignaturePubkey()
 	if err != nil {
-		return fmt.Errorf("Error generating signature keys: %s", err)
+		return fmt.Errorf("error generating signature keys: %s", err)
 	}
 	ch.signPrivKey = privkey
 	return nil
@@ -366,7 +366,7 @@ func (ch *serveChild) setupControllers() {
 
 // StartControllers starts all the processes that produce syslog messages.
 func (ch *serveChild) StartControllers() error {
-	funcs := []utils.Func{}
+	funcs := make([]utils.Func, 0, len(services.Types2Names))
 	for t := range services.Types2Names {
 		typ := t
 		switch typ {
@@ -404,12 +404,12 @@ func (ch *serveChild) StartKafkaSource() error {
 		ch.logger.Info("Kafka sources are enabled")
 		err := ch.controllers[services.KafkaSource].Create(testFlag, DumpableFlag, "", "", "", "")
 		if err != nil {
-			return fmt.Errorf("Error creating the kafka source plugin: %s", err)
+			return fmt.Errorf("error creating the kafka source plugin: %s", err)
 		}
 		ch.controllers[services.KafkaSource].SetConf(*ch.conf)
 		_, err = ch.controllers[services.KafkaSource].Start()
 		if err != nil {
-			return fmt.Errorf("Error starting the kafka source plugin: %s", err)
+			return fmt.Errorf("error starting the kafka source plugin: %s", err)
 		}
 		ch.logger.Debug("Kafka source plugin has been started")
 	}
@@ -422,12 +422,12 @@ func (ch *serveChild) StartAccounting() error {
 		ch.logger.Info("Process accounting is enabled")
 		err := ch.controllers[services.Accounting].Create(testFlag, DumpableFlag, "", "", ch.conf.Accounting.Path, "")
 		if err != nil {
-			return fmt.Errorf("Error creating the accounting plugin: %s", err)
+			return fmt.Errorf("error creating the accounting plugin: %s", err)
 		}
 		ch.controllers[services.Accounting].SetConf(*ch.conf)
 		_, err = ch.controllers[services.Accounting].Start()
 		if err != nil {
-			return fmt.Errorf("Error starting accounting plugin: %s", err)
+			return fmt.Errorf("error starting accounting plugin: %s", err)
 		}
 		ch.logger.Debug("Accounting plugin has been started")
 	}
@@ -444,12 +444,12 @@ func (ch *serveChild) StartJournal() error {
 			// in fact Create() will only do something the first time startJournal() is called
 			err := ctl.Create(testFlag, DumpableFlag, "", "", "", "")
 			if err != nil {
-				return fmt.Errorf("Error creating Journald plugin: %s", err)
+				return fmt.Errorf("error creating Journald plugin: %s", err)
 			}
 			ctl.SetConf(*ch.conf)
 			_, err = ctl.Start()
 			if err != nil {
-				return fmt.Errorf("Error starting Journald plugin: %s", err)
+				return fmt.Errorf("error starting Journald plugin: %s", err)
 			}
 			ch.logger.Debug("Journald plugin has been started")
 		} else {
@@ -466,12 +466,12 @@ func (ch *serveChild) StartRelp() error {
 	ctl := ch.controllers[services.RELP]
 	err := ctl.Create(testFlag, DumpableFlag, "", "", "", "")
 	if err != nil {
-		return fmt.Errorf("Error creating RELP plugin: %s", err)
+		return fmt.Errorf("error creating RELP plugin: %s", err)
 	}
 	ctl.SetConf(*ch.conf)
 	_, err = ctl.Start()
 	if err != nil {
-		return fmt.Errorf("Error starting RELP plugin: %s", err)
+		return fmt.Errorf("error starting RELP plugin: %s", err)
 	}
 	ch.logger.Debug("RELP plugin has been started")
 	return nil
@@ -482,14 +482,14 @@ func (ch *serveChild) StartTcp() error {
 	ctl := ch.controllers[services.TCP]
 	err := ctl.Create(testFlag, DumpableFlag, "", "", "", "")
 	if err != nil {
-		return fmt.Errorf("Error creating TCP plugin: %s", err)
+		return fmt.Errorf("error creating TCP plugin: %s", err)
 	}
 	ctl.SetConf(*ch.conf)
 	tcpinfos, err := ctl.Start()
 	if err == services.NOLISTENER {
 		ch.logger.Info("TCP plugin not started")
 	} else if err != nil {
-		return fmt.Errorf("Error starting TCP plugin: %s", err)
+		return fmt.Errorf("error starting TCP plugin: %s", err)
 	} else if len(tcpinfos) == 0 {
 		ch.logger.Info("TCP plugin not started")
 	} else {
@@ -503,14 +503,14 @@ func (ch *serveChild) StartUdp() error {
 	ctl := ch.controllers[services.UDP]
 	err := ctl.Create(testFlag, DumpableFlag, "", "", "", "")
 	if err != nil {
-		return fmt.Errorf("Error creating UDP plugin: %s", err)
+		return fmt.Errorf("error creating UDP plugin: %s", err)
 	}
 	ctl.SetConf(*ch.conf)
 	udpinfos, err := ctl.Start()
 	if err == services.NOLISTENER {
 		ch.logger.Info("UDP plugin not started")
 	} else if err != nil {
-		return fmt.Errorf("Error starting UDP plugin: %s", err)
+		return fmt.Errorf("error starting UDP plugin: %s", err)
 	} else if len(udpinfos) == 0 {
 		ch.logger.Info("UDP plugin not started")
 	} else {
@@ -554,7 +554,7 @@ func (ch *serveChild) Reload() (err error) {
 	if err != nil {
 		return err
 	}
-	funcs := []utils.Func{}
+	funcs := make([]utils.Func, 0, len(services.Types2Names))
 	for t := range services.Types2Names {
 		typ := t
 		switch typ {
@@ -577,8 +577,9 @@ func (ch *serveChild) Reload() (err error) {
 
 func (ch *serveChild) setupMetrics(logger log15.Logger) {
 	ch.metricsServer = &metrics.MetricsServer{}
-	controllers := []prometheus.Gatherer{}
-	for typ := range services.Types2Names {
+	controllers := make([]prometheus.Gatherer, 0, len(services.Types2Names))
+	for t := range services.Types2Names {
+		typ := t
 		switch typ {
 		case services.Configuration:
 		case services.Store:
@@ -602,7 +603,7 @@ func (ch *serveChild) Serve() error {
 
 	err := ch.StartControllers()
 	if err != nil {
-		return fmt.Errorf("Error starting a controller: %s", err)
+		return fmt.Errorf("error starting a controller: %s", err)
 	}
 
 	if profile {

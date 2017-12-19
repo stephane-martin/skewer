@@ -86,5 +86,5 @@ push: clean
 
 vet:
 	test -n "${GOPATH}"  # test $$GOPATH
-	go vet ./ ${SUBDIRS} || true
+	go vet ./... || true
 
