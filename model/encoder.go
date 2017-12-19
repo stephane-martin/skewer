@@ -20,7 +20,12 @@ type Encoder interface {
 	Enc(v interface{}, w io.Writer) error
 }
 
+var NonEncodableError = fmt.Errorf("non encodable message")
+
 func IsEncodingError(err error) bool {
+	if err == NonEncodableError {
+		return true
+	}
 	switch err.(type) {
 	case *json.MarshalerError, *ErrInvalid5424:
 		return true

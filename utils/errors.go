@@ -21,6 +21,20 @@ var ErrEmptyQueue = errors.New(`queue: empty queue`)
 // EmptyUID is a zero ULID
 var EmptyUID ulid.ULID
 
+func IsTemporary(err error) bool {
+	if nerr, ok := err.(net.Error); ok {
+		return nerr.Temporary()
+	}
+	return false
+}
+
+func IsTimeout(err error) bool {
+	if nerr, ok := err.(net.Error); ok {
+		return nerr.Timeout()
+	}
+	return false
+}
+
 func IsBrokenPipe(err error) bool {
 	if err == nil {
 		return false

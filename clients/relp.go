@@ -25,6 +25,18 @@ var OPEN = []byte("relp_version=0\nrelp_software=skewer\ncommands=syslog")
 var endl = []byte("\n")
 var sp = []byte(" ")
 
+type IntKey int32
+
+func (self IntKey) HashCode() uint32 {
+	return uint32(self)
+}
+func (self IntKey) Equals(t gotomic.Thing) bool {
+	if ik, ok := t.(IntKey); ok {
+		return int32(self) == int32(ik)
+	}
+	return false
+}
+
 type Txnr2UidMap struct {
 	h   *gotomic.Hash
 	sem *utils.Semaphore
@@ -41,25 +53,24 @@ func NewTxnrMap(maxsize int32) *Txnr2UidMap {
 	return &m
 }
 
-// TODO: make txnr int32
-func (m *Txnr2UidMap) Put(txnr int, uid ulid.ULID) (err error) {
+func (m *Txnr2UidMap) Put(txnr int32, uid ulid.ULID) (err error) {
 	// if there is enough room in m, put (txnr, uid)
 	// if not, wait for some room
 	// can be interrupted, in that case, return error
 	if err = m.sem.Acquire(); err != nil {
 		return err
 	}
-	if _, overw := m.h.Put(gotomic.IntKey(txnr), uid); overw {
+	if _, overw := m.h.Put(IntKey(txnr), uid); overw {
 		m.sem.Release()
 	}
 	return nil
 }
 
-func (m *Txnr2UidMap) Get(txnr int) (uid ulid.ULID, err error) {
+func (m *Txnr2UidMap) Get(txnr int32) (uid ulid.ULID, err error) {
 	// get the uid for the given txnr
 	// if found, delete (uid, txnr) from m
 	// if not found, return error
-	if t, present := m.h.Delete(gotomic.IntKey(txnr)); present {
+	if t, present := m.h.Delete(IntKey(txnr)); present {
 		m.sem.Release()
 		return t.(ulid.ULID), nil
 	}
@@ -67,11 +78,11 @@ func (m *Txnr2UidMap) Get(txnr int) (uid ulid.ULID, err error) {
 	return
 }
 
-type Iterator func(int, ulid.ULID)
+type Iterator func(int32, ulid.ULID)
 
 func (m *Txnr2UidMap) ForEach(f Iterator) {
 	g := func(k gotomic.Hashable, v gotomic.Thing) bool {
-		f(int(k.(gotomic.IntKey)), v.(ulid.ULID))
+		f(int32(k.(IntKey)), v.(ulid.ULID))
 		return false
 	}
 	m.h.Each(g)
@@ -254,8 +265,18 @@ func (c *RELPClient) Connect() (err error) {
 			for range c.ticker.C {
 				err = c.Flush()
 				if utils.IsBrokenPipe(err) {
-
+					c.logger.Warn("Broken pipe detected when flushing buffers", "error", err)
+					_ = c.conn.Close()
+					c.sendQueue.Dispose()
+					return
 				}
+				if utils.IsTimeout(err) {
+					c.logger.Warn("Timeout detected when flushing buffers", "error", err)
+					_ = c.conn.Close()
+					c.sendQueue.Dispose()
+					return
+				}
+				c.logger.Warn("Unexpected error flushing buffers", "error", err)
 			}
 		}()
 	} else {
@@ -363,9 +384,9 @@ func (c *RELPClient) handleRspAnswers() {
 		c.sendWg.Wait() // wait for doSend to return
 		// now we can NACK the messages that we did not have a response for,
 		// as no more txnr2msgid entries will be added by doSend
-		keys := make([]int, 0)
+		keys := make([]int32, 0)
 		c.txnr2msgid.ForEach(
-			func(txnr int, uid ulid.ULID) {
+			func(txnr int32, uid ulid.ULID) {
 				c.nackChan <- uid
 				keys = append(keys, txnr)
 			},
@@ -402,7 +423,7 @@ func (c *RELPClient) handleRspAnswers() {
 			c.logger.Info("error reading server responses", "error", err)
 			return
 		}
-		uid, err := c.txnr2msgid.Get(int(txnr))
+		uid, err := c.txnr2msgid.Get(txnr)
 		if err == nil {
 			if retcode == 200 {
 				c.ackChan <- uid
@@ -415,15 +436,13 @@ func (c *RELPClient) handleRspAnswers() {
 	}
 }
 
-var NonEncodableError = fmt.Errorf("non encodable message")
-
 func (c *RELPClient) doSendOne(msg *model.FullMessage) (err error) {
 	if msg == nil {
 		return
 	}
 	buf, txnr, err := c.encode("syslog", msg)
 	if err != nil {
-		return NonEncodableError
+		return model.NonEncodableError
 	}
 	if len(buf) == 0 {
 		c.ackChan <- msg.Uid
@@ -435,7 +454,7 @@ func (c *RELPClient) doSendOne(msg *model.FullMessage) (err error) {
 		_, err = c.writer.Write(buf)
 	}
 	if err == nil {
-		return c.txnr2msgid.Put(int(txnr), msg.Uid)
+		return c.txnr2msgid.Put(txnr, msg.Uid)
 	}
 	c.nackChan <- msg.Uid
 	return err
@@ -467,7 +486,7 @@ func (c *RELPClient) doSend() {
 		if err == utils.ErrDisposed {
 			c.logger.Debug("the queue has been disposed")
 			return
-		} else if err == NonEncodableError {
+		} else if model.IsEncodingError(err) {
 			c.logger.Warn("dropped non-encodable message", "uid", ulid.ULID(msg.Uid).String())
 			continue
 		} else if err != nil {

@@ -5,9 +5,11 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/free/concurrent-writer/concurrent"
+	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
@@ -30,15 +32,19 @@ type SyslogTCPClient struct {
 	writer  *concurrent.Writer
 	encoder model.Encoder
 	ticker  *time.Ticker
+	logger  log15.Logger
 
 	ackChan  chan ulid.ULID
 	nackChan chan ulid.ULID
 
+	errorFlag int32
+	errorPrev error
+
 	sync.Mutex
 }
 
-func NewSyslogTCPClient() *SyslogTCPClient {
-	return &SyslogTCPClient{}
+func NewSyslogTCPClient(logger log15.Logger) *SyslogTCPClient {
+	return &SyslogTCPClient{logger: logger.New("clientkind", "TCP")}
 }
 
 func (c *SyslogTCPClient) Host(host string) *SyslogTCPClient {
@@ -174,8 +180,20 @@ func (c *SyslogTCPClient) Connect() (err error) {
 			for range c.ticker.C {
 				err = c.Flush()
 				if utils.IsBrokenPipe(err) {
-					// TODO
+					_ = c.conn.Close()
+					c.logger.Warn("Broken pipe detected when flushing buffers", "error", err)
+					c.errorPrev = err
+					atomic.StoreInt32(&c.errorFlag, 1)
+					return
 				}
+				if utils.IsTimeout(err) {
+					_ = c.conn.Close()
+					c.logger.Warn("Timeout detected when flushing buffers", "error", err)
+					c.errorPrev = err
+					atomic.StoreInt32(&c.errorFlag, 1)
+					return
+				}
+				c.logger.Warn("Unexpected error flushing buffers", "error", err)
 			}
 		}()
 	} else {
@@ -199,12 +217,14 @@ func (c *SyslogTCPClient) Send(msg *model.FullMessage) (err error) {
 	} else {
 		buf, err = model.TcpOctetEncode(c.encoder, msg)
 	}
-	// TODO: return explicit non encodable error
 	if err != nil {
-		return err
+		return model.NonEncodableError
 	}
 	if len(buf) == 0 {
 		return nil
+	}
+	if atomic.LoadInt32(&c.errorFlag) == 1 {
+		return c.errorPrev
 	}
 	if c.writer != nil {
 		_, err = c.writer.Write(buf)

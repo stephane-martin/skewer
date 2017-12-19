@@ -30,7 +30,7 @@ type tcpDestination struct {
 }
 
 func NewTcpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (dest Destination, err error) {
-	clt := clients.NewSyslogTCPClient().
+	clt := clients.NewSyslogTCPClient(logger).
 		Host(bc.TcpDest.Host).
 		Port(bc.TcpDest.Port).
 		Path(bc.TcpDest.UnixSocketPath).
