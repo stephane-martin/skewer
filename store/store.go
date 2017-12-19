@@ -10,6 +10,7 @@ import (
 
 	"github.com/awnumar/memguard"
 	"github.com/dgraph-io/badger"
+	"github.com/dgraph-io/badger/options"
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
 	"github.com/prometheus/client_golang/prometheus"
@@ -319,6 +320,8 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 	badgerOpts.ValueDir = cfg.Dirname
 	badgerOpts.MaxTableSize = cfg.Maxsize
 	badgerOpts.SyncWrites = cfg.FSync
+	badgerOpts.TableLoadingMode = options.MemoryMap
+	badgerOpts.ValueLogFileSize = 64 * 1024 * 1024
 
 	err := os.MkdirAll(cfg.Dirname, 0700)
 	if err != nil {
