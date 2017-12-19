@@ -1082,6 +1082,12 @@
 			"revisionTime": "2017-04-21T08:09:44Z"
 		},
 		{
+			"checksumSHA1": "RV5XNHMQ1pbfkx8djuSlvxlRGvs=",
+			"path": "gopkg.in/Graylog2/go-gelf.v2/gelf",
+			"revision": "4143646226541087117ff2f83334ea48b3201841",
+			"revisionTime": "2017-12-11T09:40:31Z"
+		},
+		{
 			"checksumSHA1": "toAZuzA0LeXM+VBx3Wqh5E0yMDg=",
 			"path": "gopkg.in/Shopify/sarama.v1",
 			"revision": "240fd146ce68bcafb034cc5dc977229ffbafa8ea",
