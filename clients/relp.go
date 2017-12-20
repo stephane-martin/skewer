@@ -264,19 +264,21 @@ func (c *RELPClient) Connect() (err error) {
 			var err error
 			for range c.ticker.C {
 				err = c.Flush()
-				if utils.IsBrokenPipe(err) {
-					c.logger.Warn("Broken pipe detected when flushing buffers", "error", err)
-					_ = c.conn.Close()
-					c.sendQueue.Dispose()
-					return
+				if err != nil {
+					if utils.IsBrokenPipe(err) {
+						c.logger.Warn("Broken pipe detected when flushing buffers", "error", err)
+						_ = c.conn.Close()
+						c.sendQueue.Dispose()
+						return
+					}
+					if utils.IsTimeout(err) {
+						c.logger.Warn("Timeout detected when flushing buffers", "error", err)
+						_ = c.conn.Close()
+						c.sendQueue.Dispose()
+						return
+					}
+					c.logger.Warn("Unexpected error flushing buffers", "error", err)
 				}
-				if utils.IsTimeout(err) {
-					c.logger.Warn("Timeout detected when flushing buffers", "error", err)
-					_ = c.conn.Close()
-					c.sendQueue.Dispose()
-					return
-				}
-				c.logger.Warn("Unexpected error flushing buffers", "error", err)
 			}
 		}()
 	} else {

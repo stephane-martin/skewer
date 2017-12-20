@@ -170,21 +170,23 @@ func (c *SyslogTCPClient) Connect() (err error) {
 			var err error
 			for range c.ticker.C {
 				err = c.Flush()
-				if utils.IsBrokenPipe(err) {
-					_ = c.conn.Close()
-					c.logger.Warn("Broken pipe detected when flushing buffers", "error", err)
-					c.errorPrev = err
-					atomic.StoreInt32(&c.errorFlag, 1)
-					return
+				if err != nil {
+					if utils.IsBrokenPipe(err) {
+						_ = c.conn.Close()
+						c.logger.Warn("Broken pipe detected when flushing buffers", "error", err)
+						c.errorPrev = err
+						atomic.StoreInt32(&c.errorFlag, 1)
+						return
+					}
+					if utils.IsTimeout(err) {
+						_ = c.conn.Close()
+						c.logger.Warn("Timeout detected when flushing buffers", "error", err)
+						c.errorPrev = err
+						atomic.StoreInt32(&c.errorFlag, 1)
+						return
+					}
+					c.logger.Warn("Unexpected error flushing buffers", "error", err)
 				}
-				if utils.IsTimeout(err) {
-					_ = c.conn.Close()
-					c.logger.Warn("Timeout detected when flushing buffers", "error", err)
-					c.errorPrev = err
-					atomic.StoreInt32(&c.errorFlag, 1)
-					return
-				}
-				c.logger.Warn("Unexpected error flushing buffers", "error", err)
 			}
 		}()
 	} else {
