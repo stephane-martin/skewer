@@ -101,9 +101,9 @@ func (f *CFactory) New(typ Types, binderHandle uintptr, loggerHandle uintptr) *P
 		logger:       f.logger,
 		signKey:      f.signKey,
 		ring:         f.ring,
+		metricsChan:  make(chan []*dto.MetricFamily),
+		ShutdownChan: make(chan struct{}),
 	}
-	s.metricsChan = make(chan []*dto.MetricFamily)
-	s.ShutdownChan = make(chan struct{})
 	return &s
 }
 
@@ -128,7 +128,7 @@ func (s *PluginController) W(header []byte, message []byte) (err error) {
 
 // Gather asks the controlled plugin to report its metrics
 func (s *PluginController) Gather() (m []*dto.MetricFamily, err error) {
-	m = []*dto.MetricFamily{}
+	m = make([]*dto.MetricFamily, 0)
 	select {
 	case <-s.ShutdownChan:
 		return
