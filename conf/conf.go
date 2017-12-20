@@ -18,6 +18,7 @@ import (
 
 	sarama "github.com/Shopify/sarama"
 	cluster "github.com/bsm/sarama-cluster"
+	"github.com/fatih/set"
 
 	"github.com/BurntSushi/toml"
 	"github.com/hashicorp/errwrap"
@@ -218,6 +219,60 @@ func convertClientAuthType(auth_type string) tls.ClientAuthType {
 	default:
 		return tls.NoClientCert
 	}
+}
+
+func (c *BaseConfig) GetCertificateFiles() (list []string) {
+	s := set.New(set.ThreadSafe)
+	s.Add(c.KafkaDest.CAFile, c.KafkaDest.CertFile, c.KafkaDest.KeyFile)
+	s.Add(c.RelpDest.CAFile, c.RelpDest.CertFile, c.RelpDest.KeyFile)
+	s.Add(c.TcpDest.CAFile, c.TcpDest.CertFile, c.TcpDest.KeyFile)
+	for _, src := range c.TcpSource {
+		s.Add(src.CAFile, src.CertFile, src.KeyFile)
+	}
+	for _, src := range c.RelpSource {
+		s.Add(src.CAFile, src.CertFile, src.KeyFile)
+	}
+	for _, src := range c.KafkaSource {
+		s.Add(src.CAFile, src.CertFile, src.KeyFile)
+	}
+	list = make([]string, 0)
+	for _, f := range s.List() {
+		if f != nil {
+			if fs, ok := f.(string); ok && len(fs) > 0 {
+				if utils.FileExists(fs) {
+					list = append(list, fs)
+				}
+			}
+		}
+	}
+	return list
+}
+
+func (c *BaseConfig) GetCertificatePaths() (list []string) {
+	s := set.New(set.ThreadSafe)
+	s.Add(c.KafkaDest.CAPath)
+	s.Add(c.RelpDest.CAPath)
+	s.Add(c.TcpDest.CAPath)
+	for _, src := range c.TcpSource {
+		s.Add(src.CAPath)
+	}
+	for _, src := range c.RelpSource {
+		s.Add(src.CAPath)
+	}
+	for _, src := range c.KafkaSource {
+		s.Add(src.CAPath)
+	}
+	list = make([]string, 0)
+	for _, f := range s.List() {
+		if f != nil {
+			if fs, ok := f.(string); ok && len(fs) > 0 {
+				if utils.FileExists(fs) && utils.IsDir(fs) {
+					list = append(list, fs)
+				}
+			}
+		}
+	}
+	return list
 }
 
 func (c *SyslogSourceBaseConfig) GetListenAddrs() (addrs map[int]string, err error) {

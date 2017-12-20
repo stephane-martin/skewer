@@ -16,8 +16,7 @@ to post bugs and ask questions.
 -   Can fetch logs from Kafka
 -   Can fetch log messages from Journald (on Linux)
 -   Can fetch audit logs from the kernel (on Linux, by Journald)
--   Can forward logs to Kafka
--   Can forward logs to another syslog server
+-   Can forward logs to Kafka, to another syslog server, or to Graylog
 -   Can write logs on the local filesystem
 -   Configuration can be provided as a configuration file, or optionally
     fetched from Consul (not really finished)

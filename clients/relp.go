@@ -3,6 +3,7 @@ package clients
 import (
 	"bufio"
 	"bytes"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"math"
@@ -101,6 +102,7 @@ type RELPClient struct {
 	keepAlivePeriod time.Duration
 	connTimeout     time.Duration
 	flushPeriod     time.Duration
+	tlsConfig       *tls.Config
 
 	relpTimeout time.Duration
 
@@ -178,6 +180,11 @@ func (c *RELPClient) FlushPeriod(period time.Duration) *RELPClient {
 	return c
 }
 
+func (c *RELPClient) TLS(config *tls.Config) *RELPClient {
+	c.tlsConfig = config
+	return c
+}
+
 func (c *RELPClient) Connect() (err error) {
 	c.Lock()
 	defer func() {
@@ -211,10 +218,16 @@ func (c *RELPClient) Connect() (err error) {
 			return fmt.Errorf("RELPClient: specify a port")
 		}
 		hostport := net.JoinHostPort(c.host, strconv.FormatInt(int64(c.port), 10))
+		var dialer *net.Dialer
 		if c.connTimeout == 0 {
-			conn, err = net.Dial("tcp", hostport)
+			dialer = &net.Dialer{}
 		} else {
-			conn, err = net.DialTimeout("tcp", hostport, c.connTimeout)
+			dialer = &net.Dialer{Timeout: c.connTimeout}
+		}
+		if c.tlsConfig == nil {
+			conn, err = dialer.Dial("tcp", hostport)
+		} else {
+			conn, err = tls.DialWithDialer(dialer, "tcp", hostport, c.tlsConfig)
 		}
 		if err != nil {
 			return err

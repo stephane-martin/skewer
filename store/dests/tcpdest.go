@@ -10,6 +10,7 @@ import (
 	"github.com/stephane-martin/skewer/clients"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/utils"
 )
 
 var sp = []byte(" ")
@@ -40,6 +41,21 @@ func NewTcpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perme
 		FrameDelimiter(bc.TcpDest.FrameDelimiter).
 		ConnTimeout(bc.TcpDest.ConnTimeout).
 		FlushPeriod(bc.TcpDest.FlushPeriod)
+
+	if bc.TcpDest.TLSEnabled {
+		config, err := utils.NewTLSConfig(
+			bc.TcpDest.Host,
+			bc.TcpDest.CAFile,
+			bc.TcpDest.CAPath,
+			bc.TcpDest.CertFile,
+			bc.TcpDest.KeyFile,
+			bc.TcpDest.Insecure,
+		)
+		if err != nil {
+			return nil, err
+		}
+		clt = clt.TLS(config)
+	}
 
 	err = clt.Connect()
 	if err != nil {

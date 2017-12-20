@@ -1,6 +1,7 @@
 package clients
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net"
 	"strconv"
@@ -24,6 +25,7 @@ type SyslogTCPClient struct {
 	keepAlivePeriod time.Duration
 	connTimeout     time.Duration
 	flushPeriod     time.Duration
+	tlsConfig       *tls.Config
 
 	lineFraming    bool
 	frameDelimiter uint8
@@ -94,6 +96,11 @@ func (c *SyslogTCPClient) FlushPeriod(period time.Duration) *SyslogTCPClient {
 	return c
 }
 
+func (c *SyslogTCPClient) TLS(config *tls.Config) *SyslogTCPClient {
+	c.tlsConfig = config
+	return c
+}
+
 func (c *SyslogTCPClient) Close() (err error) {
 	c.Lock()
 	defer c.Unlock()
@@ -137,10 +144,16 @@ func (c *SyslogTCPClient) Connect() (err error) {
 			return fmt.Errorf("SyslogTCPClient: specify a port")
 		}
 		hostport := net.JoinHostPort(c.host, strconv.FormatInt(int64(c.port), 10))
+		var dialer *net.Dialer
 		if c.connTimeout == 0 {
-			conn, err = net.Dial("tcp", hostport)
+			dialer = &net.Dialer{}
 		} else {
-			conn, err = net.DialTimeout("tcp", hostport, c.connTimeout)
+			dialer = &net.Dialer{Timeout: c.connTimeout}
+		}
+		if c.tlsConfig == nil {
+			conn, err = dialer.Dial("tcp", hostport)
+		} else {
+			conn, err = tls.DialWithDialer(dialer, "tcp", hostport, c.tlsConfig)
 		}
 		if err != nil {
 			return err

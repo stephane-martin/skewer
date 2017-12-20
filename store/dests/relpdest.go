@@ -11,6 +11,7 @@ import (
 	"github.com/stephane-martin/skewer/clients"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/utils"
 )
 
 type relpDestination struct {
@@ -37,6 +38,21 @@ func NewRelpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perm
 		RelpTimeout(bc.RelpDest.RelpTimeout).
 		WindowSize(bc.RelpDest.WindowSize).
 		FlushPeriod(bc.RelpDest.FlushPeriod)
+
+	if bc.RelpDest.TLSEnabled {
+		config, err := utils.NewTLSConfig(
+			bc.RelpDest.Host,
+			bc.RelpDest.CAFile,
+			bc.RelpDest.CAPath,
+			bc.RelpDest.CertFile,
+			bc.RelpDest.KeyFile,
+			bc.RelpDest.Insecure,
+		)
+		if err != nil {
+			return nil, err
+		}
+		clt = clt.TLS(config)
+	}
 
 	err = clt.Connect()
 	if err != nil {
