@@ -24,7 +24,7 @@ type mountPoint struct {
 	Data   string
 }
 
-func (c *NamespacedCmd) Start() error {
+func (c *NamespacedCmd) Start() (err error) {
 	acctParentDir := ""
 	fileDestParentDir := ""
 
@@ -75,7 +75,7 @@ func (c *NamespacedCmd) Start() error {
 			return err
 		}
 		if !utils.IsDir(c.confPath) {
-			return fmt.Errorf("Configuration path '%s' does not exist, or is not a directory", confPath)
+			return fmt.Errorf("Configuration path '%s' does not exist, or is not a directory", c.confPath)
 		}
 	}
 
@@ -101,11 +101,11 @@ func (c *NamespacedCmd) Start() error {
 	})
 
 	// TODO: DUMPABLE should only be set in the child, just to write uid_map
-	if !dumpable {
+	if !c.dumpable {
 		dump.SetDumpable()
 	}
 	err = c.cmd.Start()
-	if !dumpable {
+	if !c.dumpable {
 		dump.SetNonDumpable()
 	}
 	return err
