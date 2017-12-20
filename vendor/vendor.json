@@ -346,6 +346,12 @@
 			"revisionTime": "2017-03-18T15:58:57Z"
 		},
 		{
+			"checksumSHA1": "7ZZGga/NOgmEaDqRZvrhkNedbL8=",
+			"path": "github.com/fatih/set",
+			"revision": "24e92685f4763e7a95dbcae78a571bdc8dc7f766",
+			"revisionTime": "2017-07-04T05:58:01Z"
+		},
+		{
 			"checksumSHA1": "3SzDBz3k4I7iTgu23J8bX4nHQks=",
 			"path": "github.com/free/concurrent-writer",
 			"revision": "363b9993c91180a82babd49f530aa64902d364cd",
