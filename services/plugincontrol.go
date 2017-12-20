@@ -623,7 +623,7 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 				s.createdMu.Unlock()
 				return err
 			}
-			err = namespaces.StartInNamespaces(s.cmd, dumpable, "", "", acctPath, "")
+			err = namespaces.NewNamespacedCmd(s.cmd).Dumpable(dumpable).AccountingPath(acctPath).Start()
 		}
 
 		if err != nil {
@@ -662,7 +662,11 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 				s.createdMu.Unlock()
 				return err
 			}
-			err = namespaces.StartInNamespaces(s.cmd, dumpable, storePath, "", "", fileDestTmpl)
+			err = namespaces.NewNamespacedCmd(s.cmd).
+				Dumpable(dumpable).
+				StorePath(storePath).
+				FileDestTemplate(fileDestTmpl).
+				Start()
 		}
 
 		if err != nil {

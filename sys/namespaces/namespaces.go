@@ -24,68 +24,64 @@ type mountPoint struct {
 	Data   string
 }
 
-func StartInNamespaces(command *exec.Cmd, dumpable bool, storePath, confDir, acctPath, fileDestTmpl string) (err error) {
-	acctDir := ""
-	fileDestDir := ""
-	acctPath = strings.TrimSpace(acctPath)
-	fileDestTmpl = strings.TrimSpace(fileDestTmpl)
-	storePath = strings.TrimSpace(storePath)
-	confDir = strings.TrimSpace(confDir)
+func (c *NamespacedCmd) Start() error {
+	acctParentDir := ""
+	fileDestParentDir := ""
 
-	if len(acctPath) > 0 {
-		acctPath, err = filepath.Abs(acctPath)
+	if len(c.acctPath) > 0 {
+		c.acctPath, err = filepath.Abs(c.acctPath)
 		if err != nil {
 			return err
 		}
-		acctDir = filepath.Dir(acctPath)
-		if !utils.IsDir(acctDir) {
-			return fmt.Errorf("Accounting path '%s' does not exist or is not a directory", acctDir)
+		acctParentDir = filepath.Dir(c.acctPath)
+		if !utils.IsDir(acctParentDir) {
+			return fmt.Errorf("Accounting path '%s' does not exist or is not a directory", acctParentDir)
 		}
 	}
 
-	if len(fileDestTmpl) > 0 {
-		fileDestTmpl, err = filepath.Abs(fileDestTmpl)
+	if len(c.fileDestTmpl) > 0 {
+		c.fileDestTmpl, err = filepath.Abs(c.fileDestTmpl)
 		if err != nil {
 			return err
 		}
 		// ex for fileDestTmpl: "/var/log/skewer/{{.Fields.Date}}/{{.Fields.Appname}}.log"
-		n := strings.Index(fileDestTmpl, "{")
+		n := strings.Index(c.fileDestTmpl, "{")
 		if n == -1 {
 			// static filename, not a template
-			fileDestDir = filepath.Dir(fileDestTmpl)
+			fileDestParentDir = filepath.Dir(c.fileDestTmpl)
 		} else {
 			// take the prefix, eg "/var/log/skewer"
-			fileDestDir = strings.TrimRight(fileDestTmpl[:n], "/")
+			fileDestParentDir = strings.TrimRight(c.fileDestTmpl[:n], "/")
 		}
-		if !utils.IsDir(fileDestDir) {
-			return fmt.Errorf("Supposed to write logs to directory '%s', but it does not exist, or is not a directory", fileDestDir)
+		if !utils.IsDir(fileParentDestDir) {
+			return fmt.Errorf("Supposed to write logs to directory '%s', but it does not exist, or is not a directory", fileParentDestDir)
 		}
 
 	}
 
-	if len(storePath) > 0 {
-		storePath, err = filepath.Abs(storePath)
+	if len(c.storePath) > 0 {
+		c.storePath, err = filepath.Abs(c.storePath)
 		if err != nil {
 			return err
 		}
-		if !utils.IsDir(storePath) {
-			return fmt.Errorf("Store path '%s' does not exist, or is not a directory", storePath)
+		if !utils.IsDir(c.storePath) {
+			return fmt.Errorf("Store path '%s' does not exist, or is not a directory", c.storePath)
 		}
 	}
 
-	if len(confDir) > 0 {
-		confDir, err = filepath.Abs(confDir)
+	if len(c.confPath) > 0 {
+		c.confPath, err = filepath.Abs(c.confPath)
 		if err != nil {
 			return err
 		}
-		if !utils.IsDir(confDir) {
-			return fmt.Errorf("Configuration path '%s' does not exist, or is not a directory", confDir)
+		if !utils.IsDir(c.confPath) {
+			return fmt.Errorf("Configuration path '%s' does not exist, or is not a directory", confPath)
 		}
 	}
 
-	command.Env = append(command.Env, setupEnv(storePath, confDir, acctDir, fileDestDir)...)
+	c.cmd.Env = append(c.cmd.Env, setupEnv(c.storePath, c.confPath, acctParentDir, fileParentDestDir)...)
 
-	command.SysProcAttr = &syscall.SysProcAttr{
+	c.cmd.SysProcAttr = &syscall.SysProcAttr{
 		Cloneflags: syscall.CLONE_NEWUSER | syscall.CLONE_NEWPID | syscall.CLONE_NEWUTS | syscall.CLONE_NEWNS,
 
 		UidMappings: []syscall.SysProcIDMap{
@@ -108,12 +104,13 @@ func StartInNamespaces(command *exec.Cmd, dumpable bool, storePath, confDir, acc
 	if !dumpable {
 		dump.SetDumpable()
 	}
-	err = command.Start()
+	err = c.cmd.Start()
 	if !dumpable {
 		dump.SetNonDumpable()
 	}
 	return err
 }
+
 
 func PivotRoot(root string) (err error) {
 	oldroot := filepath.Join(root, "oldroot")
@@ -508,7 +505,7 @@ func MakeChroot(targetExec string) (string, error) {
 		)
 	}
 
-	// RW bind-mount the directory where to write logs if needed
+	// RW bind-mount the directory for file destination if needed
 	fileDestDir := strings.TrimSpace(os.Getenv("SKEWER_FILEDEST_DIR"))
 	if len(fileDestDir) > 0 {
 		fmt.Fprintln(os.Stderr, "FILEDESTDIR", fileDestDir)
