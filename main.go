@@ -216,8 +216,8 @@ func execServeParent() (err error) {
 	binderSockets := map[string]spair{}
 	loggerSockets := map[string]spair{}
 
-	for _, h := range cmd.Handles {
-		if h.Type == cmd.BINDER {
+	for _, h := range services.Handles {
+		if h.Type == services.BINDER {
 			binderSockets[h.Service], err = getSocketPair(syscall.SOCK_STREAM)
 		} else {
 			loggerSockets[h.Service], err = getSocketPair(syscall.SOCK_DGRAM)
@@ -257,8 +257,8 @@ func execServeParent() (err error) {
 	}
 
 	extraFiles := []*os.File{}
-	for _, h := range cmd.Handles {
-		if h.Type == cmd.BINDER {
+	for _, h := range services.Handles {
+		if h.Type == services.BINDER {
 			extraFiles = append(extraFiles, os.NewFile(binderSockets[h.Service].child, h.Service))
 		} else {
 			extraFiles = append(extraFiles, os.NewFile(loggerSockets[h.Service].child, h.Service))
@@ -289,8 +289,8 @@ func execServeParent() (err error) {
 		return makeErr("Error starting child", err)
 	}
 
-	for _, h := range cmd.Handles {
-		if h.Type == cmd.BINDER {
+	for _, h := range services.Handles {
+		if h.Type == services.BINDER {
 			_ = syscall.Close(int(binderSockets[h.Service].child))
 		} else {
 			_ = syscall.Close(int(loggerSockets[h.Service].child))

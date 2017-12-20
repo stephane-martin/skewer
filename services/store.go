@@ -39,7 +39,7 @@ type storeServiceImpl struct {
 // NewStoreService creates a StoreService.
 // The StoreService is responsible to manage the lifecycle of the Store and the
 // Kafka Forwarder that is fed by the Store.
-func NewStoreService(l log15.Logger, ring kring.Ring, pipe *os.File) NetworkService {
+func NewStoreService(l log15.Logger, ring kring.Ring, pipe *os.File) Provider {
 	if pipe == nil {
 		l.Crit("The Store was not given a message pipe")
 		return nil

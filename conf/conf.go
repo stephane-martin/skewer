@@ -221,58 +221,77 @@ func convertClientAuthType(auth_type string) tls.ClientAuthType {
 	}
 }
 
-func (c *BaseConfig) GetCertificateFiles() (list []string) {
+func cleanList(list set.Interface) (res []string) {
+	res = make([]string, 0)
+	for _, f := range list.List() {
+		if f != nil {
+			if fs, ok := f.(string); ok && len(fs) > 0 {
+				if utils.FileExists(fs) {
+					res = append(res, fs)
+				}
+			}
+		}
+	}
+	return res
+}
+
+func (c *BaseConfig) GetCertificateFiles() (res map[string]([]string)) {
+	res = map[string]([]string){}
 	s := set.New(set.ThreadSafe)
 	s.Add(c.KafkaDest.CAFile, c.KafkaDest.CertFile, c.KafkaDest.KeyFile)
 	s.Add(c.RelpDest.CAFile, c.RelpDest.CertFile, c.RelpDest.KeyFile)
 	s.Add(c.TcpDest.CAFile, c.TcpDest.CertFile, c.TcpDest.KeyFile)
+	res["dests"] = cleanList(s)
+
+	s = set.New(set.ThreadSafe)
 	for _, src := range c.TcpSource {
 		s.Add(src.CAFile, src.CertFile, src.KeyFile)
 	}
+	res["tcpsource"] = cleanList(s)
+
+	s = set.New(set.ThreadSafe)
 	for _, src := range c.RelpSource {
 		s.Add(src.CAFile, src.CertFile, src.KeyFile)
 	}
+	res["relpsource"] = cleanList(s)
+
+	s = set.New(set.ThreadSafe)
 	for _, src := range c.KafkaSource {
 		s.Add(src.CAFile, src.CertFile, src.KeyFile)
 	}
-	list = make([]string, 0)
-	for _, f := range s.List() {
-		if f != nil {
-			if fs, ok := f.(string); ok && len(fs) > 0 {
-				if utils.FileExists(fs) {
-					list = append(list, fs)
-				}
-			}
-		}
-	}
-	return list
+	res["kafkasource"] = cleanList(s)
+
+	return res
+
 }
 
-func (c *BaseConfig) GetCertificatePaths() (list []string) {
+func (c *BaseConfig) GetCertificatePaths() (res map[string]([]string)) {
+	res = map[string]([]string){}
 	s := set.New(set.ThreadSafe)
 	s.Add(c.KafkaDest.CAPath)
 	s.Add(c.RelpDest.CAPath)
 	s.Add(c.TcpDest.CAPath)
+	res["dests"] = cleanList(s)
+
+	s = set.New(set.ThreadSafe)
 	for _, src := range c.TcpSource {
 		s.Add(src.CAPath)
 	}
+	res["tcpsource"] = cleanList(s)
+
+	s = set.New(set.ThreadSafe)
 	for _, src := range c.RelpSource {
 		s.Add(src.CAPath)
 	}
+	res["relpsource"] = cleanList(s)
+
+	s = set.New(set.ThreadSafe)
 	for _, src := range c.KafkaSource {
 		s.Add(src.CAPath)
 	}
-	list = make([]string, 0)
-	for _, f := range s.List() {
-		if f != nil {
-			if fs, ok := f.(string); ok && len(fs) > 0 {
-				if utils.FileExists(fs) && utils.IsDir(fs) {
-					list = append(list, fs)
-				}
-			}
-		}
-	}
-	return list
+	res["kafkasource"] = cleanList(s)
+
+	return res
 }
 
 func (c *SyslogSourceBaseConfig) GetListenAddrs() (addrs map[int]string, err error) {

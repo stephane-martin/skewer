@@ -3,7 +3,7 @@ package services
 import "github.com/stephane-martin/skewer/model"
 import dto "github.com/prometheus/client_model/go"
 
-type NetworkService interface {
+type Provider interface {
 	Start(test bool) ([]model.ListenerInfo, error)
 	Stop()
 	Shutdown()

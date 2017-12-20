@@ -15,7 +15,6 @@ import (
 
 	"github.com/awnumar/memguard"
 	"github.com/inconshreveable/log15"
-	"github.com/kardianos/osext"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/consul"
@@ -46,20 +45,16 @@ type PluginController struct {
 
 	conf conf.BaseConfig
 
-	binderHandle uintptr
-	loggerHandle uintptr
-	pipe         *os.File
-	logger       log15.Logger
-	stasher      *StorePlugin
-	registry     *consul.Registry
+	pipe     *os.File
+	logger   log15.Logger
+	stasher  *StorePlugin
+	registry *consul.Registry
 
 	metricsChan chan []*dto.MetricFamily
-	stdin       io.WriteCloser
 	stdinMu     sync.Mutex
 	stdinWriter *utils.SigWriter
 	signKey     *memguard.LockedBuffer
-	stdout      io.ReadCloser
-	cmd         *exec.Cmd
+	cmd         *namespaces.PluginCmd
 
 	ShutdownChan chan struct{}
 	StopChan     chan struct{}
@@ -91,13 +86,11 @@ func ControllerFactory(ring kring.Ring, signKey *memguard.LockedBuffer, stasher 
 	return &f
 }
 
-func (f *CFactory) New(typ Types, binderHandle uintptr, loggerHandle uintptr) *PluginController {
+func (f *CFactory) New(typ Types) *PluginController {
 	s := PluginController{
 		typ:          typ,
 		stasher:      f.stasher,
 		registry:     f.registry,
-		binderHandle: binderHandle,
-		loggerHandle: loggerHandle,
 		logger:       f.logger,
 		signKey:      f.signKey,
 		ring:         f.ring,
@@ -108,7 +101,7 @@ func (f *CFactory) New(typ Types, binderHandle uintptr, loggerHandle uintptr) *P
 }
 
 func (f *CFactory) NewStore(loggerHandle uintptr) *StorePlugin {
-	s := &StorePlugin{PluginController: f.New(Store, 0, loggerHandle)}
+	s := &StorePlugin{PluginController: f.New(Store)}
 	s.MessageQueue = queue.NewMessageQueue()
 	s.pushwg = &sync.WaitGroup{}
 	return s
@@ -231,7 +224,7 @@ func (s *PluginController) kill(misbevave bool) (err error) {
 		s.logger.Crit("killing misbehaving plugin", "type", Types2Names[s.typ])
 	}
 	s.stdinMu.Lock()
-	err = s.cmd.Process.Kill()
+	err = s.cmd.Kill()
 	s.stdinMu.Unlock()
 	return err
 }
@@ -338,7 +331,7 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 		}() // end of defer
 
 		// read the encoded messages that the plugin may write on stdout
-		scanner := bufio.NewScanner(s.stdout)
+		scanner := bufio.NewScanner(s.cmd.Stdout)
 		scanner.Split(utils.PluginSplit)
 		scanner.Buffer(make([]byte, 0, 132000), 132000)
 		command := ""
@@ -530,58 +523,66 @@ func (s *PluginController) Start() (infos []model.ListenerInfo, err error) {
 	return infos, nil
 }
 
-func setupCmd(name string, r kring.Ring, binderHandle, loggerHandle uintptr, messagePipe *os.File, test bool) (*exec.Cmd, io.WriteCloser, io.ReadCloser, error) {
-	exe, err := osext.Executable()
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	envs := []string{"PATH=/bin:/usr/bin", fmt.Sprintf("SKEWER_SESSION=%s", r.GetSessionID().String())}
-	files := []*os.File{}
-	if binderHandle != 0 {
-		files = append(files, os.NewFile(uintptr(binderHandle), "binder"))
-		envs = append(envs, "SKEWER_HAS_BINDER=TRUE")
-	}
-	if loggerHandle != 0 {
-		files = append(files, os.NewFile(uintptr(loggerHandle), "logger"))
-		envs = append(envs, "SKEWER_HAS_LOGGER=TRUE")
-	}
-	if messagePipe != nil {
-		files = append(files, messagePipe)
-		envs = append(envs, "SKEWER_HAS_PIPE=TRUE")
-	}
-	rPipe, wPipe, err := os.Pipe()
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	files = append(files, rPipe)
-	err = r.WriteRingPass(wPipe)
-	_ = wPipe.Close()
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	if test {
-		envs = append(envs, "SKEWER_TEST=TRUE")
-	}
-
-	cmd := &exec.Cmd{
-		Path:       exe,
-		Stderr:     os.Stderr,
-		ExtraFiles: files,
-		Env:        envs,
-		Args:       []string{name},
-	}
-	in, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	out, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	return cmd, in, out, nil
+type PluginCreateOpts struct {
+	test         bool
+	dumpable     bool
+	storePath    string
+	confDir      string
+	acctPath     string
+	fileDestTmpl string
+	certFiles    []string
+	certPaths    []string
 }
 
-func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, acctPath, fileDestTmpl string) error {
+func DumpableOpt(dumpable bool) func(*PluginCreateOpts) {
+	return func(opts *PluginCreateOpts) {
+		opts.dumpable = dumpable
+	}
+}
+
+func TestOpt(test bool) func(*PluginCreateOpts) {
+	return func(opts *PluginCreateOpts) {
+		opts.test = test
+	}
+}
+
+func StorePathOpt(path string) func(*PluginCreateOpts) {
+	return func(opts *PluginCreateOpts) {
+		opts.storePath = path
+	}
+}
+
+func ConfDirOpt(path string) func(*PluginCreateOpts) {
+	return func(opts *PluginCreateOpts) {
+		opts.confDir = path
+	}
+}
+
+func AccountingPathOpt(path string) func(*PluginCreateOpts) {
+	return func(opts *PluginCreateOpts) {
+		opts.acctPath = path
+	}
+}
+
+func FileDestTmplOpt(path string) func(*PluginCreateOpts) {
+	return func(opts *PluginCreateOpts) {
+		opts.fileDestTmpl = path
+	}
+}
+
+func CertFilesOpt(list []string) func(*PluginCreateOpts) {
+	return func(opts *PluginCreateOpts) {
+		opts.certFiles = list
+	}
+}
+
+func CertPathsOpt(list []string) func(*PluginCreateOpts) {
+	return func(opts *PluginCreateOpts) {
+		opts.certPaths = list
+	}
+}
+
+func (s *PluginController) Create(optsfuncs ...func(*PluginCreateOpts)) error {
 	// if the provider process already lives, Create() just returns
 	s.createdMu.Lock()
 	if s.created {
@@ -589,16 +590,18 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 		return nil
 	}
 
+	opts := &PluginCreateOpts{
+		certFiles: make([]string, 0),
+		certPaths: make([]string, 0),
+	}
+	for _, f := range optsfuncs {
+		f(opts)
+	}
+
 	s.ShutdownChan = make(chan struct{})
 	s.ExitCode = 0
 	var err error
 	name := Types2Names[s.typ]
-	if s.typ != Accounting {
-		acctPath = ""
-	}
-	if s.typ != Store {
-		fileDestTmpl = ""
-	}
 
 	switch s.typ {
 	case RELP, TCP, UDP, Accounting, Journal, KafkaSource:
@@ -615,7 +618,14 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 		// this way we can support environments where user namespaces are not
 		// available
 		if capabilities.CapabilitiesSupported {
-			s.cmd, s.stdin, s.stdout, err = setupCmd(fmt.Sprintf("confined-%s", name), s.ring, s.binderHandle, s.loggerHandle, pipew, test)
+			s.cmd, err = namespaces.SetupCmd(
+				fmt.Sprintf("confined-%s", name),
+				s.ring,
+				namespaces.BinderHandle(BinderHdl(s.typ)),
+				namespaces.LoggerHandle(LoggerHdl(s.typ)),
+				namespaces.Pipe(pipew),
+				namespaces.Test(opts.test),
+			)
 			if err != nil {
 				_ = piper.Close()
 				_ = pipew.Close()
@@ -623,14 +633,26 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 				s.createdMu.Unlock()
 				return err
 			}
-			err = namespaces.NewNamespacedCmd(s.cmd).Dumpable(dumpable).AccountingPath(acctPath).Start()
+			err = s.cmd.Namespaced().
+				Dumpable(opts.dumpable).
+				AccountingPath(opts.acctPath).
+				CertFiles(opts.certFiles).
+				CertPaths(opts.certPaths).
+				Start()
 		}
 
 		if err != nil {
 			s.logger.Warn("Starting plugin in user namespace failed", "error", err, "type", name)
 		}
 		if err != nil || !capabilities.CapabilitiesSupported {
-			s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.ring, s.binderHandle, s.loggerHandle, pipew, test)
+			s.cmd, err = namespaces.SetupCmd(
+				name,
+				s.ring,
+				namespaces.BinderHandle(BinderHdl(s.typ)),
+				namespaces.LoggerHandle(LoggerHdl(s.typ)),
+				namespaces.Pipe(pipew),
+				namespaces.Test(opts.test),
+			)
 			if err != nil {
 				_ = piper.Close()
 				_ = pipew.Close()
@@ -654,7 +676,14 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 		}
 		s.pipe = pipew
 		if capabilities.CapabilitiesSupported {
-			s.cmd, s.stdin, s.stdout, err = setupCmd(fmt.Sprintf("confined-%s", name), s.ring, s.binderHandle, s.loggerHandle, piper, test)
+			s.cmd, err = namespaces.SetupCmd(
+				fmt.Sprintf("confined-%s", name),
+				s.ring,
+				namespaces.BinderHandle(BinderHdl(s.typ)),
+				namespaces.LoggerHandle(LoggerHdl(s.typ)),
+				namespaces.Pipe(pipew),
+				namespaces.Test(opts.test),
+			)
 			if err != nil {
 				_ = piper.Close()
 				_ = pipew.Close()
@@ -662,10 +691,12 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 				s.createdMu.Unlock()
 				return err
 			}
-			err = namespaces.NewNamespacedCmd(s.cmd).
-				Dumpable(dumpable).
-				StorePath(storePath).
-				FileDestTemplate(fileDestTmpl).
+			err = s.cmd.Namespaced().
+				Dumpable(opts.dumpable).
+				StorePath(opts.storePath).
+				FileDestTemplate(opts.fileDestTmpl).
+				CertFiles(opts.certFiles).
+				CertPaths(opts.certPaths).
 				Start()
 		}
 
@@ -673,7 +704,14 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 			s.logger.Warn("Starting plugin in user namespace failed", "error", err, "type", name)
 		}
 		if err != nil || !capabilities.CapabilitiesSupported {
-			s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.ring, s.binderHandle, s.loggerHandle, piper, test)
+			s.cmd, err = namespaces.SetupCmd(
+				name,
+				s.ring,
+				namespaces.BinderHandle(BinderHdl(s.typ)),
+				namespaces.LoggerHandle(LoggerHdl(s.typ)),
+				namespaces.Pipe(pipew),
+				namespaces.Test(opts.test),
+			)
 			if err != nil {
 				_ = piper.Close()
 				_ = pipew.Close()
@@ -689,7 +727,13 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 		}
 
 	default:
-		s.cmd, s.stdin, s.stdout, err = setupCmd(name, s.ring, s.binderHandle, s.loggerHandle, nil, test)
+		s.cmd, err = namespaces.SetupCmd(
+			name,
+			s.ring,
+			namespaces.BinderHandle(BinderHdl(s.typ)),
+			namespaces.LoggerHandle(LoggerHdl(s.typ)),
+			namespaces.Test(opts.test),
+		)
 		if err != nil {
 			close(s.ShutdownChan)
 			s.createdMu.Unlock()
@@ -703,7 +747,7 @@ func (s *PluginController) Create(test bool, dumpable bool, storePath, confDir, 
 		s.createdMu.Unlock()
 		return err
 	}
-	s.stdinWriter = utils.NewSignatureWriter(s.stdin, s.signKey)
+	s.stdinWriter = utils.NewSignatureWriter(s.cmd.Stdin, s.signKey)
 	s.created = true
 	s.createdMu.Unlock()
 

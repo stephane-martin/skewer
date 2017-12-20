@@ -53,8 +53,8 @@ func (c *NamespacedCmd) Start() error {
 			// take the prefix, eg "/var/log/skewer"
 			fileDestParentDir = strings.TrimRight(c.fileDestTmpl[:n], "/")
 		}
-		if !utils.IsDir(fileParentDestDir) {
-			return fmt.Errorf("Supposed to write logs to directory '%s', but it does not exist, or is not a directory", fileParentDestDir)
+		if !utils.IsDir(fileDestParentDir) {
+			return fmt.Errorf("Supposed to write logs to directory '%s', but it does not exist, or is not a directory", fileDestParentDir)
 		}
 
 	}
@@ -79,9 +79,9 @@ func (c *NamespacedCmd) Start() error {
 		}
 	}
 
-	c.cmd.Env = append(c.cmd.Env, setupEnv(c.storePath, c.confPath, acctParentDir, fileParentDestDir)...)
+	c.cmd.AppendEnv(setupEnv(c.storePath, c.confPath, acctParentDir, fileDestParentDir))
 
-	c.cmd.SysProcAttr = &syscall.SysProcAttr{
+	c.cmd.SetSysProcAttr(&syscall.SysProcAttr{
 		Cloneflags: syscall.CLONE_NEWUSER | syscall.CLONE_NEWPID | syscall.CLONE_NEWUTS | syscall.CLONE_NEWNS,
 
 		UidMappings: []syscall.SysProcIDMap{
@@ -98,7 +98,7 @@ func (c *NamespacedCmd) Start() error {
 				Size:        1,
 			},
 		},
-	}
+	})
 
 	// TODO: DUMPABLE should only be set in the child, just to write uid_map
 	if !dumpable {
@@ -110,7 +110,6 @@ func (c *NamespacedCmd) Start() error {
 	}
 	return err
 }
-
 
 func PivotRoot(root string) (err error) {
 	oldroot := filepath.Join(root, "oldroot")

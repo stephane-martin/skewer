@@ -102,38 +102,44 @@ func (c *ConfigurationService) Chan() chan *conf.BaseConfig {
 
 func (c *ConfigurationService) Start(r kring.Ring) error {
 	var err error
-	var cmd *exec.Cmd
-	var stdin io.WriteCloser
-	var stdout io.ReadCloser
+	var cmd *namespaces.PluginCmd
 	c.output = make(chan *conf.BaseConfig)
 
 	if capabilities.CapabilitiesSupported {
-		cmd, stdin, stdout, err = setupCmd("confined-skewer-conf", r, 0, c.loggerHandle, nil, false)
+		cmd, err = namespaces.SetupCmd(
+			"confined-skewer-conf",
+			r,
+			namespaces.LoggerHandle(c.loggerHandle),
+		)
 		if err != nil {
 			close(c.output)
 			return err
 		}
-		err = namespaces.NewNamespacedCmd(cmd).ConfPath(c.confdir).Start()
+		err = cmd.Namespaced().ConfPath(c.confdir).Start()
 	}
 	if err != nil {
 		c.logger.Warn("Starting configuration service in user namespace has failed", "error", err)
 	}
 	if err != nil || !capabilities.CapabilitiesSupported {
-		cmd, stdin, stdout, err = setupCmd("skewer-conf", r, 0, c.loggerHandle, nil, false)
+		cmd, err = namespaces.SetupCmd(
+			"skewer-conf",
+			r,
+			namespaces.LoggerHandle(c.loggerHandle),
+		)
 		if err != nil {
 			close(c.output)
 			return err
 		}
-		err = cmd.Start()
+		err = cmd.Cmd.Start()
 	}
 	if err != nil {
-		_ = stdin.Close()
-		_ = stdout.Close()
+		_ = cmd.Stdin.Close()
+		_ = cmd.Stdout.Close()
 		close(c.output)
 		return err
 	}
-	c.stdin = stdin
-	c.stdinWriter = utils.NewSignatureWriter(stdin, c.signKey)
+	c.stdin = cmd.Stdin
+	c.stdinWriter = utils.NewSignatureWriter(cmd.Stdin, c.signKey)
 
 	startedChan := make(chan error)
 
@@ -151,13 +157,13 @@ func (c *ConfigurationService) Start(r kring.Ring) error {
 			if kill {
 				c.logger.Warn("Killing configuration service")
 				c.stdinMu.Lock()
-				_ = cmd.Process.Kill()
+				_ = cmd.Cmd.Process.Kill()
 				c.stdinMu.Unlock()
 			}
 
 			errChan := make(chan error)
 			go func() {
-				errChan <- cmd.Wait()
+				errChan <- cmd.Cmd.Wait()
 				close(errChan)
 			}()
 
@@ -168,9 +174,9 @@ func (c *ConfigurationService) Start(r kring.Ring) error {
 			case <-time.After(3 * time.Second):
 				c.logger.Warn("Timeout: killing configuration service")
 				c.stdinMu.Lock()
-				_ = cmd.Process.Kill()
+				_ = cmd.Cmd.Process.Kill()
 				c.stdinMu.Unlock()
-				err = cmd.Wait()
+				err = cmd.Cmd.Wait()
 			}
 
 			if err == nil {
@@ -189,7 +195,7 @@ func (c *ConfigurationService) Start(r kring.Ring) error {
 		}()
 
 		var command string
-		scanner := bufio.NewScanner(stdout)
+		scanner := bufio.NewScanner(cmd.Stdout)
 		scanner.Split(utils.PluginSplit)
 
 		for scanner.Scan() {

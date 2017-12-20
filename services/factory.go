@@ -41,6 +41,21 @@ var Names2Types map[string]Types = map[string]Types{
 var Types2Names map[Types]string
 var Types2ConfinedNames map[Types]string
 
+var Handles []ServiceHandle
+var HandlesMap map[ServiceHandle]uintptr
+
+type HandleType uint8
+
+const (
+	BINDER HandleType = iota
+	LOGGER
+)
+
+type ServiceHandle struct {
+	Service string
+	Type    HandleType
+}
+
 func init() {
 	Types2Names = map[Types]string{}
 	Types2ConfinedNames = map[Types]string{}
@@ -48,9 +63,38 @@ func init() {
 		Types2Names[v] = k
 		Types2ConfinedNames[v] = "confined-" + k
 	}
+
+	Handles = []ServiceHandle{
+		{"child", BINDER},
+		{Types2Names[TCP], BINDER},
+		{Types2Names[UDP], BINDER},
+		{Types2Names[RELP], BINDER},
+		{"child", LOGGER},
+		{Types2Names[TCP], LOGGER},
+		{Types2Names[UDP], LOGGER},
+		{Types2Names[RELP], LOGGER},
+		{Types2Names[Journal], LOGGER},
+		{Types2Names[Configuration], LOGGER},
+		{Types2Names[Store], LOGGER},
+		{Types2Names[Accounting], LOGGER},
+		{Types2Names[KafkaSource], LOGGER},
+	}
+
+	HandlesMap = map[ServiceHandle]uintptr{}
+	for i, h := range Handles {
+		HandlesMap[h] = uintptr(i + 3)
+	}
 }
 
-func ConfigureAndStartService(s NetworkService, c conf.BaseConfig, test bool) ([]model.ListenerInfo, error) {
+func LoggerHdl(typ Types) uintptr {
+	return HandlesMap[ServiceHandle{Types2Names[typ], LOGGER}]
+}
+
+func BinderHdl(typ Types) uintptr {
+	return HandlesMap[ServiceHandle{Types2Names[typ], BINDER}]
+}
+
+func ConfigureAndStartService(s Provider, c conf.BaseConfig, test bool) ([]model.ListenerInfo, error) {
 
 	switch s := s.(type) {
 	case *network.TcpServiceImpl:
@@ -79,7 +123,7 @@ func ConfigureAndStartService(s NetworkService, c conf.BaseConfig, test bool) ([
 
 }
 
-func ProviderFactory(t Types, r kring.Ring, reporter *base.Reporter, b *binder.BinderClient, l log15.Logger, pipe *os.File) NetworkService {
+func ProviderFactory(t Types, r kring.Ring, reporter *base.Reporter, b *binder.BinderClient, l log15.Logger, pipe *os.File) Provider {
 	switch t {
 	case TCP:
 		return network.NewTcpService(reporter, b, l)

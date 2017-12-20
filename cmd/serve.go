@@ -50,21 +50,6 @@ var GidFlag string
 var DumpableFlag bool
 var profile bool
 
-var Handles []ServiceHandle
-var HandlesMap map[ServiceHandle]uintptr
-
-type HandleType uint8
-
-const (
-	BINDER HandleType = iota
-	LOGGER
-)
-
-type ServiceHandle struct {
-	Service string
-	Type    HandleType
-}
-
 func init() {
 	RootCmd.AddCommand(serveCobraCmd)
 	serveCobraCmd.Flags().BoolVar(&testFlag, "test", false, "Print messages to stdout instead of sending to Kafka")
@@ -80,34 +65,6 @@ func init() {
 	serveCobraCmd.Flags().BoolVar(&DumpableFlag, "dumpable", false, "if set, the skewer process will be traceable/dumpable")
 	serveCobraCmd.Flags().BoolVar(&profile, "profile", false, "if set, profile memory")
 
-	Handles = []ServiceHandle{
-		{"child", BINDER},
-		{services.Types2Names[services.TCP], BINDER},
-		{services.Types2Names[services.UDP], BINDER},
-		{services.Types2Names[services.RELP], BINDER},
-		{"child", LOGGER},
-		{services.Types2Names[services.TCP], LOGGER},
-		{services.Types2Names[services.UDP], LOGGER},
-		{services.Types2Names[services.RELP], LOGGER},
-		{services.Types2Names[services.Journal], LOGGER},
-		{services.Types2Names[services.Configuration], LOGGER},
-		{services.Types2Names[services.Store], LOGGER},
-		{services.Types2Names[services.Accounting], LOGGER},
-		{services.Types2Names[services.KafkaSource], LOGGER},
-	}
-
-	HandlesMap = map[ServiceHandle]uintptr{}
-	for i, h := range Handles {
-		HandlesMap[h] = uintptr(i + 3)
-	}
-}
-
-func LoggerHdl(typ services.Types) uintptr {
-	return HandlesMap[ServiceHandle{services.Types2Names[typ], LOGGER}]
-}
-
-func BinderHdl(typ services.Types) uintptr {
-	return HandlesMap[ServiceHandle{services.Types2Names[typ], BINDER}]
 }
 
 // ExecuteChild sets up the environment for the serve command and starts it.
@@ -116,7 +73,7 @@ func ExecuteChild() (err error) {
 	if len(sessionID) == 0 {
 		return fmt.Errorf("empty session ID")
 	}
-	ringSecretPipe := os.NewFile(uintptr(len(Handles)+3), "ringsecretpipe")
+	ringSecretPipe := os.NewFile(uintptr(len(services.Handles)+3), "ringsecretpipe")
 	var ringSecret *memguard.LockedBuffer
 	buf := make([]byte, 32)
 	_, err = ringSecretPipe.Read(buf)
@@ -177,7 +134,7 @@ func newServeChild(ring kring.Ring) (*serveChild, error) {
 	if err != nil {
 		return nil, err
 	}
-	childLoggerHdl := HandlesMap[ServiceHandle{"child", LOGGER}]
+	childLoggerHdl := services.HandlesMap[services.ServiceHandle{"child", services.LOGGER}]
 	conn, err := net.FileConn(os.NewFile(childLoggerHdl, "logger"))
 	if err != nil {
 		return nil, err
@@ -267,7 +224,7 @@ func (ch *serveChild) ShutdownControllers() {
 }
 
 func (ch *serveChild) setupConfiguration() error {
-	ch.confService = services.NewConfigurationService(ch.signPrivKey, LoggerHdl(services.Configuration), ch.logger)
+	ch.confService = services.NewConfigurationService(ch.signPrivKey, services.LoggerHdl(services.Configuration), ch.logger)
 	ch.confService.SetConfDir(configDirName)
 	ch.confService.SetConsulParams(ch.consulParams)
 	err := ch.confService.Start(ch.ring)
@@ -308,7 +265,7 @@ func (ch *serveChild) setupConsulRegistry() error {
 
 func (ch *serveChild) setupStore() (st *services.StorePlugin, err error) {
 	f := services.ControllerFactory(ch.ring, ch.signPrivKey, nil, ch.consulRegistry, ch.logger)
-	st = f.NewStore(LoggerHdl(services.Store))
+	st = f.NewStore(services.LoggerHdl(services.Store))
 	st.SetConf(*ch.conf)
 
 	tmpl := ""
@@ -317,7 +274,17 @@ func (ch *serveChild) setupStore() (st *services.StorePlugin, err error) {
 		tmpl = ch.conf.FileDest.Filename
 	}
 
-	err = st.Create(testFlag, DumpableFlag, storeDirname, "", "", tmpl)
+	certfiles := ch.conf.GetCertificateFiles()["dests"]
+	certpaths := ch.conf.GetCertificatePaths()["dests"]
+
+	err = st.Create(
+		services.TestOpt(testFlag),
+		services.DumpableOpt(DumpableFlag),
+		services.StorePathOpt(storeDirname),
+		services.FileDestTmplOpt(tmpl),
+		services.CertFilesOpt(certfiles),
+		services.CertPathsOpt(certpaths),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("can't create the message Store: %s", err)
 	}
@@ -348,7 +315,7 @@ func setupController(f *services.CFactory, typ services.Types) *services.PluginC
 	case services.Configuration, services.Store:
 		return nil
 	default:
-		return f.New(typ, BinderHdl(typ), LoggerHdl(typ))
+		return f.New(typ)
 	}
 }
 
@@ -402,7 +369,15 @@ func (ch *serveChild) StartController(typ services.Types) error {
 func (ch *serveChild) StartKafkaSource() error {
 	if len(ch.conf.KafkaSource) > 0 {
 		ch.logger.Info("Kafka sources are enabled")
-		err := ch.controllers[services.KafkaSource].Create(testFlag, DumpableFlag, "", "", "", "")
+		certfiles := ch.conf.GetCertificateFiles()["kafkasource"]
+		certpaths := ch.conf.GetCertificatePaths()["kafkasource"]
+
+		err := ch.controllers[services.KafkaSource].Create(
+			services.TestOpt(testFlag),
+			services.DumpableOpt(DumpableFlag),
+			services.CertFilesOpt(certfiles),
+			services.CertPathsOpt(certpaths),
+		)
 		if err != nil {
 			return fmt.Errorf("error creating the kafka source plugin: %s", err)
 		}
@@ -420,7 +395,11 @@ func (ch *serveChild) StartKafkaSource() error {
 func (ch *serveChild) StartAccounting() error {
 	if ch.conf.Accounting.Enabled {
 		ch.logger.Info("Process accounting is enabled")
-		err := ch.controllers[services.Accounting].Create(testFlag, DumpableFlag, "", "", ch.conf.Accounting.Path, "")
+		err := ch.controllers[services.Accounting].Create(
+			services.TestOpt(testFlag),
+			services.DumpableOpt(DumpableFlag),
+			services.AccountingPathOpt(ch.conf.Accounting.Path),
+		)
 		if err != nil {
 			return fmt.Errorf("error creating the accounting plugin: %s", err)
 		}
@@ -442,7 +421,10 @@ func (ch *serveChild) StartJournal() error {
 			ctl := ch.controllers[services.Journal]
 			ch.logger.Info("Journald service is enabled")
 			// in fact Create() will only do something the first time startJournal() is called
-			err := ctl.Create(testFlag, DumpableFlag, "", "", "", "")
+			err := ctl.Create(
+				services.TestOpt(testFlag),
+				services.DumpableOpt(DumpableFlag),
+			)
 			if err != nil {
 				return fmt.Errorf("error creating Journald plugin: %s", err)
 			}
@@ -463,8 +445,17 @@ func (ch *serveChild) StartJournal() error {
 
 // StartRelp starts the Relp process.
 func (ch *serveChild) StartRelp() error {
+	certfiles := ch.conf.GetCertificateFiles()["relpsource"]
+	certpaths := ch.conf.GetCertificatePaths()["relpsource"]
+
 	ctl := ch.controllers[services.RELP]
-	err := ctl.Create(testFlag, DumpableFlag, "", "", "", "")
+	err := ctl.Create(
+		services.TestOpt(testFlag),
+		services.DumpableOpt(DumpableFlag),
+		services.CertFilesOpt(certfiles),
+		services.CertPathsOpt(certpaths),
+	)
+
 	if err != nil {
 		return fmt.Errorf("error creating RELP plugin: %s", err)
 	}
@@ -479,8 +470,17 @@ func (ch *serveChild) StartRelp() error {
 
 // StartTcp starts the TCP process.
 func (ch *serveChild) StartTcp() error {
+	certfiles := ch.conf.GetCertificateFiles()["tcpsource"]
+	certpaths := ch.conf.GetCertificatePaths()["tcpsource"]
+
 	ctl := ch.controllers[services.TCP]
-	err := ctl.Create(testFlag, DumpableFlag, "", "", "", "")
+	err := ctl.Create(
+		services.TestOpt(testFlag),
+		services.DumpableOpt(DumpableFlag),
+		services.CertFilesOpt(certfiles),
+		services.CertPathsOpt(certpaths),
+	)
+
 	if err != nil {
 		return fmt.Errorf("error creating TCP plugin: %s", err)
 	}
@@ -501,7 +501,11 @@ func (ch *serveChild) StartTcp() error {
 // StartUdp starts the UDP process.
 func (ch *serveChild) StartUdp() error {
 	ctl := ch.controllers[services.UDP]
-	err := ctl.Create(testFlag, DumpableFlag, "", "", "", "")
+	err := ctl.Create(
+		services.TestOpt(testFlag),
+		services.DumpableOpt(DumpableFlag),
+	)
+
 	if err != nil {
 		return fmt.Errorf("error creating UDP plugin: %s", err)
 	}
