@@ -58,7 +58,7 @@ func (c *NamespacedCmd) Start() (err error) {
 		if err != nil {
 			return err
 		}
-		path.acctParentDir = filepath.Dir(acctPath)
+		paths.acctParentDir = filepath.Dir(acctPath)
 		if !utils.IsDir(paths.acctParentDir) {
 			return fmt.Errorf("Accounting path '%s' does not exist or is not a directory", paths.acctParentDir)
 		}
@@ -560,20 +560,20 @@ func setupEnv(paths envPaths) (env []string) {
 		env = append(env, fmt.Sprintf("SKEWER_TTYNAME=%s", myTtyName))
 	}
 
-	if len(paths.confDir) > 0 {
-		env = append(env, fmt.Sprintf("SKEWER_CONF_DIR=%s", paths.confDir))
+	if len(paths.confPath) > 0 {
+		env = append(env, fmt.Sprintf("SKEWER_CONF_DIR=%s", paths.confPath))
 	}
 
 	if len(paths.storePath) > 0 {
 		env = append(env, fmt.Sprintf("SKEWER_STORE_PATH=%s", paths.storePath))
 	}
 
-	if len(paths.acctDir) > 0 {
-		env = append(env, fmt.Sprintf("SKEWER_ACCT_DIR=%s", paths.acctDir))
+	if len(paths.acctParentDir) > 0 {
+		env = append(env, fmt.Sprintf("SKEWER_ACCT_DIR=%s", paths.acctParentDir))
 	}
 
-	if len(paths.fileDestDir) > 0 {
-		env = append(env, fmt.Sprintf("SKEWER_FILEDEST_DIR=%s", paths.fileDestDir))
+	if len(paths.fileDestParentDir) > 0 {
+		env = append(env, fmt.Sprintf("SKEWER_FILEDEST_DIR=%s", paths.fileDestParentDir))
 	}
 
 	if len(paths.certFiles) > 0 {

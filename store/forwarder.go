@@ -103,6 +103,7 @@ func (fwder *fwderImpl) forwardByDest(ctx context.Context, store Store, bc conf.
 			return
 		case <-dest.Fatal():
 			fwder.once.Do(func() {
+				// TODO: just close the forwarder for the relevant destination
 				close(fwder.fatalChan)
 			})
 		}
