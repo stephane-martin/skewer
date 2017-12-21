@@ -24,62 +24,87 @@ type mountPoint struct {
 	Data   string
 }
 
+type envPaths struct {
+	acctParentDir     string
+	fileDestParentDir string
+	storePath         string
+	confPath          string
+	certFiles         []string
+	certPaths         []string
+}
+
 func (c *NamespacedCmd) Start() (err error) {
-	acctParentDir := ""
-	fileDestParentDir := ""
+	paths := envPaths{
+		certFiles: make([]string, 0),
+		certPaths: make([]string, 0),
+	}
+
+	for _, f := range c.certFiles {
+		if !utils.FileExists(f) {
+			return fmt.Errorf("Certificate file '%s' does not exist", f)
+		}
+		paths.certFiles = append(paths.certFiles, f)
+	}
+
+	for _, f := range c.certPaths {
+		if !utils.IsDir(f) {
+			return fmt.Errorf("Certificate path '%s' does not exist or is not a directory", f)
+		}
+		paths.certPaths = append(paths.certPaths, f)
+	}
 
 	if len(c.acctPath) > 0 {
-		c.acctPath, err = filepath.Abs(c.acctPath)
+		acctPath, err := filepath.Abs(c.acctPath)
 		if err != nil {
 			return err
 		}
-		acctParentDir = filepath.Dir(c.acctPath)
-		if !utils.IsDir(acctParentDir) {
-			return fmt.Errorf("Accounting path '%s' does not exist or is not a directory", acctParentDir)
+		path.acctParentDir = filepath.Dir(acctPath)
+		if !utils.IsDir(paths.acctParentDir) {
+			return fmt.Errorf("Accounting path '%s' does not exist or is not a directory", paths.acctParentDir)
 		}
 	}
 
 	if len(c.fileDestTmpl) > 0 {
-		c.fileDestTmpl, err = filepath.Abs(c.fileDestTmpl)
+		fileDestTmpl, err := filepath.Abs(c.fileDestTmpl)
 		if err != nil {
 			return err
 		}
 		// ex for fileDestTmpl: "/var/log/skewer/{{.Fields.Date}}/{{.Fields.Appname}}.log"
-		n := strings.Index(c.fileDestTmpl, "{")
+		n := strings.Index(fileDestTmpl, "{")
 		if n == -1 {
 			// static filename, not a template
-			fileDestParentDir = filepath.Dir(c.fileDestTmpl)
+			paths.fileDestParentDir = filepath.Dir(fileDestTmpl)
 		} else {
 			// take the prefix, eg "/var/log/skewer"
-			fileDestParentDir = strings.TrimRight(c.fileDestTmpl[:n], "/")
+			paths.fileDestParentDir = strings.TrimRight(fileDestTmpl[:n], "/")
 		}
-		if !utils.IsDir(fileDestParentDir) {
-			return fmt.Errorf("Supposed to write logs to directory '%s', but it does not exist, or is not a directory", fileDestParentDir)
+		if !utils.IsDir(paths.fileDestParentDir) {
+			return fmt.Errorf("Supposed to write logs to directory '%s', but it does not exist, or is not a directory", paths.fileDestParentDir)
 		}
 
 	}
 
 	if len(c.storePath) > 0 {
-		c.storePath, err = filepath.Abs(c.storePath)
+		paths.storePath, err = filepath.Abs(c.storePath)
 		if err != nil {
 			return err
 		}
-		if !utils.IsDir(c.storePath) {
-			return fmt.Errorf("Store path '%s' does not exist, or is not a directory", c.storePath)
+		if !utils.IsDir(paths.storePath) {
+			return fmt.Errorf("Store path '%s' does not exist, or is not a directory", paths.storePath)
 		}
 	}
 
 	if len(c.confPath) > 0 {
-		c.confPath, err = filepath.Abs(c.confPath)
+		paths.confPath, err = filepath.Abs(c.confPath)
 		if err != nil {
 			return err
 		}
-		if !utils.IsDir(c.confPath) {
-			return fmt.Errorf("Configuration path '%s' does not exist, or is not a directory", c.confPath)
+		if !utils.IsDir(paths.confPath) {
+			return fmt.Errorf("Configuration path '%s' does not exist, or is not a directory", paths.confPath)
 		}
 	}
 
-	c.cmd.AppendEnv(setupEnv(c.storePath, c.confPath, acctParentDir, fileDestParentDir))
+	c.cmd.AppendEnv(setupEnv(paths))
 
 	c.cmd.SetSysProcAttr(&syscall.SysProcAttr{
 		Cloneflags: syscall.CLONE_NEWUSER | syscall.CLONE_NEWPID | syscall.CLONE_NEWUTS | syscall.CLONE_NEWNS,
@@ -528,31 +553,35 @@ func MakeChroot(targetExec string) (string, error) {
 	return root, nil
 }
 
-func setupEnv(storePath string, confDir string, acctDir string, fileDestDir string) (env []string) {
+func setupEnv(paths envPaths) (env []string) {
 	env = []string{}
 	if ttyname.IsAtty(1) {
 		myTtyName, _ := ttyname.TtyName(1)
 		env = append(env, fmt.Sprintf("SKEWER_TTYNAME=%s", myTtyName))
 	}
 
-	confDir = strings.TrimSpace(confDir)
-	if len(confDir) > 0 {
-		env = append(env, fmt.Sprintf("SKEWER_CONF_DIR=%s", confDir))
+	if len(paths.confDir) > 0 {
+		env = append(env, fmt.Sprintf("SKEWER_CONF_DIR=%s", paths.confDir))
 	}
 
-	storePath = strings.TrimSpace(storePath)
-	if len(storePath) > 0 {
-		env = append(env, fmt.Sprintf("SKEWER_STORE_PATH=%s", storePath))
+	if len(paths.storePath) > 0 {
+		env = append(env, fmt.Sprintf("SKEWER_STORE_PATH=%s", paths.storePath))
 	}
 
-	acctDir = strings.TrimSpace(acctDir)
-	if len(acctDir) > 0 {
-		env = append(env, fmt.Sprintf("SKEWER_ACCT_DIR=%s", acctDir))
+	if len(paths.acctDir) > 0 {
+		env = append(env, fmt.Sprintf("SKEWER_ACCT_DIR=%s", paths.acctDir))
 	}
 
-	fileDestDir = strings.TrimSpace(fileDestDir)
-	if len(fileDestDir) > 0 {
-		env = append(env, fmt.Sprintf("SKEWER_FILEDEST_DIR=%s", fileDestDir))
+	if len(paths.fileDestDir) > 0 {
+		env = append(env, fmt.Sprintf("SKEWER_FILEDEST_DIR=%s", paths.fileDestDir))
+	}
+
+	if len(paths.certFiles) > 0 {
+		env = append(env, fmt.Sprintf("SKEWER_CERT_FILES=%s", strings.Join(paths.certFiles, ";")))
+	}
+
+	if len(paths.certPaths) > 0 {
+		env = append(env, fmt.Sprintf("SKEWER_CERT_PATHS=%s", strings.Join(paths.certPaths, ";")))
 	}
 
 	_, err := exec.LookPath("systemctl")
