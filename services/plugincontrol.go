@@ -681,7 +681,7 @@ func (s *PluginController) Create(optsfuncs ...func(*PluginCreateOpts)) error {
 				s.ring,
 				namespaces.BinderHandle(BinderHdl(s.typ)),
 				namespaces.LoggerHandle(LoggerHdl(s.typ)),
-				namespaces.Pipe(pipew),
+				namespaces.Pipe(piper),
 				namespaces.Test(opts.test),
 			)
 			if err != nil {
@@ -709,7 +709,7 @@ func (s *PluginController) Create(optsfuncs ...func(*PluginCreateOpts)) error {
 				s.ring,
 				namespaces.BinderHandle(BinderHdl(s.typ)),
 				namespaces.LoggerHandle(LoggerHdl(s.typ)),
-				namespaces.Pipe(pipew),
+				namespaces.Pipe(piper),
 				namespaces.Test(opts.test),
 			)
 			if err != nil {

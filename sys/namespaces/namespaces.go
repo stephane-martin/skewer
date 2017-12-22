@@ -310,6 +310,8 @@ func MakeChroot(targetExec string) (string, error) {
 		systemMountsMap[acctDir] = true
 	}
 
+	// TODO: add SKEWER_CERT_PATHS directories
+
 	systemMounts := make([]string, 0, len(systemMountsMap))
 	for dir, b := range systemMountsMap {
 		if b {
@@ -549,6 +551,8 @@ func MakeChroot(targetExec string) (string, error) {
 			"",
 		)
 	}
+
+	// TODO: mount SKEWER_CERT_FILES
 
 	return root, nil
 }

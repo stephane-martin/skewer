@@ -1,8 +1,8 @@
 package clients
 
 import (
-	"github.com/oklog/ulid"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/utils/queue"
 )
 
 type Client interface {
@@ -10,6 +10,6 @@ type Client interface {
 	Close() error
 	Send(msg *model.FullMessage) error
 	Flush() error
-	Ack() chan ulid.ULID
-	Nack() chan ulid.ULID
+	Ack() *queue.AckQueue
+	Nack() *queue.AckQueue
 }

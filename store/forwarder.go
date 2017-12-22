@@ -23,20 +23,23 @@ type forwarderMetrics struct {
 type fwderImpl struct {
 	messageFilterCounter *prometheus.CounterVec
 	logger               log15.Logger
-	fatalChan            chan struct{}
 	wg                   *sync.WaitGroup
-	test                 bool
 	registry             *prometheus.Registry
-	destinations         map[conf.DestinationType]dests.Destination
 	once                 sync.Once
+	store                Store
+	conf                 conf.BaseConfig
+	desttype             conf.DestinationType
+	fatalChan            chan struct{}
 }
 
-func NewForwarder(test bool, logger log15.Logger) (fwder Forwarder) {
+func NewForwarder(desttype conf.DestinationType, st Store, bc conf.BaseConfig, logger log15.Logger) (fwder Forwarder) {
 	f := fwderImpl{
-		test:         test,
-		logger:       logger.New("class", "forwarder"),
-		registry:     prometheus.NewRegistry(),
-		destinations: map[conf.DestinationType]dests.Destination{},
+		logger:    logger.New("class", "forwarder"),
+		registry:  prometheus.NewRegistry(),
+		store:     st,
+		conf:      bc,
+		desttype:  desttype,
+		fatalChan: make(chan struct{}),
 	}
 
 	f.messageFilterCounter = prometheus.NewCounterVec(
@@ -63,29 +66,27 @@ func (fwder *fwderImpl) Fatal() chan struct{} {
 	return fwder.fatalChan
 }
 
+func (fwder *fwderImpl) dofatal() {
+	fwder.once.Do(func() { close(fwder.fatalChan) })
+}
+
 func (fwder *fwderImpl) WaitFinished() {
 	fwder.wg.Wait()
 }
 
-func (fwder *fwderImpl) Forward(ctx context.Context, from Store, bc conf.BaseConfig) {
-	fwder.fatalChan = make(chan struct{})
-	fwder.destinations = map[conf.DestinationType]dests.Destination{}
-	dests := from.Destinations()
-	for _, d := range dests {
-		fwder.wg.Add(1)
-		go fwder.forwardByDest(ctx, from, bc, d)
-	}
+func (fwder *fwderImpl) Forward(ctx context.Context) {
+	fwder.wg.Add(1)
+	go fwder.doForward(ctx)
 }
 
-func (fwder *fwderImpl) forwardByDest(ctx context.Context, store Store, bc conf.BaseConfig, desttype conf.DestinationType) {
-	var err error
-	var dest dests.Destination
+func (fwder *fwderImpl) doForward(ctx context.Context) {
 	defer fwder.wg.Done()
+	var err error
 
-	dest, err = dests.NewDestination(ctx, desttype, bc, store.ACK, store.NACK, store.PermError, fwder.logger)
+	dest, err := dests.NewDestination(ctx, fwder.desttype, fwder.conf, fwder.store.ACK, fwder.store.NACK, fwder.store.PermError, fwder.logger)
 	if err != nil {
 		fwder.logger.Error("Error setting up the destination", "error", err)
-		close(fwder.fatalChan)
+		fwder.dofatal()
 		return
 	}
 
@@ -102,22 +103,16 @@ func (fwder *fwderImpl) forwardByDest(ctx context.Context, store Store, bc conf.
 		case <-ctx.Done():
 			return
 		case <-dest.Fatal():
-			fwder.once.Do(func() {
-				// TODO: just close the forwarder for the relevant destination
-				close(fwder.fatalChan)
-			})
+			fwder.dofatal()
 		}
 	}()
-	fwder.fwdMsgsByDest(ctx, store, dest, desttype)
-}
 
-func (fwder *fwderImpl) fwdMsgsByDest(ctx context.Context, store Store, dest dests.Destination, desttype conf.DestinationType) {
 	jsenvs := map[ulid.ULID]*javascript.Environment{}
 	done := ctx.Done()
-	outputs := store.Outputs(desttype)
+	outputs := fwder.store.Outputs(fwder.desttype)
+
 	var more bool
 	var message *model.FullMessage
-	var err error
 
 	for {
 		select {
@@ -128,8 +123,8 @@ func (fwder *fwderImpl) fwdMsgsByDest(ctx context.Context, store Store, dest des
 				return
 			}
 			if message != nil {
-				err = fwder.fwdMsg(message, jsenvs, store, dest, desttype)
-				store.ReleaseMsg(message)
+				err = fwder.fwdMsg(message, jsenvs, dest)
+				fwder.store.ReleaseMsg(message)
 				if err != nil {
 					fwder.logger.Warn("Error forwarding message", "error", err, "uid", ulid.ULID(message.Uid).String())
 				}
@@ -138,7 +133,7 @@ func (fwder *fwderImpl) fwdMsgsByDest(ctx context.Context, store Store, dest des
 	}
 }
 
-func (fwder *fwderImpl) fwdMsg(m *model.FullMessage, envs map[ulid.ULID]*javascript.Environment, st Store, dst dests.Destination, dtype conf.DestinationType) (err error) {
+func (fwder *fwderImpl) fwdMsg(m *model.FullMessage, envs map[ulid.ULID]*javascript.Environment, dest dests.Destination) (err error) {
 	var errs []error
 	var config *conf.FilterSubConfig
 	var topic, partitionKey string
@@ -148,14 +143,14 @@ func (fwder *fwderImpl) fwdMsg(m *model.FullMessage, envs map[ulid.ULID]*javascr
 	env, ok := envs[m.ConfId]
 	if !ok {
 		// create the environement for the javascript virtual machine
-		config, err = st.GetSyslogConfig(m.ConfId)
+		config, err = fwder.store.GetSyslogConfig(m.ConfId)
 		if err != nil {
 			fwder.logger.Warn(
-				"Could not find the stored configuration for a message",
+				"could not find the stored configuration for a message",
 				"confId", ulid.ULID(m.ConfId).String(),
 				"msgId", ulid.ULID(m.Uid).String(),
 			)
-			st.PermError(m.Uid, dtype)
+			fwder.store.PermError(m.Uid, fwder.desttype)
 			return err
 		}
 		envs[m.ConfId] = javascript.NewFilterEnvironment(
@@ -190,22 +185,21 @@ func (fwder *fwderImpl) fwdMsg(m *model.FullMessage, envs map[ulid.ULID]*javascr
 
 	switch filterResult {
 	case javascript.DROPPED:
-		st.ACK(m.Uid, dtype)
-		fwder.messageFilterCounter.WithLabelValues("dropped", m.Parsed.Client, conf.DestinationNames[dtype]).Inc()
+		fwder.store.ACK(m.Uid, fwder.desttype)
+		fwder.messageFilterCounter.WithLabelValues("dropped", m.Parsed.Client, conf.DestinationNames[fwder.desttype]).Inc()
 		return
 	case javascript.REJECTED:
-		fwder.messageFilterCounter.WithLabelValues("rejected", m.Parsed.Client, conf.DestinationNames[dtype]).Inc()
-		st.NACK(m.Uid, dtype)
+		fwder.messageFilterCounter.WithLabelValues("rejected", m.Parsed.Client, conf.DestinationNames[fwder.desttype]).Inc()
+		fwder.store.NACK(m.Uid, fwder.desttype)
 		return
 	case javascript.PASS:
-		fwder.messageFilterCounter.WithLabelValues("passing", m.Parsed.Client, conf.DestinationNames[dtype]).Inc()
+		fwder.messageFilterCounter.WithLabelValues("passing", m.Parsed.Client, conf.DestinationNames[fwder.desttype]).Inc()
 	default:
-		st.PermError(m.Uid, dtype)
+		fwder.store.PermError(m.Uid, fwder.desttype)
 		fwder.logger.Warn("Error happened processing message", "uid", m.Uid, "error", err)
-		fwder.messageFilterCounter.WithLabelValues("unknown", m.Parsed.Client, conf.DestinationNames[dtype]).Inc()
+		fwder.messageFilterCounter.WithLabelValues("unknown", m.Parsed.Client, conf.DestinationNames[fwder.desttype]).Inc()
 		return err
 	}
 
-	return dst.Send(*m, partitionKey, partitionNumber, topic)
-
+	return dest.Send(*m, partitionKey, partitionNumber, topic)
 }

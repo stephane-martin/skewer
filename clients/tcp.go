@@ -11,9 +11,9 @@ import (
 
 	"github.com/free/concurrent-writer/concurrent"
 	"github.com/inconshreveable/log15"
-	"github.com/oklog/ulid"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/queue"
 )
 
 type SyslogTCPClient struct {
@@ -247,10 +247,10 @@ func (c *SyslogTCPClient) Flush() error {
 	return nil
 }
 
-func (c *SyslogTCPClient) Ack() chan ulid.ULID {
+func (c *SyslogTCPClient) Ack() *queue.AckQueue {
 	return nil
 }
 
-func (c *SyslogTCPClient) Nack() chan ulid.ULID {
+func (c *SyslogTCPClient) Nack() *queue.AckQueue {
 	return nil
 }

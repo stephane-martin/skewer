@@ -16,8 +16,10 @@ import (
 	"github.com/free/concurrent-writer/concurrent"
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
+	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/queue"
 	"github.com/stephane-martin/skewer/utils/queue/message"
 	"github.com/zond/gotomic"
 )
@@ -117,8 +119,8 @@ type RELPClient struct {
 	txnr2msgid *Txnr2UidMap
 	windowSize int32
 
-	ackChan   chan ulid.ULID
-	nackChan  chan ulid.ULID
+	ackChan   *queue.AckQueue
+	nackChan  *queue.AckQueue
 	sendQueue *message.Ring
 
 	sync.Mutex
@@ -302,8 +304,8 @@ func (c *RELPClient) Connect() (err error) {
 	if c.windowSize > 0 {
 		window = c.windowSize
 	}
-	c.ackChan = make(chan ulid.ULID)
-	c.nackChan = make(chan ulid.ULID)
+	c.ackChan = queue.NewAckQueue()
+	c.nackChan = queue.NewAckQueue()
 	c.sendQueue = message.NewRing(uint64(window))
 	c.txnr2msgid = NewTxnrMap(window)
 	c.handleWg.Add(1)
@@ -402,7 +404,7 @@ func (c *RELPClient) handleRspAnswers() {
 		keys := make([]int32, 0)
 		c.txnr2msgid.ForEach(
 			func(txnr int32, uid ulid.ULID) {
-				c.nackChan <- uid
+				c.nackChan.Put(uid, conf.Relp)
 				keys = append(keys, txnr)
 			},
 		)
@@ -412,8 +414,8 @@ func (c *RELPClient) handleRspAnswers() {
 		}
 		c.txnr2msgid.Dispose()
 		// close the ackChan channels: we have nothing more to say
-		close(c.ackChan)
-		close(c.nackChan)
+		c.ackChan.Dispose()
+		c.nackChan.Dispose()
 		c.handleWg.Done()
 	}()
 	for {
@@ -441,9 +443,9 @@ func (c *RELPClient) handleRspAnswers() {
 		uid, err := c.txnr2msgid.Get(txnr)
 		if err == nil {
 			if retcode == 200 {
-				c.ackChan <- uid
+				c.ackChan.Put(uid, conf.Relp)
 			} else {
-				c.nackChan <- uid
+				c.nackChan.Put(uid, conf.Relp)
 			}
 		} else {
 			c.logger.Warn("Unknown txnr", "txnr", txnr)
@@ -460,7 +462,7 @@ func (c *RELPClient) doSendOne(msg *model.FullMessage) (err error) {
 		return model.NonEncodableError
 	}
 	if len(buf) == 0 {
-		c.ackChan <- msg.Uid
+		c.ackChan.Put(msg.Uid, conf.Relp)
 		return nil
 	}
 	if c.writer == nil {
@@ -471,7 +473,7 @@ func (c *RELPClient) doSendOne(msg *model.FullMessage) (err error) {
 	if err == nil {
 		return c.txnr2msgid.Put(txnr, msg.Uid)
 	}
-	c.nackChan <- msg.Uid
+	c.nackChan.Put(msg.Uid, conf.Relp)
 	return err
 }
 
@@ -484,7 +486,7 @@ func (c *RELPClient) doSend() {
 			if err != nil {
 				break
 			}
-			c.nackChan <- msg.Uid
+			c.nackChan.Put(msg.Uid, conf.Relp)
 		}
 		c.sendWg.Done()
 	}()
@@ -535,11 +537,11 @@ func (c *RELPClient) Close() (err error) {
 	return err
 }
 
-func (c *RELPClient) Ack() chan ulid.ULID {
+func (c *RELPClient) Ack() *queue.AckQueue {
 	return c.ackChan
 }
 
-func (c *RELPClient) Nack() chan ulid.ULID {
+func (c *RELPClient) Nack() *queue.AckQueue {
 	return c.nackChan
 }
 

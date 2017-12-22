@@ -26,7 +26,7 @@ type Store interface {
 }
 
 type Forwarder interface {
-	Forward(ctx context.Context, from Store, bc conf.BaseConfig)
+	Forward(ctx context.Context)
 	Fatal() chan struct{}
 	WaitFinished()
 	Gather() ([]*dto.MetricFamily, error)

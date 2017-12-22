@@ -32,17 +32,7 @@ func (dests *Destinations) Store(ds conf.DestinationType) {
 }
 
 func (dests *Destinations) Load() (res []conf.DestinationType) {
-	ds := atomic.LoadUint64(&dests.d)
-	if ds == 0 {
-		return []conf.DestinationType{conf.Stderr}
-	}
-	res = make([]conf.DestinationType, 0, len(conf.Destinations))
-	for _, dtype := range conf.Destinations {
-		if ds&uint64(dtype) != 0 {
-			res = append(res, dtype)
-		}
-	}
-	return res
+	return conf.DestinationType(atomic.LoadUint64(&dests.d)).Iterate()
 }
 
 type storeMetrics struct {

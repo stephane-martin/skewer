@@ -10,7 +10,6 @@ import (
 
 	"github.com/awnumar/memguard"
 	"github.com/inconshreveable/log15"
-	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
@@ -20,20 +19,23 @@ import (
 )
 
 type storeServiceImpl struct {
-	st              *store.MessageStore
-	config          conf.BaseConfig
-	logger          log15.Logger
-	shutdownStore   context.CancelFunc
-	shutdownCtx     context.Context
-	cancelForwarder context.CancelFunc
-	forwarder       store.Forwarder
-	mu              *sync.Mutex
-	ingestwg        *sync.WaitGroup
-	pipe            *os.File
-	status          bool
-	test            bool
-	secret          *memguard.LockedBuffer
-	ring            kring.Ring
+	store            *store.MessageStore
+	config           conf.BaseConfig
+	logger           log15.Logger
+	shutdownStore    context.CancelFunc
+	shutdownCtx      context.Context
+	cancelForwarders context.CancelFunc
+	mu               *sync.Mutex
+	ingestwg         *sync.WaitGroup
+	pipe             *os.File
+	status           bool
+	test             bool
+	secret           *memguard.LockedBuffer
+	ring             kring.Ring
+	forwarders       map[conf.DestinationType]store.Forwarder
+	fmu              map[conf.DestinationType]*sync.Mutex
+	fstatus          map[conf.DestinationType]bool
+	fcancels         map[conf.DestinationType]context.CancelFunc
 }
 
 // NewStoreService creates a StoreService.
@@ -51,6 +53,12 @@ func NewStoreService(l log15.Logger, ring kring.Ring, pipe *os.File) Provider {
 		pipe:     pipe,
 		logger:   l,
 		ring:     ring,
+	}
+	impl.fmu = map[conf.DestinationType]*sync.Mutex{}
+	impl.fstatus = map[conf.DestinationType]bool{}
+	impl.fcancels = map[conf.DestinationType]context.CancelFunc{}
+	for _, desttype := range conf.Destinations {
+		impl.fmu[desttype] = &sync.Mutex{}
 	}
 	impl.shutdownCtx, impl.shutdownStore = context.WithCancel(context.Background())
 	return impl
@@ -71,21 +79,160 @@ func (s *storeServiceImpl) SetConfAndRestart(c conf.BaseConfig, test bool) ([]mo
 	} else {
 		s.secret = nil
 	}
-	return s.doStart(test, nil)
+	return s.doStart(nil)
 }
 
 func (s *storeServiceImpl) FatalError() chan struct{} {
 	// Errors return a channel to signal the Store fatal errors.
 	// (Typically no space left on disk.)
-	return s.st.Errors()
+	return s.store.Errors()
 }
 
-// Start starts the Kafka forwarder
 func (s *storeServiceImpl) Start(test bool) ([]model.ListenerInfo, error) {
-	return s.doStart(test, s.mu)
+	// unused
+	return s.doStart(s.mu)
 }
 
-func (s *storeServiceImpl) doStart(test bool, mu *sync.Mutex) ([]model.ListenerInfo, error) {
+func (s *storeServiceImpl) create() error {
+	destinations, err := s.config.Main.GetDestinations()
+	if err != nil {
+		return err
+	}
+	s.store, err = store.NewStore(s.shutdownCtx, s.config.Store, s.ring, destinations, s.logger)
+	if err != nil {
+		return err
+	}
+	err = s.store.StoreAllSyslogConfigs(s.config)
+	if err != nil {
+		return err
+	}
+	// receive syslog messages on the pipe
+	s.ingestwg.Add(1)
+	go func() {
+		defer s.ingestwg.Done()
+
+		scanner := bufio.NewScanner(s.pipe)
+		scanner.Split(utils.MakeDecryptSplit(s.secret))
+		defer func() {
+			if s.secret != nil {
+				//s.secret.Destroy()
+			}
+		}()
+		var err error
+
+		for scanner.Scan() {
+			message := model.FullMessage{}
+			_, err = message.UnmarshalMsg(scanner.Bytes())
+			if err == nil {
+				err, _ = s.store.Stash(message)
+				if err != nil {
+					s.logger.Error("Error pushing message to the store queue", "error", err)
+					go func() { s.Shutdown() }()
+					return
+				}
+			} else {
+				s.logger.Error("Unexpected error decoding message from the Store pipe", "error", err)
+				go func() { s.Shutdown() }()
+				return
+			}
+		}
+
+		err = scanner.Err()
+		if err == io.EOF || err == io.ErrClosedPipe || err == io.ErrUnexpectedEOF {
+			s.logger.Debug("Stopped to read the ingestion store pipe")
+		} else if err != nil {
+			s.logger.Warn("Unexpected error decoding message from the Store pipe", "error", err)
+		}
+	}()
+	return nil
+}
+
+func (s *storeServiceImpl) startAllForwarders(dests conf.DestinationType) {
+	// returns immediately
+	var gforwarderCtx context.Context
+	gforwarderCtx, s.cancelForwarders = context.WithCancel(s.shutdownCtx)
+	s.forwarders = map[conf.DestinationType]store.Forwarder{}
+	for _, dtype := range dests.Iterate() {
+		desttype := dtype
+		s.startForwarder(gforwarderCtx, desttype)
+	}
+}
+
+func (s *storeServiceImpl) stopAllForwarders() {
+	if s.cancelForwarders != nil {
+		s.cancelForwarders()
+		s.cancelForwarders = nil
+		var wg sync.WaitGroup
+		for _, dtype := range conf.Destinations {
+			wg.Add(1)
+			go func(desttype conf.DestinationType) {
+				s.stopForwarder(desttype)
+				wg.Done()
+			}(dtype)
+		}
+		wg.Wait()
+	}
+}
+
+func (s *storeServiceImpl) stopForwarder(desttype conf.DestinationType) {
+	s.fmu[desttype].Lock()
+	defer s.fmu[desttype].Unlock()
+	if !s.fstatus[desttype] {
+		return
+	}
+	s.fcancels[desttype]()
+	s.fcancels[desttype] = nil
+	s.forwarders[desttype].WaitFinished()
+	s.forwarders[desttype] = nil
+	s.fstatus[desttype] = false
+}
+
+func (s *storeServiceImpl) startForwarder(gforwarderCtx context.Context, desttype conf.DestinationType) {
+	// returns immediately
+	s.fmu[desttype].Lock()
+	if s.fstatus[desttype] {
+		s.fmu[desttype].Unlock()
+		return
+	}
+	s.logger.Info("Starting forwarder", "type", conf.DestinationNames[desttype])
+	s.fstatus[desttype] = true
+
+	ctx, cancel := context.WithCancel(gforwarderCtx)
+	forwarder := store.NewForwarder(desttype, s.store, s.config, s.logger)
+	s.forwarders[desttype] = forwarder
+	s.fcancels[desttype] = cancel
+	s.fmu[desttype].Unlock()
+
+	// start forwarding message
+	forwarder.Forward(ctx)
+
+	// monitor for remote connection errors
+	go func() {
+		select {
+		case <-ctx.Done():
+			return
+		case <-forwarder.Fatal():
+			// when the kafka forwarder signals an error,
+			// the StoreService stops the forwarder,
+			// waits 10 seconds, and then restarts the
+			// forwarder.
+			// but at the same time the main process can
+			// decide to stop/start the StoreService (for
+			// instance because it received a SIGHUP).
+			// that's why we need the mutex stuff
+			s.logger.Warn("The forwarder reported a connection error", "type", conf.DestinationNames[desttype])
+			s.stopForwarder(desttype)
+			select {
+			case <-gforwarderCtx.Done():
+			case <-time.After(10 * time.Second):
+				s.startForwarder(gforwarderCtx, desttype)
+			}
+		}
+	}()
+
+}
+
+func (s *storeServiceImpl) doStart(mu *sync.Mutex) ([]model.ListenerInfo, error) {
 	infos := []model.ListenerInfo{}
 	if mu != nil {
 		mu.Lock()
@@ -104,115 +251,27 @@ func (s *storeServiceImpl) doStart(test bool, mu *sync.Mutex) ([]model.ListenerI
 		return infos, nil
 	}
 
-	// create the store if needed
-	if s.st == nil {
-		s.test = test
-		destinations, err := s.config.Main.GetDestinations()
-		if err != nil {
-			return infos, err
-		}
-		s.st, err = store.NewStore(s.shutdownCtx, s.config.Store, s.ring, destinations, s.logger)
-		if err != nil {
-			return infos, err
-		}
-		err = s.st.StoreAllSyslogConfigs(s.config)
-		if err != nil {
-			return infos, err
-		}
-		// receive syslog messages on the pipe
-		s.ingestwg.Add(1)
-		go func() {
-			defer s.ingestwg.Done()
-
-			scanner := bufio.NewScanner(s.pipe)
-			scanner.Split(utils.MakeDecryptSplit(s.secret))
-			defer func() {
-				if s.secret != nil {
-					//s.secret.Destroy()
-				}
-			}()
-			var err error
-
-			for scanner.Scan() {
-				message := model.FullMessage{}
-				_, err = message.UnmarshalMsg(scanner.Bytes())
-				if err == nil {
-					err, _ = s.st.Stash(message)
-					if err != nil {
-						s.logger.Error("Error pushing message to the store queue", "error", err)
-						go func() { s.Shutdown() }()
-						return
-					}
-				} else {
-					s.logger.Error("Unexpected error decoding message from the Store pipe", "error", err)
-					go func() { s.Shutdown() }()
-					return
-				}
-			}
-
-			err = scanner.Err()
-			if err == io.EOF || err == io.ErrClosedPipe || err == io.ErrUnexpectedEOF {
-				s.logger.Debug("Stopped to read the ingestion store pipe")
-			} else if err != nil {
-				s.logger.Warn("Unexpected error decoding message from the Store pipe", "error", err)
-			}
-		}()
-	}
-
 	destinations, err := s.config.Main.GetDestinations()
 	if err != nil {
-		s.logger.Warn("Error parsing destinations (should not happen!!!)", "error", err)
-	} else {
-		// refresh destinations
-		s.st.SetDestinations(destinations)
+		s.logger.Error("Error parsing destinations (should not happen!!!)", "error", err)
+		return nil, err
 	}
 
-	// create and start the forwarder
-	var forwarderCtx context.Context
-	forwarderCtx, s.cancelForwarder = context.WithCancel(context.Background())
-	s.forwarder = store.NewForwarder(test, s.logger)
-	s.forwarder.Forward(forwarderCtx, s.st, s.config)
+	// create the store if needed
+	if s.store == nil {
+		err = s.create()
+		if err != nil {
+			return infos, err
+		}
+	}
+
+	// refresh destinations
+	s.store.SetDestinations(destinations)
 	s.status = true
 
-	go func() {
-		done := forwarderCtx.Done()
-		shutdown := s.shutdownCtx.Done()
-		fwderFatalError := s.forwarder.Fatal()
-		// monitor for remote connection errors
-		select {
-		case <-done:
-			// the main process has stopped the forwarder
-			// we don't need to monitor for errors anymore
-			return
-		case <-shutdown:
-			// the Store was shutdown
-			return
-		case <-fwderFatalError:
-			// when the kafka forwarder signals an error,
-			// the StoreService stops the forwarder,
-			// waits 10 seconds, and then restarts the
-			// forwarder.
-			// but at the same time the main process can
-			// decide to stop/start the StoreService (for
-			// instance because it received a SIGHUP).
-			// that's why we need the mutex stuff in Start(),
-			// Stop(), SetConfAndRestart() methods.
-			tryStart := func() error {
-				select {
-				case <-s.shutdownCtx.Done():
-					return nil
-				case <-time.After(10 * time.Second):
-					_, err := s.Start(test)
-					return err
-				}
-			}
-			s.logger.Warn("The forwarder reported a connection error")
-			s.Stop()
-			for tryStart() != nil {
-				s.logger.Warn("Failed to start the forwarder", "error", "err")
-			}
-		}
-	}()
+	// create and start the forwarders
+	s.startAllForwarders(destinations)
+
 	return infos, nil
 }
 
@@ -239,10 +298,8 @@ func (s *storeServiceImpl) doStop(mu *sync.Mutex) {
 		return
 	}
 
-	// stop the kafka forwarder
-	s.cancelForwarder()
-	s.forwarder.WaitFinished()
-	s.logger.Debug("Forwarder has stopped")
+	// stop the kafka forwarders
+	s.stopAllForwarders()
 	s.status = false
 }
 
@@ -258,7 +315,7 @@ func (s *storeServiceImpl) Shutdown() {
 	s.ingestwg.Wait() // wait until we are done ingesting new messages
 	s.shutdownStore()
 	s.logger.Debug("Store service waits for end of store goroutines")
-	s.st.WaitFinished()
+	s.store.WaitFinished()
 	_ = s.pipe.Close()
 }
 
@@ -267,12 +324,13 @@ func (s *storeServiceImpl) Gather() ([]*dto.MetricFamily, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.status {
-		// forwarder is started
-		var couple prometheus.Gatherers = []prometheus.Gatherer{s.st, s.forwarder}
-		return couple.Gather()
-	} else if s.st == nil {
+		// TODO
+		//var couple prometheus.Gatherers = []prometheus.Gatherer{s.st, s.forwarder}
+		//return couple.Gather()
+		return nil, nil
+	} else if s.store == nil {
 		return nil, nil
 	} else {
-		return s.st.Gather()
+		return s.store.Gather()
 	}
 }

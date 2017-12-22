@@ -6,12 +6,14 @@ import (
 	"time"
 
 	"github.com/inconshreveable/log15"
+	"github.com/oklog/ulid"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/clients"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/queue"
 )
 
 type relpDestination struct {
@@ -87,25 +89,25 @@ func NewRelpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perm
 		// TODO: metrics
 		ackChan := d.client.Ack()
 		nackChan := d.client.Nack()
-		for {
-			if ackChan == nil && nackChan == nil {
-				return
+		var err error
+		var uid ulid.ULID
+
+		for queue.WaitManyAckQueues(ackChan, nackChan) {
+			for {
+				uid, _, err = ackChan.Get()
+				if err != nil {
+					break
+				}
+				d.ack(uid, conf.Relp)
 			}
-			select {
-			case uid, more := <-ackChan:
-				if more {
-					d.ack(uid, conf.Relp)
-				} else {
-					ackChan = nil
+			for {
+				uid, _, err = nackChan.Get()
+				if err != nil {
+					break
 				}
-			case uid, more := <-nackChan:
-				if more {
-					d.nack(uid, conf.Relp)
-					d.logger.Info("RELP server returned a NACK", "uid", uid.String())
-					d.once.Do(func() { close(d.fatal) })
-				} else {
-					nackChan = nil
-				}
+				d.nack(uid, conf.Relp)
+				d.logger.Info("RELP server returned a NACK", "uid", uid.String())
+				d.once.Do(func() { close(d.fatal) })
 			}
 		}
 	}()

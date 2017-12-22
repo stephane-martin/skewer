@@ -14,6 +14,19 @@ import (
 // DestinationType lists the possible kind of destinations where skewer can forward messages.
 type DestinationType uint64
 
+func (dests DestinationType) Iterate() (res []DestinationType) {
+	if dests == 0 {
+		return []DestinationType{Stderr}
+	}
+	res = make([]DestinationType, 0, len(Destinations))
+	for _, dtype := range Destinations {
+		if uint64(dests)&uint64(dtype) != 0 {
+			res = append(res, dtype)
+		}
+	}
+	return res
+}
+
 const (
 	Kafka   DestinationType = 1
 	Udp                     = 2

@@ -86,11 +86,25 @@ func (q *AckQueue) Wait() bool {
 func WaitManyAckQueues(queues ...*AckQueue) bool {
 	var nb uint64
 	var q *AckQueue
+
+	notNilQueues := make([]*AckQueue, 0, len(queues))
+	for _, q = range queues {
+		if q != nil {
+			notNilQueues = append(notNilQueues, q)
+		}
+	}
+	if len(notNilQueues) == 0 {
+		return false
+	}
+	queues = notNilQueues
+
 MainLoop:
 	for {
 		for _, q = range queues {
-			if q.Has() {
-				return true
+			if q != nil {
+				if q.Has() {
+					return true
+				}
 			}
 		}
 		for _, q = range queues {
