@@ -291,15 +291,7 @@ func SetJournalFs(targetExec string) error {
 }
 
 func MakeChroot(targetExec string) (string, error) {
-
 	// TODO: add SKEWER_CERT_PATHS directories
-
-	systemMounts := make([]string, 0, len(systemMountsMap))
-	for dir, b := range systemMountsMap {
-		if b {
-			systemMounts = append(systemMounts, dir)
-		}
-	}
 
 	root, err := ioutil.TempDir("", "skewer-confined")
 	if err != nil {
@@ -400,16 +392,16 @@ func MakeChroot(targetExec string) (string, error) {
 	// bind mount skewer configuration directory
 	confDir := strings.TrimSpace(os.Getenv("SKEWER_CONF_DIR"))
 	if len(confDir) > 0 {
-		target := filepath.Join("/tmp", "conf", confDir)
-		os.MkdirAll(target)
+		target := filepath.Join(root, "newroot", "tmp", "conf", confDir)
+		os.MkdirAll(target, 0755)
 		syscall.Mount(confDir, target, "bind", syscall.MS_BIND|syscall.MS_REC|syscall.MS_RDONLY|syscall.MS_NODEV|syscall.MS_NOEXEC|syscall.MS_NOSUID, "")
 		syscall.Mount(confDir, target, "bind", syscall.MS_BIND|syscall.MS_REC|syscall.MS_RDONLY|syscall.MS_NODEV|syscall.MS_NOEXEC|syscall.MS_NOSUID|syscall.MS_REMOUNT, "")
 	}
 
 	acctDir := strings.TrimSpace(os.Getenv("SKEWER_ACCT_DIR"))
 	if len(acctDir) > 0 {
-		target := filepath.Join("/tmp", "acct", acctDir)
-		os.MkdirAll(target)
+		target := filepath.Join(root, "newroot", "tmp", "acct", acctDir)
+		os.MkdirAll(target, 0755)
 		syscall.Mount(acctDir, target, "bind", syscall.MS_BIND|syscall.MS_REC|syscall.MS_RDONLY|syscall.MS_NODEV|syscall.MS_NOEXEC|syscall.MS_NOSUID, "")
 		syscall.Mount(acctDir, target, "bind", syscall.MS_BIND|syscall.MS_REC|syscall.MS_RDONLY|syscall.MS_NODEV|syscall.MS_NOEXEC|syscall.MS_NOSUID|syscall.MS_REMOUNT, "")
 	}
@@ -514,7 +506,6 @@ func MakeChroot(targetExec string) (string, error) {
 	// RW bind-mount the Store if needed
 	storePath := strings.TrimSpace(os.Getenv("SKEWER_STORE_PATH"))
 	if len(storePath) > 0 {
-		fmt.Fprintln(os.Stderr, "STOREPATH", storePath)
 		if !utils.IsDir(storePath) {
 			return "", fmt.Errorf("Store path '%s' is not a directory", storePath)
 		}

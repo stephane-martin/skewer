@@ -3,7 +3,6 @@ package services
 import (
 	"bufio"
 	"context"
-	"fmt"
 	"io"
 	"os"
 	"sync"
@@ -48,7 +47,6 @@ func NewStoreService(confined bool, l log15.Logger, ring kring.Ring, pipe *os.Fi
 		l.Crit("The Store was not given a message pipe")
 		return nil
 	}
-	fmt.Fprintln(os.Stderr, "CONFINED", confined)
 	impl := &storeServiceImpl{
 		ingestwg: &sync.WaitGroup{},
 		mu:       &sync.Mutex{},
