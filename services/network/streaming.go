@@ -35,6 +35,7 @@ type StreamingService struct {
 	MaxMessageSize int
 	acceptsWg      sync.WaitGroup
 	wg             sync.WaitGroup
+	confined       bool
 }
 
 func (s *StreamingService) init() {
@@ -177,7 +178,7 @@ func (s *StreamingService) AcceptTCP(lc TCPListenerConf) {
 				}
 			}
 			if lc.Conf.TLSEnabled {
-				tlsConf, err := utils.NewTLSConfig("", lc.Conf.CAFile, lc.Conf.CAPath, lc.Conf.CertFile, lc.Conf.KeyFile, false)
+				tlsConf, err := utils.NewTLSConfig("", lc.Conf.CAFile, lc.Conf.CAPath, lc.Conf.CertFile, lc.Conf.KeyFile, false, s.confined)
 				if err != nil {
 					s.Logger.Warn("Error creating TLS configuration", "error", err)
 				} else {

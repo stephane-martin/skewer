@@ -29,7 +29,7 @@ type tcpDestination struct {
 	once        sync.Once
 }
 
-func NewTcpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (dest Destination, err error) {
+func NewTcpDestination(ctx context.Context, confined bool, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (dest Destination, err error) {
 	clt := clients.NewSyslogTCPClient(logger).
 		Host(bc.TcpDest.Host).
 		Port(bc.TcpDest.Port).
@@ -50,6 +50,7 @@ func NewTcpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perme
 			bc.TcpDest.CertFile,
 			bc.TcpDest.KeyFile,
 			bc.TcpDest.Insecure,
+			confined,
 		)
 		if err != nil {
 			return nil, err

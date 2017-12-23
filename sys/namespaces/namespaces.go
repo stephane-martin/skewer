@@ -291,24 +291,6 @@ func SetJournalFs(targetExec string) error {
 }
 
 func MakeChroot(targetExec string) (string, error) {
-	systemMountsMap := map[string]bool{
-	//"/etc": true,
-	//"/var": true,
-	//"/bin": true,
-	//"/usr/bin":  true,
-	//"/sbin":     true,
-	//"/usr/sbin": true,
-	}
-
-	confDir := strings.TrimSpace(os.Getenv("SKEWER_CONF_DIR"))
-	if len(confDir) > 0 {
-		systemMountsMap[confDir] = true
-	}
-
-	acctDir := strings.TrimSpace(os.Getenv("SKEWER_ACCT_DIR"))
-	if len(acctDir) > 0 {
-		systemMountsMap[acctDir] = true
-	}
 
 	// TODO: add SKEWER_CERT_PATHS directories
 
@@ -384,22 +366,24 @@ func MakeChroot(targetExec string) (string, error) {
 		},
 	}
 
-	for _, systemMount := range systemMounts {
-		if _, err := os.Stat(systemMount); err == nil {
-			mounts = append(mounts, mountPoint{
-				Source: systemMount,
-				Target: systemMount,
-				Fs:     "bind",
-				Flags:  syscall.MS_BIND | syscall.MS_REC | syscall.MS_RDONLY | syscall.MS_NODEV | syscall.MS_NOSUID,
-			})
-			mounts = append(mounts, mountPoint{
-				Source: systemMount,
-				Target: systemMount,
-				Fs:     "bind",
-				Flags:  syscall.MS_BIND | syscall.MS_REC | syscall.MS_RDONLY | syscall.MS_NODEV | syscall.MS_NOSUID | syscall.MS_REMOUNT,
-			})
+	/*
+		for _, systemMount := range systemMounts {
+			if _, err := os.Stat(systemMount); err == nil {
+				mounts = append(mounts, mountPoint{
+					Source: systemMount,
+					Target: systemMount,
+					Fs:     "bind",
+					Flags:  syscall.MS_BIND | syscall.MS_REC | syscall.MS_RDONLY | syscall.MS_NODEV | syscall.MS_NOSUID,
+				})
+				mounts = append(mounts, mountPoint{
+					Source: systemMount,
+					Target: systemMount,
+					Fs:     "bind",
+					Flags:  syscall.MS_BIND | syscall.MS_REC | syscall.MS_RDONLY | syscall.MS_NODEV | syscall.MS_NOSUID | syscall.MS_REMOUNT,
+				})
+			}
 		}
-	}
+	*/
 
 	for _, m := range mounts {
 		target := filepath.Join(root, "newroot", m.Target)
@@ -411,6 +395,23 @@ func MakeChroot(targetExec string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("failed to mount %s to %s: %v", m.Source, target, err)
 		}
+	}
+
+	// bind mount skewer configuration directory
+	confDir := strings.TrimSpace(os.Getenv("SKEWER_CONF_DIR"))
+	if len(confDir) > 0 {
+		target := filepath.Join("/tmp", "conf", confDir)
+		os.MkdirAll(target)
+		syscall.Mount(confDir, target, "bind", syscall.MS_BIND|syscall.MS_REC|syscall.MS_RDONLY|syscall.MS_NODEV|syscall.MS_NOEXEC|syscall.MS_NOSUID, "")
+		syscall.Mount(confDir, target, "bind", syscall.MS_BIND|syscall.MS_REC|syscall.MS_RDONLY|syscall.MS_NODEV|syscall.MS_NOEXEC|syscall.MS_NOSUID|syscall.MS_REMOUNT, "")
+	}
+
+	acctDir := strings.TrimSpace(os.Getenv("SKEWER_ACCT_DIR"))
+	if len(acctDir) > 0 {
+		target := filepath.Join("/tmp", "acct", acctDir)
+		os.MkdirAll(target)
+		syscall.Mount(acctDir, target, "bind", syscall.MS_BIND|syscall.MS_REC|syscall.MS_RDONLY|syscall.MS_NODEV|syscall.MS_NOEXEC|syscall.MS_NOSUID, "")
+		syscall.Mount(acctDir, target, "bind", syscall.MS_BIND|syscall.MS_REC|syscall.MS_RDONLY|syscall.MS_NODEV|syscall.MS_NOEXEC|syscall.MS_NOSUID|syscall.MS_REMOUNT, "")
 	}
 
 	// bind mount shared libraries from /lib and /lib64

@@ -346,7 +346,7 @@ func ImportSyslogConfig(data []byte) (*FilterSubConfig, error) {
 	return &c, nil
 }
 
-func (c *KafkaSourceConfig) GetSaramaConsumerConfig() (*cluster.Config, error) {
+func (c *KafkaSourceConfig) GetSaramaConsumerConfig(confined bool) (*cluster.Config, error) {
 	s := cluster.NewConfig()
 	s.ClientID = c.ClientID
 	s.ChannelBufferSize = c.ChannelBufferSize
@@ -376,7 +376,7 @@ func (c *KafkaSourceConfig) GetSaramaConsumerConfig() (*cluster.Config, error) {
 	s.Version = v
 
 	if c.TLSEnabled {
-		tlsConf, err := utils.NewTLSConfig("", c.CAFile, c.CAPath, c.CertFile, c.KeyFile, c.Insecure)
+		tlsConf, err := utils.NewTLSConfig("", c.CAFile, c.CAPath, c.CertFile, c.KeyFile, c.Insecure, confined)
 		if err == nil {
 			s.Net.TLS.Enable = true
 			s.Net.TLS.Config = tlsConf
@@ -394,7 +394,7 @@ func (c *KafkaSourceConfig) GetSaramaConsumerConfig() (*cluster.Config, error) {
 	return s, nil
 }
 
-func (c *KafkaDestConfig) GetSaramaProducerConfig() (*sarama.Config, error) {
+func (c *KafkaDestConfig) GetSaramaProducerConfig(confined bool) (*sarama.Config, error) {
 	s := sarama.NewConfig()
 	s.ClientID = c.ClientID
 	s.ChannelBufferSize = c.ChannelBufferSize
@@ -437,7 +437,7 @@ func (c *KafkaDestConfig) GetSaramaProducerConfig() (*sarama.Config, error) {
 	}
 
 	if c.TLSEnabled {
-		tlsConf, err := utils.NewTLSConfig("", c.CAFile, c.CAPath, c.CertFile, c.KeyFile, c.Insecure)
+		tlsConf, err := utils.NewTLSConfig("", c.CAFile, c.CAPath, c.CertFile, c.KeyFile, c.Insecure, confined)
 		if err == nil {
 			s.Net.TLS.Enable = true
 			s.Net.TLS.Config = tlsConf
@@ -462,8 +462,8 @@ func (c *KafkaDestConfig) GetSaramaProducerConfig() (*sarama.Config, error) {
 	return s, nil
 }
 
-func (c *KafkaDestConfig) GetAsyncProducer() (sarama.AsyncProducer, error) {
-	conf, err := c.GetSaramaProducerConfig()
+func (c *KafkaDestConfig) GetAsyncProducer(confined bool) (sarama.AsyncProducer, error) {
+	conf, err := c.GetSaramaProducerConfig(confined)
 	if err != nil {
 		return nil, err
 	}
@@ -474,8 +474,8 @@ func (c *KafkaDestConfig) GetAsyncProducer() (sarama.AsyncProducer, error) {
 	return nil, KafkaError{Err: err}
 }
 
-func (c *KafkaDestConfig) GetClient() (sarama.Client, error) {
-	conf, err := c.GetSaramaProducerConfig()
+func (c *KafkaDestConfig) GetClient(confined bool) (sarama.Client, error) {
+	conf, err := c.GetSaramaProducerConfig(confined)
 	if err != nil {
 		return nil, err
 	}
@@ -486,8 +486,8 @@ func (c *KafkaDestConfig) GetClient() (sarama.Client, error) {
 	return nil, KafkaError{Err: err}
 }
 
-func (c *KafkaSourceConfig) GetClient() (*cluster.Consumer, error) {
-	conf, err := c.GetSaramaConsumerConfig()
+func (c *KafkaSourceConfig) GetClient(confined bool) (*cluster.Consumer, error) {
+	conf, err := c.GetSaramaConsumerConfig(confined)
 	if err != nil {
 		return nil, err
 	}

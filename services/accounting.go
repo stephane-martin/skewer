@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -45,15 +46,17 @@ type AccountingService struct {
 	stopchan       chan struct{}
 	fatalErrorChan chan struct{}
 	fatalOnce      *sync.Once
+	confined       bool
 }
 
-func NewAccountingService(stasher *base.Reporter, l log15.Logger) (*AccountingService, error) {
+func NewAccountingService(stasher *base.Reporter, confined bool, l log15.Logger) (*AccountingService, error) {
 	s := AccountingService{
 		stasher:  stasher,
 		logger:   l.New("class", "accounting"),
 		wgroup:   &sync.WaitGroup{},
 		metrics:  NewAccountingMetrics(),
 		registry: prometheus.NewRegistry(),
+		confined: confined,
 	}
 	s.registry.MustRegister(s.metrics.IncomingMsgsCounter)
 	return &s, nil
@@ -244,7 +247,11 @@ func (s *AccountingService) Start(test bool) (infos []model.ListenerInfo, err er
 		hostname = "unknown"
 	}
 
-	f, err = os.Open(s.Conf.Path)
+	acctFilename := s.Conf.Path
+	if s.confined {
+		acctFilename = filepath.Join("/tmp", "acct", acctFilename)
+	}
+	f, err = os.Open(acctFilename)
 	if err != nil {
 		return
 	}

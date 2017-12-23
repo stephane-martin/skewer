@@ -83,7 +83,14 @@ func (fwder *fwderImpl) doForward(ctx context.Context) {
 	defer fwder.wg.Done()
 	var err error
 
-	dest, err := dests.NewDestination(ctx, fwder.desttype, fwder.conf, fwder.store.ACK, fwder.store.NACK, fwder.store.PermError, fwder.logger)
+	dest, err := dests.NewDestination(
+		ctx,
+		fwder.desttype,
+		fwder.conf,
+		fwder.store.ACK, fwder.store.NACK, fwder.store.PermError,
+		fwder.store.Confined(),
+		fwder.logger,
+	)
 	if err != nil {
 		fwder.logger.Error("Error setting up the destination", "error", err)
 		fwder.dofatal()

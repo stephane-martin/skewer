@@ -435,12 +435,12 @@ func main() {
 		buf := make([]byte, 32)
 		_, err := rPipe.Read(buf)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Could not read BSD secret:", err)
+			fmt.Fprintln(os.Stderr, "Could not read ring secret:", err)
 			os.Exit(-1)
 		}
 		bsdSecret, err = memguard.NewImmutableFromBytes(buf)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Could not create BSD secret:", err)
+			fmt.Fprintln(os.Stderr, "Could not create ring secret:", err)
 			os.Exit(-1)
 		}
 		_ = rPipe.Close()
@@ -459,7 +459,7 @@ func main() {
 		if err != nil {
 			cleanup("Pledge setup error", err, logger, cancelLogger)
 		}
-		err = services.LaunchConfProvider(ring, logger)
+		err = services.LaunchConfProvider(ring, os.Getenv("SKEWER_CONFINED") == "TRUE", logger)
 		if err != nil {
 			cleanup("ConfigurationProvider encountered a fatal error", err, logger, cancelLogger)
 		}
@@ -526,8 +526,8 @@ func main() {
 				cleanup("Error dropping caps", err, logger, cancelLogger)
 			}
 		}
-
-		err = syscall.Exec(path, []string{os.Args[0][9:]}, os.Environ())
+		environ := append(os.Environ(), "SKEWER_CONFINED=TRUE")
+		err = syscall.Exec(path, []string{os.Args[0][9:]}, environ)
 		if err != nil {
 			cleanup("execve error", err, logger, cancelLogger)
 		}
@@ -612,7 +612,15 @@ func main() {
 		if err != nil {
 			cleanup("Pledge setup error", err, logger, cancelLogger)
 		}
-		err = services.Launch(services.Names2Types[name], os.Getenv("SKEWER_TEST") == "TRUE", ring, binderClient, logger, pipe)
+		err = services.Launch(
+			services.Names2Types[name],
+			os.Getenv("SKEWER_TEST") == "TRUE",
+			os.Getenv("SKEWER_CONFINED") == "TRUE",
+			ring,
+			binderClient,
+			logger,
+			pipe,
+		)
 		if err != nil {
 			cleanup("Plugin encountered a fatal error", err, logger, cancelLogger)
 		}

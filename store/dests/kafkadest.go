@@ -26,7 +26,7 @@ type kafkaDestination struct {
 	format     string
 }
 
-func NewKafkaDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (Destination, error) {
+func NewKafkaDestination(ctx context.Context, confined bool, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (Destination, error) {
 	d := &kafkaDestination{
 		logger:     logger,
 		ack:        ack,
@@ -38,7 +38,7 @@ func NewKafkaDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, per
 	}
 	var err error
 	for {
-		d.producer, err = bc.KafkaDest.GetAsyncProducer()
+		d.producer, err = bc.KafkaDest.GetAsyncProducer(confined)
 		if err == nil {
 			logger.Info("The forwarder got a Kafka producer")
 			break

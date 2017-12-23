@@ -28,7 +28,7 @@ type relpDestination struct {
 	ackCounter *prometheus.CounterVec
 }
 
-func NewRelpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (dest Destination, err error) {
+func NewRelpDestination(ctx context.Context, confined bool, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (dest Destination, err error) {
 	clt := clients.NewRELPClient(logger).
 		Host(bc.RelpDest.Host).
 		Port(bc.RelpDest.Port).
@@ -49,6 +49,7 @@ func NewRelpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, perm
 			bc.RelpDest.CertFile,
 			bc.RelpDest.KeyFile,
 			bc.RelpDest.Insecure,
+			confined,
 		)
 		if err != nil {
 			return nil, err

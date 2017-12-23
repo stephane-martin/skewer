@@ -23,7 +23,7 @@ func Wout(header []byte, msg []byte) (err error) {
 	return err
 }
 
-func Launch(typ Types, test bool, ring kring.Ring, binderClient *binder.BinderClient, logger log15.Logger, pipe *os.File) error {
+func Launch(typ Types, test bool, confined bool, ring kring.Ring, binderClt *binder.BinderClient, l log15.Logger, pipe *os.File) error {
 	if ring == nil {
 		return fmt.Errorf("No ring")
 	}
@@ -32,10 +32,10 @@ func Launch(typ Types, test bool, ring kring.Ring, binderClient *binder.BinderCl
 	name := Types2Names[typ]
 	hasConf := false
 
-	reporter := base.NewReporter(name, logger, pipe)
+	reporter := base.NewReporter(name, l, pipe)
 	defer reporter.Stop() // will close the pipe
 
-	svc := ProviderFactory(typ, ring, reporter, binderClient, logger, pipe)
+	svc := ProviderFactory(typ, confined, ring, reporter, binderClt, l, pipe)
 	if svc == nil {
 		err := fmt.Errorf("The Service Factory returned 'nil' for plugin '%s'", name)
 		_ = Wout(STARTERROR, []byte(err.Error()))
@@ -75,7 +75,7 @@ func Launch(typ Types, test bool, ring kring.Ring, binderClient *binder.BinderCl
 
 			reporter.SetSecret(nil)
 			if globalConf.Main.EncryptIPC {
-				logger.Debug("Encrypting messages from plugin", "type", name)
+				l.Debug("Encrypting messages from plugin", "type", name)
 				secret, err := ring.GetBoxSecret()
 				if err != nil {
 					_ = Wout(STARTERROR, []byte(err.Error()))
@@ -122,7 +122,7 @@ func Launch(typ Types, test bool, ring kring.Ring, binderClient *binder.BinderCl
 			// here we *do not return*. So the plugin process continues to live
 			// and to listen for subsequent control commands
 		case "shutdown":
-			logger.Debug("provider is asked to stop", "type", name)
+			l.Debug("provider is asked to stop", "type", name)
 			svc.Shutdown()
 			_ = Wout(SHUTDOWN, base.SUCC)
 			// at the end of shutdown command, we *return*. So the plugin
@@ -142,28 +142,28 @@ func Launch(typ Types, test bool, ring kring.Ring, binderClient *binder.BinderCl
 			empty := []*dto.MetricFamily{}
 			families, err := svc.Gather()
 			if err != nil {
-				logger.Warn("Error gathering metrics", "type", name, "error", err)
+				l.Warn("Error gathering metrics", "type", name, "error", err)
 				families = empty
 			}
 			familiesb, err := json.Marshal(families)
 			if err != nil {
-				logger.Warn("Error marshaling metrics", "type", name, "error", err)
+				l.Warn("Error marshaling metrics", "type", name, "error", err)
 				familiesb, _ = json.Marshal(empty)
 			}
 			err = Wout(METRICS, familiesb)
 			if err != nil {
-				logger.Crit("Could not write metrics to upstream", "type", name, "error", err)
+				l.Crit("Could not write metrics to upstream", "type", name, "error", err)
 				return err
 			}
 		default:
-			logger.Crit("Unknown command", "type", name, "command", command)
+			l.Crit("Unknown command", "type", name, "command", command)
 			return fmt.Errorf("Unknown command '%s' in plugin '%s'", command, name)
 		}
 
 	}
 	e := scanner.Err()
 	if e != nil {
-		logger.Error("In plugin provider, scanning stdin met error", "error", e)
+		l.Error("In plugin provider, scanning stdin met error", "error", e)
 		return e
 	}
 	return nil

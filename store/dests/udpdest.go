@@ -23,7 +23,7 @@ type udpDestination struct {
 	client  *clients.SyslogUDPClient
 }
 
-func NewUdpDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (dest Destination, err error) {
+func NewUdpDestination(ctx context.Context, confined bool, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (dest Destination, err error) {
 	client := clients.NewSyslogUDPClient(logger).
 		Host(bc.UdpDest.Host).
 		Port(bc.UdpDest.Port).

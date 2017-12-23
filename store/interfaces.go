@@ -23,6 +23,7 @@ type Store interface {
 	Gather() ([]*dto.MetricFamily, error)
 	ReleaseMsg(msg *model.FullMessage)
 	Destinations() []conf.DestinationType
+	Confined() bool
 }
 
 type Forwarder interface {

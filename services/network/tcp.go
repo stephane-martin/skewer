@@ -76,7 +76,7 @@ type TcpServiceImpl struct {
 	fatalOnce        *sync.Once
 }
 
-func NewTcpService(reporter *base.Reporter, b *binder.BinderClient, l log15.Logger) *TcpServiceImpl {
+func NewTcpService(reporter *base.Reporter, confined bool, b *binder.BinderClient, l log15.Logger) *TcpServiceImpl {
 	s := TcpServiceImpl{
 		status:   TcpStopped,
 		reporter: reporter,
@@ -88,6 +88,7 @@ func NewTcpService(reporter *base.Reporter, b *binder.BinderClient, l log15.Logg
 	s.StreamingService.BaseService.Logger = l.New("class", "TcpServer")
 	s.StreamingService.BaseService.Binder = b
 	s.StreamingService.handler = tcpHandler{Server: &s}
+	s.StreamingService.confined = confined
 	return &s
 }
 
@@ -240,7 +241,6 @@ type tcpHandler struct {
 }
 
 func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TcpSourceConfig) {
-
 	s := h.Server
 	s.AddConnection(conn)
 

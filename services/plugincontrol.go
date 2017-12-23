@@ -619,7 +619,7 @@ func (s *PluginController) Create(optsfuncs ...func(*PluginCreateOpts)) error {
 		// available
 		if capabilities.CapabilitiesSupported {
 			s.cmd, err = namespaces.SetupCmd(
-				fmt.Sprintf("confined-%s", name),
+				Types2ConfinedNames[s.typ],
 				s.ring,
 				namespaces.BinderHandle(BinderHdl(s.typ)),
 				namespaces.LoggerHandle(LoggerHdl(s.typ)),
@@ -677,7 +677,7 @@ func (s *PluginController) Create(optsfuncs ...func(*PluginCreateOpts)) error {
 		s.pipe = pipew
 		if capabilities.CapabilitiesSupported {
 			s.cmd, err = namespaces.SetupCmd(
-				fmt.Sprintf("confined-%s", name),
+				Types2ConfinedNames[Store],
 				s.ring,
 				namespaces.BinderHandle(BinderHdl(s.typ)),
 				namespaces.LoggerHandle(LoggerHdl(s.typ)),

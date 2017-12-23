@@ -58,15 +58,17 @@ type KafkaServiceImpl struct {
 	queues           *queue.KafkaQueues
 	fatalErrorChan   chan struct{}
 	fatalOnce        *sync.Once
+	confined         bool
 }
 
-func NewKafkaService(reporter *base.Reporter, l log15.Logger) *KafkaServiceImpl {
+func NewKafkaService(reporter *base.Reporter, confined bool, l log15.Logger) *KafkaServiceImpl {
 	s := KafkaServiceImpl{
 		reporter: reporter,
 		metrics:  newKafkaMetrics(),
 		registry: prometheus.NewRegistry(),
 		logger:   l.New("class", "KafkaService"),
 		stopChan: make(chan struct{}),
+		confined: confined,
 	}
 	s.registry.MustRegister(s.metrics.IncomingMsgsCounter, s.metrics.ParsingErrorCounter)
 	return &s
@@ -123,7 +125,7 @@ func (s *KafkaServiceImpl) startOne(config conf.KafkaSourceConfig) {
 				return
 			default:
 			}
-			consumer, err = config.GetClient()
+			consumer, err = config.GetClient(s.confined)
 			if err == nil {
 				s.logger.Debug("Got a Kafka consumer")
 				break

@@ -315,7 +315,7 @@ type fileDestination struct {
 	encoder      model.Encoder
 }
 
-func NewFileDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (dest Destination, err error) {
+func NewFileDestination(ctx context.Context, confined bool, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (dest Destination, err error) {
 	d := &fileDestination{
 		logger:  logger,
 		ack:     ack,

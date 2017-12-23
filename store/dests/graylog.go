@@ -25,7 +25,7 @@ type graylogDestination struct {
 	writer  gelf.Writer
 }
 
-func NewGraylogDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (dest Destination, err error) {
+func NewGraylogDestination(ctx context.Context, confined bool, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (dest Destination, err error) {
 	hostport := net.JoinHostPort(bc.GraylogDest.Host, strconv.FormatInt(int64(bc.GraylogDest.Port), 10))
 	var w gelf.Writer
 	if strings.ToLower(strings.TrimSpace(bc.GraylogDest.Mode)) == "udp" {

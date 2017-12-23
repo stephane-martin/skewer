@@ -3,6 +3,7 @@ package services
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"sync"
@@ -36,16 +37,18 @@ type storeServiceImpl struct {
 	fmu              map[conf.DestinationType]*sync.Mutex
 	fstatus          map[conf.DestinationType]bool
 	fcancels         map[conf.DestinationType]context.CancelFunc
+	confined         bool
 }
 
 // NewStoreService creates a StoreService.
 // The StoreService is responsible to manage the lifecycle of the Store and the
 // Kafka Forwarder that is fed by the Store.
-func NewStoreService(l log15.Logger, ring kring.Ring, pipe *os.File) Provider {
+func NewStoreService(confined bool, l log15.Logger, ring kring.Ring, pipe *os.File) Provider {
 	if pipe == nil {
 		l.Crit("The Store was not given a message pipe")
 		return nil
 	}
+	fmt.Fprintln(os.Stderr, "CONFINED", confined)
 	impl := &storeServiceImpl{
 		ingestwg: &sync.WaitGroup{},
 		mu:       &sync.Mutex{},
@@ -53,6 +56,7 @@ func NewStoreService(l log15.Logger, ring kring.Ring, pipe *os.File) Provider {
 		pipe:     pipe,
 		logger:   l,
 		ring:     ring,
+		confined: confined,
 	}
 	impl.fmu = map[conf.DestinationType]*sync.Mutex{}
 	impl.fstatus = map[conf.DestinationType]bool{}
@@ -98,7 +102,7 @@ func (s *storeServiceImpl) create() error {
 	if err != nil {
 		return err
 	}
-	s.store, err = store.NewStore(s.shutdownCtx, s.config.Store, s.ring, destinations, s.logger)
+	s.store, err = store.NewStore(s.shutdownCtx, s.config.Store, s.ring, destinations, s.confined, s.logger)
 	if err != nil {
 		return err
 	}

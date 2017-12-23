@@ -45,7 +45,7 @@ var printStoreCmd = &cobra.Command{
 		c.Store.Dirname = storeDirname
 
 		// prepare the message store
-		st, err = store.NewStore(ctx, c.Store, nil, conf.Stderr, logger)
+		st, err = store.NewStore(ctx, c.Store, nil, conf.Stderr, false, logger)
 		if err != nil {
 			fmt.Println("Can't create the message Store", "path", c.Store.Dirname, "error", err)
 			return

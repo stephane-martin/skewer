@@ -9,7 +9,7 @@ import (
 )
 
 // NewTLSConfig builds and returns a TLS config from the provided parameters.
-func NewTLSConfig(address, caFile, caPath, certFile, keyFile string, insecure bool) (*tls.Config, error) {
+func NewTLSConfig(address, caFile, caPath, certFile, keyFile string, insecure bool, confined bool) (*tls.Config, error) {
 	tlsClientConfig := &tls.Config{
 		InsecureSkipVerify: insecure,
 	}

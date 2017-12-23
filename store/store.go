@@ -137,6 +137,11 @@ type MessageStore struct {
 
 	OutputsChans map[conf.DestinationType](chan *model.FullMessage)
 	pool         *sync.Pool
+	confined     bool
+}
+
+func (s *MessageStore) Confined() bool {
+	return s.confined
 }
 
 func (s *MessageStore) Gather() ([]*dto.MetricFamily, error) {
@@ -304,7 +309,7 @@ func (s *MessageStore) init(ctx context.Context) {
 	}
 }
 
-func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests conf.DestinationType, l log15.Logger) (*MessageStore, error) {
+func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests conf.DestinationType, confined bool, l log15.Logger) (*MessageStore, error) {
 	badgerOpts := badger.DefaultOptions
 	badgerOpts.Dir = cfg.Dirname
 	badgerOpts.ValueDir = cfg.Dirname
@@ -318,7 +323,11 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 		return nil, err
 	}
 
-	store := &MessageStore{metrics: NewStoreMetrics(), registry: prometheus.NewRegistry()}
+	store := &MessageStore{
+		metrics:  NewStoreMetrics(),
+		registry: prometheus.NewRegistry(),
+		confined: confined,
+	}
 	store.registry.MustRegister(store.metrics.BadgerGauge, store.metrics.AckCounter)
 	store.logger = l.New("class", "MessageStore")
 	store.dests = &Destinations{}

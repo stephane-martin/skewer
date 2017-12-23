@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -323,7 +324,7 @@ func start(confdir string, params consul.ConnParams, r kring.Ring, logger log15.
 	return cancel, nil
 }
 
-func LaunchConfProvider(r kring.Ring, logger log15.Logger) error {
+func LaunchConfProvider(r kring.Ring, confined bool, logger log15.Logger) error {
 	if r == nil {
 		return fmt.Errorf("No ring")
 	}
@@ -370,6 +371,9 @@ func LaunchConfProvider(r kring.Ring, logger log15.Logger) error {
 		case "confdir":
 			if len(parts) == 2 {
 				confdir = strings.TrimSpace(parts[1])
+				if confined {
+					confdir = filepath.Join("/tmp", "conf", confdir)
+				}
 			} else {
 				return fmt.Errorf("Empty confdir command")
 			}

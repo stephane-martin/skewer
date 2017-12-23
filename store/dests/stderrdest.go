@@ -24,7 +24,7 @@ type stderrDestination struct {
 	encoder model.Encoder
 }
 
-func NewStderrDestination(ctx context.Context, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (dest Destination, err error) {
+func NewStderrDestination(ctx context.Context, confined bool, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (dest Destination, err error) {
 	d := &stderrDestination{
 		logger:  logger,
 		ack:     ack,

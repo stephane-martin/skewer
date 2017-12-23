@@ -123,14 +123,14 @@ func ConfigureAndStartService(s Provider, c conf.BaseConfig, test bool) ([]model
 
 }
 
-func ProviderFactory(t Types, r kring.Ring, reporter *base.Reporter, b *binder.BinderClient, l log15.Logger, pipe *os.File) Provider {
+func ProviderFactory(t Types, confined bool, r kring.Ring, reporter *base.Reporter, b *binder.BinderClient, l log15.Logger, pipe *os.File) Provider {
 	switch t {
 	case TCP:
-		return network.NewTcpService(reporter, b, l)
+		return network.NewTcpService(reporter, confined, b, l)
 	case UDP:
 		return network.NewUdpService(reporter, b, l)
 	case RELP:
-		return network.NewRelpService(reporter, b, l)
+		return network.NewRelpService(reporter, confined, b, l)
 	case Journal:
 		svc, err := linux.NewJournalService(reporter, l)
 		if err == nil {
@@ -140,7 +140,7 @@ func ProviderFactory(t Types, r kring.Ring, reporter *base.Reporter, b *binder.B
 			return nil
 		}
 	case Accounting:
-		svc, err := NewAccountingService(reporter, l)
+		svc, err := NewAccountingService(reporter, confined, l)
 		if err == nil {
 			return svc
 		} else {
@@ -148,9 +148,9 @@ func ProviderFactory(t Types, r kring.Ring, reporter *base.Reporter, b *binder.B
 			return nil
 		}
 	case Store:
-		return NewStoreService(l, r, pipe)
+		return NewStoreService(confined, l, r, pipe)
 	case KafkaSource:
-		return network.NewKafkaService(reporter, l)
+		return network.NewKafkaService(reporter, confined, l)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown service type: %d\n", t)
 		return nil

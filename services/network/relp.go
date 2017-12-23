@@ -268,11 +268,18 @@ type RelpService struct {
 	pc             []conf.ParserConfig
 	kc             conf.KafkaDestConfig
 	wg             sync.WaitGroup
+	confined       bool
 }
 
-func NewRelpService(r *base.Reporter, b *binder.BinderClient, l log15.Logger) *RelpService {
-	s := &RelpService{b: b, logger: l, reporter: r, direct: true}
-	s.impl = NewRelpServiceImpl(s.direct, r, s.b, s.logger)
+func NewRelpService(r *base.Reporter, confined bool, b *binder.BinderClient, l log15.Logger) *RelpService {
+	s := &RelpService{
+		b:        b,
+		logger:   l,
+		reporter: r,
+		direct:   true,
+		confined: confined,
+	}
+	s.impl = NewRelpServiceImpl(s.direct, confined, r, s.b, s.logger)
 	return s
 }
 
@@ -295,7 +302,7 @@ func (s *RelpService) Start(test bool) (infos []model.ListenerInfo, err error) {
 	//	s.logger.Debug("Capabilities", "caps", capabilities.GetCaps())
 	//}
 	infos = []model.ListenerInfo{}
-	s.impl = NewRelpServiceImpl(s.direct, s.reporter, s.b, s.logger)
+	s.impl = NewRelpServiceImpl(s.direct, s.confined, s.reporter, s.b, s.logger)
 	s.fatalErrorChan = make(chan struct{})
 	s.fatalOnce = &sync.Once{}
 
@@ -384,7 +391,7 @@ type RelpServiceImpl struct {
 	forwarder           *ackForwarder
 }
 
-func NewRelpServiceImpl(direct bool, reporter *base.Reporter, b *binder.BinderClient, logger log15.Logger) *RelpServiceImpl {
+func NewRelpServiceImpl(direct bool, confined bool, reporter *base.Reporter, b *binder.BinderClient, logger log15.Logger) *RelpServiceImpl {
 	s := RelpServiceImpl{
 		status:    Stopped,
 		metrics:   NewRelpMetrics(),
@@ -408,6 +415,7 @@ func NewRelpServiceImpl(direct bool, reporter *base.Reporter, b *binder.BinderCl
 	s.StreamingService.BaseService.Logger = logger.New("class", "RelpServer")
 	s.StreamingService.BaseService.Binder = b
 	s.StreamingService.handler = RelpHandler{Server: &s}
+	s.StreamingService.confined = confined
 	s.StatusChan = make(chan RelpServerStatus, 10)
 	return &s
 }
@@ -432,7 +440,7 @@ func (s *RelpServiceImpl) Start(test bool) ([]model.ListenerInfo, error) {
 	s.producer = nil
 	if !s.test && s.direct {
 		var err error
-		s.producer, err = s.kafkaConf.GetAsyncProducer()
+		s.producer, err = s.kafkaConf.GetAsyncProducer(s.confined)
 		if err != nil {
 			s.resetTCPListeners()
 			return nil, err
