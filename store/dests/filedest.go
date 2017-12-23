@@ -325,7 +325,11 @@ func NewFileDestination(ctx context.Context, confined bool, bc conf.BaseConfig, 
 		fatal:   make(chan struct{}),
 		files:   newOpenedFiles(ctx, bc.FileDest, logger),
 	}
-	d.filenameTmpl, err = template.New("filename").Parse(bc.FileDest.Filename)
+	fname := bc.FileDest.Filename
+	if confined {
+		fname = filepath.Join("/tmp", "filedest", fname)
+	}
+	d.filenameTmpl, err = template.New("filename").Parse(fname)
 	if err != nil {
 		return nil, err
 	}

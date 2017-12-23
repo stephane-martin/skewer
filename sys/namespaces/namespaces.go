@@ -358,25 +358,6 @@ func MakeChroot(targetExec string) (string, error) {
 		},
 	}
 
-	/*
-		for _, systemMount := range systemMounts {
-			if _, err := os.Stat(systemMount); err == nil {
-				mounts = append(mounts, mountPoint{
-					Source: systemMount,
-					Target: systemMount,
-					Fs:     "bind",
-					Flags:  syscall.MS_BIND | syscall.MS_REC | syscall.MS_RDONLY | syscall.MS_NODEV | syscall.MS_NOSUID,
-				})
-				mounts = append(mounts, mountPoint{
-					Source: systemMount,
-					Target: systemMount,
-					Fs:     "bind",
-					Flags:  syscall.MS_BIND | syscall.MS_REC | syscall.MS_RDONLY | syscall.MS_NODEV | syscall.MS_NOSUID | syscall.MS_REMOUNT,
-				})
-			}
-		}
-	*/
-
 	for _, m := range mounts {
 		target := filepath.Join(root, "newroot", m.Target)
 		err := os.MkdirAll(target, 0755)
@@ -509,7 +490,7 @@ func MakeChroot(targetExec string) (string, error) {
 		if !utils.IsDir(storePath) {
 			return "", fmt.Errorf("Store path '%s' is not a directory", storePath)
 		}
-		target := filepath.Join(root, "newroot", storePath)
+		target := filepath.Join(root, "newroot", "tmp", "store", storePath)
 		os.MkdirAll(target, 0755)
 		syscall.Mount(
 			storePath, target, "bind",
@@ -530,7 +511,7 @@ func MakeChroot(targetExec string) (string, error) {
 		if !utils.IsDir(fileDestDir) {
 			return "", fmt.Errorf("Destination path '%s' is not a directory", fileDestDir)
 		}
-		target := filepath.Join(root, "newroot", fileDestDir)
+		target := filepath.Join(root, "newroot", "tmp", "filedest", fileDestDir)
 		os.MkdirAll(target, 0755)
 		syscall.Mount(
 			fileDestDir, target, "bind",

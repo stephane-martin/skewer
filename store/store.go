@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -310,15 +311,19 @@ func (s *MessageStore) init(ctx context.Context) {
 }
 
 func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests conf.DestinationType, confined bool, l log15.Logger) (*MessageStore, error) {
+	dirname := cfg.Dirname
+	if confined {
+		dirname = filepath.Join("/tmp", "store", dirname)
+	}
 	badgerOpts := badger.DefaultOptions
-	badgerOpts.Dir = cfg.Dirname
-	badgerOpts.ValueDir = cfg.Dirname
+	badgerOpts.Dir = dirname
+	badgerOpts.ValueDir = dirname
 	badgerOpts.MaxTableSize = cfg.Maxsize
 	badgerOpts.SyncWrites = cfg.FSync
 	badgerOpts.TableLoadingMode = options.MemoryMap
 	badgerOpts.ValueLogFileSize = 64 * 1024 * 1024
 
-	err := os.MkdirAll(cfg.Dirname, 0700)
+	err := os.MkdirAll(dirname, 0700)
 	if err != nil {
 		return nil, err
 	}
