@@ -3,6 +3,7 @@ package utils
 import (
 	"crypto/tls"
 	"net"
+	"path/filepath"
 	"strings"
 
 	rootcerts "github.com/hashicorp/go-rootcerts"
@@ -27,12 +28,24 @@ func NewTLSConfig(address, caFile, caPath, certFile, keyFile string, insecure bo
 		tlsClientConfig.ServerName = server
 	}
 
-	if certFile != "" && keyFile != "" {
+	if len(certFile) > 0 && len(keyFile) > 0 {
+		if confined {
+			certFile = filepath.Join("/tmp", "certfiles", certFile)
+			keyFile = filepath.Join("/tmp", "certfiles", keyFile)
+		}
 		tlsCert, err := tls.LoadX509KeyPair(certFile, keyFile)
 		if err != nil {
 			return nil, err
 		}
 		tlsClientConfig.Certificates = []tls.Certificate{tlsCert}
+	}
+
+	if len(caFile) > 0 && confined {
+		caFile = filepath.Join("/tmp", "certfiles", caFile)
+	}
+
+	if len(caPath) > 0 && confined {
+		caPath = filepath.Join("/tmp", "certpaths", caPath)
 	}
 
 	rootConfig := &rootcerts.Config{
