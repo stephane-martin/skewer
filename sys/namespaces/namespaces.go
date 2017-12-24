@@ -154,14 +154,14 @@ type baseMountPoint struct {
 
 type bindMountPoint struct {
 	baseMountPoint
-	Flags    int
+	Flags    uintptr
 	ReadOnly bool
 	IsDir    bool
 }
 
 type mountPoint struct {
 	baseMountPoint
-	Flags int
+	Flags uintptr
 	Fs    string
 	Data  string
 }
@@ -171,59 +171,81 @@ func SetJournalFs(targetExec string) error {
 
 	roRemounts := []mountPoint{
 		{
-			Target: "/bin",
-			Flags:  syscall.MS_NOSUID | syscall.MS_NODEV,
+			baseMountPoint: baseMountPoint{
+				Target: "/bin",
+			},
+			Flags: syscall.MS_NOSUID | syscall.MS_NODEV,
 		},
 		{
-			Target: "/sbin",
-			Flags:  syscall.MS_NOSUID | syscall.MS_NODEV,
+			baseMountPoint: baseMountPoint{
+				Target: "/sbin",
+			},
+			Flags: syscall.MS_NOSUID | syscall.MS_NODEV,
 		},
 		{
-			Target: "/lib",
-			Flags:  syscall.MS_NOSUID | syscall.MS_NODEV,
+			baseMountPoint: baseMountPoint{
+				Target: "/lib",
+			},
+			Flags: syscall.MS_NOSUID | syscall.MS_NODEV,
 		},
 		{
-			Target: "/lib64",
-			Flags:  syscall.MS_NOSUID | syscall.MS_NODEV,
+			baseMountPoint: baseMountPoint{
+				Target: "/lib64",
+			},
+			Flags: syscall.MS_NOSUID | syscall.MS_NODEV,
 		},
 		{
-			Target: "/usr",
-			Flags:  syscall.MS_NOSUID | syscall.MS_NODEV,
+			baseMountPoint: baseMountPoint{
+				Target: "/usr",
+			},
+			Flags: syscall.MS_NOSUID | syscall.MS_NODEV,
 		},
 		{
-			Target: "/var",
-			Flags:  syscall.MS_NOSUID | syscall.MS_NODEV | syscall.MS_NOEXEC,
+			baseMountPoint: baseMountPoint{
+				Target: "/var",
+			},
+			Flags: syscall.MS_NOSUID | syscall.MS_NODEV | syscall.MS_NOEXEC,
 		},
 		{
-			Target: "/home",
-			Flags:  syscall.MS_NOSUID | syscall.MS_NODEV,
+			baseMountPoint: baseMountPoint{
+				Target: "/home",
+			},
+			Flags: syscall.MS_NOSUID | syscall.MS_NODEV,
 		},
 		{
-			Target: "/etc",
-			Flags:  syscall.MS_NOSUID | syscall.MS_NODEV | syscall.MS_NOEXEC,
+			baseMountPoint: baseMountPoint{
+				Target: "/etc",
+			},
+			Flags: syscall.MS_NOSUID | syscall.MS_NODEV | syscall.MS_NOEXEC,
 		},
 	}
 
 	mounts := []mountPoint{
 		{
-			Source: "proc",
-			Target: "/proc",
-			Fs:     "proc",
-			Flags:  syscall.MS_NOSUID | syscall.MS_NOEXEC | syscall.MS_NODEV,
+			baseMountPoint: baseMountPoint{
+				Source: "proc",
+				Target: "/proc",
+			},
+			Fs:    "proc",
+			Flags: syscall.MS_NOSUID | syscall.MS_NOEXEC | syscall.MS_NODEV,
 		},
 		{
-			Source: "tmpfs",
-			Target: "/dev",
-			Fs:     "tmpfs",
-			Flags:  syscall.MS_NOSUID | syscall.MS_NOEXEC,
-			Data:   "mode=755",
+			baseMountPoint: baseMountPoint{
+				Source: "tmpfs",
+				Target: "/dev",
+			},
+			Fs:    "tmpfs",
+			Flags: syscall.MS_NOSUID | syscall.MS_NOEXEC,
+			Data:  "mode=755",
 		},
 		{
-			Source: "tmpfs",
-			Target: "/boot",
-			Fs:     "tmpfs",
-			Flags:  syscall.MS_NOSUID | syscall.MS_NODEV | syscall.MS_NOEXEC,
-			Data:   "mode=700",
+			baseMountPoint: baseMountPoint{
+				Source: "tmpfs",
+				Target: "/boot",
+			},
+			Fs:    "tmpfs",
+			Flags: syscall.MS_NOSUID | syscall.MS_NODEV | syscall.MS_NOEXEC,
+			Data:  "mode=700",
 		},
 	}
 
@@ -321,56 +343,70 @@ func MakeChroot(targetExec string) (string, error) {
 
 	mounts := []mountPoint{
 		{
-			Source: "proc",
-			Target: "/proc",
-			Fs:     "proc",
-			Flags:  syscall.MS_NOSUID | syscall.MS_NOEXEC | syscall.MS_NODEV,
+			baseMountPoint: baseMountPoint{
+				Source: "proc",
+				Target: "/proc",
+			},
+			Fs:    "proc",
+			Flags: syscall.MS_NOSUID | syscall.MS_NOEXEC | syscall.MS_NODEV,
 		},
 		{
-			Source: "tmpfs",
-			Target: "/dev",
-			Fs:     "tmpfs",
-			Flags:  syscall.MS_NOSUID | syscall.MS_NOEXEC,
-			Data:   "mode=755",
+			baseMountPoint: baseMountPoint{
+				Source: "tmpfs",
+				Target: "/dev",
+			},
+			Fs:    "tmpfs",
+			Flags: syscall.MS_NOSUID | syscall.MS_NOEXEC,
+			Data:  "mode=755",
 		},
 		{
-			Source: "tmpfs",
-			Target: "/run",
-			Fs:     "tmpfs",
-			Flags:  syscall.MS_NODEV | syscall.MS_NOEXEC | syscall.MS_NOSUID,
-			Data:   "mode=755",
+			baseMountPoint: baseMountPoint{
+				Source: "tmpfs",
+				Target: "/run",
+			},
+			Fs:    "tmpfs",
+			Flags: syscall.MS_NODEV | syscall.MS_NOEXEC | syscall.MS_NOSUID,
+			Data:  "mode=755",
 		},
 		{
-			Source: "devpts",
-			Target: "/dev/pts",
-			Fs:     "devpts",
-			Flags:  syscall.MS_NOSUID | syscall.MS_NOEXEC,
-			Data:   "newinstance,ptmxmode=0666,mode=620",
+			baseMountPoint: baseMountPoint{
+				Source: "devpts",
+				Target: "/dev/pts",
+			},
+			Fs:    "devpts",
+			Flags: syscall.MS_NOSUID | syscall.MS_NOEXEC,
+			Data:  "newinstance,ptmxmode=0666,mode=620",
 		},
 		{
-			Source: "tmpfs",
-			Target: "/tmp",
-			Fs:     "tmpfs",
-			Flags:  syscall.MS_NOSUID | syscall.MS_NODEV,
-			Data:   "mode=700",
+			baseMountPoint: baseMountPoint{
+				Source: "tmpfs",
+				Target: "/tmp",
+			},
+			Fs:    "tmpfs",
+			Flags: syscall.MS_NOSUID | syscall.MS_NODEV,
+			Data:  "mode=700",
 		},
 		{
-			Source: "tmpfs",
-			Target: "/lib",
-			Fs:     "tmpfs",
-			Flags:  syscall.MS_NOSUID | syscall.MS_NODEV,
-			Data:   "mode=755",
+			baseMountPoint: baseMountPoint{
+				Source: "tmpfs",
+				Target: "/lib",
+			},
+			Fs:    "tmpfs",
+			Flags: syscall.MS_NOSUID | syscall.MS_NODEV,
+			Data:  "mode=755",
 		},
 		{
-			Source: "tmpfs",
-			Target: "/lib64",
-			Fs:     "tmpfs",
-			Flags:  syscall.MS_NOSUID | syscall.MS_NODEV,
-			Data:   "mode=755",
+			baseMountPoint: baseMountPoint{
+				Source: "tmpfs",
+				Target: "/lib64",
+			},
+			Fs:    "tmpfs",
+			Flags: syscall.MS_NOSUID | syscall.MS_NODEV,
+			Data:  "mode=755",
 		},
 	}
 
-	mounted := set.New()
+	mounted := set.New(set.ThreadSafe)
 	for _, m := range mounts {
 		target := filepath.Join(root, "newroot", m.Target)
 		err := os.MkdirAll(target, 0755)
@@ -393,8 +429,10 @@ func MakeChroot(targetExec string) (string, error) {
 	confDir := strings.TrimSpace(os.Getenv("SKEWER_CONF_DIR"))
 	if len(confDir) > 0 {
 		bindMounts = append(bindMounts, bindMountPoint{
-			Source:   confDir,
-			Target:   filepath.Join(root, "newroot", "tmp", "conf", confDir),
+			baseMountPoint: baseMountPoint{
+				Source: confDir,
+				Target: filepath.Join(root, "newroot", "tmp", "conf", confDir),
+			},
 			ReadOnly: true,
 			IsDir:    true,
 			Flags:    syscall.MS_NODEV | syscall.MS_NOEXEC | syscall.MS_NOSUID,
@@ -408,8 +446,10 @@ func MakeChroot(targetExec string) (string, error) {
 	acctDir := strings.TrimSpace(os.Getenv("SKEWER_ACCT_DIR"))
 	if len(acctDir) > 0 {
 		bindMounts = append(bindMounts, bindMountPoint{
-			Source:   acctDir,
-			Target:   filepath.Join(root, "newroot", "tmp", "acct", acctDir),
+			baseMountPoint: baseMountPoint{
+				Source: acctDir,
+				Target: filepath.Join(root, "newroot", "tmp", "acct", acctDir),
+			},
 			ReadOnly: true,
 			IsDir:    true,
 			Flags:    syscall.MS_NODEV | syscall.MS_NOEXEC | syscall.MS_NOSUID,
@@ -431,8 +471,10 @@ func MakeChroot(targetExec string) (string, error) {
 
 	for _, library := range shared_libs {
 		bindMounts = append(bindMounts, bindMountPoint{
-			Source:   library,
-			Target:   filepath.Join(root, "newroot", library),
+			baseMountPoint: baseMountPoint{
+				Source: library,
+				Target: filepath.Join(root, "newroot", library),
+			},
 			ReadOnly: true,
 			IsDir:    false,
 			Flags:    syscall.MS_NOSUID | syscall.MS_NODEV,
@@ -457,8 +499,10 @@ func MakeChroot(targetExec string) (string, error) {
 
 	for _, device := range devices {
 		bindMounts = append(bindMounts, bindMountPoint{
-			Source:   filepath.Join("/dev", device),
-			Target:   filepath.Join(root, "newroot", "dev", device),
+			baseMountPoint: baseMountPoint{
+				Source: filepath.Join("/dev", device),
+				Target: filepath.Join(root, "newroot", "dev", device),
+			},
 			ReadOnly: false,
 			IsDir:    false,
 			Flags:    syscall.MS_NOSUID | syscall.MS_NOEXEC,
@@ -482,8 +526,10 @@ func MakeChroot(targetExec string) (string, error) {
 
 	// bind mount /dev/shm
 	bindMounts = append(bindMounts, bindMountPoint{
-		Source:   "/dev/shm",
-		Target:   filepath.Join(root, "newroot", "dev", "shm"),
+		baseMountPoint: baseMountPoint{
+			Source: "/dev/shm",
+			Target: filepath.Join(root, "newroot", "dev", "shm"),
+		},
 		ReadOnly: false,
 		IsDir:    true,
 		Flags:    syscall.MS_NOEXEC | syscall.MS_NOSUID,
@@ -505,11 +551,13 @@ func MakeChroot(targetExec string) (string, error) {
 	ttyname := strings.TrimSpace(os.Getenv("SKEWER_TTYNAME"))
 	if len(ttyname) > 0 {
 		bindMounts = append(bindMounts, bindMountPoint{
-			Source:   ttyname,
-			Target:   filepath.Join(root, "newroot", "dev", "console"),
+			baseMountPoint: baseMountPoint{
+				Source: ttyname,
+				Target: filepath.Join(root, "newroot", "dev", "console"),
+			},
 			ReadOnly: false,
 			IsDir:    false,
-			Falgs:    syscall.MS_NOSUID | syscall.MS_NOEXEC,
+			Flags:    syscall.MS_NOSUID | syscall.MS_NOEXEC,
 		})
 		/*
 			target := filepath.Join(root, "newroot", "dev", "console")
@@ -524,8 +572,10 @@ func MakeChroot(targetExec string) (string, error) {
 
 	// bind mount the skewer executable
 	bindMounts = append(bindMounts, bindMountPoint{
-		Source:   targetExec,
-		Target:   filepath.Join(root, "newroot", targetExec),
+		baseMountPoint: baseMountPoint{
+			Source: targetExec,
+			Target: filepath.Join(root, "newroot", targetExec),
+		},
 		ReadOnly: true,
 		IsDir:    false,
 		Flags:    syscall.MS_NOSUID | syscall.MS_NODEV,
@@ -558,8 +608,10 @@ func MakeChroot(targetExec string) (string, error) {
 	storePath := strings.TrimSpace(os.Getenv("SKEWER_STORE_PATH"))
 	if len(storePath) > 0 {
 		bindMounts = append(bindMounts, bindMountPoint{
-			Source:   storePath,
-			Target:   filepath.Join(root, "newroot", "tmp", "store", storePath),
+			baseMountPoint: baseMountPoint{
+				Source: storePath,
+				Target: filepath.Join(root, "newroot", "tmp", "store", storePath),
+			},
 			ReadOnly: false,
 			IsDir:    true,
 			Flags:    syscall.MS_NOEXEC | syscall.MS_NOSUID | syscall.MS_NODEV,
@@ -587,8 +639,10 @@ func MakeChroot(targetExec string) (string, error) {
 	fileDestDir := strings.TrimSpace(os.Getenv("SKEWER_FILEDEST_DIR"))
 	if len(fileDestDir) > 0 {
 		bindMounts = append(bindMounts, bindMountPoint{
-			Source:   fileDestDir,
-			Target:   filepath.Join(root, "newroot", "tmp", "filedest", fileDestDir),
+			baseMountPoint: baseMountPoint{
+				Source: fileDestDir,
+				Target: filepath.Join(root, "newroot", "tmp", "filedest", fileDestDir),
+			},
 			ReadOnly: false,
 			IsDir:    true,
 			Flags:    syscall.MS_NOEXEC | syscall.MS_NODEV | syscall.MS_NOSUID,
@@ -614,12 +668,17 @@ func MakeChroot(targetExec string) (string, error) {
 	}
 
 	// mount SKEWER_CERT_FILES
-	certFiles = strings.Split(strings.TrimSpace(os.Getenv("SKEWER_CERT_FILES")), ";")
+	certFiles := strings.Split(strings.TrimSpace(os.Getenv("SKEWER_CERT_FILES")), ";")
 	if len(certFiles) > 0 {
 		for _, certFile := range certFiles {
+			if len(certFile) == 0 {
+				continue
+			}
 			bindMounts = append(bindMounts, bindMountPoint{
-				Source:   certFile,
-				Target:   filepath.Join(root, "newroot", "tmp", "certfiles", certFile),
+				baseMountPoint: baseMountPoint{
+					Source: certFile,
+					Target: filepath.Join(root, "newroot", "tmp", "certfiles", certFile),
+				},
 				ReadOnly: true,
 				IsDir:    false,
 				Flags:    syscall.MS_NOSUID | syscall.MS_NOEXEC | syscall.MS_NODEV,
@@ -628,12 +687,17 @@ func MakeChroot(targetExec string) (string, error) {
 	}
 
 	// mount SKEWER_CERT_PATHS directories
-	certPaths = strings.Split(strings.TrimSpace(os.Getenv("SKEWER_CERT_PATHS")), ";")
+	certPaths := strings.Split(strings.TrimSpace(os.Getenv("SKEWER_CERT_PATHS")), ";")
 	if len(certPaths) > 0 {
 		for _, certPath := range certPaths {
+			if len(certPath) == 0 {
+				continue
+			}
 			bindMounts = append(bindMounts, bindMountPoint{
-				Source:   certPath,
-				Target:   filepath.Join(root, "newroot", "tmp", "certpaths", certPath),
+				baseMountPoint: baseMountPoint{
+					Source: certPath,
+					Target: filepath.Join(root, "newroot", "tmp", "certpaths", certPath),
+				},
 				ReadOnly: true,
 				IsDir:    true,
 				Flags:    syscall.MS_NOSUID | syscall.MS_NOEXEC | syscall.MS_NODEV,
@@ -681,7 +745,7 @@ func MakeChroot(targetExec string) (string, error) {
 			})
 		} else {
 			if !utils.FileExists(mountPoint.Source) {
-				return "", fmt.Errorf("mount source '%s' does not exist", mountPoint.Source)
+				return "", fmt.Errorf("mount source '%s' (to '%s') does not exist", mountPoint.Source, mountPoint.Target)
 			}
 			os.MkdirAll(filepath.Dir(mountPoint.Target), 0755)
 			f, err := os.Create(mountPoint.Target)
