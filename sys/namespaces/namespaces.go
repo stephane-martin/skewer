@@ -245,11 +245,11 @@ func SetJournalFs(targetExec string) error {
 			},
 			Fs:    "tmpfs",
 			Flags: syscall.MS_NOSUID | syscall.MS_NODEV | syscall.MS_NOEXEC,
-			Data:  "mode=700",
+			Data:  "mode=755",
 		},
 	}
 
-	temp, err := ioutil.TempDir("", "skewer-confined")
+	temp, err := ioutil.TempDir("", "skewer-tmpdev")
 	if err != nil {
 		return fmt.Errorf("TempDir error: %s", err)
 	}
@@ -260,13 +260,12 @@ func SetJournalFs(targetExec string) error {
 		return fmt.Errorf("Error bind-mounting /dev: %s", err)
 	}
 
+	// mask /proc, /dev, /boot
 	for _, m := range mounts {
-		if _, err := os.Stat(m.Target); err != nil {
-			if os.IsNotExist(err) {
-				err = os.MkdirAll(m.Target, 0755)
-				if err != nil {
-					return fmt.Errorf("mkdirall %s error: %v", m.Target, err)
-				}
+		if !utils.FileExists(m.Target) {
+			err = os.MkdirAll(m.Target, 0755)
+			if err != nil {
+				return fmt.Errorf("mkdirall %s error: %v", m.Target, err)
 			}
 		}
 		err = syscall.Mount(m.Source, m.Target, m.Fs, uintptr(m.Flags), "")
@@ -275,8 +274,9 @@ func SetJournalFs(targetExec string) error {
 		}
 	}
 
+	// make most of directories read-only
 	for _, m := range roRemounts {
-		if _, err = os.Stat(m.Target); err == nil {
+		if utils.IsDir(m.Target) {
 			err := syscall.Mount(m.Target, m.Target, "bind", syscall.MS_BIND|syscall.MS_REC, "")
 			if err != nil {
 				return fmt.Errorf("failed to bind-mount %s: %s", m.Target, err.Error())
@@ -287,6 +287,8 @@ func SetJournalFs(targetExec string) error {
 			}
 		}
 	}
+
+	// populate the new /dev
 	devices := []string{"null", "zero", "full", "random", "urandom"}
 	for _, device := range devices {
 		f, err := os.Create(filepath.Join("/dev", device))
@@ -294,10 +296,12 @@ func SetJournalFs(targetExec string) error {
 			f.Close()
 			err = syscall.Mount(filepath.Join(temp, device), filepath.Join("/dev", device), "bind", syscall.MS_BIND, "")
 			if err != nil {
-				return fmt.Errorf("Error bind-mounting device %s: %s", device, err)
+				return fmt.Errorf("Error bind-mounting device '%s': %s", device, err)
 			}
 		}
 	}
+
+	// /dev/shm is mounted from parent container, so that Posix IPC and shared mem can work
 	err = os.Mkdir("/dev/shm", 0755)
 	if err == nil {
 		err = syscall.Mount(filepath.Join(temp, "shm"), "/dev/shm", "bind", syscall.MS_BIND|syscall.MS_REC, "")
@@ -316,17 +320,24 @@ func SetJournalFs(targetExec string) error {
 	if err != nil {
 		return fmt.Errorf("Error removing %s: %s", temp, err)
 	}
-	err = syscall.Mount("tmpfs", "/tmp", "tmpfs", syscall.MS_NODEV|syscall.MS_NOEXEC|syscall.MS_NOSUID, "")
-	if err != nil {
-		return fmt.Errorf("Error mounting /tmp: %s", err)
-	}
 
+	tmpMP := mountPoint{
+		baseMountPoint: baseMountPoint{
+			Source: "tmpfs",
+			Target: "/tmp",
+		},
+		Fs:    "tmpfs",
+		Flags: syscall.MS_NOSUID | syscall.MS_NODEV | syscall.MS_NOEXEC,
+		Data:  "mode=755",
+	}
+	err = syscall.Mount(tmpMP.Source, tmpMP.Target, tmpMP.Fs, uintptr(tmpMP.Flags), "")
+	if err != nil {
+		return fmt.Errorf("failed to mount %s: %s", tmpMP.Target, err)
+	}
 	return nil
 }
 
 func MakeChroot(targetExec string) (string, error) {
-	// TODO: handle errors correctly
-
 	root, err := ioutil.TempDir("", "skewer-confined")
 	if err != nil {
 		return "", err
