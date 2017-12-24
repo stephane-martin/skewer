@@ -437,10 +437,6 @@ func MakeChroot(targetExec string) (string, error) {
 			IsDir:    true,
 			Flags:    syscall.MS_NODEV | syscall.MS_NOEXEC | syscall.MS_NOSUID,
 		})
-		//target := filepath.Join(root, "newroot", "tmp", "conf", confDir)
-		//os.MkdirAll(target, 0755)
-		//syscall.Mount(confDir, target, "bind", syscall.MS_BIND|syscall.MS_REC|syscall.MS_RDONLY|syscall.MS_NODEV|syscall.MS_NOEXEC|syscall.MS_NOSUID, "")
-		//syscall.Mount(confDir, target, "bind", syscall.MS_BIND|syscall.MS_REC|syscall.MS_RDONLY|syscall.MS_NODEV|syscall.MS_NOEXEC|syscall.MS_NOSUID|syscall.MS_REMOUNT, "")
 	}
 
 	acctDir := strings.TrimSpace(os.Getenv("SKEWER_ACCT_DIR"))
@@ -454,10 +450,6 @@ func MakeChroot(targetExec string) (string, error) {
 			IsDir:    true,
 			Flags:    syscall.MS_NODEV | syscall.MS_NOEXEC | syscall.MS_NOSUID,
 		})
-		//target := filepath.Join(root, "newroot", "tmp", "acct", acctDir)
-		//os.MkdirAll(target, 0755)
-		//syscall.Mount(acctDir, target, "bind", syscall.MS_BIND|syscall.MS_REC|syscall.MS_RDONLY|syscall.MS_NODEV|syscall.MS_NOEXEC|syscall.MS_NOSUID, "")
-		//syscall.Mount(acctDir, target, "bind", syscall.MS_BIND|syscall.MS_REC|syscall.MS_RDONLY|syscall.MS_NODEV|syscall.MS_NOEXEC|syscall.MS_NOSUID|syscall.MS_REMOUNT, "")
 	}
 
 	// bind mount shared libraries from /lib and /lib64
@@ -479,19 +471,6 @@ func MakeChroot(targetExec string) (string, error) {
 			IsDir:    false,
 			Flags:    syscall.MS_NOSUID | syscall.MS_NODEV,
 		})
-		/*
-			libraryDir := filepath.Dir(library)
-			targetDir := filepath.Join(root, "newroot", libraryDir)
-			os.MkdirAll(targetDir, 0755)
-			target := filepath.Join(root, "newroot", library)
-			f, err := os.Create(target)
-			if err == nil {
-				f.Close()
-				syscall.Mount(library, target, "bind", syscall.MS_BIND|syscall.MS_RDONLY|syscall.MS_NODEV|syscall.MS_NOSUID, "")
-				syscall.Mount(library, target, "bind", syscall.MS_BIND|syscall.MS_RDONLY|syscall.MS_NODEV|syscall.MS_NOSUID|syscall.MS_REMOUNT, "")
-
-			}
-		*/
 	}
 
 	// bind mount some devices in /dev
@@ -507,21 +486,6 @@ func MakeChroot(targetExec string) (string, error) {
 			IsDir:    false,
 			Flags:    syscall.MS_NOSUID | syscall.MS_NOEXEC,
 		})
-		/*
-			source := filepath.Join("/dev", device)
-			target := filepath.Join(root, "newroot", "dev", device)
-			f, err := os.Create(target)
-			if err == nil {
-				f.Close()
-				err = syscall.Mount(source, target, "bind", syscall.MS_BIND|syscall.MS_NOSUID|syscall.MS_NOEXEC, "")
-				err = syscall.Mount(source, target, "bind", syscall.MS_BIND|syscall.MS_NOSUID|syscall.MS_NOEXEC|syscall.MS_REMOUNT, "")
-				if err != nil {
-					return "", fmt.Errorf("failed to mount %s to %s: %v", source, target, err)
-				}
-			} else {
-				return "", fmt.Errorf("failed to create %s: %s", target, err.Error())
-			}
-		*/
 	}
 
 	// bind mount /dev/shm
@@ -534,18 +498,6 @@ func MakeChroot(targetExec string) (string, error) {
 		IsDir:    true,
 		Flags:    syscall.MS_NOEXEC | syscall.MS_NOSUID,
 	})
-	/*
-		target = filepath.Join(root, "newroot", "dev", "shm")
-		err = os.Mkdir(target, 0755)
-		if err == nil {
-			err = syscall.Mount("/dev/shm", target, "bind", syscall.MS_BIND|syscall.MS_NOSUID|syscall.MS_NOEXEC|syscall.MS_REC, "")
-			if err != nil {
-				return "", fmt.Errorf("Failed to bind-mount /dev/shm")
-			}
-		} else {
-			return "", fmt.Errorf("Failed to create /dev/shm")
-		}
-	*/
 
 	// bind mount /dev/console if needed
 	ttyname := strings.TrimSpace(os.Getenv("SKEWER_TTYNAME"))
@@ -559,15 +511,6 @@ func MakeChroot(targetExec string) (string, error) {
 			IsDir:    false,
 			Flags:    syscall.MS_NOSUID | syscall.MS_NOEXEC,
 		})
-		/*
-			target := filepath.Join(root, "newroot", "dev", "console")
-			f, err := os.Create(target)
-			if err == nil {
-				f.Close()
-				syscall.Mount(ttyname, target, "bind", syscall.MS_BIND|syscall.MS_NOSUID|syscall.MS_NOEXEC, "")
-				syscall.Mount(ttyname, target, "bind", syscall.MS_BIND|syscall.MS_NOSUID|syscall.MS_NOEXEC|syscall.MS_REMOUNT, "")
-			}
-		*/
 	}
 
 	// bind mount the skewer executable
@@ -580,29 +523,6 @@ func MakeChroot(targetExec string) (string, error) {
 		IsDir:    false,
 		Flags:    syscall.MS_NOSUID | syscall.MS_NODEV,
 	})
-	/*
-		executableDir := filepath.Dir(targetExec)
-		targetDir := filepath.Join(root, "newroot", executableDir)
-		err = os.MkdirAll(targetDir, 0755)
-		if err != nil {
-			return "", fmt.Errorf("mkdirall %s error: %v", targetDir, err)
-		}
-		target := filepath.Join(root, "newroot", targetExec)
-		f, err := os.Create(target)
-		if err == nil {
-			f.Close()
-			err = syscall.Mount(targetExec, target, "bind", syscall.MS_BIND|syscall.MS_NOSUID|syscall.MS_NODEV|syscall.MS_RDONLY, "")
-			if err != nil {
-				return "", fmt.Errorf("failed to mount %s to %s: %s", targetExec, target, err.Error())
-			}
-			err = syscall.Mount(targetExec, target, "bind", syscall.MS_BIND|syscall.MS_NOSUID|syscall.MS_NODEV|syscall.MS_REMOUNT|syscall.MS_RDONLY, "")
-			if err != nil {
-				return "", fmt.Errorf("failed to remount readonly %s to %s: %s", targetExec, target, err.Error())
-			}
-		} else {
-			return "", fmt.Errorf("failed to create %s: %s", target, err.Error())
-		}
-	*/
 
 	// RW bind-mount the Store if needed
 	storePath := strings.TrimSpace(os.Getenv("SKEWER_STORE_PATH"))
@@ -616,23 +536,6 @@ func MakeChroot(targetExec string) (string, error) {
 			IsDir:    true,
 			Flags:    syscall.MS_NOEXEC | syscall.MS_NOSUID | syscall.MS_NODEV,
 		})
-		/*
-			if !utils.IsDir(storePath) {
-				return "", fmt.Errorf("Store path '%s' is not a directory", storePath)
-			}
-			target := filepath.Join(root, "newroot", "tmp", "store", storePath)
-			os.MkdirAll(target, 0755)
-			syscall.Mount(
-				storePath, target, "bind",
-				syscall.MS_BIND|syscall.MS_REC|syscall.MS_NOEXEC|syscall.MS_NODEV|syscall.MS_NOSUID,
-				"",
-			)
-			syscall.Mount(
-				storePath, target, "bind",
-				syscall.MS_BIND|syscall.MS_REC|syscall.MS_NOEXEC|syscall.MS_NODEV|syscall.MS_NOSUID|syscall.MS_REMOUNT,
-				"",
-			)
-		*/
 	}
 
 	// RW bind-mount the directory for file destination if needed
@@ -647,24 +550,6 @@ func MakeChroot(targetExec string) (string, error) {
 			IsDir:    true,
 			Flags:    syscall.MS_NOEXEC | syscall.MS_NODEV | syscall.MS_NOSUID,
 		})
-		/*
-			fmt.Fprintln(os.Stderr, "FILEDESTDIR", fileDestDir)
-			if !utils.IsDir(fileDestDir) {
-				return "", fmt.Errorf("Destination path '%s' is not a directory", fileDestDir)
-			}
-			target := filepath.Join(root, "newroot", "tmp", "filedest", fileDestDir)
-			os.MkdirAll(target, 0755)
-			syscall.Mount(
-				fileDestDir, target, "bind",
-				syscall.MS_BIND|syscall.MS_REC|syscall.MS_NOEXEC|syscall.MS_NODEV|syscall.MS_NOSUID,
-				"",
-			)
-			syscall.Mount(
-				fileDestDir, target, "bind",
-				syscall.MS_BIND|syscall.MS_REC|syscall.MS_NOEXEC|syscall.MS_NODEV|syscall.MS_NOSUID|syscall.MS_REMOUNT,
-				"",
-			)
-		*/
 	}
 
 	// mount SKEWER_CERT_FILES
