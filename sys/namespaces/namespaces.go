@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -16,15 +15,6 @@ import (
 	dump "github.com/stephane-martin/skewer/sys/dumpable"
 	"github.com/stephane-martin/skewer/utils"
 )
-
-type envPaths struct {
-	acctParentDir     string
-	fileDestParentDir string
-	storePath         string
-	confPath          string
-	certFiles         []string
-	certPaths         []string
-}
 
 func (c *NamespacedCmd) Start() (err error) {
 	paths := envPaths{
@@ -97,7 +87,15 @@ func (c *NamespacedCmd) Start() (err error) {
 		}
 	}
 
-	c.cmd.AppendEnv(setupEnv(paths))
+	ttyName := ""
+	if ttyname.IsAtty(1) {
+		ttyName, err := ttyname.TtyName(1)
+		if err != nil {
+			ttyName = ""
+		}
+	}
+
+	c.cmd.AppendEnv(setupEnv(paths, ttyName))
 
 	c.cmd.SetSysProcAttr(&syscall.SysProcAttr{
 		Cloneflags: syscall.CLONE_NEWUSER | syscall.CLONE_NEWPID | syscall.CLONE_NEWUTS | syscall.CLONE_NEWNS,
@@ -145,25 +143,6 @@ func PivotRoot(root string) (err error) {
 		err = fmt.Errorf("PivotRoot error: %s", err.Error())
 	}
 	return err
-}
-
-type baseMountPoint struct {
-	Source string
-	Target string
-}
-
-type bindMountPoint struct {
-	baseMountPoint
-	Flags    uintptr
-	ReadOnly bool
-	IsDir    bool
-}
-
-type mountPoint struct {
-	baseMountPoint
-	Flags uintptr
-	Fs    string
-	Data  string
 }
 
 func SetJournalFs(targetExec string) error {
@@ -698,43 +677,4 @@ func MakeChroot(targetExec string) (string, error) {
 	)
 
 	return root, nil
-}
-
-func setupEnv(paths envPaths) (env []string) {
-	env = []string{}
-	if ttyname.IsAtty(1) {
-		myTtyName, _ := ttyname.TtyName(1)
-		env = append(env, fmt.Sprintf("SKEWER_TTYNAME=%s", myTtyName))
-	}
-
-	if len(paths.confPath) > 0 {
-		env = append(env, fmt.Sprintf("SKEWER_CONF_DIR=%s", paths.confPath))
-	}
-
-	if len(paths.storePath) > 0 {
-		env = append(env, fmt.Sprintf("SKEWER_STORE_PATH=%s", paths.storePath))
-	}
-
-	if len(paths.acctParentDir) > 0 {
-		env = append(env, fmt.Sprintf("SKEWER_ACCT_DIR=%s", paths.acctParentDir))
-	}
-
-	if len(paths.fileDestParentDir) > 0 {
-		env = append(env, fmt.Sprintf("SKEWER_FILEDEST_DIR=%s", paths.fileDestParentDir))
-	}
-
-	if len(paths.certFiles) > 0 {
-		env = append(env, fmt.Sprintf("SKEWER_CERT_FILES=%s", strings.Join(paths.certFiles, ";")))
-	}
-
-	if len(paths.certPaths) > 0 {
-		env = append(env, fmt.Sprintf("SKEWER_CERT_PATHS=%s", strings.Join(paths.certPaths, ";")))
-	}
-
-	_, err := exec.LookPath("systemctl")
-	if err == nil {
-		env = append(env, "SKEWER_HAVE_SYSTEMCTL=TRUE")
-	}
-
-	return env
 }

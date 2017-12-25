@@ -7,6 +7,8 @@ import (
 	"github.com/oklog/ulid"
 )
 
+var ZeroUid ulid.ULID
+
 type Generator struct {
 	entropy *rand.Rand
 }

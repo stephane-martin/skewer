@@ -100,7 +100,7 @@ func Fuzz(m []byte) int {
 
 func GetParser(format string) *Parser {
 	switch format {
-	case "rfc5424", "rfc3164", "json", "fulljson", "auto":
+	case "rfc5424", "rfc3164", "json", "fulljson", "gelf", "auto":
 		return &Parser{format: format}
 	default:
 		return nil
@@ -118,6 +118,8 @@ func Parse(m []byte, format string, decoder *encoding.Decoder, dont_parse_sd boo
 		sm, err = ParseJsonFormat(m, decoder)
 	case "fulljson":
 		sm, err = ParseFullJsonFormat(m, decoder)
+	case "gelf":
+		sm, err = ParseGelfFormat(m, decoder)
 	case "auto":
 		if len(m) == 0 {
 			return sm, &EmptyMessageError{}

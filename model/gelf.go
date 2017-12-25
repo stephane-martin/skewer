@@ -3,8 +3,35 @@ package model
 import (
 	"fmt"
 
+	"github.com/oklog/ulid"
+	"github.com/stephane-martin/skewer/utils"
 	"gopkg.in/Graylog2/go-gelf.v2/gelf"
 )
+
+func (m *FullMessage) ToGelfMessage() *gelf.Message {
+	gm := m.Parsed.ToGelfMessage()
+	if m.Uid != utils.ZeroUid {
+		gm.Extra["skewer_uid"] = ulid.ULID(m.Uid).String()
+	}
+	if m.Txnr > 0 {
+		gm.Extra["txnr"] = m.Txnr
+	}
+	return gm
+}
+
+func (m *ParsedMessage) ToGelfMessage() *gelf.Message {
+	gm := m.Fields.ToGelfMessage()
+	if len(m.Client) > 0 {
+		gm.Extra["client"] = m.Client
+	}
+	if m.LocalPort > 0 {
+		gm.Extra["port"] = m.LocalPort
+	}
+	if len(m.UnixSocketPath) > 0 {
+		gm.Extra["socket_path"] = m.UnixSocketPath
+	}
+	return gm
+}
 
 func (m *SyslogMessage) ToGelfMessage() *gelf.Message {
 	gelfm := gelf.Message{
@@ -14,6 +41,7 @@ func (m *SyslogMessage) ToGelfMessage() *gelf.Message {
 		Full:     "",
 		TimeUnix: float64(m.TimeReportedNum) / 1000000000,
 		Level:    int32(m.Severity),
+		Facility: m.Facility.String(),
 		RawExtra: nil,
 	}
 	gelfm.Extra = map[string]interface{}{}
@@ -23,7 +51,7 @@ func (m *SyslogMessage) ToGelfMessage() *gelf.Message {
 			(gelfm.Extra[domain]).(map[string]string)[k] = v
 		}
 	}
-	gelfm.Extra["facility"] = m.Facility.String()
+	gelfm.Extra["facility"] = gelfm.Facility
 	if len(m.Appname) > 0 {
 		gelfm.Extra["appname"] = m.Appname
 	}

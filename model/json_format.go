@@ -9,7 +9,27 @@ import (
 	"github.com/pquerna/ffjson/ffjson"
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/unicode"
+	"gopkg.in/Graylog2/go-gelf.v2/gelf"
 )
+
+func ParseGelfFormat(m []byte, decoder *encoding.Decoder) (msg *SyslogMessage, rerr error) {
+	// we ignore decoder, JSON is always UTF-8
+	decoder = unicode.UTF8.NewDecoder()
+
+	var err error
+	m, err = decoder.Bytes(m)
+	if err != nil {
+		return nil, &InvalidEncodingError{Err: err}
+	}
+	gelfMsg := gelf.Message{}
+	err = gelfMsg.UnmarshalJSON(m)
+	if err != nil {
+		return nil, &UnmarshalingJsonError{err}
+	}
+	syslogMsg := SyslogMessage{}
+	syslogMsg.FromGelfMessage(&gelfMsg)
+	return &syslogMsg, nil
+}
 
 func ParseFullJsonFormat(m []byte, decoder *encoding.Decoder) (msg *SyslogMessage, rerr error) {
 	// we ignore decoder, JSON is always UTF-8

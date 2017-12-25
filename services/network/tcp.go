@@ -282,11 +282,10 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TcpSourceConfig)
 	}
 	scanner := bufio.NewScanner(conn)
 	scanner.Buffer(make([]byte, 0, s.MaxMessageSize), s.MaxMessageSize)
-	switch config.Format {
-	case "rfc5424", "rfc3164", "json", "auto":
+	if config.LineFraming {
+		scanner.Split(makeLFTCPSplit(config.FrameDelimiter))
+	} else {
 		scanner.Split(TcpSplit)
-	default:
-		scanner.Split(lfTCPSplit)
 	}
 	var rawmsg *model.RawTcpMessage
 	var buf []byte
@@ -320,22 +319,26 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TcpSourceConfig)
 	logger.Info("End of TCP client connection", "error", scanner.Err())
 }
 
-func lfTCPSplit(data []byte, atEOF bool) (advance int, token []byte, eoferr error) {
-	if atEOF {
-		eoferr = io.EOF
+func makeLFTCPSplit(delimiter string) func(d []byte, a bool) (int, []byte, error) {
+	delim := []byte(delimiter)[0]
+	f := func(data []byte, atEOF bool) (advance int, token []byte, eoferr error) {
+		if atEOF {
+			eoferr = io.EOF
+		}
+		trimmedData := bytes.TrimLeft(data, " \r\n")
+		if len(trimmedData) == 0 {
+			return 0, nil, eoferr
+		}
+		trimmed := len(data) - len(trimmedData)
+		lf := bytes.IndexByte(trimmedData, delim)
+		if lf == 0 {
+			return 0, nil, eoferr
+		}
+		token = bytes.Trim(trimmedData[0:lf], " \r\n")
+		advance = trimmed + lf + 1
+		return advance, token, nil
 	}
-	trimmedData := bytes.TrimLeft(data, " \r\n")
-	if len(trimmedData) == 0 {
-		return 0, nil, eoferr
-	}
-	trimmed := len(data) - len(trimmedData)
-	lf := bytes.IndexByte(trimmedData, '\n')
-	if lf == 0 {
-		return 0, nil, eoferr
-	}
-	token = bytes.Trim(trimmedData[0:lf], " \r\n")
-	advance = trimmed + lf + 1
-	return advance, token, nil
+	return f
 }
 
 func getline(data []byte, trimmed int, eoferr error) (int, []byte, error) {

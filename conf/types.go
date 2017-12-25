@@ -345,6 +345,8 @@ type TcpSourceConfig struct {
 	FilterSubConfig        `mapstructure:",squash"`
 	TlsBaseConfig          `mapstructure:",squash"`
 	ClientAuthType         string    `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
+	LineFraming            bool      `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
+	FrameDelimiter         string    `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
 	ConfID                 ulid.ULID `mapstructure:"-" toml:"-" json:"conf_id"`
 }
 
@@ -383,6 +385,8 @@ type RelpSourceConfig struct {
 	FilterSubConfig        `mapstructure:",squash"`
 	TlsBaseConfig          `mapstructure:",squash"`
 	ClientAuthType         string    `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
+	LineFraming            bool      `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
+	FrameDelimiter         string    `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
 	ConfID                 ulid.ULID `mapstructure:"-" toml:"-" json:"conf_id"`
 }
 

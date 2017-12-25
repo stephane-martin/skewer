@@ -75,7 +75,7 @@ func (d *graylogDestination) Fatal() chan struct{} {
 }
 
 func (d *graylogDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
-	err = d.writer.WriteMessage(message.Parsed.Fields.ToGelfMessage())
+	err = d.writer.WriteMessage(message.ToGelfMessage())
 	if err == nil {
 		d.ack(message.Uid, conf.Graylog)
 	} else {

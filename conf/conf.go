@@ -873,7 +873,7 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 	for _, parserConf := range c.Parsers {
 		name := strings.TrimSpace(parserConf.Name)
 		switch name {
-		case "rfc5424", "rfc3164", "json", "fulljson", "auto":
+		case "rfc5424", "rfc3164", "json", "fulljson", "gelf", "auto":
 			return ConfigurationCheckError{ErrString: "Parser configuration must not use a reserved name"}
 		case "":
 			return ConfigurationCheckError{ErrString: "Empty parser name"}
@@ -919,6 +919,12 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 	_, err = ParseVersion(c.KafkaDest.Version)
 	if err != nil {
 		return ConfigurationCheckError{ErrString: "Kafka version can't be parsed", Err: err}
+	}
+
+	for i := range c.TcpSource {
+		if len(c.TcpSource[i].FrameDelimiter) == 0 {
+			c.TcpSource[i].FrameDelimiter = "\n"
+		}
 	}
 
 	syslogConfs := []SyslogSourceConfig{}
@@ -982,7 +988,7 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 		}
 
 		switch baseConf.Format {
-		case "rfc5424", "rfc3164", "json", "fulljson", "auto":
+		case "rfc5424", "rfc3164", "json", "fulljson", "gelf", "auto":
 		default:
 			if _, ok := parsersNames[baseConf.Format]; !ok {
 				return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown parser: '%s'", baseConf.Format)}
@@ -1072,7 +1078,7 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 		}
 
 		switch conf.Format {
-		case "rfc5424", "rfc3164", "json", "fulljson", "auto":
+		case "rfc5424", "rfc3164", "json", "fulljson", "gelf", "auto":
 		default:
 			if _, ok := parsersNames[conf.Format]; !ok {
 				return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown parser: '%s'", conf.Format)}

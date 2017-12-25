@@ -172,6 +172,8 @@ func deriveDeepCopy_5(dst, src *TcpSourceConfig) {
 	dst.FilterSubConfig = src.FilterSubConfig
 	dst.TlsBaseConfig = src.TlsBaseConfig
 	dst.ClientAuthType = src.ClientAuthType
+	dst.LineFraming = src.LineFraming
+	dst.FrameDelimiter = src.FrameDelimiter
 	dst.ConfID = src.ConfID
 }
 
@@ -192,6 +194,8 @@ func deriveDeepCopy_7(dst, src *RelpSourceConfig) {
 	dst.FilterSubConfig = src.FilterSubConfig
 	dst.TlsBaseConfig = src.TlsBaseConfig
 	dst.ClientAuthType = src.ClientAuthType
+	dst.LineFraming = src.LineFraming
+	dst.FrameDelimiter = src.FrameDelimiter
 	dst.ConfID = src.ConfID
 }
 

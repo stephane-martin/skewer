@@ -46,6 +46,8 @@ func NewEncoder(frmt string) (Encoder, error) {
 		return newEncoderFullJson(), nil
 	case "file":
 		return newEncoderFile(), nil
+	case "gelf":
+		return newEncoderGELF(), nil
 	default:
 		return nil, fmt.Errorf("NewEncoder: unknown encoding format '%s'", frmt)
 	}
@@ -152,6 +154,40 @@ func (e *encoder5424) Enc(v interface{}, w io.Writer) error {
 		return val.Parsed.Fields.Encode5424(w)
 	case *SyslogMessage:
 		return val.Encode5424(w)
+	default:
+		return defaultEncode(v, w)
+	}
+}
+
+type encoderGELF struct {
+	w io.Writer
+}
+
+func newEncoderGELF() *encoderGELF {
+	return &encoderGELF{}
+}
+
+func (e *encoderGELF) Enc(v interface{}, w io.Writer) (err error) {
+	if v == nil {
+		return nil
+	}
+	switch val := v.(type) {
+	case *FullMessage:
+		buf := bytes.NewBuffer(nil)
+		err = val.ToGelfMessage().MarshalJSONBuf(buf)
+		if err != nil {
+			return err
+		}
+		_, err = w.Write(buf.Bytes())
+		return err
+	case *SyslogMessage:
+		buf := bytes.NewBuffer(nil)
+		err = val.ToGelfMessage().MarshalJSONBuf(buf)
+		if err != nil {
+			return err
+		}
+		_, err = w.Write(buf.Bytes())
+		return err
 	default:
 		return defaultEncode(v, w)
 	}

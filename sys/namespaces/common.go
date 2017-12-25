@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -182,4 +183,70 @@ func SetupCmd(name string, ring kring.Ring, funcopts ...func(*CmdOpts)) (cmd *Pl
 		return nil, err
 	}
 	return cmd, nil
+}
+
+type envPaths struct {
+	acctParentDir     string
+	fileDestParentDir string
+	storePath         string
+	confPath          string
+	certFiles         []string
+	certPaths         []string
+}
+
+func setupEnv(paths envPaths, ttyName string) (env []string) {
+	env = []string{}
+	if len(ttyName) > 0 {
+		env = append(env, fmt.Sprintf("SKEWER_TTYNAME=%s", ttyName))
+	}
+
+	if len(paths.confPath) > 0 {
+		env = append(env, fmt.Sprintf("SKEWER_CONF_DIR=%s", paths.confPath))
+	}
+
+	if len(paths.storePath) > 0 {
+		env = append(env, fmt.Sprintf("SKEWER_STORE_PATH=%s", paths.storePath))
+	}
+
+	if len(paths.acctParentDir) > 0 {
+		env = append(env, fmt.Sprintf("SKEWER_ACCT_DIR=%s", paths.acctParentDir))
+	}
+
+	if len(paths.fileDestParentDir) > 0 {
+		env = append(env, fmt.Sprintf("SKEWER_FILEDEST_DIR=%s", paths.fileDestParentDir))
+	}
+
+	if len(paths.certFiles) > 0 {
+		env = append(env, fmt.Sprintf("SKEWER_CERT_FILES=%s", filepath.Join(paths.certFiles...)))
+	}
+
+	if len(paths.certPaths) > 0 {
+		env = append(env, fmt.Sprintf("SKEWER_CERT_PATHS=%s", filepath.Join(paths.certPaths...)))
+	}
+
+	_, err := exec.LookPath("systemctl")
+	if err == nil {
+		env = append(env, "SKEWER_HAVE_SYSTEMCTL=TRUE")
+	}
+
+	return env
+}
+
+type baseMountPoint struct {
+	Source string
+	Target string
+}
+
+type bindMountPoint struct {
+	baseMountPoint
+	Flags    uintptr
+	ReadOnly bool
+	IsDir    bool
+}
+
+type mountPoint struct {
+	baseMountPoint
+	Flags uintptr
+	Fs    string
+	Data  string
 }
