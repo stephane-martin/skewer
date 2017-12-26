@@ -177,6 +177,10 @@ func (c *RelpSourceConfig) SetConfID() {
 	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
 }
 
+func (c *GraylogSourceConfig) SetConfID() {
+	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
+}
+
 func (c *JournaldConfig) SetConfID() {
 	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
 }
@@ -921,12 +925,6 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 		return ConfigurationCheckError{ErrString: "Kafka version can't be parsed", Err: err}
 	}
 
-	for i := range c.TcpSource {
-		if len(c.TcpSource[i].FrameDelimiter) == 0 {
-			c.TcpSource[i].FrameDelimiter = "\n"
-		}
-	}
-
 	syslogConfs := []SyslogSourceConfig{}
 	for i := range c.TcpSource {
 		syslogConfs = append(syslogConfs, &c.TcpSource[i])
@@ -937,8 +935,17 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 	for i := range c.RelpSource {
 		syslogConfs = append(syslogConfs, &c.RelpSource[i])
 	}
+	for i := range c.GraylogSource {
+		syslogConfs = append(syslogConfs, &c.GraylogSource[i])
+	}
 
-	// set default values for TCP, UDP and RELP sources.
+	// set default values for TCP, UDP, Graylog and RELP sources.
+	for i := range c.TcpSource {
+		if len(c.TcpSource[i].FrameDelimiter) == 0 {
+			c.TcpSource[i].FrameDelimiter = "\n"
+		}
+	}
+
 	for _, syslogConf := range syslogConfs {
 		baseConf := syslogConf.GetSyslogConf()
 		filterConf := syslogConf.GetFilterConf()

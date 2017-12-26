@@ -14,7 +14,7 @@ import (
 type BaseService struct {
 	ParserConfigs   []conf.ParserConfig
 	Logger          log15.Logger
-	Binder          *binder.BinderClient
+	Binder          binder.Client
 	UnixSocketPaths []string
 	Connections     map[io.Closer]bool
 	QueueSize       uint64

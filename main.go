@@ -495,6 +495,7 @@ func main() {
 	case services.Types2ConfinedNames[services.Accounting],
 		services.Types2ConfinedNames[services.TCP],
 		services.Types2ConfinedNames[services.UDP],
+		services.Types2ConfinedNames[services.Graylog],
 		services.Types2ConfinedNames[services.RELP],
 		services.Types2ConfinedNames[services.Store],
 		services.Types2ConfinedNames[services.Configuration],
@@ -534,6 +535,7 @@ func main() {
 
 	case services.Types2Names[services.TCP],
 		services.Types2Names[services.UDP],
+		services.Types2Names[services.Graylog],
 		services.Types2Names[services.RELP],
 		services.Types2Names[services.Journal],
 		services.Types2Names[services.Store],
@@ -547,7 +549,7 @@ func main() {
 		dumpable.SetNonDumpable()
 		capabilities.NoNewPriv()
 
-		var binderClient *binder.BinderClient
+		var binderClient *binder.BinderClientImpl
 		var pipe *os.File
 		var err error
 		var handle uintptr = 3

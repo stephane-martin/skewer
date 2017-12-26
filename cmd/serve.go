@@ -208,12 +208,13 @@ func (ch *serveChild) ShutdownControllers() {
 	if err != nil {
 		ch.logger.Error("Error shutting down controllers", "error", err)
 	}
-
+	/*
 	ch.logger.Debug("The RELP service has been stopped")
 	ch.logger.Debug("Stopped accounting service")
 	ch.logger.Debug("Stopped journald service")
 	ch.logger.Debug("The TCP service has been stopped")
 	ch.logger.Debug("The UDP service has been stopped")
+	*/
 
 	ch.globalCancel()
 	ch.store.Shutdown(5 * time.Second)
@@ -355,6 +356,8 @@ func (ch *serveChild) StartController(typ services.Types) error {
 		return ch.StartTcp()
 	case services.UDP:
 		return ch.StartUdp()
+	case services.Graylog:
+		return ch.StartGraylog()
 	case services.Journal:
 		return ch.StartJournal()
 	case services.Accounting:
@@ -519,6 +522,31 @@ func (ch *serveChild) StartUdp() error {
 		ch.logger.Info("UDP plugin not started")
 	} else {
 		ch.logger.Debug("UDP plugin started", "listeners", len(udpinfos))
+	}
+	return nil
+}
+
+// StartGraylog starts the Graylog process.
+func (ch *serveChild) StartGraylog() error {
+	ctl := ch.controllers[services.Graylog]
+	err := ctl.Create(
+		services.TestOpt(testFlag),
+		services.DumpableOpt(DumpableFlag),
+	)
+
+	if err != nil {
+		return fmt.Errorf("error creating Graylog plugin: %s", err)
+	}
+	ctl.SetConf(*ch.conf)
+	infos, err := ctl.Start()
+	if err == services.NOLISTENER {
+		ch.logger.Info("Graylog plugin not started")
+	} else if err != nil {
+		return fmt.Errorf("error starting Graylog plugin: %s", err)
+	} else if len(infos) == 0 {
+		ch.logger.Info("Graylog plugin not started")
+	} else {
+		ch.logger.Debug("Graylog plugin started", "listeners", len(infos))
 	}
 	return nil
 }

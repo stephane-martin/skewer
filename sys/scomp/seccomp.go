@@ -502,6 +502,7 @@ func SetupSeccomp(name string) (err error) {
 
 	case services.Types2Names[services.TCP],
 		services.Types2Names[services.UDP],
+		services.Types2Names[services.Graylog],
 		services.Types2Names[services.Journal]:
 
 		_, err = deriveComposeA(buildSimpleFilter, applyFilter)(baseAllowed, nil)

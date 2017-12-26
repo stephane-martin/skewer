@@ -23,7 +23,7 @@ func Wout(header []byte, msg []byte) (err error) {
 	return err
 }
 
-func Launch(typ Types, test bool, confined bool, ring kring.Ring, binderClt *binder.BinderClient, l log15.Logger, pipe *os.File) error {
+func Launch(typ Types, test bool, confined bool, ring kring.Ring, binderClt *binder.BinderClientImpl, l log15.Logger, pipe *os.File) error {
 	if ring == nil {
 		return fmt.Errorf("No ring")
 	}

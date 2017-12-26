@@ -21,14 +21,12 @@ func ParseGelfFormat(m []byte, decoder *encoding.Decoder) (msg *SyslogMessage, r
 	if err != nil {
 		return nil, &InvalidEncodingError{Err: err}
 	}
-	gelfMsg := gelf.Message{}
+	gelfMsg := &gelf.Message{}
 	err = gelfMsg.UnmarshalJSON(m)
 	if err != nil {
 		return nil, &UnmarshalingJsonError{err}
 	}
-	syslogMsg := SyslogMessage{}
-	syslogMsg.FromGelfMessage(&gelfMsg)
-	return &syslogMsg, nil
+	return FromGelfMessage(gelfMsg), nil
 }
 
 func ParseFullJsonFormat(m []byte, decoder *encoding.Decoder) (msg *SyslogMessage, rerr error) {

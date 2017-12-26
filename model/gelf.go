@@ -65,6 +65,18 @@ func (m *SyslogMessage) ToGelfMessage() *gelf.Message {
 	return &gelfm
 }
 
+func FromGelfMessage(gelfm *gelf.Message) (msg *SyslogMessage) {
+	msg = &SyslogMessage{}
+	msg.FromGelfMessage(gelfm)
+	return msg
+}
+
+func FullFromGelfMessage(gelfm *gelf.Message) (msg *FullMessage) {
+	msg = &FullMessage{}
+	msg.Parsed.Fields.FromGelfMessage(gelfm)
+	return msg
+}
+
 func (m *SyslogMessage) FromGelfMessage(gelfm *gelf.Message) {
 	m.TimeReported = ""
 	m.TimeGenerated = ""
@@ -84,11 +96,7 @@ func (m *SyslogMessage) FromGelfMessage(gelfm *gelf.Message) {
 		m.Properties = map[string]map[string]string{}
 		return
 	}
-	if len(gelfm.Full) > 0 {
-		m.Message = gelfm.Full
-	} else {
-		m.Message = gelfm.Short
-	}
+	m.Message = gelfm.Short
 	m.TimeReportedNum = int64(gelfm.TimeUnix * 1000000000)
 	m.TimeGeneratedNum = m.TimeReportedNum
 	m.Hostname = gelfm.Host
@@ -119,6 +127,9 @@ func (m *SyslogMessage) FromGelfMessage(gelfm *gelf.Message) {
 
 	m.Properties = map[string]map[string]string{}
 	m.Properties["gelf"] = map[string]string{}
+	if len(gelfm.Full) > 0 {
+		m.Properties["gelf"]["full"] = gelfm.Full
+	}
 	for k, v := range gelfm.Extra {
 		switch k {
 		case "facility", "appname", "procid", "msgid":

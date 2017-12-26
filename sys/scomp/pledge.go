@@ -14,6 +14,7 @@ func SetupPledge(name string) (err error) {
 	switch name {
 	case services.Types2Names[services.TCP],
 		services.Types2Names[services.UDP],
+		services.Types2Names[services.Graylog],
 		services.Types2Names[services.RELP],
 		services.Types2Names[services.Configuration],
 		services.Types2Names[services.Accounting],

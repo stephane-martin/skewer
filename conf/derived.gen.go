@@ -83,6 +83,24 @@ func deriveDeepCopy(dst, src *BaseConfig) {
 		}
 		deriveDeepCopy_3(dst.KafkaSource, src.KafkaSource)
 	}
+	if src.GraylogSource == nil {
+		dst.GraylogSource = nil
+	} else {
+		if dst.GraylogSource != nil {
+			if len(src.GraylogSource) > len(dst.GraylogSource) {
+				if cap(dst.GraylogSource) >= len(src.GraylogSource) {
+					dst.GraylogSource = (dst.GraylogSource)[:len(src.GraylogSource)]
+				} else {
+					dst.GraylogSource = make([]GraylogSourceConfig, len(src.GraylogSource))
+				}
+			} else if len(src.GraylogSource) < len(dst.GraylogSource) {
+				dst.GraylogSource = (dst.GraylogSource)[:len(src.GraylogSource)]
+			}
+		} else {
+			dst.GraylogSource = make([]GraylogSourceConfig, len(src.GraylogSource))
+		}
+		deriveDeepCopy_4(dst.GraylogSource, src.GraylogSource)
+	}
 	dst.Store = src.Store
 	if src.Parsers == nil {
 		dst.Parsers = nil
@@ -107,7 +125,7 @@ func deriveDeepCopy(dst, src *BaseConfig) {
 	dst.Accounting = src.Accounting
 	dst.Main = src.Main
 	field := new(KafkaDestConfig)
-	deriveDeepCopy_4(field, &src.KafkaDest)
+	deriveDeepCopy_5(field, &src.KafkaDest)
 	dst.KafkaDest = *field
 	dst.UdpDest = src.UdpDest
 	dst.TcpDest = src.TcpDest
@@ -121,7 +139,7 @@ func deriveDeepCopy(dst, src *BaseConfig) {
 func deriveDeepCopy_(dst, src []TcpSourceConfig) {
 	for src_i, src_value := range src {
 		field := new(TcpSourceConfig)
-		deriveDeepCopy_5(field, &src_value)
+		deriveDeepCopy_6(field, &src_value)
 		dst[src_i] = *field
 	}
 }
@@ -130,7 +148,7 @@ func deriveDeepCopy_(dst, src []TcpSourceConfig) {
 func deriveDeepCopy_1(dst, src []UdpSourceConfig) {
 	for src_i, src_value := range src {
 		field := new(UdpSourceConfig)
-		deriveDeepCopy_6(field, &src_value)
+		deriveDeepCopy_7(field, &src_value)
 		dst[src_i] = *field
 	}
 }
@@ -139,7 +157,7 @@ func deriveDeepCopy_1(dst, src []UdpSourceConfig) {
 func deriveDeepCopy_2(dst, src []RelpSourceConfig) {
 	for src_i, src_value := range src {
 		field := new(RelpSourceConfig)
-		deriveDeepCopy_7(field, &src_value)
+		deriveDeepCopy_8(field, &src_value)
 		dst[src_i] = *field
 	}
 }
@@ -148,15 +166,24 @@ func deriveDeepCopy_2(dst, src []RelpSourceConfig) {
 func deriveDeepCopy_3(dst, src []KafkaSourceConfig) {
 	for src_i, src_value := range src {
 		field := new(KafkaSourceConfig)
-		deriveDeepCopy_8(field, &src_value)
+		deriveDeepCopy_9(field, &src_value)
 		dst[src_i] = *field
 	}
 }
 
 // deriveDeepCopy_4 recursively copies the contents of src into dst.
-func deriveDeepCopy_4(dst, src *KafkaDestConfig) {
+func deriveDeepCopy_4(dst, src []GraylogSourceConfig) {
+	for src_i, src_value := range src {
+		field := new(GraylogSourceConfig)
+		deriveDeepCopy_10(field, &src_value)
+		dst[src_i] = *field
+	}
+}
+
+// deriveDeepCopy_5 recursively copies the contents of src into dst.
+func deriveDeepCopy_5(dst, src *KafkaDestConfig) {
 	field := new(KafkaBaseConfig)
-	deriveDeepCopy_9(field, &src.KafkaBaseConfig)
+	deriveDeepCopy_11(field, &src.KafkaBaseConfig)
 	dst.KafkaBaseConfig = *field
 	dst.KafkaProducerBaseConfig = src.KafkaProducerBaseConfig
 	dst.TlsBaseConfig = src.TlsBaseConfig
@@ -164,32 +191,32 @@ func deriveDeepCopy_4(dst, src *KafkaDestConfig) {
 	dst.Format = src.Format
 }
 
-// deriveDeepCopy_5 recursively copies the contents of src into dst.
-func deriveDeepCopy_5(dst, src *TcpSourceConfig) {
+// deriveDeepCopy_6 recursively copies the contents of src into dst.
+func deriveDeepCopy_6(dst, src *TcpSourceConfig) {
 	field := new(SyslogSourceBaseConfig)
-	deriveDeepCopy_10(field, &src.SyslogSourceBaseConfig)
+	deriveDeepCopy_12(field, &src.SyslogSourceBaseConfig)
 	dst.SyslogSourceBaseConfig = *field
 	dst.FilterSubConfig = src.FilterSubConfig
 	dst.TlsBaseConfig = src.TlsBaseConfig
 	dst.ClientAuthType = src.ClientAuthType
 	dst.LineFraming = src.LineFraming
 	dst.FrameDelimiter = src.FrameDelimiter
-	dst.ConfID = src.ConfID
-}
-
-// deriveDeepCopy_6 recursively copies the contents of src into dst.
-func deriveDeepCopy_6(dst, src *UdpSourceConfig) {
-	field := new(SyslogSourceBaseConfig)
-	deriveDeepCopy_10(field, &src.SyslogSourceBaseConfig)
-	dst.SyslogSourceBaseConfig = *field
-	dst.FilterSubConfig = src.FilterSubConfig
 	dst.ConfID = src.ConfID
 }
 
 // deriveDeepCopy_7 recursively copies the contents of src into dst.
-func deriveDeepCopy_7(dst, src *RelpSourceConfig) {
+func deriveDeepCopy_7(dst, src *UdpSourceConfig) {
 	field := new(SyslogSourceBaseConfig)
-	deriveDeepCopy_10(field, &src.SyslogSourceBaseConfig)
+	deriveDeepCopy_12(field, &src.SyslogSourceBaseConfig)
+	dst.SyslogSourceBaseConfig = *field
+	dst.FilterSubConfig = src.FilterSubConfig
+	dst.ConfID = src.ConfID
+}
+
+// deriveDeepCopy_8 recursively copies the contents of src into dst.
+func deriveDeepCopy_8(dst, src *RelpSourceConfig) {
+	field := new(SyslogSourceBaseConfig)
+	deriveDeepCopy_12(field, &src.SyslogSourceBaseConfig)
 	dst.SyslogSourceBaseConfig = *field
 	dst.FilterSubConfig = src.FilterSubConfig
 	dst.TlsBaseConfig = src.TlsBaseConfig
@@ -199,10 +226,10 @@ func deriveDeepCopy_7(dst, src *RelpSourceConfig) {
 	dst.ConfID = src.ConfID
 }
 
-// deriveDeepCopy_8 recursively copies the contents of src into dst.
-func deriveDeepCopy_8(dst, src *KafkaSourceConfig) {
+// deriveDeepCopy_9 recursively copies the contents of src into dst.
+func deriveDeepCopy_9(dst, src *KafkaSourceConfig) {
 	field := new(KafkaBaseConfig)
-	deriveDeepCopy_9(field, &src.KafkaBaseConfig)
+	deriveDeepCopy_11(field, &src.KafkaBaseConfig)
 	dst.KafkaBaseConfig = *field
 	dst.KafkaConsumerBaseConfig = src.KafkaConsumerBaseConfig
 	dst.FilterSubConfig = src.FilterSubConfig
@@ -235,8 +262,17 @@ func deriveDeepCopy_8(dst, src *KafkaSourceConfig) {
 	}
 }
 
-// deriveDeepCopy_9 recursively copies the contents of src into dst.
-func deriveDeepCopy_9(dst, src *KafkaBaseConfig) {
+// deriveDeepCopy_10 recursively copies the contents of src into dst.
+func deriveDeepCopy_10(dst, src *GraylogSourceConfig) {
+	field := new(SyslogSourceBaseConfig)
+	deriveDeepCopy_12(field, &src.SyslogSourceBaseConfig)
+	dst.SyslogSourceBaseConfig = *field
+	dst.FilterSubConfig = src.FilterSubConfig
+	dst.ConfID = src.ConfID
+}
+
+// deriveDeepCopy_11 recursively copies the contents of src into dst.
+func deriveDeepCopy_11(dst, src *KafkaBaseConfig) {
 	if src.Brokers == nil {
 		dst.Brokers = nil
 	} else {
@@ -268,8 +304,8 @@ func deriveDeepCopy_9(dst, src *KafkaBaseConfig) {
 	dst.MetadataRefreshFrequency = src.MetadataRefreshFrequency
 }
 
-// deriveDeepCopy_10 recursively copies the contents of src into dst.
-func deriveDeepCopy_10(dst, src *SyslogSourceBaseConfig) {
+// deriveDeepCopy_12 recursively copies the contents of src into dst.
+func deriveDeepCopy_12(dst, src *SyslogSourceBaseConfig) {
 	if src.Ports == nil {
 		dst.Ports = nil
 	} else {

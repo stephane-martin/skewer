@@ -76,7 +76,7 @@ type TcpServiceImpl struct {
 	fatalOnce        *sync.Once
 }
 
-func NewTcpService(reporter *base.Reporter, confined bool, b *binder.BinderClient, l log15.Logger) *TcpServiceImpl {
+func NewTcpService(reporter *base.Reporter, confined bool, b *binder.BinderClientImpl, l log15.Logger) *TcpServiceImpl {
 	s := TcpServiceImpl{
 		status:   TcpStopped,
 		reporter: reporter,

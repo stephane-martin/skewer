@@ -25,6 +25,7 @@ const (
 	Accounting
 	KafkaSource
 	Configuration
+	Graylog
 )
 
 var Names2Types map[string]Types = map[string]Types{
@@ -36,6 +37,7 @@ var Names2Types map[string]Types = map[string]Types{
 	"skewer-accounting":  Accounting,
 	"skewer-kafkasource": KafkaSource,
 	"skewer-conf":        Configuration,
+	"skewer-graylog":     Graylog,
 }
 
 var Types2Names map[Types]string
@@ -69,6 +71,7 @@ func init() {
 		{Types2Names[TCP], BINDER},
 		{Types2Names[UDP], BINDER},
 		{Types2Names[RELP], BINDER},
+		{Types2Names[Graylog], BINDER},
 		{"child", LOGGER},
 		{Types2Names[TCP], LOGGER},
 		{Types2Names[UDP], LOGGER},
@@ -78,6 +81,7 @@ func init() {
 		{Types2Names[Store], LOGGER},
 		{Types2Names[Accounting], LOGGER},
 		{Types2Names[KafkaSource], LOGGER},
+		{Types2Names[Graylog], LOGGER},
 	}
 
 	HandlesMap = map[ServiceHandle]uintptr{}
@@ -106,6 +110,9 @@ func ConfigureAndStartService(s Provider, c conf.BaseConfig, test bool) ([]model
 	case *network.RelpService:
 		s.SetConf(c.RelpSource, c.Parsers, c.KafkaDest, c.Main.DirectRelp, c.Main.InputQueueSize)
 		return s.Start(test)
+	case *network.GraylogSvcImpl:
+		s.SetConf(c.GraylogSource)
+		return s.Start(test)
 	case *linux.JournalService:
 		s.SetConf(c.Journald)
 		return s.Start(test)
@@ -123,7 +130,7 @@ func ConfigureAndStartService(s Provider, c conf.BaseConfig, test bool) ([]model
 
 }
 
-func ProviderFactory(t Types, confined bool, r kring.Ring, reporter *base.Reporter, b *binder.BinderClient, l log15.Logger, pipe *os.File) Provider {
+func ProviderFactory(t Types, confined bool, r kring.Ring, reporter *base.Reporter, b *binder.BinderClientImpl, l log15.Logger, pipe *os.File) Provider {
 	switch t {
 	case TCP:
 		return network.NewTcpService(reporter, confined, b, l)
@@ -131,6 +138,8 @@ func ProviderFactory(t Types, confined bool, r kring.Ring, reporter *base.Report
 		return network.NewUdpService(reporter, b, l)
 	case RELP:
 		return network.NewRelpService(reporter, confined, b, l)
+	case Graylog:
+		return network.NewGraylogService(reporter, b, l)
 	case Journal:
 		svc, err := linux.NewJournalService(reporter, l)
 		if err == nil {

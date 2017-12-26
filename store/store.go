@@ -441,6 +441,13 @@ func (s *MessageStore) StoreAllSyslogConfigs(c conf.BaseConfig) (err error) {
 		})
 	}
 
+	for _, c := range c.GraylogSource {
+		graylogConf := c
+		funcs = append(funcs, func() error {
+			return s.StoreSyslogConfig(graylogConf.ConfID, graylogConf.FilterSubConfig)
+		})
+	}
+
 	funcs = append(funcs, func() error {
 		return s.StoreSyslogConfig(c.Journald.ConfID, c.Journald.FilterSubConfig)
 	})

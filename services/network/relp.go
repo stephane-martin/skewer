@@ -263,7 +263,7 @@ type RelpService struct {
 	logger         log15.Logger
 	reporter       *base.Reporter
 	direct         bool
-	b              *binder.BinderClient
+	b              *binder.BinderClientImpl
 	sc             []conf.RelpSourceConfig
 	pc             []conf.ParserConfig
 	kc             conf.KafkaDestConfig
@@ -271,7 +271,7 @@ type RelpService struct {
 	confined       bool
 }
 
-func NewRelpService(r *base.Reporter, confined bool, b *binder.BinderClient, l log15.Logger) *RelpService {
+func NewRelpService(r *base.Reporter, confined bool, b *binder.BinderClientImpl, l log15.Logger) *RelpService {
 	s := &RelpService{
 		b:        b,
 		logger:   l,
@@ -391,7 +391,7 @@ type RelpServiceImpl struct {
 	forwarder           *ackForwarder
 }
 
-func NewRelpServiceImpl(direct bool, confined bool, reporter *base.Reporter, b *binder.BinderClient, logger log15.Logger) *RelpServiceImpl {
+func NewRelpServiceImpl(direct bool, confined bool, reporter *base.Reporter, b *binder.BinderClientImpl, logger log15.Logger) *RelpServiceImpl {
 	s := RelpServiceImpl{
 		status:    Stopped,
 		metrics:   NewRelpMetrics(),

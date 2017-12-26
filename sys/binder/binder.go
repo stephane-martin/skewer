@@ -145,19 +145,21 @@ func NewExternalPacketConns() *ExternalPacketConns {
 	return &ext
 }
 
-type BinderClient struct {
+
+
+type BinderClientImpl struct {
 	conn           *net.UnixConn
 	NewStreamConns *ExternalConns
 	NewPacketConns *ExternalPacketConns
 }
 
-func NewBinderClient(binderFile *os.File, logger log15.Logger) (*BinderClient, error) {
+func NewBinderClient(binderFile *os.File, logger log15.Logger) (*BinderClientImpl, error) {
 	conn, err := net.FileConn(binderFile)
 	if err != nil {
 		return nil, err
 	}
 	binderFile.Close()
-	c := BinderClient{conn: conn.(*net.UnixConn)}
+	c := BinderClientImpl{conn: conn.(*net.UnixConn)}
 	c.NewStreamConns = NewExternalConns()
 	c.NewPacketConns = NewExternalPacketConns()
 
@@ -236,7 +238,7 @@ func NewBinderClient(binderFile *os.File, logger log15.Logger) (*BinderClient, e
 
 type BinderListener struct {
 	addr   string
-	client *BinderClient
+	client *BinderClientImpl
 }
 
 func (l *BinderListener) Close() error {
@@ -281,7 +283,7 @@ func (l *BinderListener) Addr() net.Addr {
 	return &BinderAddr{addr: l.addr}
 }
 
-func (c *BinderClient) Listen(lnet string, laddr string) (net.Listener, error) {
+func (c *BinderClientImpl) Listen(lnet string, laddr string) (net.Listener, error) {
 	addr := fmt.Sprintf("%s:%s", lnet, laddr)
 	ichan := c.NewStreamConns.Get(addr, true)
 	_, err := c.conn.Write([]byte(fmt.Sprintf("listen %s\n", addr)))
@@ -299,7 +301,7 @@ func (c *BinderClient) Listen(lnet string, laddr string) (net.Listener, error) {
 	}
 }
 
-func (c *BinderClient) ListenPacket(lnet string, laddr string) (net.PacketConn, error) {
+func (c *BinderClientImpl) ListenPacket(lnet string, laddr string) (net.PacketConn, error) {
 	addr := fmt.Sprintf("%s:%s", lnet, laddr)
 	ichan := c.NewPacketConns.Get(addr, true)
 	_, err := c.conn.Write([]byte(fmt.Sprintf("listen %s\n", addr)))
@@ -317,12 +319,12 @@ func (c *BinderClient) ListenPacket(lnet string, laddr string) (net.PacketConn, 
 	return conn, nil
 }
 
-func (c *BinderClient) StopListen(addr string) {
+func (c *BinderClientImpl) StopListen(addr string) {
 	c.NewStreamConns.Delete(addr)
 	_, _ = c.conn.Write([]byte(fmt.Sprintf("stoplisten %s\n", addr)))
 }
 
-func (c *BinderClient) Quit() error {
+func (c *BinderClientImpl) Quit() error {
 	return utils.All(
 		func() (err error) {
 			_, err = c.conn.Write([]byte("byebye\n"))

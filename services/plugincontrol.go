@@ -604,7 +604,7 @@ func (s *PluginController) Create(optsfuncs ...func(*PluginCreateOpts)) error {
 	name := Types2Names[s.typ]
 
 	switch s.typ {
-	case RELP, TCP, UDP, Accounting, Journal, KafkaSource:
+	case RELP, TCP, UDP, Graylog, Accounting, Journal, KafkaSource:
 		// the plugin will use this pipe to report syslog messages
 		piper, pipew, err := os.Pipe()
 		if err != nil {

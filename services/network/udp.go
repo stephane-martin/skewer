@@ -31,9 +31,7 @@ type UdpServiceImpl struct {
 	base.BaseService
 	UdpConfigs     []conf.UdpSourceConfig
 	status         UdpServerStatus
-	statusChan     chan UdpServerStatus
 	stasher        *base.Reporter
-	handler        PacketHandler
 	metrics        *udpMetrics
 	registry       *prometheus.Registry
 	wg             sync.WaitGroup
@@ -43,20 +41,12 @@ type UdpServiceImpl struct {
 	rawMessagesQueue *udp.Ring
 }
 
-type PacketHandler interface {
-	HandleConnection(conn net.PacketConn, config conf.UdpSourceConfig)
-}
-
-type UdpHandler struct {
-	Server *UdpServiceImpl
-}
-
 type udpMetrics struct {
 	IncomingMsgsCounter *prometheus.CounterVec
 	ParsingErrorCounter *prometheus.CounterVec
 }
 
-func NewUdpMetrics() *udpMetrics {
+func newUDPMetrics() *udpMetrics {
 	m := &udpMetrics{}
 	m.IncomingMsgsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -75,10 +65,10 @@ func NewUdpMetrics() *udpMetrics {
 	return m
 }
 
-func NewUdpService(stasher *base.Reporter, b *binder.BinderClient, l log15.Logger) *UdpServiceImpl {
+func NewUdpService(stasher *base.Reporter, b *binder.BinderClientImpl, l log15.Logger) *UdpServiceImpl {
 	s := UdpServiceImpl{
 		status:     UdpStopped,
-		metrics:    NewUdpMetrics(),
+		metrics:    newUDPMetrics(),
 		registry:   prometheus.NewRegistry(),
 		stasher:    stasher,
 		UdpConfigs: []conf.UdpSourceConfig{},
@@ -87,7 +77,6 @@ func NewUdpService(stasher *base.Reporter, b *binder.BinderClient, l log15.Logge
 	s.registry.MustRegister(s.metrics.IncomingMsgsCounter, s.metrics.ParsingErrorCounter)
 	s.BaseService.Logger = l.New("class", "UdpServer")
 	s.BaseService.Binder = b
-	s.handler = UdpHandler{Server: &s}
 	return &s
 }
 
@@ -174,17 +163,12 @@ func (s *UdpServiceImpl) Gather() ([]*dto.MetricFamily, error) {
 	return s.registry.Gather()
 }
 
-func (s *UdpServiceImpl) handleConnection(conn net.PacketConn, config conf.UdpSourceConfig) {
-	s.handler.HandleConnection(conn, config)
-}
-
 func (s *UdpServiceImpl) Start(test bool) ([]model.ListenerInfo, error) {
 	s.LockStatus()
+	defer s.UnlockStatus()
 	if s.status != UdpStopped {
-		s.UnlockStatus()
 		return nil, errors.ServerNotStopped
 	}
-	s.statusChan = make(chan UdpServerStatus, 1)
 	s.fatalErrorChan = make(chan struct{})
 	s.fatalOnce = &sync.Once{}
 
@@ -202,9 +186,7 @@ func (s *UdpServiceImpl) Start(test bool) ([]model.ListenerInfo, error) {
 		s.Logger.Info("Listening on UDP", "nb_services", len(infos))
 	} else {
 		s.Logger.Debug("The UDP service has not been started: no listening port")
-		close(s.statusChan)
 	}
-	s.UnlockStatus()
 	return infos, nil
 }
 
@@ -222,8 +204,8 @@ func (s *UdpServiceImpl) Shutdown() {
 
 func (s *UdpServiceImpl) Stop() {
 	s.LockStatus()
+	defer s.UnlockStatus()
 	if s.status != UdpStarted {
-		s.UnlockStatus()
 		return
 	}
 	s.CloseConnections()
@@ -233,10 +215,7 @@ func (s *UdpServiceImpl) Stop() {
 	s.wg.Wait()
 
 	s.status = UdpStopped
-	s.statusChan <- UdpStopped
-	close(s.statusChan)
 	s.Logger.Debug("Udp server has stopped")
-	s.UnlockStatus()
 }
 
 func (s *UdpServiceImpl) ListenPacket() []model.ListenerInfo {
@@ -294,12 +273,11 @@ func (s *UdpServiceImpl) ListenPacket() []model.ListenerInfo {
 	return udpinfos
 }
 
-func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.UdpSourceConfig) {
+func (s *UdpServiceImpl) handleConnection(conn net.PacketConn, config conf.UdpSourceConfig) {
 	var localPort int
 	var localPortS string
 	var path string
 	var err error
-	s := h.Server
 
 	s.AddConnection(conn)
 
@@ -332,7 +310,7 @@ func (h UdpHandler) HandleConnection(conn net.PacketConn, config conf.UdpSourceC
 		if err != nil {
 			logger.Debug("Error reading UDP", "error", err)
 			s.Pool.Put(rawmsg)
-			break
+			return
 		}
 		if rawmsg.Size == 0 {
 			s.Pool.Put(rawmsg)

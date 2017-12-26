@@ -69,23 +69,24 @@ var RDestinations = map[DestinationType]byte{
 
 // BaseConfig is the root of all configuration parameters.
 type BaseConfig struct {
-	TcpSource   []TcpSourceConfig   `mapstructure:"tcp_source" toml:"tcp_source" json:"tcp_source"`
-	UdpSource   []UdpSourceConfig   `mapstructure:"udp_source" toml:"udp_source" json:"udp_source"`
-	RelpSource  []RelpSourceConfig  `mapstructure:"relp_source" toml:"relp_source" json:"relp_source"`
-	KafkaSource []KafkaSourceConfig `mapstructure:"kafka_source" toml:"kafka_source" json:"kafka_source"`
-	Store       StoreConfig         `mapstructure:"store" toml:"store" json:"store"`
-	Parsers     []ParserConfig      `mapstructure:"parser" toml:"parser" json:"parser"`
-	Journald    JournaldConfig      `mapstructure:"journald" toml:"journald" json:"journald"`
-	Metrics     MetricsConfig       `mapstructure:"metrics" toml:"metrics" json:"metrics"`
-	Accounting  AccountingConfig    `mapstructure:"accounting" toml:"accounting" json:"accounting"`
-	Main        MainConfig          `mapstructure:"main" toml:"main" json:"main"`
-	KafkaDest   KafkaDestConfig     `mapstructure:"kafka_destination" toml:"kafka_destination" json:"kafka_destination"`
-	UdpDest     UdpDestConfig       `mapstructure:"udp_destination" toml:"udp_destination" json:"udp_destination"`
-	TcpDest     TcpDestConfig       `mapstructure:"tcp_destination" toml:"tcp_destination" json:"tcp_destination"`
-	RelpDest    RelpDestConfig      `mapstructure:"relp_destination" toml:"relp_destination" json:"relp_destination"`
-	FileDest    FileDestConfig      `mapstructure:"file_destination" toml:"file_destination" json:"file_destination"`
-	StderrDest  StderrDestConfig    `mapstructure:"stderr_destination" toml:"stderr_destination" json:"stderr_destination"`
-	GraylogDest GraylogDestConfig   `mapstructure:"graylog_destination" toml:"graylog_destination" json:"graylog_destination"`
+	TcpSource     []TcpSourceConfig     `mapstructure:"tcp_source" toml:"tcp_source" json:"tcp_source"`
+	UdpSource     []UdpSourceConfig     `mapstructure:"udp_source" toml:"udp_source" json:"udp_source"`
+	RelpSource    []RelpSourceConfig    `mapstructure:"relp_source" toml:"relp_source" json:"relp_source"`
+	KafkaSource   []KafkaSourceConfig   `mapstructure:"kafka_source" toml:"kafka_source" json:"kafka_source"`
+	GraylogSource []GraylogSourceConfig `mapstructure:"graylog_source" toml:"graylog_source" json:"graylog_source"`
+	Store         StoreConfig           `mapstructure:"store" toml:"store" json:"store"`
+	Parsers       []ParserConfig        `mapstructure:"parser" toml:"parser" json:"parser"`
+	Journald      JournaldConfig        `mapstructure:"journald" toml:"journald" json:"journald"`
+	Metrics       MetricsConfig         `mapstructure:"metrics" toml:"metrics" json:"metrics"`
+	Accounting    AccountingConfig      `mapstructure:"accounting" toml:"accounting" json:"accounting"`
+	Main          MainConfig            `mapstructure:"main" toml:"main" json:"main"`
+	KafkaDest     KafkaDestConfig       `mapstructure:"kafka_destination" toml:"kafka_destination" json:"kafka_destination"`
+	UdpDest       UdpDestConfig         `mapstructure:"udp_destination" toml:"udp_destination" json:"udp_destination"`
+	TcpDest       TcpDestConfig         `mapstructure:"tcp_destination" toml:"tcp_destination" json:"tcp_destination"`
+	RelpDest      RelpDestConfig        `mapstructure:"relp_destination" toml:"relp_destination" json:"relp_destination"`
+	FileDest      FileDestConfig        `mapstructure:"file_destination" toml:"file_destination" json:"file_destination"`
+	StderrDest    StderrDestConfig      `mapstructure:"stderr_destination" toml:"stderr_destination" json:"stderr_destination"`
+	GraylogDest   GraylogDestConfig     `mapstructure:"graylog_destination" toml:"graylog_destination" json:"graylog_destination"`
 }
 
 // MainConfig lists general/global parameters.
@@ -378,6 +379,24 @@ func (c *UdpSourceConfig) GetSyslogConf() *SyslogSourceBaseConfig {
 
 func (c *UdpSourceConfig) DefaultPort() int {
 	return 1514
+}
+
+type GraylogSourceConfig struct {
+	SyslogSourceBaseConfig `mapstructure:",squash"`
+	FilterSubConfig        `mapstructure:",squash"`
+	ConfID                 ulid.ULID `mapstructure:"-" toml:"-" json:"conf_id"`
+}
+
+func (c *GraylogSourceConfig) GetFilterConf() *FilterSubConfig {
+	return &c.FilterSubConfig
+}
+
+func (c *GraylogSourceConfig) GetSyslogConf() *SyslogSourceBaseConfig {
+	return &c.SyslogSourceBaseConfig
+}
+
+func (c *GraylogSourceConfig) DefaultPort() int {
+	return 12201
 }
 
 type RelpSourceConfig struct {
