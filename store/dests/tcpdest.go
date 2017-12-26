@@ -16,8 +16,6 @@ import (
 var sp = []byte(" ")
 var zero ulid.ULID
 
-// TODO: metrics
-
 type tcpDestination struct {
 	logger      log15.Logger
 	fatal       chan struct{}
@@ -60,8 +58,10 @@ func NewTcpDestination(ctx context.Context, confined bool, bc conf.BaseConfig, a
 
 	err = clt.Connect()
 	if err != nil {
+		connCounter.WithLabelValues("tcp", "fail").Inc()
 		return nil, err
 	}
+	connCounter.WithLabelValues("tcp", "success").Inc()
 
 	d := &tcpDestination{
 		logger:  logger,
@@ -92,18 +92,23 @@ func (d *tcpDestination) Send(message model.FullMessage, partitionKey string, pa
 	err = d.clt.Send(&message)
 	if err == nil {
 		if d.previousUid != zero {
+			ackCounter.WithLabelValues("tcp", "ack", "").Inc()
 			d.ack(d.previousUid, conf.Tcp)
 		}
 		d.previousUid = message.Uid
 	} else if model.IsEncodingError(err) {
+		ackCounter.WithLabelValues("tcp", "permerr", "").Inc()
 		d.permerr(message.Uid, conf.Tcp)
 	} else {
 		// error writing to the TCP conn
+		ackCounter.WithLabelValues("tcp", "nack", "").Inc()
 		d.nack(message.Uid, conf.Tcp)
 		if d.previousUid != zero {
+			ackCounter.WithLabelValues("tcp", "nack", "").Inc()
 			d.nack(d.previousUid, conf.Tcp)
 			d.previousUid = zero
 		}
+		fatalCounter.WithLabelValues("tcp").Inc()
 		d.once.Do(func() { close(d.fatal) })
 	}
 	return

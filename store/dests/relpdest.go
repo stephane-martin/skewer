@@ -7,8 +7,6 @@ import (
 
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
-	"github.com/prometheus/client_golang/prometheus"
-	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/clients"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
@@ -17,15 +15,13 @@ import (
 )
 
 type relpDestination struct {
-	logger     log15.Logger
-	fatal      chan struct{}
-	registry   *prometheus.Registry
-	client     *clients.RELPClient
-	once       sync.Once
-	ack        storeCallback
-	nack       storeCallback
-	permerr    storeCallback
-	ackCounter *prometheus.CounterVec
+	logger  log15.Logger
+	fatal   chan struct{}
+	client  *clients.RELPClient
+	once    sync.Once
+	ack     storeCallback
+	nack    storeCallback
+	permerr storeCallback
 }
 
 func NewRelpDestination(ctx context.Context, confined bool, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (dest Destination, err error) {
@@ -59,18 +55,18 @@ func NewRelpDestination(ctx context.Context, confined bool, bc conf.BaseConfig, 
 
 	err = clt.Connect()
 	if err != nil {
+		connCounter.WithLabelValues("relp", "fail").Inc()
 		return nil, err
 	}
+	connCounter.WithLabelValues("relp", "success").Inc()
 
 	d := &relpDestination{
-		logger:     logger,
-		registry:   prometheus.NewRegistry(),
-		ack:        ack,
-		nack:       nack,
-		permerr:    permerr,
-		fatal:      make(chan struct{}),
-		client:     clt,
-		ackCounter: relpAckCounter,
+		logger:  logger,
+		ack:     ack,
+		nack:    nack,
+		permerr: permerr,
+		fatal:   make(chan struct{}),
+		client:  clt,
 	}
 
 	rebind := bc.RelpDest.Rebind
@@ -87,7 +83,6 @@ func NewRelpDestination(ctx context.Context, confined bool, bc conf.BaseConfig, 
 	}
 
 	go func() {
-		// TODO: metrics
 		ackChan := d.client.Ack()
 		nackChan := d.client.Nack()
 		var err error
@@ -100,6 +95,7 @@ func NewRelpDestination(ctx context.Context, confined bool, bc conf.BaseConfig, 
 					break
 				}
 				d.ack(uid, conf.Relp)
+				ackCounter.WithLabelValues("relp", "ack", "").Inc()
 			}
 			for {
 				uid, _, err = nackChan.Get()
@@ -108,6 +104,8 @@ func NewRelpDestination(ctx context.Context, confined bool, bc conf.BaseConfig, 
 				}
 				d.nack(uid, conf.Relp)
 				d.logger.Info("RELP server returned a NACK", "uid", uid.String())
+				ackCounter.WithLabelValues("relp", "nack", "").Inc()
+				fatalCounter.WithLabelValues("relp").Inc()
 				d.once.Do(func() { close(d.fatal) })
 			}
 		}
@@ -120,6 +118,8 @@ func (d *relpDestination) Send(message model.FullMessage, partitionKey string, p
 	err = d.client.Send(&message)
 	if err != nil {
 		// the client send queue has been disposed
+		ackCounter.WithLabelValues("relp", "nack", "").Inc()
+		fatalCounter.WithLabelValues("relp").Inc()
 		d.nack(message.Uid, conf.Relp)
 		d.once.Do(func() { close(d.fatal) })
 	}
@@ -132,8 +132,4 @@ func (d *relpDestination) Close() (err error) {
 
 func (d *relpDestination) Fatal() chan struct{} {
 	return d.fatal
-}
-
-func (d *relpDestination) Gather() ([]*dto.MetricFamily, error) {
-	return d.registry.Gather()
 }

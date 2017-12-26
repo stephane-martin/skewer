@@ -11,8 +11,6 @@ import (
 	"github.com/stephane-martin/skewer/model"
 )
 
-// TODO: metrics
-
 type stderrDestination struct {
 	logger  log15.Logger
 	fatal   chan struct{}
@@ -46,15 +44,19 @@ func (d *stderrDestination) Send(message model.FullMessage, partitionKey string,
 	var buf []byte
 	buf, err = model.ChainEncode(d.encoder, &message, "\n")
 	if err != nil {
+		ackCounter.WithLabelValues("stderr", "permerr", "").Inc()
 		d.permerr(message.Uid, conf.Stderr)
 		return err
 	}
 	_, err = os.Stderr.Write(buf)
 	if err != nil {
+		ackCounter.WithLabelValues("stderr", "nack", "").Inc()
+		fatalCounter.WithLabelValues("stderr").Inc()
 		d.nack(message.Uid, conf.Stderr)
 		d.once.Do(func() { close(d.fatal) })
 		return err
 	}
+	ackCounter.WithLabelValues("stderr", "ack", "").Inc()
 	d.ack(message.Uid, conf.Stderr)
 	return nil
 }

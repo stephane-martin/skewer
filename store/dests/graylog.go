@@ -13,8 +13,6 @@ import (
 	"gopkg.in/Graylog2/go-gelf.v2/gelf"
 )
 
-// TODO: metrics
-
 type graylogDestination struct {
 	logger  log15.Logger
 	fatal   chan struct{}
@@ -31,8 +29,10 @@ func NewGraylogDestination(ctx context.Context, confined bool, bc conf.BaseConfi
 	if strings.ToLower(strings.TrimSpace(bc.GraylogDest.Mode)) == "udp" {
 		writer, err := gelf.NewUDPWriter(hostport)
 		if err != nil {
+			connCounter.WithLabelValues("graylog", "fail").Inc()
 			return nil, err
 		}
+		connCounter.WithLabelValues("graylog", "success").Inc()
 		writer.CompressionLevel = bc.GraylogDest.CompressionLevel
 		switch strings.TrimSpace(strings.ToLower(bc.GraylogDest.CompressionType)) {
 		case "gzip":
@@ -48,8 +48,10 @@ func NewGraylogDestination(ctx context.Context, confined bool, bc conf.BaseConfi
 	} else {
 		writer, err := gelf.NewTCPWriter(hostport)
 		if err != nil {
+			connCounter.WithLabelValues("graylog", "fail").Inc()
 			return nil, err
 		}
+		connCounter.WithLabelValues("graylog", "success").Inc()
 		writer.MaxReconnect = bc.GraylogDest.MaxReconnect
 		writer.ReconnectDelay = bc.GraylogDest.ReconnectDelay
 		w = writer
@@ -78,8 +80,11 @@ func (d *graylogDestination) Send(message model.FullMessage, partitionKey string
 	err = d.writer.WriteMessage(message.ToGelfMessage())
 	if err == nil {
 		d.ack(message.Uid, conf.Graylog)
+		ackCounter.WithLabelValues("graylog", "ack", "").Inc()
 	} else {
 		d.nack(message.Uid, conf.Graylog)
+		ackCounter.WithLabelValues("graylog", "nack", "").Inc()
+		fatalCounter.WithLabelValues("graylog").Inc()
 		d.once.Do(func() { close(d.fatal) })
 	}
 	return err

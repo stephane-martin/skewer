@@ -20,7 +20,6 @@ type Store interface {
 	GetSyslogConfig(configID ulid.ULID) (*conf.FilterSubConfig, error)
 	StoreAllSyslogConfigs(c conf.BaseConfig) error
 	ReadAllBadgers() (map[string]string, map[string]string, map[string]string)
-	Gather() ([]*dto.MetricFamily, error)
 	ReleaseMsg(msg *model.FullMessage)
 	Destinations() []conf.DestinationType
 	Confined() bool

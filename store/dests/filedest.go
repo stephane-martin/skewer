@@ -22,8 +22,6 @@ import (
 	"github.com/stephane-martin/skewer/model"
 )
 
-// TODO: metrics
-
 // ensure thread safety for the gzip writer
 type cGzipWriter struct {
 	w  *gzip.Writer
@@ -70,6 +68,7 @@ func finalizer(obj *openedFile) {
 }
 
 func newOpenedFile(f *os.File, name string, closeAt int64, bufferSize int, dogzip bool, level int) *openedFile {
+	openedFilesGauge.Inc()
 	o := openedFile{
 		oFile:   f,
 		name:    name,
@@ -127,7 +126,10 @@ func (o *openedFile) closeFile() {
 	if o.gzipwriter != nil {
 		_ = o.gzipwriter.Close()
 	}
-	_ = o.oFile.Close()
+	err := o.oFile.Close()
+	if err != nil {
+		openedFilesGauge.Dec()
+	}
 }
 
 type openedFiles struct {
@@ -315,18 +317,18 @@ type fileDestination struct {
 	encoder      model.Encoder
 }
 
-func NewFileDestination(ctx context.Context, confined bool, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (dest Destination, err error) {
+func NewFileDestination(ctx context.Context, cfnd bool, bc conf.BaseConfig, ack, nack, permerr storeCallback, l log15.Logger) (dest Destination, err error) {
 	d := &fileDestination{
-		logger:  logger,
+		logger:  l,
 		ack:     ack,
 		nack:    nack,
 		permerr: permerr,
 		format:  bc.FileDest.Format,
 		fatal:   make(chan struct{}),
-		files:   newOpenedFiles(ctx, bc.FileDest, logger),
+		files:   newOpenedFiles(ctx, bc.FileDest, l),
 	}
 	fname := bc.FileDest.Filename
-	if confined {
+	if cfnd {
 		fname = filepath.Join("/tmp", "filedest", fname)
 	}
 	d.filenameTmpl, err = template.New("filename").Parse(fname)
@@ -348,6 +350,7 @@ func (d *fileDestination) Send(message model.FullMessage, partitionKey string, p
 	err = d.filenameTmpl.Execute(buf, message.Parsed)
 	if err != nil {
 		err = fmt.Errorf("Error calculating filename: %s", err)
+		ackCounter.WithLabelValues("file", "permerr", "").Inc()
 		d.permerr(message.Uid, conf.File)
 		return err
 	}
@@ -355,28 +358,34 @@ func (d *fileDestination) Send(message model.FullMessage, partitionKey string, p
 	f, err := d.files.open(filename)
 	if err != nil {
 		err = fmt.Errorf("Error opening file '%s': %s", filename, err)
+		ackCounter.WithLabelValues("file", "nack", "").Inc()
 		d.nack(message.Uid, conf.File)
 		return err
 	}
 	encoded, err := model.ChainEncode(d.encoder, &message, "\n")
 	if err != nil {
+		ackCounter.WithLabelValues("file", "permerr", "").Inc()
 		d.permerr(message.Uid, conf.File)
 		return err
 	}
 	_, err = f.Write(encoded)
 	if err != nil {
+		ackCounter.WithLabelValues("file", "nack", "").Inc()
 		d.nack(message.Uid, conf.File)
 		return err
 	}
 	if f.Closed() {
 		err = f.MarkClosed()
 		if err == nil {
+			ackCounter.WithLabelValues("file", "ack", "").Inc()
 			d.ack(message.Uid, conf.File)
 			return nil
 		}
+		ackCounter.WithLabelValues("file", "nack", "").Inc()
 		d.nack(message.Uid, conf.File)
 		return err
 	}
+	ackCounter.WithLabelValues("file", "ack", "").Inc()
 	d.ack(message.Uid, conf.File)
 	return nil
 }

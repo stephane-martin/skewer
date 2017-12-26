@@ -11,8 +11,6 @@ import (
 	"github.com/stephane-martin/skewer/model"
 )
 
-// TODO: metrics
-
 type udpDestination struct {
 	logger  log15.Logger
 	fatal   chan struct{}
@@ -32,8 +30,10 @@ func NewUdpDestination(ctx context.Context, confined bool, bc conf.BaseConfig, a
 
 	err = client.Connect()
 	if err != nil {
+		connCounter.WithLabelValues("udp", "fail").Inc()
 		return nil, err
 	}
+	connCounter.WithLabelValues("udp", "success").Inc()
 
 	d := &udpDestination{
 		logger:  logger,
@@ -62,13 +62,17 @@ func NewUdpDestination(ctx context.Context, confined bool, bc conf.BaseConfig, a
 func (d *udpDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
 	err = d.client.Send(&message)
 	if err == nil {
+		ackCounter.WithLabelValues("udp", "ack", "").Inc()
 		d.ack(message.Uid, conf.Udp)
 		return nil
 	} else if model.IsEncodingError(err) {
+		ackCounter.WithLabelValues("udp", "permerr", "").Inc()
 		d.permerr(message.Uid, conf.Udp)
 		return err
 	} else {
 		// error writing to the UDP conn
+		ackCounter.WithLabelValues("udp", "nack", "").Inc()
+		fatalCounter.WithLabelValues("udp").Inc()
 		d.nack(message.Uid, conf.Udp)
 		d.once.Do(func() { close(d.fatal) })
 		return err

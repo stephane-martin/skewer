@@ -59,7 +59,7 @@ func NewForwarder(desttype conf.DestinationType, st Store, bc conf.BaseConfig, l
 }
 
 func (fwder *fwderImpl) Gather() ([]*dto.MetricFamily, error) {
-	return dests.DestsRegistry.Gather()
+	return dests.Registry.Gather()
 }
 
 func (fwder *fwderImpl) Fatal() chan struct{} {

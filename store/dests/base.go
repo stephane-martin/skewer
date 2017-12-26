@@ -2,27 +2,60 @@ package dests
 
 import "github.com/prometheus/client_golang/prometheus"
 
-var DestsRegistry *prometheus.Registry
-var relpAckCounter *prometheus.CounterVec
-var kafkaAckCounter *prometheus.CounterVec
+var Registry *prometheus.Registry
+
+var ackCounter *prometheus.CounterVec
+var connCounter *prometheus.CounterVec
+var fatalCounter *prometheus.CounterVec
+var kafkaInputsCounter prometheus.Counter
+var openedFilesGauge prometheus.Gauge
 
 func init() {
-	DestsRegistry = prometheus.NewRegistry()
-	relpAckCounter = prometheus.NewCounterVec(
+	Registry = prometheus.NewRegistry()
+
+	ackCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "skw_relpdest_ack_total",
 			Help: "number of RELP acknowledgments",
 		},
-		[]string{"status"},
-	)
-	kafkaAckCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "skw_kafkadest_ack_total",
-			Help: "number of kafka acknowledgments",
-		},
-		[]string{"status", "topic"},
+		[]string{"dest", "status", "topic"},
 	)
 
-	DestsRegistry.MustRegister(relpAckCounter)
-	DestsRegistry.MustRegister(kafkaAckCounter)
+	connCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "skw_relpdest_conn_total",
+			Help: "number of RELP connections",
+		},
+		[]string{"dest", "status"},
+	)
+
+	fatalCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "skw_kafka_fatal_total",
+			Help: "number of received kafka fatal errors",
+		},
+		[]string{"dest"},
+	)
+
+	kafkaInputsCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "skw_kafka_inputs_total",
+			Help: "number of sent messages to kafka",
+		},
+	)
+
+	openedFilesGauge = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "skw_file_opened_files_number",
+			Help: "number of opened files by the file destination",
+		},
+	)
+
+	Registry.MustRegister(
+		ackCounter,
+		connCounter,
+		fatalCounter,
+		kafkaInputsCounter,
+		openedFilesGauge,
+	)
 }

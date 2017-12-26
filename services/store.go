@@ -10,10 +10,12 @@ import (
 
 	"github.com/awnumar/memguard"
 	"github.com/inconshreveable/log15"
+	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/store"
+	"github.com/stephane-martin/skewer/store/dests"
 	"github.com/stephane-martin/skewer/sys/kring"
 	"github.com/stephane-martin/skewer/utils"
 )
@@ -323,16 +325,6 @@ func (s *storeServiceImpl) Shutdown() {
 
 // Gather returns the metrics for the Store and the Kafka forwarder
 func (s *storeServiceImpl) Gather() ([]*dto.MetricFamily, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.status {
-		// TODO
-		//var couple prometheus.Gatherers = []prometheus.Gatherer{s.st, s.forwarder}
-		//return couple.Gather()
-		return nil, nil
-	} else if s.store == nil {
-		return nil, nil
-	} else {
-		return s.store.Gather()
-	}
+	var couple prometheus.Gatherers = []prometheus.Gatherer{store.Registry, dests.Registry}
+	return couple.Gather()
 }
