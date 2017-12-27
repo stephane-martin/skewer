@@ -89,7 +89,8 @@ func (c *NamespacedCmd) Start() (err error) {
 
 	ttyName := ""
 	if ttyname.IsAtty(1) {
-		ttyName, err := ttyname.TtyName(1)
+		var err error
+		ttyName, err = ttyname.TtyName(1)
 		if err != nil {
 			ttyName = ""
 		}
