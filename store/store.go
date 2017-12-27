@@ -237,7 +237,6 @@ func (s *MessageStore) forward(ctx context.Context, d conf.DestinationType) {
 			default:
 				messages = s.retrieve(s.batchSize, d)
 				if len(messages) > 0 {
-					//store.logger.Debug("Messages to be sent to destination", "dest", d, "nb", len(messages))
 					break wait_messages
 				} else {
 					time.Sleep(100 * time.Millisecond)
@@ -306,10 +305,11 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 	badgerOpts := badger.DefaultOptions
 	badgerOpts.Dir = dirname
 	badgerOpts.ValueDir = dirname
-	badgerOpts.MaxTableSize = cfg.Maxsize
+	badgerOpts.MaxTableSize = cfg.MaxTableSize
 	badgerOpts.SyncWrites = cfg.FSync
 	badgerOpts.TableLoadingMode = options.MemoryMap
-	badgerOpts.ValueLogFileSize = 64 * 1024 * 1024
+	// TODO: ValueLogLoadingMode
+	badgerOpts.ValueLogFileSize = cfg.ValueLogFileSize
 
 	err := os.MkdirAll(dirname, 0700)
 	if err != nil {

@@ -196,6 +196,7 @@ func SetStoreDefaults(v *viper.Viper, prefixed bool) {
 		prefix = "store."
 	}
 	v.SetDefault(prefix+"dirname", "/var/lib/skewer")
-	v.SetDefault(prefix+"max_size", 64<<20)
+	v.SetDefault(prefix+"max_table_size", 64<<20)
+	v.SetDefault(prefix+"value_log_file_size", 64<<20)
 	v.SetDefault(prefix+"batch_size", 5000)
 }
