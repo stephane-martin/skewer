@@ -90,7 +90,7 @@ func NewHTTPDestination(ctx context.Context, cfnd bool, bc conf.BaseConfig, ack,
 	}
 	d.url = tmpl
 
-	if strings.HasPrefix(conf.URL, "https") {
+	if strings.HasPrefix(strings.ToLower(conf.URL), "https") {
 		conf.TLSEnabled = true
 	}
 	dialer := &net.Dialer{
