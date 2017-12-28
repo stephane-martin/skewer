@@ -24,11 +24,28 @@ func SetDefaults(v *viper.Viper) {
 		SetFileDestDefaults,
 		SetStderrDestDefaults,
 		SetGraylogDestDefaults,
+		SetHTTPDestDefaults,
 		SetMainDefaults,
 	}
 	for _, f := range funcs {
 		f(v, true)
 	}
+}
+
+func SetHTTPDestDefaults(v *viper.Viper, prefixed bool) {
+	prefix := ""
+	if prefixed {
+		prefix = "http_destination."
+	}
+	v.SetDefault(prefix+"format", "fulljson")
+	v.SetDefault(prefix+"max_idle_conns_per_host", 2)
+	v.SetDefault(prefix+"idle_conn_timeout", "90s")
+	v.SetDefault(prefix+"connection_timeout", "10s")
+	v.SetDefault(prefix+"conn_keepalive", true)
+	v.SetDefault(prefix+"conn_keepalive_period", "30s")
+	v.SetDefault(prefix+"user_agent", "skewer/"+Version)
+	v.SetDefault(prefix+"method", "POST")
+	v.SetDefault(prefix+"content_type", "auto")
 }
 
 func SetGraylogDestDefaults(v *viper.Viper, prefixed bool) {

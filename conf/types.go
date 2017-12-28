@@ -2,7 +2,6 @@ package conf
 
 import (
 	"encoding/base64"
-	"fmt"
 	"strings"
 	"time"
 
@@ -10,62 +9,6 @@ import (
 	"github.com/oklog/ulid"
 	"github.com/stephane-martin/skewer/utils/sbox"
 )
-
-// DestinationType lists the possible kind of destinations where skewer can forward messages.
-type DestinationType uint64
-
-func (dests DestinationType) Iterate() (res []DestinationType) {
-	if dests == 0 {
-		return []DestinationType{Stderr}
-	}
-	res = make([]DestinationType, 0, len(Destinations))
-	for _, dtype := range Destinations {
-		if uint64(dests)&uint64(dtype) != 0 {
-			res = append(res, dtype)
-		}
-	}
-	return res
-}
-
-const (
-	Kafka   DestinationType = 1
-	Udp                     = 2
-	Tcp                     = 4
-	Relp                    = 8
-	File                    = 16
-	Stderr                  = 32
-	Graylog                 = 64
-)
-
-var Destinations = map[string]DestinationType{
-	"kafka":   Kafka,
-	"udp":     Udp,
-	"tcp":     Tcp,
-	"relp":    Relp,
-	"file":    File,
-	"stderr":  Stderr,
-	"graylog": Graylog,
-}
-
-var DestinationNames = map[DestinationType]string{
-	Kafka:   "kafka",
-	Udp:     "udp",
-	Tcp:     "tcp",
-	Relp:    "relp",
-	File:    "file",
-	Stderr:  "stderr",
-	Graylog: "graylog",
-}
-
-var RDestinations = map[DestinationType]byte{
-	Kafka:   'k',
-	Udp:     'u',
-	Tcp:     't',
-	Relp:    'r',
-	File:    'f',
-	Stderr:  's',
-	Graylog: 'g',
-}
 
 // BaseConfig is the root of all configuration parameters.
 type BaseConfig struct {
@@ -83,6 +26,7 @@ type BaseConfig struct {
 	KafkaDest     KafkaDestConfig       `mapstructure:"kafka_destination" toml:"kafka_destination" json:"kafka_destination"`
 	UdpDest       UdpDestConfig         `mapstructure:"udp_destination" toml:"udp_destination" json:"udp_destination"`
 	TcpDest       TcpDestConfig         `mapstructure:"tcp_destination" toml:"tcp_destination" json:"tcp_destination"`
+	HTTPDest      HTTPDestConfig        `mapstructure:"http_destination" toml:"http_destination" json:"http_destination"`
 	RelpDest      RelpDestConfig        `mapstructure:"relp_destination" toml:"relp_destination" json:"relp_destination"`
 	FileDest      FileDestConfig        `mapstructure:"file_destination" toml:"file_destination" json:"file_destination"`
 	StderrDest    StderrDestConfig      `mapstructure:"stderr_destination" toml:"stderr_destination" json:"stderr_destination"`
@@ -96,22 +40,6 @@ type MainConfig struct {
 	MaxInputMessageSize int    `mapstructure:"max_input_message_size" toml:"max_input_message_size" json:"max_input_message_size"`
 	Destination         string `mapstructure:"destination" toml:"destination" json:"destination"`
 	EncryptIPC          bool   `mapstructure:"encrypt_ipc" toml:"encrypt_ipc" json:"encrypt_ipc"`
-}
-
-func (m *MainConfig) GetDestinations() (dests DestinationType, err error) {
-	destr := strings.TrimSpace(strings.ToLower(m.Destination))
-	for _, dest := range strings.Split(destr, ",") {
-		d, ok := Destinations[strings.TrimSpace(dest)]
-		if ok {
-			dests = dests | d
-		} else {
-			return 0, ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown destination type: '%s'", dest)}
-		}
-	}
-	if dests == 0 {
-		return Stderr, nil
-	}
-	return
 }
 
 type MetricsConfig struct {
@@ -300,6 +228,26 @@ type TcpDestConfig struct {
 
 	LineFraming    bool  `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
 	FrameDelimiter uint8 `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
+}
+
+type HTTPDestConfig struct {
+	TlsBaseConfig       `mapstructure:",squash"`
+	Insecure            bool          `mapstructure:"insecure" toml:"insecure" json:"insecure"`
+	URL                 string        `mapstructure:"url" toml:"url" json:"url"`
+	Method              string        `mapstructure:"method" toml:"method" json:"method"`
+	ProxyURL            string        `mapstructure:"proxy_url" toml:"proxy_url" json:"proxy_url"`
+	Rebind              time.Duration `mapstructure:"rebind" toml:"rebind" json:"rebind"`
+	Format              string        `mapstructure:"format" toml:"format" json:"format"`
+	MaxIdleConnsPerHost int           `mapstructure:"max_idle_conns_per_host" toml:"max_idle_conns_per_host" json:"max_idle_conns_per_host"`
+	IdleConnTimeout     time.Duration `mapstructure:"idle_conn_timeout" toml:"idle_conn_timeout" json:"idle_conn_timeout"`
+	ConnTimeout         time.Duration `mapstructure:"connection_timeout" toml:"connection_timeout" json:"connection_timeout"`
+	ConnKeepAlive       bool          `mapstructure:"conn_keepalive" toml:"conn_keepalive" json:"conn_keepalive"`
+	ConnKeepAlivePeriod time.Duration `mapstructure:"conn_keepalive_period" toml:"conn_keepalive_period" json:"conn_keepalive_period"`
+	BasicAuth           bool          `mapstructure:"basic_auth" toml:"basic_auth" json:"basic_auth"`
+	Username            string        `mapstructure:"username" toml:"username" json:"username"`
+	Password            string        `mapstructure:"password" toml:"password" json:"password"`
+	UserAgent           string        `mapstructure:"user_agent" toml:"user_agent" json:"user_agent"`
+	ContentType         string        `mapstructure:"content_type" toml:"content_type" json:"content_type"`
 }
 
 type FileDestConfig struct {

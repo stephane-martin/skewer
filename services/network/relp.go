@@ -314,6 +314,7 @@ func (s *RelpService) Start(test bool) (infos []model.ListenerInfo, err error) {
 			switch state {
 			case FinalStopped:
 				//s.impl.Logger.Debug("The RELP service has been definitely halted")
+				//fmt.Fprintln(os.Stderr, "FINALSTOPPED")
 				_ = s.reporter.Report([]model.ListenerInfo{})
 				return
 
@@ -322,6 +323,7 @@ func (s *RelpService) Start(test bool) (infos []model.ListenerInfo, err error) {
 				s.impl.SetConf(s.sc, s.pc, s.kc, s.QueueSize)
 				infos, err := s.impl.Start(test)
 				if err == nil {
+					//fmt.Fprintln(os.Stderr, "STOPPED")
 					err = s.reporter.Report(infos)
 					if err != nil {
 						s.impl.Logger.Error("Failed to report infos. Fatal error.", "error", err)
@@ -329,6 +331,7 @@ func (s *RelpService) Start(test bool) (infos []model.ListenerInfo, err error) {
 					}
 				} else {
 					s.impl.Logger.Warn("The RELP service has failed to start", "error", err)
+					//fmt.Fprintln(os.Stderr, "FAILSTART")
 					err = s.reporter.Report([]model.ListenerInfo{})
 					if err != nil {
 						s.impl.Logger.Error("Failed to report infos. Fatal error.", "error", err)
@@ -642,6 +645,7 @@ func (s *RelpServiceImpl) Parse() {
 		}
 		// else send message to the Store
 		parsedMsg.Uid = gen.Uid()
+		//fmt.Fprintln(os.Stderr, "ZOOOG")
 		f, nonf = s.reporter.Stash(parsedMsg)
 		if f == nil && nonf == nil {
 			s.forwarder.ForwardSucc(parsedMsg.ConnID, parsedMsg.Txnr)

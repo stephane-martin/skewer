@@ -38,6 +38,8 @@ func NewDestination(
 		return NewStderrDestination(ctx, confined, bc, ack, nack, permerr, logger)
 	case conf.Graylog:
 		return NewGraylogDestination(ctx, confined, bc, ack, nack, permerr, logger)
+	case conf.Http:
+		return NewHTTPDestination(ctx, confined, bc, ack, nack, permerr, logger)
 	default:
 		return nil, fmt.Errorf("Unknown destination type: %d", typ)
 	}

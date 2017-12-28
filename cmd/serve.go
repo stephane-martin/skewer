@@ -209,11 +209,11 @@ func (ch *serveChild) ShutdownControllers() {
 		ch.logger.Error("Error shutting down controllers", "error", err)
 	}
 	/*
-	ch.logger.Debug("The RELP service has been stopped")
-	ch.logger.Debug("Stopped accounting service")
-	ch.logger.Debug("Stopped journald service")
-	ch.logger.Debug("The TCP service has been stopped")
-	ch.logger.Debug("The UDP service has been stopped")
+		ch.logger.Debug("The RELP service has been stopped")
+		ch.logger.Debug("Stopped accounting service")
+		ch.logger.Debug("Stopped journald service")
+		ch.logger.Debug("The TCP service has been stopped")
+		ch.logger.Debug("The UDP service has been stopped")
 	*/
 
 	ch.globalCancel()
@@ -448,6 +448,9 @@ func (ch *serveChild) StartJournal() error {
 
 // StartRelp starts the Relp process.
 func (ch *serveChild) StartRelp() error {
+	if len(ch.conf.RelpSource) == 0 {
+		return nil
+	}
 	certfiles := ch.conf.GetCertificateFiles()["relpsource"]
 	certpaths := ch.conf.GetCertificatePaths()["relpsource"]
 
@@ -473,6 +476,9 @@ func (ch *serveChild) StartRelp() error {
 
 // StartTcp starts the TCP process.
 func (ch *serveChild) StartTcp() error {
+	if len(ch.conf.TcpSource) == 0 {
+		return nil
+	}
 	certfiles := ch.conf.GetCertificateFiles()["tcpsource"]
 	certpaths := ch.conf.GetCertificatePaths()["tcpsource"]
 
@@ -503,6 +509,9 @@ func (ch *serveChild) StartTcp() error {
 
 // StartUdp starts the UDP process.
 func (ch *serveChild) StartUdp() error {
+	if len(ch.conf.UdpSource) == 0 {
+		return nil
+	}
 	ctl := ch.controllers[services.UDP]
 	err := ctl.Create(
 		services.TestOpt(testFlag),
@@ -528,6 +537,9 @@ func (ch *serveChild) StartUdp() error {
 
 // StartGraylog starts the Graylog process.
 func (ch *serveChild) StartGraylog() error {
+	if len(ch.conf.GraylogSource) == 0 {
+		return nil
+	}
 	ctl := ch.controllers[services.Graylog]
 	err := ctl.Create(
 		services.TestOpt(testFlag),

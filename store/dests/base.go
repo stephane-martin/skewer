@@ -7,6 +7,7 @@ var Registry *prometheus.Registry
 var ackCounter *prometheus.CounterVec
 var connCounter *prometheus.CounterVec
 var fatalCounter *prometheus.CounterVec
+var httpStatusCounter *prometheus.CounterVec
 var kafkaInputsCounter prometheus.Counter
 var openedFilesGauge prometheus.Gauge
 
@@ -37,6 +38,14 @@ func init() {
 		[]string{"dest"},
 	)
 
+	httpStatusCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "skw_http_status_total",
+			Help: "number of returned status codes for HTTP destination",
+		},
+		[]string{"host", "code"},
+	)
+
 	kafkaInputsCounter = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Name: "skw_kafka_inputs_total",
@@ -56,6 +65,7 @@ func init() {
 		connCounter,
 		fatalCounter,
 		kafkaInputsCounter,
+		httpStatusCounter,
 		openedFilesGauge,
 	)
 }

@@ -14,7 +14,6 @@ import (
 )
 
 var sp = []byte(" ")
-var zero ulid.ULID
 
 type tcpDestination struct {
 	logger      log15.Logger
@@ -27,8 +26,8 @@ type tcpDestination struct {
 	once        sync.Once
 }
 
-func NewTcpDestination(ctx context.Context, confined bool, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (dest Destination, err error) {
-	clt := clients.NewSyslogTCPClient(logger).
+func NewTcpDestination(ctx context.Context, cfnd bool, bc conf.BaseConfig, ack, nack, permerr storeCallback, l log15.Logger) (dest Destination, err error) {
+	clt := clients.NewSyslogTCPClient(l).
 		Host(bc.TcpDest.Host).
 		Port(bc.TcpDest.Port).
 		Path(bc.TcpDest.UnixSocketPath).
@@ -48,7 +47,7 @@ func NewTcpDestination(ctx context.Context, confined bool, bc conf.BaseConfig, a
 			bc.TcpDest.CertFile,
 			bc.TcpDest.KeyFile,
 			bc.TcpDest.Insecure,
-			confined,
+			cfnd,
 		)
 		if err != nil {
 			return nil, err
@@ -64,7 +63,7 @@ func NewTcpDestination(ctx context.Context, confined bool, bc conf.BaseConfig, a
 	connCounter.WithLabelValues("tcp", "success").Inc()
 
 	d := &tcpDestination{
-		logger:  logger,
+		logger:  l,
 		fatal:   make(chan struct{}),
 		ack:     ack,
 		nack:    nack,
@@ -79,7 +78,7 @@ func NewTcpDestination(ctx context.Context, confined bool, bc conf.BaseConfig, a
 			case <-ctx.Done():
 				// the store service asked for stop
 			case <-time.After(rebind):
-				logger.Info("TCP destination rebind period has expired", "rebind", rebind.String())
+				l.Info("TCP destination rebind period has expired", "rebind", rebind.String())
 				d.once.Do(func() { close(d.fatal) })
 			}
 		}()
@@ -91,7 +90,7 @@ func NewTcpDestination(ctx context.Context, confined bool, bc conf.BaseConfig, a
 func (d *tcpDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
 	err = d.clt.Send(&message)
 	if err == nil {
-		if d.previousUid != zero {
+		if d.previousUid != utils.ZeroUid {
 			ackCounter.WithLabelValues("tcp", "ack", "").Inc()
 			d.ack(d.previousUid, conf.Tcp)
 		}
@@ -103,10 +102,10 @@ func (d *tcpDestination) Send(message model.FullMessage, partitionKey string, pa
 		// error writing to the TCP conn
 		ackCounter.WithLabelValues("tcp", "nack", "").Inc()
 		d.nack(message.Uid, conf.Tcp)
-		if d.previousUid != zero {
+		if d.previousUid != utils.ZeroUid {
 			ackCounter.WithLabelValues("tcp", "nack", "").Inc()
 			d.nack(d.previousUid, conf.Tcp)
-			d.previousUid = zero
+			d.previousUid = utils.ZeroUid
 		}
 		fatalCounter.WithLabelValues("tcp").Inc()
 		d.once.Do(func() { close(d.fatal) })

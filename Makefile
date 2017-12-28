@@ -6,7 +6,7 @@ SED=/usr/local/bin/gsed
 BINARY=skewer
 COMMIT=$(shell git rev-parse HEAD)
 VERSION=0.1
-LDFLAGS=-ldflags '-X github.com/stephane-martin/skewer/cmd.Version=${VERSION} -X github.com/stephane-martin/skewer/cmd.GitCommit=${COMMIT}"'
+LDFLAGS=-ldflags '-X github.com/stephane-martin/skewer/conf.Version=${VERSION} -X github.com/stephane-martin/skewer/conf.GitCommit=${COMMIT}"'
 
 SOURCES = $(shell find . -type f -name '*.go' -not -path "./vendor/*")
 SUBDIRS = $(shell find . -type d -regex './[a-z].*' -not -path './vendor*' -not -path '*.shapesdoc' | xargs)

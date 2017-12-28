@@ -25,10 +25,12 @@ import (
 	"github.com/inconshreveable/log15"
 	"github.com/spf13/viper"
 	"github.com/stephane-martin/skewer/consul"
-	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/sys/kring"
 	"github.com/stephane-martin/skewer/utils"
 )
+
+var Version string
+var GitCommit string
 
 func (source BaseConfig) Clone() BaseConfig {
 	//return source
@@ -898,26 +900,9 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 		return err
 	}
 
-	// note that Graylog destination does not have a Format option
-	c.UdpDest.Format = strings.TrimSpace(strings.ToLower(c.UdpDest.Format))
-	c.TcpDest.Format = strings.TrimSpace(strings.ToLower(c.TcpDest.Format))
-	c.RelpDest.Format = strings.TrimSpace(strings.ToLower(c.RelpDest.Format))
-	c.KafkaDest.Format = strings.TrimSpace(strings.ToLower(c.KafkaDest.Format))
-	c.FileDest.Format = strings.TrimSpace(strings.ToLower(c.FileDest.Format))
-	c.StderrDest.Format = strings.TrimSpace(strings.ToLower(c.StderrDest.Format))
-
-	for _, frmt := range []string{
-		c.UdpDest.Format,
-		c.TcpDest.Format,
-		c.RelpDest.Format,
-		c.KafkaDest.Format,
-		c.FileDest.Format,
-		c.StderrDest.Format,
-	} {
-		_, err := model.NewEncoder(frmt)
-		if err != nil {
-			return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown destination format: '%s'", frmt)}
-		}
+	err = c.CheckDestinations()
+	if err != nil {
+		return err
 	}
 
 	_, err = ParseVersion(c.KafkaDest.Version)

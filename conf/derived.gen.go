@@ -129,6 +129,7 @@ func deriveDeepCopy(dst, src *BaseConfig) {
 	dst.KafkaDest = *field
 	dst.UdpDest = src.UdpDest
 	dst.TcpDest = src.TcpDest
+	dst.HTTPDest = src.HTTPDest
 	dst.RelpDest = src.RelpDest
 	dst.FileDest = src.FileDest
 	dst.StderrDest = src.StderrDest
