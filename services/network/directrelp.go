@@ -3,7 +3,6 @@ package network
 import (
 	"bufio"
 	"bytes"
-	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
@@ -11,16 +10,18 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
+	sarama "github.com/Shopify/sarama"
 	"github.com/oklog/ulid"
+	"github.com/pquerna/ffjson/ffjson"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"golang.org/x/text/encoding"
 
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/conf"
+	"github.com/stephane-martin/skewer/javascript"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/services/errors"
@@ -30,220 +31,69 @@ import (
 	"github.com/stephane-martin/skewer/utils/queue/tcp"
 )
 
-var relpAnswersCounter *prometheus.CounterVec
-var relpProtocolErrorsCounter *prometheus.CounterVec
+/*
+	m.KafkaConnectionErrorCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "skw_relp_kafka_connection_errors_total",
+			Help: "number of kafka connection errors",
+		},
+	)
 
-func initRelpRegistry() {
-	base.Once.Do(func() {
-		base.InitRegistry()
-		relpAnswersCounter = prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "skw_relp_answers_total",
-				Help: "number of RELP rsp answers",
-			},
-			[]string{"status", "client"},
-		)
+	m.KafkaAckNackCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "skw_relp_kafka_ack_total",
+			Help: "number of kafka acknowledgments",
+		},
+		[]string{"status", "topic"},
+	)
+*/
 
-		relpProtocolErrorsCounter = prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "skw_relp_protocol_errors_total",
-				Help: "Number of RELP protocol errors",
-			},
-			[]string{"client"},
-		)
+var kafkaAckNackCounter *prometheus.CounterVec
+var kafkaConnectionErrorCounter *prometheus.CounterVec
 
-		base.Registry.MustRegister(
-			relpAnswersCounter,
-			relpProtocolErrorsCounter,
-		)
-	})
-}
-
-type RelpServerStatus int
-
-const (
-	Stopped RelpServerStatus = iota
-	Started
-	FinalStopped
-	Waiting
-)
-
-type ackForwarder struct {
-	succ sync.Map
-	fail sync.Map
-	comm sync.Map
-	next uintptr
-}
-
-func newAckForwarder() *ackForwarder {
-	return &ackForwarder{}
-}
-
-func txnr2bytes(txnr int) []byte {
-	bs := make([]byte, 8)
-	ux := uint64(txnr) << 1
-	if txnr < 0 {
-		ux = ^ux
-	}
-	binary.LittleEndian.PutUint64(bs, ux)
-	return bs
-}
-
-func bytes2txnr(b []byte) int {
-	ux := binary.LittleEndian.Uint64(b)
-	x := int64(ux >> 1)
-	if ux&1 != 0 {
-		x = ^x
-	}
-	return int(x)
-}
-
-func (f *ackForwarder) Received(connID uintptr, txnr int) {
-	if c, ok := f.comm.Load(connID); ok {
-		_ = c.(*queue.IntQueue).Put(txnr)
-	}
-}
-
-func (f *ackForwarder) Commit(connID uintptr) {
-	if c, ok := f.comm.Load(connID); ok {
-		_, _ = c.(*queue.IntQueue).Get()
-	}
-}
-
-func (f *ackForwarder) NextToCommit(connID uintptr) int {
-	if c, ok := f.comm.Load(connID); ok {
-		next, err := c.(*queue.IntQueue).Peek()
-		if err != nil {
-			return -1
-		}
-		return next
-	}
-	return -1
-}
-
-func (f *ackForwarder) ForwardSucc(connID uintptr, txnr int) {
-	if q, ok := f.succ.Load(connID); ok {
-		_ = q.(*queue.IntQueue).Put(txnr)
-	}
-}
-
-func (f *ackForwarder) GetSucc(connID uintptr) int {
-	if q, ok := f.succ.Load(connID); ok {
-		txnr, err := q.(*queue.IntQueue).Get()
-		if err != nil {
-			return -1
-		}
-		return txnr
-	}
-	return -1
-}
-
-func (f *ackForwarder) ForwardFail(connID uintptr, txnr int) {
-	if q, ok := f.fail.Load(connID); ok {
-		_ = q.(*queue.IntQueue).Put(txnr)
-	}
-}
-
-func (f *ackForwarder) GetFail(connID uintptr) int {
-	if q, ok := f.fail.Load(connID); ok {
-		txnr, err := q.(*queue.IntQueue).Get()
-		if err != nil {
-			return -1
-		}
-		return txnr
-	}
-	return -1
-}
-
-func (f *ackForwarder) AddConn() uintptr {
-	connID := atomic.AddUintptr(&f.next, 1)
-	f.succ.Store(connID, queue.NewIntQueue())
-	f.fail.Store(connID, queue.NewIntQueue())
-	f.comm.Store(connID, queue.NewIntQueue())
-	return connID
-}
-
-func (f *ackForwarder) RemoveConn(connID uintptr) {
-	if q, ok := f.succ.Load(connID); ok {
-		q.(*queue.IntQueue).Dispose()
-		f.succ.Delete(connID)
-	}
-	if q, ok := f.fail.Load(connID); ok {
-		q.(*queue.IntQueue).Dispose()
-		f.fail.Delete(connID)
-	}
-	f.comm.Delete(connID)
-}
-
-func (f *ackForwarder) RemoveAll() {
-	f.succ = sync.Map{}
-	f.fail = sync.Map{}
-	f.comm = sync.Map{}
-}
-
-func (f *ackForwarder) Wait(connID uintptr) bool {
-	qsucc, ok := f.succ.Load(connID)
-	if !ok {
-		return false
-	}
-	qfail, ok := f.fail.Load(connID)
-	if !ok {
-		return false
-	}
-	return queue.WaitOne(qsucc.(*queue.IntQueue), qfail.(*queue.IntQueue))
-}
-
-type meta struct {
-	Txnr   int
-	ConnID uintptr
-}
-
-type RelpService struct {
-	impl           *RelpServiceImpl
+type DirectRelpService struct {
+	impl           *DirectRelpServiceImpl
 	fatalErrorChan chan struct{}
 	fatalOnce      *sync.Once
 	QueueSize      uint64
 	logger         log15.Logger
 	reporter       base.Reporter
 	b              *binder.BinderClientImpl
-	sc             []conf.RelpSourceConfig
+	sc             []conf.DirectRelpSourceConfig
 	pc             []conf.ParserConfig
+	kc             conf.KafkaDestConfig
 	wg             sync.WaitGroup
 	confined       bool
 }
 
-func NewRelpService(r base.Reporter, confined bool, b *binder.BinderClientImpl, l log15.Logger) *RelpService {
-	initRelpRegistry()
-	s := &RelpService{
+func NewDirectRelpService(r base.Reporter, confined bool, b *binder.BinderClientImpl, l log15.Logger) *DirectRelpService {
+	s := &DirectRelpService{
 		b:        b,
 		logger:   l,
 		reporter: r,
 		confined: confined,
 	}
-	s.impl = NewRelpServiceImpl(confined, r, s.b, s.logger)
+	s.impl = NewDirectRelpServiceImpl(confined, r, s.b, s.logger)
 	return s
 }
 
-func (s *RelpService) FatalError() chan struct{} {
+func (s *DirectRelpService) FatalError() chan struct{} {
 	return s.fatalErrorChan
 }
 
-func (s *RelpService) dofatal() {
+func (s *DirectRelpService) dofatal() {
 	s.fatalOnce.Do(func() { close(s.fatalErrorChan) })
 }
 
-func (s *RelpService) Gather() ([]*dto.MetricFamily, error) {
+func (s *DirectRelpService) Gather() ([]*dto.MetricFamily, error) {
 	return base.Registry.Gather()
 }
 
-func (s *RelpService) Start() (infos []model.ListenerInfo, err error) {
+func (s *DirectRelpService) Start() (infos []model.ListenerInfo, err error) {
 	// the Relp service manages registration in Consul by itself and
 	// therefore does not report infos
-	//if capabilities.CapabilitiesSupported {
-	//	s.logger.Debug("Capabilities", "caps", capabilities.GetCaps())
-	//}
 	infos = []model.ListenerInfo{}
-	s.impl = NewRelpServiceImpl(s.confined, s.reporter, s.b, s.logger)
+	s.impl = NewDirectRelpServiceImpl(s.confined, s.reporter, s.b, s.logger)
 	s.fatalErrorChan = make(chan struct{})
 	s.fatalOnce = &sync.Once{}
 
@@ -255,13 +105,12 @@ func (s *RelpService) Start() (infos []model.ListenerInfo, err error) {
 			switch state {
 			case FinalStopped:
 				//s.impl.Logger.Debug("The RELP service has been definitely halted")
-				//fmt.Fprintln(os.Stderr, "FINALSTOPPED")
 				_ = s.reporter.Report([]model.ListenerInfo{})
 				return
 
 			case Stopped:
 				//s.impl.Logger.Debug("The RELP service is stopped")
-				s.impl.SetConf(s.sc, s.pc, s.QueueSize)
+				s.impl.SetConf(s.sc, s.pc, s.kc, s.QueueSize)
 				infos, err := s.impl.Start()
 				if err == nil {
 					//fmt.Fprintln(os.Stderr, "STOPPED")
@@ -271,8 +120,7 @@ func (s *RelpService) Start() (infos []model.ListenerInfo, err error) {
 						s.dofatal()
 					}
 				} else {
-					s.impl.Logger.Warn("The RELP service has failed to start", "error", err)
-					//fmt.Fprintln(os.Stderr, "FAILSTART")
+					s.impl.Logger.Warn("The DirectRELP service has failed to start", "error", err)
 					err = s.reporter.Report([]model.ListenerInfo{})
 					if err != nil {
 						s.impl.Logger.Error("Failed to report infos. Fatal error.", "error", err)
@@ -283,7 +131,6 @@ func (s *RelpService) Start() (infos []model.ListenerInfo, err error) {
 				}
 
 			case Waiting:
-				//s.impl.Logger.Debug("RELP waiting")
 				go func() {
 					time.Sleep(time.Duration(30) * time.Second)
 					s.impl.EndWait()
@@ -299,50 +146,54 @@ func (s *RelpService) Start() (infos []model.ListenerInfo, err error) {
 	return
 }
 
-func (s *RelpService) Shutdown() {
+func (s *DirectRelpService) Shutdown() {
 	s.Stop()
 }
 
-func (s *RelpService) Stop() {
+func (s *DirectRelpService) Stop() {
 	s.impl.FinalStop()
 	s.wg.Wait()
 }
 
-func (s *RelpService) SetConf(sc []conf.RelpSourceConfig, pc []conf.ParserConfig, queueSize uint64) {
+func (s *DirectRelpService) SetConf(sc []conf.DirectRelpSourceConfig, pc []conf.ParserConfig, kc conf.KafkaDestConfig, queueSize uint64) {
 	s.sc = sc
 	s.pc = pc
+	s.kc = kc
 	s.QueueSize = queueSize
 }
 
-type RelpServiceImpl struct {
+type DirectRelpServiceImpl struct {
 	StreamingService
-	RelpConfigs      []conf.RelpSourceConfig
-	status           RelpServerStatus
-	StatusChan       chan RelpServerStatus
-	reporter         base.Reporter
-	rawMessagesQueue *tcp.Ring
-	parsewg          sync.WaitGroup
-	configs          map[ulid.ULID]conf.RelpSourceConfig
-	forwarder        *ackForwarder
+	RelpConfigs         []conf.DirectRelpSourceConfig
+	kafkaConf           conf.KafkaDestConfig
+	status              RelpServerStatus
+	StatusChan          chan RelpServerStatus
+	producer            sarama.AsyncProducer
+	reporter            base.Reporter
+	rawMessagesQueue    *tcp.Ring
+	parsedMessagesQueue *queue.MessageQueue
+	parsewg             sync.WaitGroup
+	configs             map[ulid.ULID]conf.DirectRelpSourceConfig
+	forwarder           *ackForwarder
 }
 
-func NewRelpServiceImpl(confined bool, reporter base.Reporter, b *binder.BinderClientImpl, logger log15.Logger) *RelpServiceImpl {
-	s := RelpServiceImpl{
+func NewDirectRelpServiceImpl(confined bool, reporter base.Reporter, b *binder.BinderClientImpl, logger log15.Logger) *DirectRelpServiceImpl {
+	s := DirectRelpServiceImpl{
 		status:    Stopped,
 		reporter:  reporter,
-		configs:   map[ulid.ULID]conf.RelpSourceConfig{},
+		configs:   map[ulid.ULID]conf.DirectRelpSourceConfig{},
 		forwarder: newAckForwarder(),
 	}
 	s.StreamingService.init()
-	s.StreamingService.BaseService.Logger = logger.New("class", "RelpServer")
+	s.StreamingService.BaseService.Logger = logger.New("class", "DirectRELPService")
 	s.StreamingService.BaseService.Binder = b
-	s.StreamingService.handler = RelpHandler{Server: &s}
+	s.StreamingService.handler = DirectRelpHandler{Server: &s}
 	s.StreamingService.confined = confined
 	s.StatusChan = make(chan RelpServerStatus, 10)
 	return &s
 }
 
-func (s *RelpServiceImpl) Start() ([]model.ListenerInfo, error) {
+func (s *DirectRelpServiceImpl) Start() ([]model.ListenerInfo, error) {
 	s.LockStatus()
 	defer s.UnlockStatus()
 	if s.status == FinalStopped {
@@ -354,21 +205,34 @@ func (s *RelpServiceImpl) Start() ([]model.ListenerInfo, error) {
 
 	infos := s.initTCPListeners()
 	if len(infos) == 0 {
-		s.Logger.Info("RELP service not started: no listener")
+		s.Logger.Info("DirectRELP service not started: no listener")
 		return infos, nil
 	}
 
-	s.Logger.Info("Listening on RELP", "nb_services", len(infos))
+	var err error
+	s.producer, err = s.kafkaConf.GetAsyncProducer(s.confined)
+	if err != nil {
+		s.resetTCPListeners()
+		return nil, err
+	}
 
+	s.Logger.Info("Listening on DirectRELP", "nb_services", len(infos))
+
+	s.parsedMessagesQueue = queue.NewMessageQueue()
 	s.rawMessagesQueue = tcp.NewRing(s.QueueSize)
-	s.configs = map[ulid.ULID]conf.RelpSourceConfig{}
+	s.configs = map[ulid.ULID]conf.DirectRelpSourceConfig{}
 
 	for _, l := range s.UnixListeners {
-		s.configs[l.Conf.ConfID] = conf.RelpSourceConfig(l.Conf)
+		s.configs[l.Conf.ConfID] = conf.DirectRelpSourceConfig(l.Conf)
 	}
 	for _, l := range s.TcpListeners {
-		s.configs[l.Conf.ConfID] = conf.RelpSourceConfig(l.Conf)
+		s.configs[l.Conf.ConfID] = conf.DirectRelpSourceConfig(l.Conf)
 	}
+
+	s.wg.Add(1)
+	go s.push2kafka()
+	s.wg.Add(1)
+	go s.handleKafkaResponses()
 
 	cpus := runtime.NumCPU()
 	for i := 0; i < cpus; i++ {
@@ -383,25 +247,25 @@ func (s *RelpServiceImpl) Start() ([]model.ListenerInfo, error) {
 	return infos, nil
 }
 
-func (s *RelpServiceImpl) Stop() {
+func (s *DirectRelpServiceImpl) Stop() {
 	s.LockStatus()
 	s.doStop(false, false)
 	s.UnlockStatus()
 }
 
-func (s *RelpServiceImpl) FinalStop() {
+func (s *DirectRelpServiceImpl) FinalStop() {
 	s.LockStatus()
 	s.doStop(true, false)
 	s.UnlockStatus()
 }
 
-func (s *RelpServiceImpl) StopAndWait() {
+func (s *DirectRelpServiceImpl) StopAndWait() {
 	s.LockStatus()
 	s.doStop(false, true)
 	s.UnlockStatus()
 }
 
-func (s *RelpServiceImpl) EndWait() {
+func (s *DirectRelpServiceImpl) EndWait() {
 	s.LockStatus()
 	if s.status != Waiting {
 		s.UnlockStatus()
@@ -412,7 +276,7 @@ func (s *RelpServiceImpl) EndWait() {
 	s.UnlockStatus()
 }
 
-func (s *RelpServiceImpl) doStop(final bool, wait bool) {
+func (s *DirectRelpServiceImpl) doStop(final bool, wait bool) {
 	if final && (s.status == Waiting || s.status == Stopped || s.status == FinalStopped) {
 		if s.status != FinalStopped {
 			s.status = FinalStopped
@@ -437,6 +301,9 @@ func (s *RelpServiceImpl) doStop(final bool, wait bool) {
 	}
 	// the parsers consume the rest of rawMessagesQueue, then they stop
 	s.parsewg.Wait() // wait that the parsers have stopped
+	if s.parsedMessagesQueue != nil {
+		s.parsedMessagesQueue.Dispose()
+	}
 
 	// after the parsers have stopped, we can close the queues
 	s.forwarder.RemoveAll()
@@ -456,18 +323,19 @@ func (s *RelpServiceImpl) doStop(final bool, wait bool) {
 	}
 }
 
-func (s *RelpServiceImpl) SetConf(sc []conf.RelpSourceConfig, pc []conf.ParserConfig, queueSize uint64) {
+func (s *DirectRelpServiceImpl) SetConf(sc []conf.DirectRelpSourceConfig, pc []conf.ParserConfig, kc conf.KafkaDestConfig, queueSize uint64) {
 	tcpConfigs := []conf.TcpSourceConfig{}
 	for _, c := range sc {
 		tcpConfigs = append(tcpConfigs, conf.TcpSourceConfig(c))
 	}
 	s.StreamingService.SetConf(tcpConfigs, pc, queueSize, 132000)
+	s.kafkaConf = kc
 	s.BaseService.Pool = &sync.Pool{New: func() interface{} {
 		return &model.RawTcpMessage{Message: make([]byte, 132000)}
 	}}
 }
 
-func (s *RelpServiceImpl) Parse() {
+func (s *DirectRelpServiceImpl) Parse() {
 	defer s.parsewg.Done()
 
 	e := NewParsersEnv(s.ParserConfigs, s.Logger)
@@ -476,11 +344,9 @@ func (s *RelpServiceImpl) Parse() {
 	var parser Parser
 	var syslogMsg *model.SyslogMessage
 	var parsedMsg model.FullMessage
-	var err, f, nonf error
+	var err error
 	var decoder *encoding.Decoder
 	var logger log15.Logger
-
-	gen := utils.NewGenerator()
 
 	for {
 		raw, err = s.rawMessagesQueue.Get()
@@ -493,7 +359,7 @@ func (s *RelpServiceImpl) Parse() {
 		}
 
 		logger = s.Logger.New(
-			"protocol", "relp",
+			"protocol", "directrelp",
 			"client", raw.Client,
 			"local_port", raw.LocalPort,
 			"unix_socket_path", raw.UnixSocketPath,
@@ -512,7 +378,7 @@ func (s *RelpServiceImpl) Parse() {
 		if err != nil {
 			logger.Warn("Parsing error", "message", string(raw.Message[:raw.Size]), "error", err)
 			s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
-			base.ParsingErrorCounter.WithLabelValues("relp", raw.Client, raw.Format).Inc()
+			base.ParsingErrorCounter.WithLabelValues("directrelp", raw.Client, raw.Format).Inc()
 			s.Pool.Put(raw)
 			continue
 		}
@@ -535,25 +401,53 @@ func (s *RelpServiceImpl) Parse() {
 		}
 		s.Pool.Put(raw)
 
-		// send message to the Store
-		parsedMsg.Uid = gen.Uid()
-		f, nonf = s.reporter.Stash(parsedMsg)
-		if f == nil && nonf == nil {
-			s.forwarder.ForwardSucc(parsedMsg.ConnID, parsedMsg.Txnr)
-		} else if f != nil {
-			s.forwarder.ForwardFail(parsedMsg.ConnID, parsedMsg.Txnr)
-			logger.Error("Fatal error pushing RELP message to the Store", "err", f)
-			s.StopAndWait()
-			return
-		} else {
-			s.forwarder.ForwardFail(parsedMsg.ConnID, parsedMsg.Txnr)
-			logger.Warn("Non fatal error pushing RELP message to the Store", "err", nonf)
-		}
+		_ = s.parsedMessagesQueue.Put(parsedMsg)
 	}
 
 }
 
-func (s *RelpServiceImpl) handleResponses(conn net.Conn, connID uintptr, client string, logger log15.Logger) {
+func (s *DirectRelpServiceImpl) handleKafkaResponses() {
+	var succ *sarama.ProducerMessage
+	var fail *sarama.ProducerError
+	var more, fatal bool
+	kafkaSuccChan := s.producer.Successes()
+	kafkaFailChan := s.producer.Errors()
+	for {
+		if kafkaSuccChan == nil && kafkaFailChan == nil {
+			return
+		}
+		select {
+		case succ, more = <-kafkaSuccChan:
+			if more {
+				metad := succ.Metadata.(meta)
+				s.forwarder.ForwardSucc(metad.ConnID, metad.Txnr)
+				kafkaAckNackCounter.WithLabelValues("ack", succ.Topic).Inc()
+			} else {
+				kafkaSuccChan = nil
+			}
+		case fail, more = <-kafkaFailChan:
+			if more {
+				metad := fail.Msg.Metadata.(meta)
+				s.forwarder.ForwardFail(metad.ConnID, metad.Txnr)
+				kafkaAckNackCounter.WithLabelValues("nack", fail.Msg.Topic).Inc()
+				s.Logger.Info("NACK from Kafka", "error", fail.Error(), "txnr", metad.Txnr, "topic", fail.Msg.Topic)
+				fatal = model.IsFatalKafkaError(fail.Err)
+			} else {
+				kafkaFailChan = nil
+			}
+
+		}
+
+		if fatal {
+			s.StopAndWait()
+			return
+		}
+
+	}
+
+}
+
+func (s *DirectRelpServiceImpl) handleResponses(conn net.Conn, connID uintptr, client string, logger log15.Logger) {
 	defer func() {
 		s.wg.Done()
 	}()
@@ -627,13 +521,131 @@ func (s *RelpServiceImpl) handleResponses(conn net.Conn, connID uintptr, client 
 	}
 }
 
-type RelpHandler struct {
-	Server *RelpServiceImpl
+func (s *DirectRelpServiceImpl) push2kafka() {
+	defer func() {
+		s.producer.AsyncClose()
+		s.wg.Done()
+	}()
+	envs := map[ulid.ULID]*javascript.Environment{}
+	var e *javascript.Environment
+	var haveEnv bool
+	var message *model.FullMessage
+	var topic string
+	var partitionKey string
+	var partitionNumber int32
+	var errs []error
+	var err error
+	var logger log15.Logger
+	var filterResult javascript.FilterResult
+	var kafkaMsg *sarama.ProducerMessage
+	var serialized []byte
+	var reported time.Time
+	var config conf.DirectRelpSourceConfig
+
+ForParsedChan:
+	for s.parsedMessagesQueue.Wait(0) {
+		message, err = s.parsedMessagesQueue.Get()
+		if err != nil {
+			// should not happen
+			s.Logger.Error("Fatal error getting messages from the parsed messages queue", "error", err)
+			s.StopAndWait()
+			return
+		}
+		if message == nil {
+			// should not happen
+			continue ForParsedChan
+		}
+		logger = s.Logger.New("client", message.Parsed.Client, "port", message.Parsed.LocalPort, "path", message.Parsed.UnixSocketPath)
+		e, haveEnv = envs[message.ConfId]
+		if !haveEnv {
+			config, haveEnv = s.configs[message.ConfId]
+			if !haveEnv {
+				s.Logger.Warn("Could not find the configuration for a message", "confId", message.ConfId, "txnr", message.Txnr)
+				continue ForParsedChan
+			}
+			envs[message.ConfId] = javascript.NewFilterEnvironment(
+				config.FilterFunc,
+				config.TopicFunc,
+				config.TopicTmpl,
+				config.PartitionFunc,
+				config.PartitionTmpl,
+				config.PartitionNumberFunc,
+				s.Logger,
+			)
+			e = envs[message.ConfId]
+		}
+
+		topic, errs = e.Topic(message.Parsed.Fields)
+		for _, err = range errs {
+			logger.Info("Error calculating topic", "error", err, "txnr", message.Txnr)
+		}
+		if len(topic) == 0 {
+			logger.Warn("Topic or PartitionKey could not be calculated", "txnr", message.Txnr)
+			s.forwarder.ForwardFail(message.ConnID, message.Txnr)
+			continue ForParsedChan
+		}
+		partitionKey, errs = e.PartitionKey(message.Parsed.Fields)
+		for _, err = range errs {
+			logger.Info("Error calculating the partition key", "error", err, "txnr", message.Txnr)
+		}
+		partitionNumber, errs = e.PartitionNumber(message.Parsed.Fields)
+		for _, err = range errs {
+			logger.Info("Error calculating the partition number", "error", err, "txnr", message.Txnr)
+		}
+
+		filterResult, err = e.FilterMessage(&message.Parsed.Fields)
+
+		switch filterResult {
+		case javascript.DROPPED:
+			s.forwarder.ForwardFail(message.ConnID, message.Txnr)
+			base.MessageFilteringCounter.WithLabelValues("dropped", message.Parsed.Client).Inc()
+			continue ForParsedChan
+		case javascript.REJECTED:
+			s.forwarder.ForwardFail(message.ConnID, message.Txnr)
+			base.MessageFilteringCounter.WithLabelValues("rejected", message.Parsed.Client).Inc()
+			continue ForParsedChan
+		case javascript.PASS:
+			base.MessageFilteringCounter.WithLabelValues("passing", message.Parsed.Client).Inc()
+		default:
+			s.forwarder.ForwardFail(message.ConnID, message.Txnr)
+			base.MessageFilteringCounter.WithLabelValues("unknown", message.Parsed.Client).Inc()
+			logger.Warn("Error happened processing message", "txnr", message.Txnr, "error", err)
+			continue ForParsedChan
+		}
+
+		reported = time.Unix(0, message.Parsed.Fields.TimeReportedNum).UTC()
+		message.Parsed.Fields.TimeGenerated = time.Unix(0, message.Parsed.Fields.TimeGeneratedNum).UTC().Format(time.RFC3339Nano)
+		message.Parsed.Fields.TimeReported = reported.Format(time.RFC3339Nano)
+
+		serialized, err = ffjson.Marshal(&message.Parsed)
+
+		if err != nil {
+			logger.Warn("Error generating Kafka message", "error", err, "txnr", message.Txnr)
+			s.forwarder.ForwardFail(message.ConnID, message.Txnr)
+			continue ForParsedChan
+		}
+
+		kafkaMsg = &sarama.ProducerMessage{
+			Key:       sarama.StringEncoder(partitionKey),
+			Partition: partitionNumber,
+			Value:     sarama.ByteEncoder(serialized),
+			Topic:     topic,
+			Timestamp: reported,
+			Metadata:  meta{Txnr: message.Txnr, ConnID: message.ConnID},
+		}
+
+		s.producer.Input() <- kafkaMsg
+	}
+
 }
 
-func (h RelpHandler) HandleConnection(conn net.Conn, c conf.TcpSourceConfig) {
+type DirectRelpHandler struct {
+	Server *DirectRelpServiceImpl
+}
+
+func (h DirectRelpHandler) HandleConnection(conn net.Conn, c conf.TcpSourceConfig) {
 	// http://www.rsyslog.com/doc/relp.html
-	config := conf.RelpSourceConfig(c)
+	config := conf.DirectRelpSourceConfig(c)
 	s := h.Server
 	s.AddConnection(conn)
 	connID := s.forwarder.AddConn()
@@ -641,7 +653,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, c conf.TcpSourceConfig) {
 	logger := s.Logger.New("ConnID", connID)
 
 	defer func() {
-		logger.Info("Scanning the RELP stream has ended", "error", scanner.Err())
+		logger.Info("Scanning the DirectRELP stream has ended", "error", scanner.Err())
 		s.forwarder.RemoveConn(connID)
 		s.RemoveConnection(conn)
 		s.wg.Done()
@@ -671,14 +683,14 @@ func (h RelpHandler) HandleConnection(conn net.Conn, c conf.TcpSourceConfig) {
 	localPortStr := strconv.FormatInt(int64(localPort), 10)
 
 	logger = logger.New(
-		"protocol", "relp",
+		"protocol", "directrelp",
 		"client", client,
 		"local_port", localPort,
 		"unix_socket_path", path,
 		"format", config.Format,
 	)
 	logger.Info("New client connection")
-	base.ClientConnectionCounter.WithLabelValues("relp", client, localPortStr, path).Inc()
+	base.ClientConnectionCounter.WithLabelValues("directrelp", client, localPortStr, path).Inc()
 
 	s.wg.Add(1)
 	go s.handleResponses(conn, connID, client, logger)
@@ -758,10 +770,10 @@ Loop:
 			copy(rawmsg.Message, data)
 			err := s.rawMessagesQueue.Put(rawmsg)
 			if err != nil {
-				s.Logger.Error("Failed to enqueue new raw RELP message", "error", err)
+				s.Logger.Error("Failed to enqueue new raw DirectRELP message", "error", err)
 				return
 			}
-			base.IncomingMsgsCounter.WithLabelValues("relp", client, localPortStr, path).Inc()
+			base.IncomingMsgsCounter.WithLabelValues("directrelp", client, localPortStr, path).Inc()
 			//logger.Debug("RELP client received a syslog message")
 		default:
 			logger.Warn("Unknown RELP command", "command", command)

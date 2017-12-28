@@ -40,19 +40,22 @@ func (source BaseConfig) Clone() BaseConfig {
 func newBaseConf() BaseConfig {
 	brokers := []string{}
 	baseConf := BaseConfig{
-		TcpSource:   []TcpSourceConfig{},
-		UdpSource:   []UdpSourceConfig{},
-		RelpSource:  []RelpSourceConfig{},
-		KafkaSource: []KafkaSourceConfig{},
+		TcpSource:        []TcpSourceConfig{},
+		UdpSource:        []UdpSourceConfig{},
+		RelpSource:       []RelpSourceConfig{},
+		DirectRelpSource: []DirectRelpSourceConfig{},
+		GraylogSource:    []GraylogSourceConfig{},
+		KafkaSource:      []KafkaSourceConfig{},
+		Store:            StoreConfig{},
+		Parsers:          []ParserConfig{},
+		Journald:         JournaldConfig{},
+		Metrics:          MetricsConfig{},
+
 		KafkaDest: KafkaDestConfig{
 			KafkaBaseConfig: KafkaBaseConfig{
 				Brokers: brokers,
 			},
 		},
-		Store:    StoreConfig{},
-		Parsers:  []ParserConfig{},
-		Journald: JournaldConfig{},
-		Metrics:  MetricsConfig{},
 	}
 	return baseConf
 }
@@ -179,6 +182,10 @@ func (c *RelpSourceConfig) SetConfID() {
 	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
 }
 
+func (c *DirectRelpSourceConfig) SetConfID() {
+	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
+}
+
 func (c *GraylogSourceConfig) SetConfID() {
 	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
 }
@@ -200,6 +207,10 @@ func (c *TcpSourceConfig) GetClientAuthType() tls.ClientAuthType {
 }
 
 func (c *RelpSourceConfig) GetClientAuthType() tls.ClientAuthType {
+	return convertClientAuthType(c.ClientAuthType)
+}
+
+func (c *DirectRelpSourceConfig) GetClientAuthType() tls.ClientAuthType {
 	return convertClientAuthType(c.ClientAuthType)
 }
 
@@ -262,6 +273,12 @@ func (c *BaseConfig) GetCertificateFiles() (res map[string]([]string)) {
 	res["relpsource"] = cleanList(s)
 
 	s = set.New(set.ThreadSafe)
+	for _, src := range c.DirectRelpSource {
+		s.Add(src.CAFile, src.CertFile, src.KeyFile)
+	}
+	res["directrelpsource"] = cleanList(s)
+
+	s = set.New(set.ThreadSafe)
 	for _, src := range c.KafkaSource {
 		s.Add(src.CAFile, src.CertFile, src.KeyFile)
 	}
@@ -290,6 +307,12 @@ func (c *BaseConfig) GetCertificatePaths() (res map[string]([]string)) {
 		s.Add(src.CAPath)
 	}
 	res["relpsource"] = cleanList(s)
+
+	s = set.New(set.ThreadSafe)
+	for _, src := range c.DirectRelpSource {
+		s.Add(src.CAPath)
+	}
+	res["directrelpsource"] = cleanList(s)
 
 	s = set.New(set.ThreadSafe)
 	for _, src := range c.KafkaSource {
@@ -333,7 +356,17 @@ func (c *UdpSourceConfig) Export() []byte {
 	return b
 }
 
+func (c *GraylogSourceConfig) Export() []byte {
+	b, _ := json.Marshal(c)
+	return b
+}
+
 func (c *RelpSourceConfig) Export() []byte {
+	b, _ := json.Marshal(c)
+	return b
+}
+
+func (c *DirectRelpSourceConfig) Export() []byte {
 	b, _ := json.Marshal(c)
 	return b
 }
@@ -919,6 +952,9 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 	}
 	for i := range c.RelpSource {
 		syslogConfs = append(syslogConfs, &c.RelpSource[i])
+	}
+	for i := range c.DirectRelpSource {
+		syslogConfs = append(syslogConfs, &c.DirectRelpSource[i])
 	}
 	for i := range c.GraylogSource {
 		syslogConfs = append(syslogConfs, &c.GraylogSource[i])
