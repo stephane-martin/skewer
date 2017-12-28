@@ -5,7 +5,6 @@ import (
 	"sync"
 
 	"github.com/inconshreveable/log15"
-	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/journald"
@@ -13,48 +12,34 @@ import (
 	"github.com/stephane-martin/skewer/services/base"
 )
 
-type journalMetrics struct {
-	IncomingMsgsCounter *prometheus.CounterVec
-}
-
-func NewJournalMetrics() *journalMetrics {
-	m := &journalMetrics{}
-	m.IncomingMsgsCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "skw_incoming_messages_total",
-			Help: "total number of messages that were received",
-		},
-		[]string{"protocol", "client", "port", "path"},
-	)
-	return m
+func initJournalRegistry() {
+	base.Once.Do(func() {
+		base.InitRegistry()
+	})
 }
 
 type JournalService struct {
-	stasher        *base.Reporter
+	stasher        base.Stasher
 	reader         journald.JournaldReader
 	logger         log15.Logger
 	Conf           conf.JournaldConfig
 	wgroup         *sync.WaitGroup
-	metrics        *journalMetrics
-	registry       *prometheus.Registry
 	fatalErrorChan chan struct{}
 	fatalOnce      *sync.Once
 }
 
-func NewJournalService(stasher *base.Reporter, l log15.Logger) (*JournalService, error) {
+func NewJournalService(stasher base.Stasher, l log15.Logger) (*JournalService, error) {
+	initJournalRegistry()
 	s := JournalService{
-		stasher:  stasher,
-		metrics:  NewJournalMetrics(),
-		registry: prometheus.NewRegistry(),
-		logger:   l.New("class", "journald"),
-		wgroup:   &sync.WaitGroup{},
+		stasher: stasher,
+		logger:  l.New("class", "journald"),
+		wgroup:  &sync.WaitGroup{},
 	}
-	s.registry.MustRegister(s.metrics.IncomingMsgsCounter)
 	return &s, nil
 }
 
 func (s *JournalService) Gather() ([]*dto.MetricFamily, error) {
-	return s.registry.Gather()
+	return base.Registry.Gather()
 }
 
 func (s *JournalService) FatalError() chan struct{} {
@@ -65,7 +50,7 @@ func (s *JournalService) dofatal() {
 	s.fatalOnce.Do(func() { close(s.fatalErrorChan) })
 }
 
-func (s *JournalService) Start(test bool) (infos []model.ListenerInfo, err error) {
+func (s *JournalService) Start() (infos []model.ListenerInfo, err error) {
 	infos = []model.ListenerInfo{}
 	hostname, err := os.Hostname()
 	if err != nil {
@@ -102,7 +87,7 @@ func (s *JournalService) Start(test bool) (infos []model.ListenerInfo, err error
 					s.logger.Error("Fatal error stashing journal message", "error", f)
 					s.dofatal()
 				} else {
-					s.metrics.IncomingMsgsCounter.WithLabelValues("journald", hostname, "", "").Inc()
+					base.IncomingMsgsCounter.WithLabelValues("journald", hostname, "", "").Inc()
 				}
 			}
 		}

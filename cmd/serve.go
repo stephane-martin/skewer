@@ -37,7 +37,6 @@ connects to Kafka, and forwards messages to Kafka.`,
 	Run: func(cmd *cobra.Command, args []string) {},
 }
 
-var testFlag bool
 var SyslogFlag bool
 var LoglevelFlag string
 var LogfilenameFlag string
@@ -49,10 +48,10 @@ var UidFlag string
 var GidFlag string
 var DumpableFlag bool
 var profile bool
+var profilePort int
 
 func init() {
 	RootCmd.AddCommand(serveCobraCmd)
-	serveCobraCmd.Flags().BoolVar(&testFlag, "test", false, "Print messages to stdout instead of sending to Kafka")
 	serveCobraCmd.Flags().BoolVar(&SyslogFlag, "syslog", false, "Send logs to the local syslog (are you sure you wan't to do that ?)")
 	serveCobraCmd.Flags().StringVar(&LoglevelFlag, "loglevel", "info", "Set logging level")
 	serveCobraCmd.Flags().StringVar(&LogfilenameFlag, "logfilename", "", "Write logs to a file instead of stderr")
@@ -63,8 +62,8 @@ func init() {
 	serveCobraCmd.Flags().StringVar(&UidFlag, "uid", "", "Switch to this user ID (when launched as root)")
 	serveCobraCmd.Flags().StringVar(&GidFlag, "gid", "", "Switch to this group ID (when launched as root)")
 	serveCobraCmd.Flags().BoolVar(&DumpableFlag, "dumpable", false, "if set, the skewer process will be traceable/dumpable")
-	serveCobraCmd.Flags().BoolVar(&profile, "profile", false, "if set, profile memory")
-
+	serveCobraCmd.Flags().BoolVar(&profile, "prof", false, "if set, profile memory")
+	serveCobraCmd.Flags().IntVar(&profilePort, "profport", 6060, "profile HTTP port")
 }
 
 // ExecuteChild sets up the environment for the serve command and starts it.
@@ -279,7 +278,6 @@ func (ch *serveChild) setupStore() (st *services.StorePlugin, err error) {
 	certpaths := ch.conf.GetCertificatePaths()["dests"]
 
 	err = st.Create(
-		services.TestOpt(testFlag),
 		services.DumpableOpt(DumpableFlag),
 		services.StorePathOpt(storeDirname),
 		services.FileDestTmplOpt(tmpl),
@@ -376,7 +374,6 @@ func (ch *serveChild) StartKafkaSource() error {
 		certpaths := ch.conf.GetCertificatePaths()["kafkasource"]
 
 		err := ch.controllers[services.KafkaSource].Create(
-			services.TestOpt(testFlag),
 			services.DumpableOpt(DumpableFlag),
 			services.CertFilesOpt(certfiles),
 			services.CertPathsOpt(certpaths),
@@ -399,7 +396,6 @@ func (ch *serveChild) StartAccounting() error {
 	if ch.conf.Accounting.Enabled {
 		ch.logger.Info("Process accounting is enabled")
 		err := ch.controllers[services.Accounting].Create(
-			services.TestOpt(testFlag),
 			services.DumpableOpt(DumpableFlag),
 			services.AccountingPathOpt(ch.conf.Accounting.Path),
 		)
@@ -425,7 +421,6 @@ func (ch *serveChild) StartJournal() error {
 			ch.logger.Info("Journald service is enabled")
 			// in fact Create() will only do something the first time startJournal() is called
 			err := ctl.Create(
-				services.TestOpt(testFlag),
 				services.DumpableOpt(DumpableFlag),
 			)
 			if err != nil {
@@ -456,7 +451,6 @@ func (ch *serveChild) StartRelp() error {
 
 	ctl := ch.controllers[services.RELP]
 	err := ctl.Create(
-		services.TestOpt(testFlag),
 		services.DumpableOpt(DumpableFlag),
 		services.CertFilesOpt(certfiles),
 		services.CertPathsOpt(certpaths),
@@ -484,7 +478,6 @@ func (ch *serveChild) StartTcp() error {
 
 	ctl := ch.controllers[services.TCP]
 	err := ctl.Create(
-		services.TestOpt(testFlag),
 		services.DumpableOpt(DumpableFlag),
 		services.CertFilesOpt(certfiles),
 		services.CertPathsOpt(certpaths),
@@ -514,7 +507,6 @@ func (ch *serveChild) StartUdp() error {
 	}
 	ctl := ch.controllers[services.UDP]
 	err := ctl.Create(
-		services.TestOpt(testFlag),
 		services.DumpableOpt(DumpableFlag),
 	)
 
@@ -542,7 +534,6 @@ func (ch *serveChild) StartGraylog() error {
 	}
 	ctl := ch.controllers[services.Graylog]
 	err := ctl.Create(
-		services.TestOpt(testFlag),
 		services.DumpableOpt(DumpableFlag),
 	)
 
@@ -650,13 +641,14 @@ func (ch *serveChild) Serve() error {
 		return fmt.Errorf("error starting a controller: %s", err)
 	}
 
+	// TODO: profile the store process instead
 	if profile {
 		go func() {
 			mux := http.NewServeMux()
 			mux.Handle("/pprof/heap", pprof.Handler("heap"))
 			mux.Handle("/pprof/profile", http.HandlerFunc(pprof.Profile))
 			server := &http.Server{
-				Addr:    "127.0.0.1:6600",
+				Addr:    fmt.Sprintf("127.0.0.1:%d", profilePort),
 				Handler: mux,
 			}
 			err = server.ListenAndServe()

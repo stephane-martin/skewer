@@ -23,7 +23,7 @@ func Wout(header []byte, msg []byte) (err error) {
 	return err
 }
 
-func Launch(typ Types, test bool, confined bool, ring kring.Ring, binderClt *binder.BinderClientImpl, l log15.Logger, pipe *os.File) error {
+func Launch(typ Types, confined bool, ring kring.Ring, binderClt *binder.BinderClientImpl, l log15.Logger, pipe *os.File) error {
 	if ring == nil {
 		return fmt.Errorf("No ring")
 	}
@@ -32,8 +32,14 @@ func Launch(typ Types, test bool, confined bool, ring kring.Ring, binderClt *bin
 	name := Types2Names[typ]
 	hasConf := false
 
-	reporter := base.NewReporter(name, l, pipe)
-	defer reporter.Stop() // will close the pipe
+	var reporter base.Reporter
+	if typ != Store && typ != Configuration {
+		if pipe == nil {
+			return fmt.Errorf("Plugin '%s' has a nil pipe")
+		}
+		reporter = base.NewReporter(name, l, pipe)
+		defer reporter.Stop() // will close the pipe
+	}
 
 	svc := ProviderFactory(typ, confined, ring, reporter, binderClt, l, pipe)
 	if svc == nil {
@@ -72,19 +78,21 @@ func Launch(typ Types, test bool, confined bool, ring kring.Ring, binderClt *bin
 				_ = Wout([]byte("syslogconferror"), []byte(err.Error()))
 				return err
 			}
-
-			reporter.SetSecret(nil)
-			if globalConf.Main.EncryptIPC {
-				l.Debug("Encrypting messages from plugin", "type", name)
-				secret, err := ring.GetBoxSecret()
-				if err != nil {
-					_ = Wout(STARTERROR, []byte(err.Error()))
-					return err
+			if reporter != nil {
+				if globalConf.Main.EncryptIPC {
+					l.Debug("Encrypting messages from plugin", "type", name)
+					secret, err := ring.GetBoxSecret()
+					if err != nil {
+						_ = Wout(STARTERROR, []byte(err.Error()))
+						return err
+					}
+					reporter.SetSecret(secret)
+				} else {
+					reporter.SetSecret(nil)
 				}
-				reporter.SetSecret(secret)
+				reporter.Start()
 			}
-			reporter.Start()
-			infos, err := ConfigureAndStartService(svc, globalConf, test)
+			infos, err := ConfigureAndStartService(svc, globalConf)
 			if err != nil {
 				_ = Wout(STARTERROR, []byte(err.Error()))
 				return err

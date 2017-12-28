@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"runtime"
 	"strconv"
 	"strings"
@@ -15,16 +14,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	sarama "github.com/Shopify/sarama"
 	"github.com/oklog/ulid"
-	"github.com/pquerna/ffjson/ffjson"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"golang.org/x/text/encoding"
 
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/conf"
-	"github.com/stephane-martin/skewer/javascript"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/services/errors"
@@ -34,9 +30,36 @@ import (
 	"github.com/stephane-martin/skewer/utils/queue/tcp"
 )
 
-var tr = true
-var fa = false
-var sp = []byte(" ")
+// TODO: separate RELP and DIRECTRELP
+
+var relpAnswersCounter *prometheus.CounterVec
+var relpProtocolErrorsCounter *prometheus.CounterVec
+
+func initRelpRegistry() {
+	base.Once.Do(func() {
+		base.InitRegistry()
+		relpAnswersCounter = prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "skw_relp_answers_total",
+				Help: "number of RELP rsp answers",
+			},
+			[]string{"status", "client"},
+		)
+
+		relpProtocolErrorsCounter = prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "skw_relp_protocol_errors_total",
+				Help: "Number of RELP protocol errors",
+			},
+			[]string{"client"},
+		)
+
+		base.Registry.MustRegister(
+			relpAnswersCounter,
+			relpProtocolErrorsCounter,
+		)
+	})
+}
 
 type RelpServerStatus int
 
@@ -177,109 +200,29 @@ type meta struct {
 	ConnID uintptr
 }
 
-type relpMetrics struct {
-	IncomingMsgsCounter         *prometheus.CounterVec
-	ClientConnectionCounter     *prometheus.CounterVec
-	ParsingErrorCounter         *prometheus.CounterVec
-	RelpAnswersCounter          *prometheus.CounterVec
-	RelpProtocolErrorsCounter   *prometheus.CounterVec
-	KafkaConnectionErrorCounter prometheus.Counter
-	KafkaAckNackCounter         *prometheus.CounterVec
-	MessageFilteringCounter     *prometheus.CounterVec
-}
-
-func NewRelpMetrics() *relpMetrics {
-	m := &relpMetrics{}
-	m.IncomingMsgsCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "skw_incoming_messages_total",
-			Help: "total number of messages that were received",
-		},
-		[]string{"protocol", "client", "port", "path"},
-	)
-
-	m.ClientConnectionCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "skw_client_connections_total",
-			Help: "total number of client connections",
-		},
-		[]string{"protocol", "client", "port", "path"},
-	)
-
-	m.ParsingErrorCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "skw_parsing_errors_total",
-			Help: "total number of times there was a parsing error",
-		},
-		[]string{"protocol", "client", "parser_name"},
-	)
-
-	m.RelpAnswersCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "skw_relp_answers_total",
-			Help: "number of RELP rsp answers",
-		},
-		[]string{"status", "client"},
-	)
-
-	m.RelpProtocolErrorsCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "skw_relp_protocol_errors_total",
-			Help: "Number of RELP protocol errors",
-		},
-		[]string{"client"},
-	)
-
-	m.KafkaConnectionErrorCounter = prometheus.NewCounter(
-		prometheus.CounterOpts{
-			Name: "skw_relp_kafka_connection_errors_total",
-			Help: "number of kafka connection errors",
-		},
-	)
-
-	m.KafkaAckNackCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "skw_relp_kafka_ack_total",
-			Help: "number of kafka acknowledgments",
-		},
-		[]string{"status", "topic"},
-	)
-
-	m.MessageFilteringCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "skw_relp_messages_filtering_total",
-			Help: "number of filtered messages by status",
-		},
-		[]string{"status", "client"},
-	)
-	return m
-}
-
 type RelpService struct {
 	impl           *RelpServiceImpl
 	fatalErrorChan chan struct{}
 	fatalOnce      *sync.Once
 	QueueSize      uint64
 	logger         log15.Logger
-	reporter       *base.Reporter
-	direct         bool
+	reporter       base.Reporter
 	b              *binder.BinderClientImpl
 	sc             []conf.RelpSourceConfig
 	pc             []conf.ParserConfig
-	kc             conf.KafkaDestConfig
 	wg             sync.WaitGroup
 	confined       bool
 }
 
-func NewRelpService(r *base.Reporter, confined bool, b *binder.BinderClientImpl, l log15.Logger) *RelpService {
+func NewRelpService(r base.Reporter, confined bool, b *binder.BinderClientImpl, l log15.Logger) *RelpService {
+	initRelpRegistry()
 	s := &RelpService{
 		b:        b,
 		logger:   l,
 		reporter: r,
-		direct:   true,
 		confined: confined,
 	}
-	s.impl = NewRelpServiceImpl(s.direct, confined, r, s.b, s.logger)
+	s.impl = NewRelpServiceImpl(confined, r, s.b, s.logger)
 	return s
 }
 
@@ -292,17 +235,17 @@ func (s *RelpService) dofatal() {
 }
 
 func (s *RelpService) Gather() ([]*dto.MetricFamily, error) {
-	return s.impl.registry.Gather()
+	return base.Registry.Gather()
 }
 
-func (s *RelpService) Start(test bool) (infos []model.ListenerInfo, err error) {
+func (s *RelpService) Start() (infos []model.ListenerInfo, err error) {
 	// the Relp service manages registration in Consul by itself and
 	// therefore does not report infos
 	//if capabilities.CapabilitiesSupported {
 	//	s.logger.Debug("Capabilities", "caps", capabilities.GetCaps())
 	//}
 	infos = []model.ListenerInfo{}
-	s.impl = NewRelpServiceImpl(s.direct, s.confined, s.reporter, s.b, s.logger)
+	s.impl = NewRelpServiceImpl(s.confined, s.reporter, s.b, s.logger)
 	s.fatalErrorChan = make(chan struct{})
 	s.fatalOnce = &sync.Once{}
 
@@ -320,8 +263,8 @@ func (s *RelpService) Start(test bool) (infos []model.ListenerInfo, err error) {
 
 			case Stopped:
 				//s.impl.Logger.Debug("The RELP service is stopped")
-				s.impl.SetConf(s.sc, s.pc, s.kc, s.QueueSize)
-				infos, err := s.impl.Start(test)
+				s.impl.SetConf(s.sc, s.pc, s.QueueSize)
+				infos, err := s.impl.Start()
 				if err == nil {
 					//fmt.Fprintln(os.Stderr, "STOPPED")
 					err = s.reporter.Report(infos)
@@ -367,54 +310,32 @@ func (s *RelpService) Stop() {
 	s.wg.Wait()
 }
 
-func (s *RelpService) SetConf(sc []conf.RelpSourceConfig, pc []conf.ParserConfig, kc conf.KafkaDestConfig, direct bool, queueSize uint64) {
+func (s *RelpService) SetConf(sc []conf.RelpSourceConfig, pc []conf.ParserConfig, queueSize uint64) {
 	s.sc = sc
 	s.pc = pc
-	s.kc = kc
-	s.direct = direct
 	s.QueueSize = queueSize
 }
 
 type RelpServiceImpl struct {
 	StreamingService
-	RelpConfigs         []conf.RelpSourceConfig
-	kafkaConf           conf.KafkaDestConfig
-	status              RelpServerStatus
-	StatusChan          chan RelpServerStatus
-	producer            sarama.AsyncProducer
-	test                bool
-	metrics             *relpMetrics
-	registry            *prometheus.Registry
-	reporter            *base.Reporter
-	direct              bool
-	rawMessagesQueue    *tcp.Ring
-	parsedMessagesQueue *queue.MessageQueue
-	parsewg             sync.WaitGroup
-	configs             map[ulid.ULID]conf.RelpSourceConfig
-	forwarder           *ackForwarder
+	RelpConfigs      []conf.RelpSourceConfig
+	status           RelpServerStatus
+	StatusChan       chan RelpServerStatus
+	reporter         base.Reporter
+	rawMessagesQueue *tcp.Ring
+	parsewg          sync.WaitGroup
+	configs          map[ulid.ULID]conf.RelpSourceConfig
+	forwarder        *ackForwarder
 }
 
-func NewRelpServiceImpl(direct bool, confined bool, reporter *base.Reporter, b *binder.BinderClientImpl, logger log15.Logger) *RelpServiceImpl {
+func NewRelpServiceImpl(confined bool, reporter base.Reporter, b *binder.BinderClientImpl, logger log15.Logger) *RelpServiceImpl {
 	s := RelpServiceImpl{
 		status:    Stopped,
-		metrics:   NewRelpMetrics(),
-		registry:  prometheus.NewRegistry(),
 		reporter:  reporter,
-		direct:    direct,
 		configs:   map[ulid.ULID]conf.RelpSourceConfig{},
 		forwarder: newAckForwarder(),
 	}
 	s.StreamingService.init()
-	s.registry.MustRegister(
-		s.metrics.ClientConnectionCounter,
-		s.metrics.IncomingMsgsCounter,
-		s.metrics.KafkaAckNackCounter,
-		s.metrics.KafkaConnectionErrorCounter,
-		s.metrics.MessageFilteringCounter,
-		s.metrics.ParsingErrorCounter,
-		s.metrics.RelpAnswersCounter,
-		s.metrics.RelpProtocolErrorsCounter,
-	)
 	s.StreamingService.BaseService.Logger = logger.New("class", "RelpServer")
 	s.StreamingService.BaseService.Binder = b
 	s.StreamingService.handler = RelpHandler{Server: &s}
@@ -423,7 +344,7 @@ func NewRelpServiceImpl(direct bool, confined bool, reporter *base.Reporter, b *
 	return &s
 }
 
-func (s *RelpServiceImpl) Start(test bool) ([]model.ListenerInfo, error) {
+func (s *RelpServiceImpl) Start() ([]model.ListenerInfo, error) {
 	s.LockStatus()
 	defer s.UnlockStatus()
 	if s.status == FinalStopped {
@@ -432,7 +353,6 @@ func (s *RelpServiceImpl) Start(test bool) ([]model.ListenerInfo, error) {
 	if s.status != Stopped && s.status != Waiting {
 		return nil, errors.ServerNotStopped
 	}
-	s.test = test
 
 	infos := s.initTCPListeners()
 	if len(infos) == 0 {
@@ -440,19 +360,8 @@ func (s *RelpServiceImpl) Start(test bool) ([]model.ListenerInfo, error) {
 		return infos, nil
 	}
 
-	s.producer = nil
-	if !s.test && s.direct {
-		var err error
-		s.producer, err = s.kafkaConf.GetAsyncProducer(s.confined)
-		if err != nil {
-			s.resetTCPListeners()
-			return nil, err
-		}
-	}
-
 	s.Logger.Info("Listening on RELP", "nb_services", len(infos))
 
-	s.parsedMessagesQueue = queue.NewMessageQueue()
 	s.rawMessagesQueue = tcp.NewRing(s.QueueSize)
 	s.configs = map[ulid.ULID]conf.RelpSourceConfig{}
 
@@ -463,12 +372,6 @@ func (s *RelpServiceImpl) Start(test bool) ([]model.ListenerInfo, error) {
 		s.configs[l.Conf.ConfID] = conf.RelpSourceConfig(l.Conf)
 	}
 
-	if !s.test && s.direct {
-		s.wg.Add(1)
-		go s.push2kafka()
-		s.wg.Add(1)
-		go s.handleKafkaResponses()
-	}
 	cpus := runtime.NumCPU()
 	for i := 0; i < cpus; i++ {
 		s.parsewg.Add(1)
@@ -536,9 +439,6 @@ func (s *RelpServiceImpl) doStop(final bool, wait bool) {
 	}
 	// the parsers consume the rest of rawMessagesQueue, then they stop
 	s.parsewg.Wait() // wait that the parsers have stopped
-	if s.parsedMessagesQueue != nil {
-		s.parsedMessagesQueue.Dispose()
-	}
 
 	// after the parsers have stopped, we can close the queues
 	s.forwarder.RemoveAll()
@@ -558,13 +458,12 @@ func (s *RelpServiceImpl) doStop(final bool, wait bool) {
 	}
 }
 
-func (s *RelpServiceImpl) SetConf(sc []conf.RelpSourceConfig, pc []conf.ParserConfig, kc conf.KafkaDestConfig, queueSize uint64) {
+func (s *RelpServiceImpl) SetConf(sc []conf.RelpSourceConfig, pc []conf.ParserConfig, queueSize uint64) {
 	tcpConfigs := []conf.TcpSourceConfig{}
 	for _, c := range sc {
 		tcpConfigs = append(tcpConfigs, conf.TcpSourceConfig(c))
 	}
 	s.StreamingService.SetConf(tcpConfigs, pc, queueSize, 132000)
-	s.kafkaConf = kc
 	s.BaseService.Pool = &sync.Pool{New: func() interface{} {
 		return &model.RawTcpMessage{Message: make([]byte, 132000)}
 	}}
@@ -615,7 +514,7 @@ func (s *RelpServiceImpl) Parse() {
 		if err != nil {
 			logger.Warn("Parsing error", "message", string(raw.Message[:raw.Size]), "error", err)
 			s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
-			s.metrics.ParsingErrorCounter.WithLabelValues("relp", raw.Client, raw.Format).Inc()
+			base.ParsingErrorCounter.WithLabelValues("relp", raw.Client, raw.Format).Inc()
 			s.Pool.Put(raw)
 			continue
 		}
@@ -638,14 +537,8 @@ func (s *RelpServiceImpl) Parse() {
 		}
 		s.Pool.Put(raw)
 
-		if s.direct {
-			// send message directly to kafka
-			_ = s.parsedMessagesQueue.Put(parsedMsg)
-			continue
-		}
-		// else send message to the Store
+		// send message to the Store
 		parsedMsg.Uid = gen.Uid()
-		//fmt.Fprintln(os.Stderr, "ZOOOG")
 		f, nonf = s.reporter.Stash(parsedMsg)
 		if f == nil && nonf == nil {
 			s.forwarder.ForwardSucc(parsedMsg.ConnID, parsedMsg.Txnr)
@@ -658,47 +551,6 @@ func (s *RelpServiceImpl) Parse() {
 			s.forwarder.ForwardFail(parsedMsg.ConnID, parsedMsg.Txnr)
 			logger.Warn("Non fatal error pushing RELP message to the Store", "err", nonf)
 		}
-	}
-
-}
-
-func (s *RelpServiceImpl) handleKafkaResponses() {
-	var succ *sarama.ProducerMessage
-	var fail *sarama.ProducerError
-	var more, fatal bool
-	kafkaSuccChan := s.producer.Successes()
-	kafkaFailChan := s.producer.Errors()
-	for {
-		if kafkaSuccChan == nil && kafkaFailChan == nil {
-			return
-		}
-		select {
-		case succ, more = <-kafkaSuccChan:
-			if more {
-				metad := succ.Metadata.(meta)
-				s.forwarder.ForwardSucc(metad.ConnID, metad.Txnr)
-				s.metrics.KafkaAckNackCounter.WithLabelValues("ack", succ.Topic).Inc()
-			} else {
-				kafkaSuccChan = nil
-			}
-		case fail, more = <-kafkaFailChan:
-			if more {
-				metad := fail.Msg.Metadata.(meta)
-				s.forwarder.ForwardFail(metad.ConnID, metad.Txnr)
-				s.metrics.KafkaAckNackCounter.WithLabelValues("nack", fail.Msg.Topic).Inc()
-				s.Logger.Info("NACK from Kafka", "error", fail.Error(), "txnr", metad.Txnr, "topic", fail.Msg.Topic)
-				fatal = model.IsFatalKafkaError(fail.Err)
-			} else {
-				kafkaFailChan = nil
-			}
-
-		}
-
-		if fatal {
-			s.StopAndWait()
-			return
-		}
-
 	}
 
 }
@@ -749,14 +601,14 @@ func (s *RelpServiceImpl) handleResponses(conn net.Conn, connID uintptr, client 
 				if err == nil {
 					//logger.Debug("ACK to client", "connid", connID, "tnxr", next)
 					delete(successes, next)
-					s.metrics.RelpAnswersCounter.WithLabelValues("200", client).Inc()
+					relpAnswersCounter.WithLabelValues("200", client).Inc()
 				}
 			} else if failures[next] {
 				err = writeFailure(next)
 				if err == nil {
 					//logger.Debug("NACK to client", "connid", connID, "txnr", next)
 					delete(failures, next)
-					s.metrics.RelpAnswersCounter.WithLabelValues("500", client).Inc()
+					relpAnswersCounter.WithLabelValues("500", client).Inc()
 				}
 			} else {
 				break Cooking
@@ -775,133 +627,6 @@ func (s *RelpServiceImpl) handleResponses(conn net.Conn, connID uintptr, client 
 			}
 		}
 	}
-}
-
-func (s *RelpServiceImpl) push2kafka() {
-	defer func() {
-		s.producer.AsyncClose()
-		s.wg.Done()
-	}()
-	envs := map[ulid.ULID]*javascript.Environment{}
-	var e *javascript.Environment
-	var haveEnv bool
-	var message *model.FullMessage
-	var topic string
-	var partitionKey string
-	var partitionNumber int32
-	var errs []error
-	var err error
-	var logger log15.Logger
-	var filterResult javascript.FilterResult
-	var kafkaMsg *sarama.ProducerMessage
-	var serialized []byte
-	var reported time.Time
-	var config conf.RelpSourceConfig
-
-ForParsedChan:
-	for s.parsedMessagesQueue.Wait(0) {
-		message, err = s.parsedMessagesQueue.Get()
-		if err != nil {
-			// should not happen
-			s.Logger.Error("Fatal error getting messages from the parsed messages queue", "error", err)
-			s.StopAndWait()
-			return
-		}
-		if message == nil {
-			// should not happen
-			continue ForParsedChan
-		}
-		logger = s.Logger.New("client", message.Parsed.Client, "port", message.Parsed.LocalPort, "path", message.Parsed.UnixSocketPath)
-		e, haveEnv = envs[message.ConfId]
-		if !haveEnv {
-			config, haveEnv = s.configs[message.ConfId]
-			if !haveEnv {
-				s.Logger.Warn("Could not find the configuration for a message", "confId", message.ConfId, "txnr", message.Txnr)
-				continue ForParsedChan
-			}
-			envs[message.ConfId] = javascript.NewFilterEnvironment(
-				config.FilterFunc,
-				config.TopicFunc,
-				config.TopicTmpl,
-				config.PartitionFunc,
-				config.PartitionTmpl,
-				config.PartitionNumberFunc,
-				s.Logger,
-			)
-			e = envs[message.ConfId]
-		}
-
-		topic, errs = e.Topic(message.Parsed.Fields)
-		for _, err = range errs {
-			logger.Info("Error calculating topic", "error", err, "txnr", message.Txnr)
-		}
-		if len(topic) == 0 {
-			logger.Warn("Topic or PartitionKey could not be calculated", "txnr", message.Txnr)
-			s.forwarder.ForwardFail(message.ConnID, message.Txnr)
-			continue ForParsedChan
-		}
-		partitionKey, errs = e.PartitionKey(message.Parsed.Fields)
-		for _, err = range errs {
-			logger.Info("Error calculating the partition key", "error", err, "txnr", message.Txnr)
-		}
-		partitionNumber, errs = e.PartitionNumber(message.Parsed.Fields)
-		for _, err = range errs {
-			logger.Info("Error calculating the partition number", "error", err, "txnr", message.Txnr)
-		}
-
-		filterResult, err = e.FilterMessage(&message.Parsed.Fields)
-
-		switch filterResult {
-		case javascript.DROPPED:
-			s.forwarder.ForwardFail(message.ConnID, message.Txnr)
-			s.metrics.MessageFilteringCounter.WithLabelValues("dropped", message.Parsed.Client).Inc()
-			continue ForParsedChan
-		case javascript.REJECTED:
-			s.forwarder.ForwardFail(message.ConnID, message.Txnr)
-			s.metrics.MessageFilteringCounter.WithLabelValues("rejected", message.Parsed.Client).Inc()
-			continue ForParsedChan
-		case javascript.PASS:
-			s.metrics.MessageFilteringCounter.WithLabelValues("passing", message.Parsed.Client).Inc()
-		default:
-			s.forwarder.ForwardFail(message.ConnID, message.Txnr)
-			s.metrics.MessageFilteringCounter.WithLabelValues("unknown", message.Parsed.Client).Inc()
-			logger.Warn("Error happened processing message", "txnr", message.Txnr, "error", err)
-			continue ForParsedChan
-		}
-
-		reported = time.Unix(0, message.Parsed.Fields.TimeReportedNum).UTC()
-		message.Parsed.Fields.TimeGenerated = time.Unix(0, message.Parsed.Fields.TimeGeneratedNum).UTC().Format(time.RFC3339Nano)
-		message.Parsed.Fields.TimeReported = reported.Format(time.RFC3339Nano)
-
-		serialized, err = ffjson.Marshal(&message.Parsed)
-
-		if err != nil {
-			logger.Warn("Error generating Kafka message", "error", err, "txnr", message.Txnr)
-			s.forwarder.ForwardFail(message.ConnID, message.Txnr)
-			continue ForParsedChan
-		}
-
-		kafkaMsg = &sarama.ProducerMessage{
-			Key:       sarama.StringEncoder(partitionKey),
-			Partition: partitionNumber,
-			Value:     sarama.ByteEncoder(serialized),
-			Topic:     topic,
-			Timestamp: reported,
-			Metadata:  meta{Txnr: message.Txnr, ConnID: message.ConnID},
-		}
-
-		if s.test {
-			// "fake" send messages to kafka
-			fmt.Fprintf(os.Stderr, "pkey: '%s' topic:'%s' txnr:'%d'\n", partitionKey, topic, message.Txnr)
-			fmt.Fprintln(os.Stderr, string(serialized))
-			fmt.Fprintln(os.Stderr)
-			s.forwarder.ForwardSucc(message.ConnID, message.Txnr)
-		} else {
-			// send messages to Kafka
-			s.producer.Input() <- kafkaMsg
-		}
-	}
-
 }
 
 type RelpHandler struct {
@@ -955,7 +680,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, c conf.TcpSourceConfig) {
 		"format", config.Format,
 	)
 	logger.Info("New client connection")
-	s.metrics.ClientConnectionCounter.WithLabelValues("relp", client, localPortStr, path).Inc()
+	base.ClientConnectionCounter.WithLabelValues("relp", client, localPortStr, path).Inc()
 
 	s.wg.Add(1)
 	go s.handleResponses(conn, connID, client, logger)
@@ -975,7 +700,7 @@ Loop:
 		txnr, _ := strconv.Atoi(string(splits[0]))
 		if txnr <= previous {
 			logger.Warn("TXNR did not increase", "previous", previous, "current", txnr)
-			s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
+			relpProtocolErrorsCounter.WithLabelValues(client).Inc()
 			return
 		}
 		previous = txnr
@@ -987,7 +712,7 @@ Loop:
 				data = bytes.Trim(splits[3], " \r\n")
 			} else {
 				logger.Warn("datalen is non-null, but no data is provided", "datalen", datalen)
-				s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
+				relpProtocolErrorsCounter.WithLabelValues(client).Inc()
 				return
 			}
 		}
@@ -995,7 +720,7 @@ Loop:
 		case "open":
 			if relpIsOpen {
 				logger.Warn("Received open command twice")
-				s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
+				relpProtocolErrorsCounter.WithLabelValues(client).Inc()
 				return
 			}
 			fmt.Fprintf(conn, "%d rsp %d 200 OK\n%s\n", txnr, len(data)+7, string(data))
@@ -1004,7 +729,7 @@ Loop:
 		case "close":
 			if !relpIsOpen {
 				logger.Warn("Received close command before open")
-				s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
+				relpProtocolErrorsCounter.WithLabelValues(client).Inc()
 				return
 			}
 			fmt.Fprintf(conn, "%d rsp 0\n0 serverclose 0\n", txnr)
@@ -1013,7 +738,7 @@ Loop:
 		case "syslog":
 			if !relpIsOpen {
 				logger.Warn("Received syslog command before open")
-				s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
+				relpProtocolErrorsCounter.WithLabelValues(client).Inc()
 				return
 			}
 			s.forwarder.Received(connID, txnr)
@@ -1038,11 +763,11 @@ Loop:
 				s.Logger.Error("Failed to enqueue new raw RELP message", "error", err)
 				return
 			}
-			s.metrics.IncomingMsgsCounter.WithLabelValues("relp", client, localPortStr, path).Inc()
+			base.IncomingMsgsCounter.WithLabelValues("relp", client, localPortStr, path).Inc()
 			//logger.Debug("RELP client received a syslog message")
 		default:
 			logger.Warn("Unknown RELP command", "command", command)
-			s.metrics.RelpProtocolErrorsCounter.WithLabelValues(client).Inc()
+			relpProtocolErrorsCounter.WithLabelValues(client).Inc()
 			return
 		}
 		if timeout > 0 {

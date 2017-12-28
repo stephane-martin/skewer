@@ -98,39 +98,39 @@ func BinderHdl(typ Types) uintptr {
 	return HandlesMap[ServiceHandle{Types2Names[typ], BINDER}]
 }
 
-func ConfigureAndStartService(s Provider, c conf.BaseConfig, test bool) ([]model.ListenerInfo, error) {
+func ConfigureAndStartService(s Provider, c conf.BaseConfig) ([]model.ListenerInfo, error) {
 
 	switch s := s.(type) {
 	case *network.TcpServiceImpl:
 		s.SetConf(c.TcpSource, c.Parsers, c.Main.InputQueueSize, c.Main.MaxInputMessageSize)
-		return s.Start(test)
+		return s.Start()
 	case *network.UdpServiceImpl:
 		s.SetConf(c.UdpSource, c.Parsers, c.Main.InputQueueSize)
-		return s.Start(test)
+		return s.Start()
 	case *network.RelpService:
-		s.SetConf(c.RelpSource, c.Parsers, c.KafkaDest, c.Main.DirectRelp, c.Main.InputQueueSize)
-		return s.Start(test)
+		s.SetConf(c.RelpSource, c.Parsers, c.Main.InputQueueSize)
+		return s.Start()
 	case *network.GraylogSvcImpl:
 		s.SetConf(c.GraylogSource)
-		return s.Start(test)
+		return s.Start()
 	case *linux.JournalService:
 		s.SetConf(c.Journald)
-		return s.Start(test)
+		return s.Start()
 	case *AccountingService:
 		s.SetConf(c.Accounting)
-		return s.Start(test)
+		return s.Start()
 	case *storeServiceImpl:
-		return s.SetConfAndRestart(c, test)
+		return s.SetConfAndRestart(c)
 	case *network.KafkaServiceImpl:
 		s.SetConf(c.KafkaSource, c.Parsers, c.Main.InputQueueSize)
-		return s.Start(test)
+		return s.Start()
 	default:
 		return nil, fmt.Errorf("Unknown network service: %T", s)
 	}
 
 }
 
-func ProviderFactory(t Types, confined bool, r kring.Ring, reporter *base.Reporter, b *binder.BinderClientImpl, l log15.Logger, pipe *os.File) Provider {
+func ProviderFactory(t Types, confined bool, r kring.Ring, reporter base.Reporter, b *binder.BinderClientImpl, l log15.Logger, pipe *os.File) Provider {
 	switch t {
 	case TCP:
 		return network.NewTcpService(reporter, confined, b, l)

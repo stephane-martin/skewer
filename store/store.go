@@ -26,24 +26,41 @@ import (
 var Registry *prometheus.Registry
 var badgerGauge *prometheus.GaugeVec
 var ackCounter *prometheus.CounterVec
+var once sync.Once
 
-func init() {
-	Registry = prometheus.NewRegistry()
-	badgerGauge = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "skw_store_entries_gauge",
-			Help: "number of messages stored in the badger database",
-		},
-		[]string{"queue", "destination"},
-	)
-	ackCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "skw_store_acks_total",
-			Help: "number of ACKs received by the store",
-		},
-		[]string{"status", "destination"},
-	)
-	Registry.MustRegister(badgerGauge, ackCounter)
+// TODO: gather badger metrics
+
+func InitRegistry() {
+	once.Do(func() {
+		badgerGauge = prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "skw_store_entries_gauge",
+				Help: "number of messages stored in the badger database",
+			},
+			[]string{"queue", "destination"},
+		)
+		ackCounter = prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "skw_store_acks_total",
+				Help: "number of ACKs received by the store",
+			},
+			[]string{"status", "destination"},
+		)
+		Registry = prometheus.NewRegistry()
+		/*
+			expvarCollector := prometheus.NewExpvarCollector(map[string]*prometheus.Desc{
+				"memstats": prometheus.NewDesc(
+					"store_memstats",
+					"All numeric memstats as one metric family. Not a good role-model, actually... ;-)",
+					[]string{"type"}, nil,
+				),
+			})
+		*/
+		//Registry.MustRegister(badgerGauge, ackCounter, expvarCollector)
+		Registry.MustRegister(badgerGauge, ackCounter)
+		//Registry.MustRegister(badgerGauge, ackCounter, prometheus.NewGoCollector())
+		//Registry.MustRegister(badgerGauge, ackCounter, prometheus.NewProcessCollector(os.Getpid(), "store"))
+	})
 }
 
 type Destinations struct {

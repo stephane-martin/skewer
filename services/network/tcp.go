@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/inconshreveable/log15"
-	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
@@ -30,61 +29,29 @@ const (
 	TcpStarted
 )
 
-type tcpMetrics struct {
-	ClientConnectionCounter *prometheus.CounterVec
-	IncomingMsgsCounter     *prometheus.CounterVec
-	ParsingErrorCounter     *prometheus.CounterVec
-}
-
-func NewTcpMetrics() *tcpMetrics {
-	m := tcpMetrics{
-		IncomingMsgsCounter: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "skw_incoming_messages_total",
-				Help: "total number of messages that were received",
-			},
-			[]string{"protocol", "client", "port", "path"},
-		),
-
-		ClientConnectionCounter: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "skw_client_connections_total",
-				Help: "total number of client connections",
-			},
-			[]string{"protocol", "client", "port", "path"},
-		),
-		ParsingErrorCounter: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "skw_parsing_errors_total",
-				Help: "total number of times there was a parsing error",
-			},
-			[]string{"protocol", "client", "parser_name"},
-		),
-	}
-	return &m
+func initTcpRegistry() {
+	base.Once.Do(func() {
+		base.InitRegistry()
+	})
 }
 
 type TcpServiceImpl struct {
 	StreamingService
 	status           TcpServerStatus
 	statusChan       chan TcpServerStatus
-	reporter         *base.Reporter
-	metrics          *tcpMetrics
-	registry         *prometheus.Registry
+	reporter         base.Stasher
 	rawMessagesQueue *tcp.Ring
 	fatalErrorChan   chan struct{}
 	fatalOnce        *sync.Once
 }
 
-func NewTcpService(reporter *base.Reporter, confined bool, b *binder.BinderClientImpl, l log15.Logger) *TcpServiceImpl {
+func NewTcpService(reporter base.Stasher, confined bool, b *binder.BinderClientImpl, l log15.Logger) *TcpServiceImpl {
+	initTcpRegistry()
 	s := TcpServiceImpl{
 		status:   TcpStopped,
 		reporter: reporter,
-		metrics:  NewTcpMetrics(),
-		registry: prometheus.NewRegistry(),
 	}
 	s.StreamingService.init()
-	s.registry.MustRegister(s.metrics.ClientConnectionCounter, s.metrics.IncomingMsgsCounter, s.metrics.ParsingErrorCounter)
 	s.StreamingService.BaseService.Logger = l.New("class", "TcpServer")
 	s.StreamingService.BaseService.Binder = b
 	s.StreamingService.handler = tcpHandler{Server: &s}
@@ -94,11 +61,11 @@ func NewTcpService(reporter *base.Reporter, confined bool, b *binder.BinderClien
 
 // Gather asks the TCP service to report metrics
 func (s *TcpServiceImpl) Gather() ([]*dto.MetricFamily, error) {
-	return s.registry.Gather()
+	return base.Registry.Gather()
 }
 
 // Start makes the TCP service start
-func (s *TcpServiceImpl) Start(test bool) ([]model.ListenerInfo, error) {
+func (s *TcpServiceImpl) Start() ([]model.ListenerInfo, error) {
 	s.LockStatus()
 	if s.status != TcpStopped {
 		s.UnlockStatus()
@@ -193,7 +160,7 @@ func (s *TcpServiceImpl) ParseOne(raw *model.RawTcpMessage, env *ParsersEnv, gen
 
 	syslogMsg, err := parser.Parse(raw.Message[:raw.Size], decoder, raw.DontParseSD)
 	if err != nil {
-		s.metrics.ParsingErrorCounter.WithLabelValues("tcp", raw.Client, raw.Format).Inc()
+		base.ParsingErrorCounter.WithLabelValues("tcp", raw.Client, raw.Format).Inc()
 		logger.Info("Parsing error", "Message", raw.Message, "error", err)
 		return
 	}
@@ -274,7 +241,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TcpSourceConfig)
 
 	logger := s.Logger.New("protocol", "tcp", "client", client, "local_port", localPort, "unix_socket_path", path, "format", config.Format)
 	logger.Info("New client")
-	s.metrics.ClientConnectionCounter.WithLabelValues("tcp", client, localPort, path).Inc()
+	base.ClientConnectionCounter.WithLabelValues("tcp", client, localPort, path).Inc()
 
 	timeout := config.Timeout
 	if timeout > 0 {
@@ -314,7 +281,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TcpSourceConfig)
 			logger.Warn("Error queueing TCP raw message", "error", err)
 			return
 		}
-		s.metrics.IncomingMsgsCounter.WithLabelValues("tcp", client, localPort, path).Inc()
+		base.IncomingMsgsCounter.WithLabelValues("tcp", client, localPort, path).Inc()
 	}
 	logger.Info("End of TCP client connection", "error", scanner.Err())
 }

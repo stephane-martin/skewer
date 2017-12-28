@@ -8,7 +8,6 @@ import (
 	"sync"
 
 	"github.com/inconshreveable/log15"
-	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
@@ -27,13 +26,17 @@ const (
 	UdpStarted
 )
 
+func initUdpRegistry() {
+	base.Once.Do(func() {
+		base.InitRegistry()
+	})
+}
+
 type UdpServiceImpl struct {
 	base.BaseService
 	UdpConfigs     []conf.UdpSourceConfig
 	status         UdpServerStatus
-	stasher        *base.Reporter
-	metrics        *udpMetrics
-	registry       *prometheus.Registry
+	stasher        base.Stasher
 	wg             sync.WaitGroup
 	fatalErrorChan chan struct{}
 	fatalOnce      *sync.Once
@@ -41,40 +44,14 @@ type UdpServiceImpl struct {
 	rawMessagesQueue *udp.Ring
 }
 
-type udpMetrics struct {
-	IncomingMsgsCounter *prometheus.CounterVec
-	ParsingErrorCounter *prometheus.CounterVec
-}
-
-func newUDPMetrics() *udpMetrics {
-	m := &udpMetrics{}
-	m.IncomingMsgsCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "skw_incoming_messages_total",
-			Help: "total number of messages that were received",
-		},
-		[]string{"protocol", "client", "port", "path"},
-	)
-	m.ParsingErrorCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "skw_parsing_errors_total",
-			Help: "total number of times there was a parsing error",
-		},
-		[]string{"protocol", "client", "parser_name"},
-	)
-	return m
-}
-
-func NewUdpService(stasher *base.Reporter, b *binder.BinderClientImpl, l log15.Logger) *UdpServiceImpl {
+func NewUdpService(stasher base.Stasher, b *binder.BinderClientImpl, l log15.Logger) *UdpServiceImpl {
+	initUdpRegistry()
 	s := UdpServiceImpl{
 		status:     UdpStopped,
-		metrics:    newUDPMetrics(),
-		registry:   prometheus.NewRegistry(),
 		stasher:    stasher,
 		UdpConfigs: []conf.UdpSourceConfig{},
 	}
 	s.BaseService.Init()
-	s.registry.MustRegister(s.metrics.IncomingMsgsCounter, s.metrics.ParsingErrorCounter)
 	s.BaseService.Logger = l.New("class", "UdpServer")
 	s.BaseService.Binder = b
 	return &s
@@ -128,7 +105,7 @@ func (s *UdpServiceImpl) Parse() {
 		syslogMsg, err = parser.Parse(raw.Message[:raw.Size], decoder, raw.DontParseSD)
 		if err != nil {
 			s.Pool.Put(raw)
-			s.metrics.ParsingErrorCounter.WithLabelValues("udp", raw.Client, raw.Format).Inc()
+			base.ParsingErrorCounter.WithLabelValues("udp", raw.Client, raw.Format).Inc()
 			logger.Info("Parsing error", "Message", raw.Message, "error", err)
 			continue
 		}
@@ -160,10 +137,10 @@ func (s *UdpServiceImpl) Parse() {
 }
 
 func (s *UdpServiceImpl) Gather() ([]*dto.MetricFamily, error) {
-	return s.registry.Gather()
+	return base.Registry.Gather()
 }
 
-func (s *UdpServiceImpl) Start(test bool) ([]model.ListenerInfo, error) {
+func (s *UdpServiceImpl) Start() ([]model.ListenerInfo, error) {
 	s.LockStatus()
 	defer s.UnlockStatus()
 	if s.status != UdpStopped {
@@ -335,6 +312,6 @@ func (s *UdpServiceImpl) handleConnection(conn net.PacketConn, config conf.UdpSo
 			logger.Warn("Error queueing UDP message", "error", err)
 			return
 		}
-		s.metrics.IncomingMsgsCounter.WithLabelValues("udp", rawmsg.Client, localPortS, path).Inc()
+		base.IncomingMsgsCounter.WithLabelValues("udp", rawmsg.Client, localPortS, path).Inc()
 	}
 }

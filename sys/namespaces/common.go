@@ -99,7 +99,6 @@ type CmdOpts struct {
 	loggerHdl   uintptr
 	binderHdl   uintptr
 	messagePipe *os.File
-	test        bool
 }
 
 func BinderHandle(hdl uintptr) func(*CmdOpts) {
@@ -117,12 +116,6 @@ func LoggerHandle(hdl uintptr) func(*CmdOpts) {
 func Pipe(pipe *os.File) func(*CmdOpts) {
 	return func(opts *CmdOpts) {
 		opts.messagePipe = pipe
-	}
-}
-
-func Test(test bool) func(*CmdOpts) {
-	return func(opts *CmdOpts) {
-		opts.test = test
 	}
 }
 
@@ -162,9 +155,6 @@ func SetupCmd(name string, ring kring.Ring, funcopts ...func(*CmdOpts)) (cmd *Pl
 	_ = wPipe.Close()
 	if err != nil {
 		return nil, err
-	}
-	if opts.test {
-		envs = append(envs, "SKEWER_TEST=TRUE")
 	}
 
 	cmd.Cmd = &exec.Cmd{

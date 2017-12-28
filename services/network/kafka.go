@@ -8,7 +8,6 @@ import (
 
 	cluster "github.com/bsm/sarama-cluster"
 	"github.com/inconshreveable/log15"
-	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
@@ -18,37 +17,16 @@ import (
 	"github.com/stephane-martin/skewer/utils/queue/kafka"
 )
 
-type kafkaMetrics struct {
-	ParsingErrorCounter *prometheus.CounterVec
-	IncomingMsgsCounter *prometheus.CounterVec
-}
-
-func newKafkaMetrics() *kafkaMetrics {
-	m := kafkaMetrics{
-		IncomingMsgsCounter: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "skw_incoming_messages_total",
-				Help: "total number of messages that were received",
-			},
-			[]string{"protocol", "client", "port", "path"},
-		),
-		ParsingErrorCounter: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "skw_parsing_errors_total",
-				Help: "total number of times there was a parsing error",
-			},
-			[]string{"protocol", "client", "parser_name"},
-		),
-	}
-	return &m
+func initKafkaRegistry() {
+	base.Once.Do(func() {
+		base.InitRegistry()
+	})
 }
 
 type KafkaServiceImpl struct {
 	configs          []conf.KafkaSourceConfig
 	parserConfigs    []conf.ParserConfig
-	reporter         *base.Reporter
-	metrics          *kafkaMetrics
-	registry         *prometheus.Registry
+	reporter         base.Stasher
 	rawMessagesQueue *kafka.Ring
 	MaxMessageSize   int
 	logger           log15.Logger
@@ -61,16 +39,14 @@ type KafkaServiceImpl struct {
 	confined         bool
 }
 
-func NewKafkaService(reporter *base.Reporter, confined bool, l log15.Logger) *KafkaServiceImpl {
+func NewKafkaService(reporter base.Stasher, confined bool, l log15.Logger) *KafkaServiceImpl {
+	initKafkaRegistry()
 	s := KafkaServiceImpl{
 		reporter: reporter,
-		metrics:  newKafkaMetrics(),
-		registry: prometheus.NewRegistry(),
 		logger:   l.New("class", "KafkaService"),
 		stopChan: make(chan struct{}),
 		confined: confined,
 	}
-	s.registry.MustRegister(s.metrics.IncomingMsgsCounter, s.metrics.ParsingErrorCounter)
 	return &s
 }
 
@@ -84,10 +60,10 @@ func (s *KafkaServiceImpl) SetConf(sc []conf.KafkaSourceConfig, pc []conf.Parser
 }
 
 func (s *KafkaServiceImpl) Gather() ([]*dto.MetricFamily, error) {
-	return s.registry.Gather()
+	return base.Registry.Gather()
 }
 
-func (s *KafkaServiceImpl) Start(test bool) (infos []model.ListenerInfo, err error) {
+func (s *KafkaServiceImpl) Start() (infos []model.ListenerInfo, err error) {
 	infos = []model.ListenerInfo{}
 	s.queues = queue.NewQueueFactory()
 	s.stopChan = make(chan struct{})
@@ -187,7 +163,7 @@ func (s *KafkaServiceImpl) ParseOne(env *ParsersEnv, raw *model.RawKafkaMessage)
 
 	syslogMsg, err := parser.Parse(raw.Message, decoder, false)
 	if err != nil {
-		s.metrics.ParsingErrorCounter.WithLabelValues("kafka", raw.Brokers, raw.Format).Inc()
+		base.ParsingErrorCounter.WithLabelValues("kafka", raw.Brokers, raw.Format).Inc()
 		logger.Info("Parsing error", "Message", raw.Message, "error", err)
 		return
 	}
@@ -209,6 +185,8 @@ func (s *KafkaServiceImpl) ParseOne(env *ParsersEnv, raw *model.RawKafkaMessage)
 		close(s.fatalErrorChan)
 	} else if nonfatal != nil {
 		logger.Warn("Non-fatal error stashing Kafka message", "error", nonfatal)
+	} else {
+		base.IncomingMsgsCounter.WithLabelValues("kafka", raw.Brokers, "", "").Inc()
 	}
 
 }

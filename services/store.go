@@ -31,7 +31,6 @@ type storeServiceImpl struct {
 	ingestwg         *sync.WaitGroup
 	pipe             *os.File
 	status           bool
-	test             bool
 	secret           *memguard.LockedBuffer
 	ring             kring.Ring
 	forwarders       map[conf.DestinationType]store.Forwarder
@@ -49,6 +48,8 @@ func NewStoreService(confined bool, l log15.Logger, ring kring.Ring, pipe *os.Fi
 		l.Crit("The Store was not given a message pipe")
 		return nil
 	}
+	store.InitRegistry()
+	dests.InitRegistry()
 	impl := &storeServiceImpl{
 		ingestwg: &sync.WaitGroup{},
 		mu:       &sync.Mutex{},
@@ -68,7 +69,7 @@ func NewStoreService(confined bool, l log15.Logger, ring kring.Ring, pipe *os.Fi
 	return impl
 }
 
-func (s *storeServiceImpl) SetConfAndRestart(c conf.BaseConfig, test bool) ([]model.ListenerInfo, error) {
+func (s *storeServiceImpl) SetConfAndRestart(c conf.BaseConfig) ([]model.ListenerInfo, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.doStop(nil)
@@ -92,7 +93,7 @@ func (s *storeServiceImpl) FatalError() chan struct{} {
 	return s.store.Errors()
 }
 
-func (s *storeServiceImpl) Start(test bool) ([]model.ListenerInfo, error) {
+func (s *storeServiceImpl) Start() ([]model.ListenerInfo, error) {
 	// unused
 	return s.doStart(s.mu)
 }

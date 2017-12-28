@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/inconshreveable/log15"
-	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
@@ -43,13 +42,17 @@ const (
 	chunkedDataLen   = gelf.ChunkSize - chunkedHeaderLen
 )
 
+func initGraylogRegistry() {
+	base.Once.Do(func() {
+		base.InitRegistry()
+	})
+}
+
 type GraylogSvcImpl struct {
 	base.BaseService
 	Configs        []conf.GraylogSourceConfig
 	status         GraylogStatus
-	stasher        *base.Reporter
-	metrics        *graylogMetrics
-	registry       *prometheus.Registry
+	stasher        base.Stasher
 	wg             sync.WaitGroup
 	fatalErrorChan chan struct{}
 	fatalOnce      *sync.Once
@@ -57,33 +60,14 @@ type GraylogSvcImpl struct {
 	readersMu      sync.Mutex
 }
 
-type graylogMetrics struct {
-	IncomingMsgsCounter *prometheus.CounterVec
-	//ParsingErrorCounter *prometheus.CounterVec
-}
-
-func newGrayMetrics() *graylogMetrics {
-	m := &graylogMetrics{}
-	m.IncomingMsgsCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "skw_incoming_messages_total",
-			Help: "total number of messages that were received",
-		},
-		[]string{"protocol", "client", "port", "path"},
-	)
-	return m
-}
-
-func NewGraylogService(stasher *base.Reporter, b binder.Client, l log15.Logger) *GraylogSvcImpl {
+func NewGraylogService(stasher base.Stasher, b binder.Client, l log15.Logger) *GraylogSvcImpl {
+	initGraylogRegistry()
 	s := GraylogSvcImpl{
-		status:   GraylogStopped,
-		metrics:  newGrayMetrics(),
-		registry: prometheus.NewRegistry(),
-		stasher:  stasher,
-		Configs:  []conf.GraylogSourceConfig{},
+		status:  GraylogStopped,
+		stasher: stasher,
+		Configs: []conf.GraylogSourceConfig{},
 	}
 	s.BaseService.Init()
-	s.registry.MustRegister(s.metrics.IncomingMsgsCounter)
 	s.BaseService.Logger = l.New("class", "GraylogService")
 	s.BaseService.Binder = b
 	return &s
@@ -94,10 +78,10 @@ func (s *GraylogSvcImpl) SetConf(sc []conf.GraylogSourceConfig) {
 }
 
 func (s *GraylogSvcImpl) Gather() ([]*dto.MetricFamily, error) {
-	return s.registry.Gather()
+	return base.Registry.Gather()
 }
 
-func (s *GraylogSvcImpl) Start(test bool) (infos []model.ListenerInfo, err error) {
+func (s *GraylogSvcImpl) Start() (infos []model.ListenerInfo, err error) {
 	s.LockStatus()
 	defer s.UnlockStatus()
 	if s.status != GraylogStopped {
@@ -209,6 +193,8 @@ func (s *GraylogSvcImpl) handleConnection(conn net.PacketConn, config conf.Grayl
 	var full *model.FullMessage
 	var n int
 	var addr net.Addr
+	var client string
+
 	chunks := map[[8]byte](map[uint8]([]byte)){}
 	chunkStartTime := map[[8]byte]time.Time{}
 	gen := utils.NewGenerator()
@@ -283,20 +269,24 @@ func (s *GraylogSvcImpl) handleConnection(conn net.PacketConn, config conf.Grayl
 			full, err = fullMsg(cBuf[:n])
 		}
 
+		client = "localhost"
+		if addr != nil {
+			client = strings.Split(addr.String(), ":")[0]
+		}
+
 		if err != nil {
+			base.ParsingErrorCounter.WithLabelValues("graylog", client, "graylog").Inc()
 			logger.Warn("Error decoding full GELF message", "error", err)
 			continue
 		}
-		if addr == nil {
-			full.Parsed.Client = "localhost"
-		} else {
-			full.Parsed.Client = strings.Split(addr.String(), ":")[0]
-		}
+
 		full.Uid = gen.Uid()
 		full.ConfId = config.ConfID
 		full.Parsed.LocalPort = localPort
 		full.Parsed.UnixSocketPath = path
+		full.Parsed.Client = client
 		s.stasher.Stash(*full)
+		base.IncomingMsgsCounter.WithLabelValues("graylog", client, localPortS, path).Inc()
 	}
 }
 

@@ -21,47 +21,51 @@ var SYSLOG = []byte("syslog")
 var INFOS = []byte("infos")
 var SP = []byte(" ")
 
-// Reporter is used by plugins to report new syslog messages to the controller.
-type Reporter struct {
+type Stasher interface {
+	Start()
+	SetSecret(secret *memguard.LockedBuffer)
+	Stop()
+	Stash(m model.FullMessage) (error, error)
+}
+
+type Reporter interface {
+	Stasher
+	Report(infos []model.ListenerInfo) error
+}
+
+// ReporterImpl is used by plugins to report new syslog messages to the controller.
+type ReporterImpl struct {
 	name         string
 	logger       log15.Logger
 	pipe         *os.File
 	bufferedPipe *bufio.Writer
 	queue        *queue.MessageQueue
 	secret       *memguard.LockedBuffer
-	stdoutWriter *utils.EncryptWriter
 	pipeWriter   *utils.EncryptWriter
 }
 
 // NewReporter creates a reporter.
-func NewReporter(name string, l log15.Logger, pipe *os.File) *Reporter {
-	rep := Reporter{
+func NewReporter(name string, l log15.Logger, pipe *os.File) *ReporterImpl {
+	rep := ReporterImpl{
 		name:   name,
 		logger: l,
 		pipe:   pipe,
 	}
-	if pipe != nil {
-		rep.bufferedPipe = bufio.NewWriter(pipe)
-	}
+	rep.bufferedPipe = bufio.NewWriter(pipe)
 	return &rep
 }
 
-func (s *Reporter) Start() {
-	if s.pipe != nil {
-		s.queue = queue.NewMessageQueue()
-		go s.pushqueue()
-	}
+func (s *ReporterImpl) Start() {
+	s.queue = queue.NewMessageQueue()
+	go s.pushqueue()
 }
 
-func (s *Reporter) SetSecret(secret *memguard.LockedBuffer) {
+func (s *ReporterImpl) SetSecret(secret *memguard.LockedBuffer) {
 	s.secret = secret
-	s.stdoutWriter = utils.NewEncryptWriter(os.Stdout, s.secret)
-	if s.pipe != nil {
-		s.pipeWriter = utils.NewEncryptWriter(s.bufferedPipe, s.secret)
-	}
+	s.pipeWriter = utils.NewEncryptWriter(s.bufferedPipe, s.secret)
 }
 
-func (s *Reporter) pushqueue() {
+func (s *ReporterImpl) pushqueue() {
 	defer func() {
 		_ = s.bufferedPipe.Flush()
 		_ = s.pipe.Close()
@@ -96,37 +100,18 @@ func (s *Reporter) pushqueue() {
 }
 
 // Stop stops the reporter.
-func (s *Reporter) Stop() {
-	if s.queue != nil {
-		s.queue.Dispose()
-	}
+func (s *ReporterImpl) Stop() {
+	s.queue.Dispose()
 }
 
 // Stash reports one syslog message to the controller.
-func (s *Reporter) Stash(m model.FullMessage) (fatal, nonfatal error) {
-	if s.queue == nil {
-		b, err := m.MarshalMsg(nil)
-		if err != nil {
-			// should not happen
-			s.logger.Warn("A syslog message could not be serialized", "type", s.name, "error", err)
-			return nil, err
-		}
-		stdoutLock.Lock()
-		err = s.stdoutWriter.WriteWithHeader(SYSLOG, b)
-		stdoutLock.Unlock()
-		if err != nil {
-			s.logger.Crit("Could not write message to upstream. There was message loss", "error", err, "type", s.name)
-			return err, nil
-		}
-		return nil, nil
-	}
-
+func (s *ReporterImpl) Stash(m model.FullMessage) (fatal, nonfatal error) {
 	fatal = s.queue.Put(m) // fatal is set when the queue has been disposed
 	return fatal, nil
 }
 
 // Report reports information about the actual listening ports to the controller.
-func (s *Reporter) Report(infos []model.ListenerInfo) error {
+func (s *ReporterImpl) Report(infos []model.ListenerInfo) error {
 	b, err := json.Marshal(infos)
 	if err != nil {
 		return err

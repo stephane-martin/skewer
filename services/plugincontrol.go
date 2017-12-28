@@ -524,7 +524,6 @@ func (s *PluginController) Start() (infos []model.ListenerInfo, err error) {
 }
 
 type PluginCreateOpts struct {
-	test         bool
 	dumpable     bool
 	storePath    string
 	confDir      string
@@ -537,12 +536,6 @@ type PluginCreateOpts struct {
 func DumpableOpt(dumpable bool) func(*PluginCreateOpts) {
 	return func(opts *PluginCreateOpts) {
 		opts.dumpable = dumpable
-	}
-}
-
-func TestOpt(test bool) func(*PluginCreateOpts) {
-	return func(opts *PluginCreateOpts) {
-		opts.test = test
 	}
 }
 
@@ -624,7 +617,6 @@ func (s *PluginController) Create(optsfuncs ...func(*PluginCreateOpts)) error {
 				namespaces.BinderHandle(BinderHdl(s.typ)),
 				namespaces.LoggerHandle(LoggerHdl(s.typ)),
 				namespaces.Pipe(pipew),
-				namespaces.Test(opts.test),
 			)
 			if err != nil {
 				_ = piper.Close()
@@ -651,7 +643,6 @@ func (s *PluginController) Create(optsfuncs ...func(*PluginCreateOpts)) error {
 				namespaces.BinderHandle(BinderHdl(s.typ)),
 				namespaces.LoggerHandle(LoggerHdl(s.typ)),
 				namespaces.Pipe(pipew),
-				namespaces.Test(opts.test),
 			)
 			if err != nil {
 				_ = piper.Close()
@@ -682,7 +673,6 @@ func (s *PluginController) Create(optsfuncs ...func(*PluginCreateOpts)) error {
 				namespaces.BinderHandle(BinderHdl(s.typ)),
 				namespaces.LoggerHandle(LoggerHdl(s.typ)),
 				namespaces.Pipe(piper),
-				namespaces.Test(opts.test),
 			)
 			if err != nil {
 				_ = piper.Close()
@@ -710,7 +700,6 @@ func (s *PluginController) Create(optsfuncs ...func(*PluginCreateOpts)) error {
 				namespaces.BinderHandle(BinderHdl(s.typ)),
 				namespaces.LoggerHandle(LoggerHdl(s.typ)),
 				namespaces.Pipe(piper),
-				namespaces.Test(opts.test),
 			)
 			if err != nil {
 				_ = piper.Close()
@@ -732,7 +721,6 @@ func (s *PluginController) Create(optsfuncs ...func(*PluginCreateOpts)) error {
 			s.ring,
 			namespaces.BinderHandle(BinderHdl(s.typ)),
 			namespaces.LoggerHandle(LoggerHdl(s.typ)),
-			namespaces.Test(opts.test),
 		)
 		if err != nil {
 			close(s.ShutdownChan)

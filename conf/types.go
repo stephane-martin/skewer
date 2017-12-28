@@ -35,7 +35,6 @@ type BaseConfig struct {
 
 // MainConfig lists general/global parameters.
 type MainConfig struct {
-	DirectRelp          bool   `mapstructure:"direct_relp" toml:"direct_relp" json:"direct_relp"`
 	InputQueueSize      uint64 `mapstructure:"input_queue_size" toml:"input_queue_size" json:"input_queue_size"`
 	MaxInputMessageSize int    `mapstructure:"max_input_message_size" toml:"max_input_message_size" json:"max_input_message_size"`
 	Destination         string `mapstructure:"destination" toml:"destination" json:"destination"`

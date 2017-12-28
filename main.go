@@ -616,7 +616,6 @@ func main() {
 		}
 		err = services.Launch(
 			services.Names2Types[name],
-			os.Getenv("SKEWER_TEST") == "TRUE",
 			os.Getenv("SKEWER_CONFINED") == "TRUE",
 			ring,
 			binderClient,

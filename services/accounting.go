@@ -11,7 +11,6 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/inconshreveable/log15"
-	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/accounting"
 	"github.com/stephane-martin/skewer/conf"
@@ -20,28 +19,16 @@ import (
 	"github.com/stephane-martin/skewer/utils"
 )
 
-type accountingMetrics struct {
-	IncomingMsgsCounter *prometheus.CounterVec
-}
-
-func NewAccountingMetrics() *accountingMetrics {
-	m := &accountingMetrics{}
-	m.IncomingMsgsCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "skw_incoming_messages_total",
-			Help: "total number of messages that were received",
-		},
-		[]string{"protocol", "client", "port", "path"},
-	)
-	return m
+func initAccountingRegistry() {
+	base.Once.Do(func() {
+		base.InitRegistry()
+	})
 }
 
 type AccountingService struct {
-	stasher        *base.Reporter
+	stasher        base.Stasher
 	logger         log15.Logger
 	wgroup         *sync.WaitGroup
-	metrics        *accountingMetrics
-	registry       *prometheus.Registry
 	Conf           conf.AccountingConfig
 	stopchan       chan struct{}
 	fatalErrorChan chan struct{}
@@ -49,21 +36,19 @@ type AccountingService struct {
 	confined       bool
 }
 
-func NewAccountingService(stasher *base.Reporter, confined bool, l log15.Logger) (*AccountingService, error) {
+func NewAccountingService(stasher base.Stasher, confined bool, l log15.Logger) (*AccountingService, error) {
+	initAccountingRegistry()
 	s := AccountingService{
 		stasher:  stasher,
 		logger:   l.New("class", "accounting"),
 		wgroup:   &sync.WaitGroup{},
-		metrics:  NewAccountingMetrics(),
-		registry: prometheus.NewRegistry(),
 		confined: confined,
 	}
-	s.registry.MustRegister(s.metrics.IncomingMsgsCounter)
 	return &s, nil
 }
 
 func (s *AccountingService) Gather() ([]*dto.MetricFamily, error) {
-	return s.registry.Gather()
+	return base.Registry.Gather()
 }
 
 func readFileUntilEnd(f *os.File, size int) (err error) {
@@ -144,7 +129,7 @@ func (s *AccountingService) readFile(f *os.File, tick int64, hostname string, si
 				s.logger.Error("Fatal error stashing accounting message", "error", f)
 				return f
 			} else {
-				s.metrics.IncomingMsgsCounter.WithLabelValues("accounting", hostname, "", "").Inc()
+				base.IncomingMsgsCounter.WithLabelValues("accounting", hostname, "", "").Inc()
 			}
 		}
 	}
@@ -234,7 +219,7 @@ func (s *AccountingService) dofatal() {
 	s.fatalOnce.Do(func() { close(s.fatalErrorChan) })
 }
 
-func (s *AccountingService) Start(test bool) (infos []model.ListenerInfo, err error) {
+func (s *AccountingService) Start() (infos []model.ListenerInfo, err error) {
 	infos = []model.ListenerInfo{}
 	s.stopchan = make(chan struct{})
 	s.fatalErrorChan = make(chan struct{})
