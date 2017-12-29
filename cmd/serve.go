@@ -133,7 +133,7 @@ func newServeChild(ring kring.Ring) (*serveChild, error) {
 	if err != nil {
 		return nil, err
 	}
-	childLoggerHdl := services.HandlesMap[services.ServiceHandle{"child", services.LOGGER}]
+	childLoggerHdl := services.HandlesMap[services.ServiceHandle{"child", services.Logger}]
 	conn, err := net.FileConn(os.NewFile(childLoggerHdl, "logger"))
 	if err != nil {
 		return nil, err
@@ -350,6 +350,8 @@ func (ch *serveChild) StartController(typ services.Types) error {
 	switch typ {
 	case services.RELP:
 		return ch.StartRelp()
+	case services.DirectRELP:
+		return ch.StartDirectRelp()
 	case services.TCP:
 		return ch.StartTcp()
 	case services.UDP:
@@ -465,6 +467,33 @@ func (ch *serveChild) StartRelp() error {
 		return fmt.Errorf("error starting RELP plugin: %s", err)
 	}
 	ch.logger.Debug("RELP plugin has been started")
+	return nil
+}
+
+// StartDirectRelp starts the DirectRelp process.
+func (ch *serveChild) StartDirectRelp() error {
+	if len(ch.conf.DirectRelpSource) == 0 {
+		return nil
+	}
+	certfiles := ch.conf.GetCertificateFiles()["directrelpsource"]
+	certpaths := ch.conf.GetCertificatePaths()["directrelpsource"]
+
+	ctl := ch.controllers[services.DirectRELP]
+	err := ctl.Create(
+		services.DumpableOpt(DumpableFlag),
+		services.CertFilesOpt(certfiles),
+		services.CertPathsOpt(certpaths),
+	)
+
+	if err != nil {
+		return fmt.Errorf("error creating DirectRELP plugin: %s", err)
+	}
+	ctl.SetConf(*ch.conf)
+	_, err = ctl.Start()
+	if err != nil {
+		return fmt.Errorf("error starting DirectRELP plugin: %s", err)
+	}
+	ch.logger.Debug("DirectRELP plugin has been started")
 	return nil
 }
 

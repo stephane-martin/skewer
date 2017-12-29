@@ -217,7 +217,7 @@ func execServeParent() (err error) {
 	loggerSockets := map[string]spair{}
 
 	for _, h := range services.Handles {
-		if h.Type == services.BINDER {
+		if h.Type == services.Binder {
 			binderSockets[h.Service], err = getSocketPair(syscall.SOCK_STREAM)
 		} else {
 			loggerSockets[h.Service], err = getSocketPair(syscall.SOCK_DGRAM)
@@ -258,7 +258,7 @@ func execServeParent() (err error) {
 
 	extraFiles := []*os.File{}
 	for _, h := range services.Handles {
-		if h.Type == services.BINDER {
+		if h.Type == services.Binder {
 			extraFiles = append(extraFiles, os.NewFile(binderSockets[h.Service].child, h.Service))
 		} else {
 			extraFiles = append(extraFiles, os.NewFile(loggerSockets[h.Service].child, h.Service))
@@ -290,7 +290,7 @@ func execServeParent() (err error) {
 	}
 
 	for _, h := range services.Handles {
-		if h.Type == services.BINDER {
+		if h.Type == services.Binder {
 			_ = syscall.Close(int(binderSockets[h.Service].child))
 		} else {
 			_ = syscall.Close(int(loggerSockets[h.Service].child))
@@ -537,6 +537,7 @@ func main() {
 		services.Types2Names[services.UDP],
 		services.Types2Names[services.Graylog],
 		services.Types2Names[services.RELP],
+		services.Types2Names[services.DirectRELP],
 		services.Types2Names[services.Journal],
 		services.Types2Names[services.Store],
 		services.Types2Names[services.Accounting],

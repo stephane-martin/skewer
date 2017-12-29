@@ -35,7 +35,7 @@ func Launch(typ Types, confined bool, ring kring.Ring, binderClt *binder.BinderC
 	var reporter base.Reporter
 	if typ != Store && typ != Configuration {
 		if pipe == nil {
-			return fmt.Errorf("Plugin '%s' has a nil pipe")
+			return fmt.Errorf("Plugin '%s' has a nil pipe", name)
 		}
 		reporter = base.NewReporter(name, l, pipe)
 		defer reporter.Stop() // will close the pipe

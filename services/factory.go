@@ -20,6 +20,7 @@ const (
 	TCP Types = iota
 	UDP
 	RELP
+	DirectRELP
 	Journal
 	Store
 	Accounting
@@ -32,6 +33,7 @@ var Names2Types map[string]Types = map[string]Types{
 	"skewer-tcp":         TCP,
 	"skewer-udp":         UDP,
 	"skewer-relp":        RELP,
+	"skewer-directrelp":  DirectRELP,
 	"skewer-journal":     Journal,
 	"skewer-store":       Store,
 	"skewer-accounting":  Accounting,
@@ -49,8 +51,8 @@ var HandlesMap map[ServiceHandle]uintptr
 type HandleType uint8
 
 const (
-	BINDER HandleType = iota
-	LOGGER
+	Binder HandleType = iota
+	Logger
 )
 
 type ServiceHandle struct {
@@ -67,21 +69,23 @@ func init() {
 	}
 
 	Handles = []ServiceHandle{
-		{"child", BINDER},
-		{Types2Names[TCP], BINDER},
-		{Types2Names[UDP], BINDER},
-		{Types2Names[RELP], BINDER},
-		{Types2Names[Graylog], BINDER},
-		{"child", LOGGER},
-		{Types2Names[TCP], LOGGER},
-		{Types2Names[UDP], LOGGER},
-		{Types2Names[RELP], LOGGER},
-		{Types2Names[Journal], LOGGER},
-		{Types2Names[Configuration], LOGGER},
-		{Types2Names[Store], LOGGER},
-		{Types2Names[Accounting], LOGGER},
-		{Types2Names[KafkaSource], LOGGER},
-		{Types2Names[Graylog], LOGGER},
+		{"child", Binder},
+		{Types2Names[TCP], Binder},
+		{Types2Names[UDP], Binder},
+		{Types2Names[RELP], Binder},
+		{Types2Names[DirectRELP], Binder},
+		{Types2Names[Graylog], Binder},
+		{"child", Logger},
+		{Types2Names[TCP], Logger},
+		{Types2Names[UDP], Logger},
+		{Types2Names[RELP], Logger},
+		{Types2Names[DirectRELP], Logger},
+		{Types2Names[Journal], Logger},
+		{Types2Names[Configuration], Logger},
+		{Types2Names[Store], Logger},
+		{Types2Names[Accounting], Logger},
+		{Types2Names[KafkaSource], Logger},
+		{Types2Names[Graylog], Logger},
 	}
 
 	HandlesMap = map[ServiceHandle]uintptr{}
@@ -91,11 +95,11 @@ func init() {
 }
 
 func LoggerHdl(typ Types) uintptr {
-	return HandlesMap[ServiceHandle{Types2Names[typ], LOGGER}]
+	return HandlesMap[ServiceHandle{Types2Names[typ], Logger}]
 }
 
 func BinderHdl(typ Types) uintptr {
-	return HandlesMap[ServiceHandle{Types2Names[typ], BINDER}]
+	return HandlesMap[ServiceHandle{Types2Names[typ], Binder}]
 }
 
 func ConfigureAndStartService(s Provider, c conf.BaseConfig) ([]model.ListenerInfo, error) {
@@ -109,6 +113,9 @@ func ConfigureAndStartService(s Provider, c conf.BaseConfig) ([]model.ListenerIn
 		return s.Start()
 	case *network.RelpService:
 		s.SetConf(c.RelpSource, c.Parsers, c.Main.InputQueueSize)
+		return s.Start()
+	case *network.DirectRelpService:
+		s.SetConf(c.DirectRelpSource, c.Parsers, c.KafkaDest, c.Main.InputQueueSize)
 		return s.Start()
 	case *network.GraylogSvcImpl:
 		s.SetConf(c.GraylogSource)
@@ -138,24 +145,24 @@ func ProviderFactory(t Types, confined bool, r kring.Ring, reporter base.Reporte
 		return network.NewUdpService(reporter, b, l)
 	case RELP:
 		return network.NewRelpService(reporter, confined, b, l)
+	case DirectRELP:
+		return network.NewDirectRelpService(reporter, confined, b, l)
 	case Graylog:
 		return network.NewGraylogService(reporter, b, l)
 	case Journal:
 		svc, err := linux.NewJournalService(reporter, l)
 		if err == nil {
 			return svc
-		} else {
-			l.Error("Error creating the journal service", "error", err)
-			return nil
 		}
+		l.Error("Error creating the journal service", "error", err)
+		return nil
 	case Accounting:
 		svc, err := NewAccountingService(reporter, confined, l)
 		if err == nil {
 			return svc
-		} else {
-			l.Error("Error creating the accounting service", "error", err)
-			return nil
 		}
+		l.Error("Error creating the accounting service", "error", err)
+		return nil
 	case Store:
 		return NewStoreService(confined, l, r, pipe)
 	case KafkaSource:

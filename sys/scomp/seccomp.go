@@ -502,12 +502,13 @@ func SetupSeccomp(name string) (err error) {
 
 	case services.Types2Names[services.TCP],
 		services.Types2Names[services.UDP],
+		services.Types2Names[services.RELP],
 		services.Types2Names[services.Graylog],
 		services.Types2Names[services.Journal]:
 
 		_, err = deriveComposeA(buildSimpleFilter, applyFilter)(baseAllowed, nil)
 
-	case services.Types2Names[services.RELP],
+	case services.Types2Names[services.DirectRELP],
 		services.Types2Names[services.Store],
 		services.Types2Names[services.KafkaSource],
 		services.Types2Names[services.Configuration]:

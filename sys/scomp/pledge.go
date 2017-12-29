@@ -16,6 +16,7 @@ func SetupPledge(name string) (err error) {
 		services.Types2Names[services.UDP],
 		services.Types2Names[services.Graylog],
 		services.Types2Names[services.RELP],
+		services.Types2Names[services.DirectRELP],
 		services.Types2Names[services.Configuration],
 		services.Types2Names[services.Accounting],
 		services.Types2Names[services.KafkaSource]:
