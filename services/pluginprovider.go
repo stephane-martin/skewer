@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/inconshreveable/log15"
 	dto "github.com/prometheus/client_model/go"
@@ -15,6 +16,13 @@ import (
 	"github.com/stephane-martin/skewer/sys/kring"
 	"github.com/stephane-martin/skewer/utils"
 )
+
+var stdoutMu sync.Mutex
+var stdoutWriter *utils.EncryptWriter
+
+func init() {
+	stdoutWriter = utils.NewEncryptWriter(os.Stdout, nil)
+}
 
 func Wout(header []byte, msg []byte) (err error) {
 	stdoutMu.Lock()

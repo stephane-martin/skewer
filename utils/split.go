@@ -140,36 +140,7 @@ func (s *EncryptWriter) WriteWithHeader(header []byte, message []byte) (err erro
 	return err
 }
 
-/*
-// W encrypts the provided message and writes it to some Writer.
-func W(dest io.Writer, header []byte, message []byte, secret *memguard.LockedBuffer) (err error) {
-	var enc []byte
-	if secret == nil {
-		enc = message
-	} else {
-		enc, err = sbox.Encrypt(message, secret)
-		if err != nil {
-			return err
-		}
-	}
-	if len(header) == 0 {
-		return ChainWrites(
-			dest,
-			[]byte(fmt.Sprintf("%010d ", len(enc))),
-			enc,
-		)
-	}
-	return ChainWrites(
-		dest,
-		[]byte(fmt.Sprintf("%010d ", len(header)+len(enc)+1)),
-		header,
-		SP,
-		enc,
-	)
-}
-*/
-
-// MakeDecryptSplit returns a aplit function that extracts and decrypts messages.
+// MakeDecryptSplit returns a split function that extracts and decrypts messages.
 func MakeDecryptSplit(secret *memguard.LockedBuffer) bufio.SplitFunc {
 	spl := func(data []byte, atEOF bool) (int, []byte, error) {
 		adv, tok, err := PluginSplit(data, atEOF)

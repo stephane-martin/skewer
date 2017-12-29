@@ -220,10 +220,14 @@ func (ch *serveChild) ShutdownControllers() {
 }
 
 func (ch *serveChild) setupConfiguration() error {
-	ch.confService = services.NewConfigurationService(ch.signPrivKey, services.LoggerHdl(services.Configuration), ch.logger)
+	confService, err := services.NewConfigurationService(ch.ring, ch.signPrivKey, services.LoggerHdl(services.Configuration), ch.logger)
+	if err != nil {
+		return err
+	}
+	ch.confService = confService
 	ch.confService.SetConfDir(configDirName)
 	ch.confService.SetConsulParams(ch.consulParams)
-	err := ch.confService.Start(ch.ring)
+	err = ch.confService.Start(ch.ring)
 	if err != nil {
 		return fmt.Errorf("error starting the configuration service: %s", err)
 	}

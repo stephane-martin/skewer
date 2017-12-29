@@ -24,17 +24,13 @@ import (
 	"github.com/stephane-martin/skewer/utils"
 )
 
-var stdoutMu sync.Mutex
-var stdoutWriter *utils.EncryptWriter
-
-func init() {
-	stdoutWriter = utils.NewEncryptWriter(os.Stdout, nil)
-}
+var confStdoutMu sync.Mutex
+var confStdoutWriter *utils.EncryptWriter
 
 func WConf(header []byte, message []byte) (err error) {
-	stdoutMu.Lock()
-	err = stdoutWriter.WriteWithHeader(header, message)
-	stdoutMu.Unlock()
+	confStdoutMu.Lock()
+	err = confStdoutWriter.WriteWithHeader(header, message)
+	confStdoutMu.Unlock()
 	return err
 }
 
@@ -47,27 +43,33 @@ type ConfigurationService struct {
 	confdir      string
 	loggerHandle uintptr
 	signKey      *memguard.LockedBuffer
+	boxsec       *memguard.LockedBuffer
 	stdinWriter  *utils.SigWriter
 }
 
-func NewConfigurationService(signKey *memguard.LockedBuffer, childLoggerHandle uintptr, l log15.Logger) *ConfigurationService {
+func NewConfigurationService(ring kring.Ring, signKey *memguard.LockedBuffer, childLoggerHandle uintptr, l log15.Logger) (*ConfigurationService, error) {
 	c := ConfigurationService{
 		loggerHandle: childLoggerHandle,
 		logger:       l,
 		signKey:      signKey,
 		stdinMu:      &sync.Mutex{},
 	}
-	return &c
+	boxsec, err := ring.GetBoxSecret()
+	if err != nil {
+		return nil, err
+	}
+	c.boxsec = boxsec
+	return &c, nil
 }
 
 func (c *ConfigurationService) W(header []byte, message []byte) (err error) {
 	c.stdinMu.Lock()
+	defer c.stdinMu.Unlock()
 	if c.stdinWriter != nil {
 		err = c.stdinWriter.WriteWithHeader(header, message)
 	} else {
 		err = fmt.Errorf("stdin is nil")
 	}
-	c.stdinMu.Unlock()
 	return err
 }
 
@@ -197,7 +199,7 @@ func (c *ConfigurationService) Start(r kring.Ring) error {
 
 		var command string
 		scanner := bufio.NewScanner(cmd.Stdout)
-		scanner.Split(utils.PluginSplit)
+		scanner.Split(utils.MakeDecryptSplit(c.boxsec))
 
 		for scanner.Scan() {
 			parts := strings.SplitN(scanner.Text(), " ", 2)
@@ -272,24 +274,30 @@ func (c *ConfigurationService) Start(r kring.Ring) error {
 }
 
 func writeNewConf(ctx context.Context, updated chan *conf.BaseConfig, logger log15.Logger) {
+	done := ctx.Done()
+Loop:
 	for {
 		select {
-		case <-ctx.Done():
+		case <-done:
 			return
 		case newconf, more := <-updated:
-			if more {
-				confb, err := json.Marshal(newconf)
-				if err == nil {
-					// TODO: sign configuration
-					err = WConf([]byte("newconf"), confb)
-					if err != nil {
-						logger.Warn("Error sending new configuration", "error", err)
-					}
-				} else {
-					logger.Warn("Error serializing new configuration", "error", err)
-				}
-			} else {
+			if !more {
 				return
+			}
+			confb, err := json.Marshal(newconf)
+			if err != nil {
+				logger.Warn("Error serializing new configuration", "error", err)
+				continue Loop
+			}
+			select {
+			case <-done:
+				// be extra sure not to use boxsec after we have been canceled
+				return
+			default:
+				err = WConf([]byte("newconf"), confb)
+				if err != nil {
+					logger.Warn("Error sending new configuration", "error", err)
+				}
 			}
 		}
 	}
@@ -332,6 +340,11 @@ func LaunchConfProvider(r kring.Ring, confined bool, logger log15.Logger) error 
 	if err != nil {
 		return err
 	}
+	boxsec, err := r.GetBoxSecret()
+	if err != nil {
+		return err
+	}
+	confStdoutWriter = utils.NewEncryptWriter(os.Stdout, boxsec)
 	var confdir string
 	var params consul.ConnParams
 
