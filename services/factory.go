@@ -74,6 +74,7 @@ func init() {
 		{Types2Names[UDP], Binder},
 		{Types2Names[RELP], Binder},
 		{Types2Names[DirectRELP], Binder},
+		{Types2Names[Store], Binder},
 		{Types2Names[Graylog], Binder},
 		{"child", Logger},
 		{Types2Names[TCP], Logger},
@@ -137,7 +138,7 @@ func ConfigureAndStartService(s Provider, c conf.BaseConfig) ([]model.ListenerIn
 
 }
 
-func ProviderFactory(t Types, confined bool, r kring.Ring, reporter base.Reporter, b *binder.BinderClientImpl, l log15.Logger, pipe *os.File) Provider {
+func ProviderFactory(t Types, confined bool, prof bool, r kring.Ring, reporter base.Reporter, b *binder.BinderClientImpl, l log15.Logger, pipe *os.File) Provider {
 	switch t {
 	case TCP:
 		return network.NewTcpService(reporter, confined, b, l)
@@ -164,7 +165,7 @@ func ProviderFactory(t Types, confined bool, r kring.Ring, reporter base.Reporte
 		l.Error("Error creating the accounting service", "error", err)
 		return nil
 	case Store:
-		return NewStoreService(confined, l, r, pipe)
+		return NewStoreService(confined, prof, b, l, r, pipe)
 	case KafkaSource:
 		return network.NewKafkaService(reporter, confined, l)
 	default:

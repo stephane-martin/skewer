@@ -16,8 +16,10 @@ import (
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/store"
 	"github.com/stephane-martin/skewer/store/dests"
+	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/sys/kring"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/httpserver"
 )
 
 type storeServiceImpl struct {
@@ -43,7 +45,7 @@ type storeServiceImpl struct {
 // NewStoreService creates a StoreService.
 // The StoreService is responsible to manage the lifecycle of the Store and the
 // Kafka Forwarder that is fed by the Store.
-func NewStoreService(confined bool, l log15.Logger, ring kring.Ring, pipe *os.File) Provider {
+func NewStoreService(confined bool, prof bool, b binder.Client, l log15.Logger, ring kring.Ring, pipe *os.File) Provider {
 	if pipe == nil {
 		l.Crit("The Store was not given a message pipe")
 		return nil
@@ -66,6 +68,10 @@ func NewStoreService(confined bool, l log15.Logger, ring kring.Ring, pipe *os.Fi
 		impl.fmu[desttype] = &sync.Mutex{}
 	}
 	impl.shutdownCtx, impl.shutdownStore = context.WithCancel(context.Background())
+
+	if prof {
+		httpserver.ProfileServer(b)
+	}
 	return impl
 }
 

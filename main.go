@@ -569,10 +569,12 @@ func main() {
 			loggerHdl = handle
 			handle++
 		}
+
 		if os.Getenv("SKEWER_HAS_PIPE") == "TRUE" {
 			pipeHdl = handle
 			handle++
 		}
+
 		ringSecretHdl = handle
 		rPipe := os.NewFile(ringSecretHdl, "bsdpipe")
 		buf := make([]byte, 32)
@@ -618,6 +620,7 @@ func main() {
 		err = services.Launch(
 			services.Names2Types[name],
 			os.Getenv("SKEWER_CONFINED") == "TRUE",
+			os.Getenv("SKEWER_PROFILE") == "TRUE",
 			ring,
 			binderClient,
 			logger,

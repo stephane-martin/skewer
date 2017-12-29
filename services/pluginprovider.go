@@ -23,7 +23,7 @@ func Wout(header []byte, msg []byte) (err error) {
 	return err
 }
 
-func Launch(typ Types, confined bool, ring kring.Ring, binderClt *binder.BinderClientImpl, l log15.Logger, pipe *os.File) error {
+func Launch(typ Types, confined bool, profile bool, ring kring.Ring, binderClt *binder.BinderClientImpl, l log15.Logger, pipe *os.File) error {
 	if ring == nil {
 		return fmt.Errorf("No ring")
 	}
@@ -41,7 +41,7 @@ func Launch(typ Types, confined bool, ring kring.Ring, binderClt *binder.BinderC
 		defer reporter.Stop() // will close the pipe
 	}
 
-	svc := ProviderFactory(typ, confined, ring, reporter, binderClt, l, pipe)
+	svc := ProviderFactory(typ, confined, profile, ring, reporter, binderClt, l, pipe)
 	if svc == nil {
 		err := fmt.Errorf("The Service Factory returned 'nil' for plugin '%s'", name)
 		_ = Wout(STARTERROR, []byte(err.Error()))

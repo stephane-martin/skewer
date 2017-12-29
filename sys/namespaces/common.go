@@ -99,6 +99,7 @@ type CmdOpts struct {
 	loggerHdl   uintptr
 	binderHdl   uintptr
 	messagePipe *os.File
+	profile     bool
 }
 
 func BinderHandle(hdl uintptr) func(*CmdOpts) {
@@ -116,6 +117,12 @@ func LoggerHandle(hdl uintptr) func(*CmdOpts) {
 func Pipe(pipe *os.File) func(*CmdOpts) {
 	return func(opts *CmdOpts) {
 		opts.messagePipe = pipe
+	}
+}
+
+func Profile(profile bool) func(*CmdOpts) {
+	return func(opts *CmdOpts) {
+		opts.profile = profile
 	}
 }
 
@@ -145,6 +152,9 @@ func SetupCmd(name string, ring kring.Ring, funcopts ...func(*CmdOpts)) (cmd *Pl
 	if opts.messagePipe != nil {
 		files = append(files, opts.messagePipe)
 		envs = append(envs, "SKEWER_HAS_PIPE=TRUE")
+	}
+	if opts.profile {
+		envs = append(envs, "SKEWER_PROFILE=TRUE")
 	}
 	rPipe, wPipe, err := os.Pipe()
 	if err != nil {

@@ -525,12 +525,19 @@ func (s *PluginController) Start() (infos []model.ListenerInfo, err error) {
 
 type PluginCreateOpts struct {
 	dumpable     bool
+	profile      bool
 	storePath    string
 	confDir      string
 	acctPath     string
 	fileDestTmpl string
 	certFiles    []string
 	certPaths    []string
+}
+
+func ProfileOpt(profile bool) func(*PluginCreateOpts) {
+	return func(opts *PluginCreateOpts) {
+		opts.profile = profile
+	}
 }
 
 func DumpableOpt(dumpable bool) func(*PluginCreateOpts) {
@@ -673,6 +680,7 @@ func (s *PluginController) Create(optsfuncs ...func(*PluginCreateOpts)) error {
 				namespaces.BinderHandle(BinderHdl(s.typ)),
 				namespaces.LoggerHandle(LoggerHdl(s.typ)),
 				namespaces.Pipe(piper),
+				namespaces.Profile(opts.profile),
 			)
 			if err != nil {
 				_ = piper.Close()
@@ -700,6 +708,7 @@ func (s *PluginController) Create(optsfuncs ...func(*PluginCreateOpts)) error {
 				namespaces.BinderHandle(BinderHdl(s.typ)),
 				namespaces.LoggerHandle(LoggerHdl(s.typ)),
 				namespaces.Pipe(piper),
+				namespaces.Profile(opts.profile),
 			)
 			if err != nil {
 				_ = piper.Close()

@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"net/http"
-	"net/http/pprof"
 	"os"
 	"os/signal"
 	"strings"
@@ -48,7 +46,6 @@ var UidFlag string
 var GidFlag string
 var DumpableFlag bool
 var profile bool
-var profilePort int
 
 func init() {
 	RootCmd.AddCommand(serveCobraCmd)
@@ -63,7 +60,6 @@ func init() {
 	serveCobraCmd.Flags().StringVar(&GidFlag, "gid", "", "Switch to this group ID (when launched as root)")
 	serveCobraCmd.Flags().BoolVar(&DumpableFlag, "dumpable", false, "if set, the skewer process will be traceable/dumpable")
 	serveCobraCmd.Flags().BoolVar(&profile, "prof", false, "if set, profile memory")
-	serveCobraCmd.Flags().IntVar(&profilePort, "profport", 6060, "profile HTTP port")
 }
 
 // ExecuteChild sets up the environment for the serve command and starts it.
@@ -283,6 +279,7 @@ func (ch *serveChild) setupStore() (st *services.StorePlugin, err error) {
 		services.FileDestTmplOpt(tmpl),
 		services.CertFilesOpt(certfiles),
 		services.CertPathsOpt(certpaths),
+		services.ProfileOpt(profile),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("can't create the message Store: %s", err)
@@ -668,23 +665,6 @@ func (ch *serveChild) Serve() error {
 	err := ch.StartControllers()
 	if err != nil {
 		return fmt.Errorf("error starting a controller: %s", err)
-	}
-
-	// TODO: profile the store process instead
-	if profile {
-		go func() {
-			mux := http.NewServeMux()
-			mux.Handle("/pprof/heap", pprof.Handler("heap"))
-			mux.Handle("/pprof/profile", http.HandlerFunc(pprof.Profile))
-			server := &http.Server{
-				Addr:    fmt.Sprintf("127.0.0.1:%d", profilePort),
-				Handler: mux,
-			}
-			err = server.ListenAndServe()
-			if err != nil {
-				ch.logger.Warn("Error starting the pprof HTTP server", "error", err)
-			}
-		}()
 	}
 
 	ch.logger.Debug("Main loop is starting")
