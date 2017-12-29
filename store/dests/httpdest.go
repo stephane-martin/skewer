@@ -22,7 +22,7 @@ import (
 	"github.com/stephane-martin/skewer/utils/queue/message"
 )
 
-type httpDestination struct {
+type HTTPDestination struct {
 	logger      log15.Logger
 	fatal       chan struct{}
 	ack         storeCallback
@@ -41,14 +41,14 @@ type httpDestination struct {
 	wg          sync.WaitGroup
 }
 
-func NewHTTPDestination(ctx context.Context, cfnd bool, bc conf.BaseConfig, ack, nack, permerr storeCallback, l log15.Logger) (dest Destination, err error) {
+func NewHTTPDestination(ctx context.Context, cfnd bool, bc conf.BaseConfig, ack, nack, pe storeCallback, l log15.Logger) (d *HTTPDestination, err error) {
 	conf := bc.HTTPDest
-	d := httpDestination{
+	d = &HTTPDestination{
 		logger:    l,
 		fatal:     make(chan struct{}),
 		ack:       ack,
 		nack:      nack,
-		permerr:   permerr,
+		permerr:   pe,
 		useragent: conf.UserAgent,
 		method:    conf.Method,
 	}
@@ -157,24 +157,24 @@ func NewHTTPDestination(ctx context.Context, cfnd bool, bc conf.BaseConfig, ack,
 		go d.dosend(ctx)
 	}
 
-	return &d, nil
+	return d, nil
 }
 
-func (d *httpDestination) dofatal() {
+func (d *HTTPDestination) dofatal() {
 	d.once.Do(func() { close(d.fatal) })
 }
 
-func (d *httpDestination) Close() error {
+func (d *HTTPDestination) Close() error {
 	d.sendQueue.Dispose()
 	d.wg.Wait()
 	return nil
 }
 
-func (d *httpDestination) Fatal() chan struct{} {
+func (d *HTTPDestination) Fatal() chan struct{} {
 	return d.fatal
 }
 
-func (d *httpDestination) dosend(ctx context.Context) {
+func (d *HTTPDestination) dosend(ctx context.Context) {
 	defer d.wg.Done()
 	for {
 		msg, err := d.sendQueue.Get()
@@ -260,7 +260,7 @@ func (d *httpDestination) dosend(ctx context.Context) {
 	}
 }
 
-func (d *httpDestination) Send(msg model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *HTTPDestination) Send(msg model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
 	err = d.sendQueue.Put(&msg)
 	if err != nil {
 		// the client send queue has been disposed

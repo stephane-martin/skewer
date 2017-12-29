@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -100,22 +102,6 @@ func (e *encoderFile) Enc(v interface{}, w io.Writer) error {
 		return nil
 	}
 	switch val := v.(type) {
-	case *FullMessage:
-		if len(val.Parsed.Fields.Hostname) == 0 {
-			val.Parsed.Fields.Hostname = "-"
-		}
-		if len(val.Parsed.Fields.Appname) == 0 {
-			val.Parsed.Fields.Appname = "-"
-		}
-		_, err := fmt.Fprintf(
-			w,
-			"%s %s %s %s",
-			val.Parsed.Fields.GetTimeReported().Format(time.RFC3339),
-			val.Parsed.Fields.Hostname,
-			val.Parsed.Fields.Appname,
-			val.Parsed.Fields.Message,
-		)
-		return err
 	case *SyslogMessage:
 		if len(val.Hostname) == 0 {
 			val.Hostname = "-"
@@ -132,6 +118,8 @@ func (e *encoderFile) Enc(v interface{}, w io.Writer) error {
 			val.Message,
 		)
 		return err
+	case *FullMessage:
+		return e.Enc(&val.Parsed.Fields, w)
 	default:
 		return defaultEncode(v, w)
 	}
@@ -151,9 +139,9 @@ func (e *encoder5424) Enc(v interface{}, w io.Writer) error {
 	}
 	switch val := v.(type) {
 	case *FullMessage:
-		return val.Parsed.Fields.Encode5424(w)
+		return encodeMsg5424(&val.Parsed.Fields, w)
 	case *SyslogMessage:
-		return val.Encode5424(w)
+		return encodeMsg5424(val, w)
 	default:
 		return defaultEncode(v, w)
 	}
@@ -207,9 +195,9 @@ func (e *encoder3164) Enc(v interface{}, w io.Writer) error {
 	}
 	switch val := v.(type) {
 	case *FullMessage:
-		return val.Parsed.Fields.Encode3164(w)
+		return encodeMsg3164(&val.Parsed.Fields, w)
 	case *SyslogMessage:
-		return val.Encode3164(w)
+		return encodeMsg3164(val, w)
 	default:
 		return defaultEncode(v, w)
 	}
@@ -229,8 +217,10 @@ func (e *encoderJson) Enc(v interface{}, w io.Writer) error {
 	}
 	switch val := v.(type) {
 	case *FullMessage:
+		val.Parsed.Fields.SetTimeStrings()
 		return ffjson.NewEncoder(w).Encode(&val.Parsed.Fields)
 	case *SyslogMessage:
+		val.SetTimeStrings()
 		return ffjson.NewEncoder(w).Encode(val)
 	default:
 		return defaultEncode(v, w)
@@ -251,6 +241,7 @@ func (e *encoderFullJson) Enc(v interface{}, w io.Writer) error {
 	}
 	switch val := v.(type) {
 	case *FullMessage:
+		val.Parsed.Fields.SetTimeStrings()
 		return ffjson.NewEncoder(w).Encode(&val.Parsed)
 	default:
 		return defaultEncode(v, w)
@@ -403,4 +394,87 @@ func validName(s string) bool {
 		}
 	}
 	return true
+}
+
+func encodeMsg5424(m *SyslogMessage, b io.Writer) (err error) {
+	err = m.validRfc5424()
+
+	if err != nil {
+		return err
+	}
+
+	_, err = fmt.Fprintf(
+		b,
+		"<%d>1 %s %s %s %s %s ",
+		m.Priority,
+		m.GetTimeReported().Format(time.RFC3339),
+		nilify(m.Hostname),
+		nilify(m.Appname),
+		nilify(m.Procid),
+		nilify(m.Msgid),
+	)
+
+	if err != nil {
+		return err
+	}
+
+	if len(m.Properties) == 0 {
+		_, err = fmt.Fprint(b, "-")
+		if err != nil {
+			return err
+		}
+	}
+
+	for sid := range m.Properties {
+		_, err = fmt.Fprintf(b, "[%s", sid)
+		if err != nil {
+			return err
+		}
+		for name, value := range m.Properties[sid] {
+			if len(name) > 32 {
+				name = name[:32]
+			}
+			_, err = fmt.Fprintf(b, " %s=\"%s\"", name, escapeSDParam(value))
+			if err != nil {
+				return err
+			}
+		}
+		_, err = fmt.Fprintf(b, "]")
+		if err != nil {
+			return err
+		}
+	}
+
+	if len(m.Message) > 0 {
+		_, err = fmt.Fprint(b, " ")
+		if err != nil {
+			return err
+		}
+		_, err = b.Write([]byte(m.Message))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func encodeMsg3164(m *SyslogMessage, b io.Writer) (err error) {
+	procid := strings.TrimSpace(m.Procid)
+	if len(procid) > 0 {
+		procid = fmt.Sprintf("[%s]", procid)
+	}
+	hostname := strings.TrimSpace(m.Hostname)
+	if len(hostname) == 0 {
+		hostname, _ = os.Hostname()
+	}
+	_, err = fmt.Fprintf(
+		b, "<%d>%s %s %s%s: %s",
+		m.Priority,
+		m.GetTimeReported().Format("Jan _2 15:04:05"),
+		hostname,
+		m.Appname,
+		procid,
+		m.Message,
+	)
+	return err
 }

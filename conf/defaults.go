@@ -216,4 +216,5 @@ func SetStoreDefaults(v *viper.Viper, prefixed bool) {
 	v.SetDefault(prefix+"max_table_size", 64<<20)
 	v.SetDefault(prefix+"value_log_file_size", 64<<20)
 	v.SetDefault(prefix+"batch_size", 5000)
+	v.SetDefault(prefix+"add_missing_msgid", true)
 }

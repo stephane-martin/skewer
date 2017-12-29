@@ -42,7 +42,9 @@ func ParseRfc5424Format(m []byte, decoder *encoding.Decoder, dont_parse_sd bool)
 	if len(splits) < 7 {
 		return nil, &NotEnoughPartsError{len(splits)}
 	}
-	smsg = &SyslogMessage{}
+	smsg = &SyslogMessage{
+		Properties: make(map[string](map[string]string)),
+	}
 	smsg.Priority, smsg.Facility, smsg.Severity, smsg.Version, err = parsePriority(splits[0])
 	if err != nil {
 		return nil, err
@@ -155,7 +157,7 @@ func parsePriority(pv []byte) (Priority, Facility, Severity, Version, error) {
 	return Priority(p), f, s, Version(v), nil
 }
 
-func parseStructData(sd []byte) (m map[string]map[string]string, err error) {
+func parseStructData(sd []byte) (m map[string](map[string]string), err error) {
 	// see https://tools.ietf.org/html/rfc5424#section-6.3
 	if !utf8.Valid(sd) {
 		return nil, &InvalidStructuredDataError{}
@@ -283,9 +285,6 @@ func parseStructData(sd []byte) (m map[string]map[string]string, err error) {
 	}
 	for _, id := range emptySDIDs {
 		delete(m, id)
-	}
-	if len(m) == 0 {
-		return nil, nil
 	}
 
 	return m, nil

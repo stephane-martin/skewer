@@ -27,11 +27,11 @@ func NewDestination(
 	case conf.Kafka:
 		return NewKafkaDestination(ctx, confined, bc, ack, nack, permerr, logger)
 	case conf.UDP:
-		return NewUdpDestination(ctx, confined, bc, ack, nack, permerr, logger)
+		return NewUDPDestination(ctx, confined, bc, ack, nack, permerr, logger)
 	case conf.TCP:
-		return NewTcpDestination(ctx, confined, bc, ack, nack, permerr, logger)
+		return NewTCPDestination(ctx, confined, bc, ack, nack, permerr, logger)
 	case conf.RELP:
-		return NewRelpDestination(ctx, confined, bc, ack, nack, permerr, logger)
+		return NewRELPDestination(ctx, confined, bc, ack, nack, permerr, logger)
 	case conf.File:
 		return NewFileDestination(ctx, confined, bc, ack, nack, permerr, logger)
 	case conf.Stderr:

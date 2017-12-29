@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/oklog/ulid"
 	"github.com/stephane-martin/skewer/utils"
@@ -98,7 +99,7 @@ func (m *SyslogMessage) FromGelfMessage(gelfm *gelf.Message) {
 	}
 	m.Message = gelfm.Short
 	m.TimeReportedNum = int64(gelfm.TimeUnix * 1000000000)
-	m.TimeGeneratedNum = m.TimeReportedNum
+	m.TimeGeneratedNum = time.Now().UnixNano()
 	m.Hostname = gelfm.Host
 	m.Version = 1
 	m.Severity = Severity(gelfm.Level)

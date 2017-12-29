@@ -1,15 +1,10 @@
 package model
 
 import (
-	"bytes"
 	"fmt"
-	"io"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/awnumar/memguard"
-	"github.com/pquerna/ffjson/ffjson"
 	"github.com/stephane-martin/skewer/utils/sbox"
 )
 
@@ -74,22 +69,21 @@ func FacilityFromString(s string) Facility {
 
 // ffjson: nodecoder
 type SyslogMessage struct {
-	Priority         Priority `json:"priority,string" msg:"priority"`
-	Facility         Facility `json:"facility,string" msg:"facility"`
-	Severity         Severity `json:"severity,string" msg:"severity"`
-	Version          Version  `json:"version,string" msg:"version"`
-	TimeReportedNum  int64    `json:"-" msg:"timereportednum"`
-	TimeGeneratedNum int64    `json:"-" msg:"timegeneratednum"`
-	TimeReported     string   `json:"timereported" msg:"timereported"`
-	TimeGenerated    string   `json:"timegenerated" msg:"timegenerated"`
-	Hostname         string   `json:"hostname" msg:"hostname"`
-	Appname          string   `json:"appname" msg:"appname"`
-	Procid           string   `json:"procid" msg:"procid"`
-	Msgid            string   `json:"msgid" msg:"msgid"`
-	Structured       string   `json:"structured" msg:"structured"`
-	Message          string   `json:"message" msg:"message"`
-
-	Properties map[string]map[string]string `json:"properties" msg:"properties"`
+	Priority         Priority                     `json:"priority,string" msg:"priority"`
+	Facility         Facility                     `json:"facility,string" msg:"facility"`
+	Severity         Severity                     `json:"severity,string" msg:"severity"`
+	Version          Version                      `json:"version,string" msg:"version"`
+	TimeReportedNum  int64                        `json:"-" msg:"timereportednum"`
+	TimeGeneratedNum int64                        `json:"-" msg:"timegeneratednum"`
+	TimeReported     string                       `json:"timereported" msg:"timereported"`
+	TimeGenerated    string                       `json:"timegenerated" msg:"timegenerated"`
+	Hostname         string                       `json:"hostname" msg:"hostname"`
+	Appname          string                       `json:"appname" msg:"appname"`
+	Procid           string                       `json:"procid" msg:"procid"`
+	Msgid            string                       `json:"msgid" msg:"msgid"`
+	Structured       string                       `json:"structured" msg:"structured"`
+	Message          string                       `json:"message" msg:"message"`
+	Properties       map[string]map[string]string `json:"properties" msg:"properties"`
 }
 
 type ParsedMessage struct {
@@ -206,113 +200,7 @@ func (m *FullMessage) Decrypt(secret *memguard.LockedBuffer, enc []byte) (err er
 	return err
 }
 
-func (m *FullMessage) MarshalAll(frmt string) (b []byte, err error) {
-	buf := bytes.NewBuffer(nil)
-	err = m.Encode(buf, frmt)
-	if err == nil {
-		b = buf.Bytes()
-	}
-	return
-}
-
-func (m *FullMessage) Encode(b io.Writer, frmt string) error {
-	switch frmt {
-	case "rfc5424":
-		return m.Parsed.Fields.Encode5424(b)
-	case "rfc3164":
-		return m.Parsed.Fields.Encode3164(b)
-	case "json":
-		m.Parsed.Fields.TimeReported = m.Parsed.Fields.GetTimeReported().Format(time.RFC3339Nano)
-		m.Parsed.Fields.TimeGenerated = m.Parsed.Fields.GetTimeGenerated().Format(time.RFC3339Nano)
-		return ffjson.NewEncoder(b).Encode(&m.Parsed.Fields)
-	case "fulljson":
-		m.Parsed.Fields.TimeReported = m.Parsed.Fields.GetTimeReported().Format(time.RFC3339Nano)
-		m.Parsed.Fields.TimeGenerated = m.Parsed.Fields.GetTimeGenerated().Format(time.RFC3339Nano)
-		return ffjson.NewEncoder(b).Encode(&m)
-	default:
-		return fmt.Errorf("MarshalAll: unknown format '%s'", frmt)
-	}
-}
-
-func (m *SyslogMessage) Encode3164(b io.Writer) (err error) {
-	procid := strings.TrimSpace(m.Procid)
-	if len(procid) > 0 {
-		procid = fmt.Sprintf("[%s]", procid)
-	}
-	hostname := strings.TrimSpace(m.Hostname)
-	if len(hostname) == 0 {
-		hostname, _ = os.Hostname()
-	}
-	_, err = fmt.Fprintf(
-		b, "<%d>%s %s %s%s: %s",
-		m.Priority,
-		m.GetTimeReported().Format("Jan _2 15:04:05"),
-		hostname,
-		m.Appname,
-		procid,
-		m.Message,
-	)
-	return err
-}
-
-func (m *SyslogMessage) Encode5424(b io.Writer) (err error) {
-	err = m.validRfc5424()
-
-	if err != nil {
-		return err
-	}
-
-	_, err = fmt.Fprintf(
-		b,
-		"<%d>1 %s %s %s %s %s ",
-		m.Priority,
-		m.GetTimeReported().Format(time.RFC3339),
-		nilify(m.Hostname),
-		nilify(m.Appname),
-		nilify(m.Procid),
-		nilify(m.Msgid),
-	)
-
-	if err != nil {
-		return err
-	}
-
-	if len(m.Properties) == 0 {
-		_, err = fmt.Fprint(b, "-")
-		if err != nil {
-			return err
-		}
-	}
-
-	for sid := range m.Properties {
-		_, err = fmt.Fprintf(b, "[%s", sid)
-		if err != nil {
-			return err
-		}
-		for name, value := range m.Properties[sid] {
-			if len(name) > 32 {
-				name = name[:32]
-			}
-			_, err = fmt.Fprintf(b, " %s=\"%s\"", name, escapeSDParam(value))
-			if err != nil {
-				return err
-			}
-		}
-		_, err = fmt.Fprintf(b, "]")
-		if err != nil {
-			return err
-		}
-	}
-
-	if len(m.Message) > 0 {
-		_, err = fmt.Fprint(b, " ")
-		if err != nil {
-			return err
-		}
-		_, err = b.Write([]byte(m.Message))
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+func (m *SyslogMessage) SetTimeStrings() {
+	m.TimeReported = m.GetTimeReported().Format(time.RFC3339)
+	m.TimeGenerated = m.GetTimeGenerated().Format(time.RFC3339)
 }

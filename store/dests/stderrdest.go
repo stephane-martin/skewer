@@ -11,7 +11,7 @@ import (
 	"github.com/stephane-martin/skewer/model"
 )
 
-type stderrDestination struct {
+type StderrDestination struct {
 	logger  log15.Logger
 	fatal   chan struct{}
 	once    sync.Once
@@ -22,16 +22,15 @@ type stderrDestination struct {
 	encoder model.Encoder
 }
 
-func NewStderrDestination(ctx context.Context, confined bool, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (dest Destination, err error) {
-	d := &stderrDestination{
-		logger:  logger,
+func NewStderrDestination(ctx context.Context, cfnd bool, bc conf.BaseConfig, ack, nack, pe storeCallback, l log15.Logger) (d *StderrDestination, err error) {
+	d = &StderrDestination{
+		logger:  l,
 		ack:     ack,
 		nack:    nack,
-		permerr: permerr,
-		format:  bc.FileDest.Format,
+		permerr: pe,
+		format:  bc.StderrDest.Format,
 		fatal:   make(chan struct{}),
 	}
-
 	d.encoder, err = model.NewEncoder(d.format)
 	if err != nil {
 		return nil, fmt.Errorf("Error getting encoder: %s", err)
@@ -40,7 +39,7 @@ func NewStderrDestination(ctx context.Context, confined bool, bc conf.BaseConfig
 	return d, nil
 }
 
-func (d *stderrDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *StderrDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
 	var buf []byte
 	buf, err = model.ChainEncode(d.encoder, &message, "\n")
 	if err != nil {
@@ -61,10 +60,10 @@ func (d *stderrDestination) Send(message model.FullMessage, partitionKey string,
 	return nil
 }
 
-func (d *stderrDestination) Close() error {
+func (d *StderrDestination) Close() error {
 	return nil
 }
 
-func (d *stderrDestination) Fatal() chan struct{} {
+func (d *StderrDestination) Fatal() chan struct{} {
 	return d.fatal
 }

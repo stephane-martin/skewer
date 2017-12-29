@@ -13,7 +13,7 @@ import (
 	"gopkg.in/Graylog2/go-gelf.v2/gelf"
 )
 
-type graylogDestination struct {
+type GraylogDestination struct {
 	logger  log15.Logger
 	fatal   chan struct{}
 	once    sync.Once
@@ -23,7 +23,7 @@ type graylogDestination struct {
 	writer  gelf.Writer
 }
 
-func NewGraylogDestination(ctx context.Context, confined bool, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (dest Destination, err error) {
+func NewGraylogDestination(ctx context.Context, cfnd bool, bc conf.BaseConfig, ack, nack, pe storeCallback, l log15.Logger) (d *GraylogDestination, err error) {
 	hostport := net.JoinHostPort(bc.GraylogDest.Host, strconv.FormatInt(int64(bc.GraylogDest.Port), 10))
 	var w gelf.Writer
 	if strings.ToLower(strings.TrimSpace(bc.GraylogDest.Mode)) == "udp" {
@@ -57,26 +57,26 @@ func NewGraylogDestination(ctx context.Context, confined bool, bc conf.BaseConfi
 		w = writer
 	}
 
-	d := &graylogDestination{
-		logger:  logger,
+	d = &GraylogDestination{
+		logger:  l,
 		fatal:   make(chan struct{}),
 		ack:     ack,
 		nack:    nack,
-		permerr: permerr,
+		permerr: pe,
 		writer:  w,
 	}
 	return d, nil
 }
 
-func (d *graylogDestination) Close() error {
+func (d *GraylogDestination) Close() error {
 	return d.writer.Close()
 }
 
-func (d *graylogDestination) Fatal() chan struct{} {
+func (d *GraylogDestination) Fatal() chan struct{} {
 	return d.fatal
 }
 
-func (d *graylogDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *GraylogDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
 	err = d.writer.WriteMessage(message.ToGelfMessage())
 	if err == nil {
 		d.ack(message.Uid, conf.Graylog)

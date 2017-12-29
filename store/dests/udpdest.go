@@ -11,7 +11,7 @@ import (
 	"github.com/stephane-martin/skewer/model"
 )
 
-type udpDestination struct {
+type UDPDestination struct {
 	logger  log15.Logger
 	fatal   chan struct{}
 	once    sync.Once
@@ -21,8 +21,8 @@ type udpDestination struct {
 	client  *clients.SyslogUDPClient
 }
 
-func NewUdpDestination(ctx context.Context, confined bool, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (dest Destination, err error) {
-	client := clients.NewSyslogUDPClient(logger).
+func NewUDPDestination(ctx context.Context, cfnd bool, bc conf.BaseConfig, ack, nack, pe storeCallback, l log15.Logger) (d *UDPDestination, err error) {
+	client := clients.NewSyslogUDPClient(l).
 		Host(bc.UDPDest.Host).
 		Port(bc.UDPDest.Port).
 		Path(bc.UDPDest.UnixSocketPath).
@@ -35,11 +35,11 @@ func NewUdpDestination(ctx context.Context, confined bool, bc conf.BaseConfig, a
 	}
 	connCounter.WithLabelValues("udp", "success").Inc()
 
-	d := &udpDestination{
-		logger:  logger,
+	d = &UDPDestination{
+		logger:  l,
 		ack:     ack,
 		nack:    nack,
-		permerr: permerr,
+		permerr: pe,
 		fatal:   make(chan struct{}),
 		client:  client,
 	}
@@ -50,7 +50,7 @@ func NewUdpDestination(ctx context.Context, confined bool, bc conf.BaseConfig, a
 			select {
 			case <-ctx.Done():
 			case <-time.After(rebind):
-				logger.Info("UDP destination rebind period has expired", "rebind", rebind.String())
+				l.Info("UDP destination rebind period has expired", "rebind", rebind.String())
 				d.once.Do(func() { close(d.fatal) })
 			}
 		}()
@@ -59,7 +59,7 @@ func NewUdpDestination(ctx context.Context, confined bool, bc conf.BaseConfig, a
 	return d, nil
 }
 
-func (d *udpDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *UDPDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
 	err = d.client.Send(&message)
 	if err == nil {
 		ackCounter.WithLabelValues("udp", "ack", "").Inc()
@@ -79,10 +79,10 @@ func (d *udpDestination) Send(message model.FullMessage, partitionKey string, pa
 	}
 }
 
-func (d *udpDestination) Close() error {
+func (d *UDPDestination) Close() error {
 	return d.client.Close()
 }
 
-func (d *udpDestination) Fatal() chan struct{} {
+func (d *UDPDestination) Fatal() chan struct{} {
 	return d.fatal
 }

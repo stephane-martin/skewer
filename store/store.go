@@ -130,24 +130,26 @@ type MessageStore struct {
 	backend         *Backend
 	syslogConfigsDB db.Partition
 
-	wg        *sync.WaitGroup
-	dests     *Destinations
-	batchSize uint32
+	wg    sync.WaitGroup
+	dests *Destinations
+	pool  *sync.Pool
 
 	ticker *time.Ticker
 	logger log15.Logger
 
 	closedChan     chan struct{}
 	FatalErrorChan chan struct{}
+	OutputsChans   map[conf.DestinationType](chan *model.FullMessage)
 
 	toStashQueue    *queue.MessageQueue
 	ackQueue        *queue.AckQueue
 	nackQueue       *queue.AckQueue
 	permerrorsQueue *queue.AckQueue
 
-	OutputsChans map[conf.DestinationType](chan *model.FullMessage)
-	pool         *sync.Pool
-	confined     bool
+	confined        bool
+	batchSize       uint32
+	addMissingMsgID bool
+	generator       *utils.Generator
 }
 
 func (s *MessageStore) Confined() bool {
@@ -314,9 +316,9 @@ func (s *MessageStore) init(ctx context.Context) {
 	}
 }
 
-func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests conf.DestinationType, confined bool, l log15.Logger) (*MessageStore, error) {
+func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests conf.DestinationType, cfnd bool, l log15.Logger) (*MessageStore, error) {
 	dirname := cfg.Dirname
-	if confined {
+	if cfnd {
 		dirname = filepath.Join("/tmp", "store", dirname)
 	}
 	badgerOpts := badger.DefaultOptions
@@ -334,27 +336,26 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 	}
 
 	store := &MessageStore{
-		confined: confined,
-	}
-	store.logger = l.New("class", "MessageStore")
-	store.dests = &Destinations{}
-	store.dests.Store(dests)
-	store.batchSize = cfg.BatchSize
-
-	store.pool = &sync.Pool{
-		New: func() interface{} {
-			return &model.FullMessage{}
+		confined:        cfnd,
+		logger:          l.New("class", "MessageStore"),
+		dests:           &Destinations{},
+		batchSize:       cfg.BatchSize,
+		toStashQueue:    queue.NewMessageQueue(),
+		ackQueue:        queue.NewAckQueue(),
+		nackQueue:       queue.NewAckQueue(),
+		permerrorsQueue: queue.NewAckQueue(),
+		closedChan:      make(chan struct{}),
+		OutputsChans:    make(map[conf.DestinationType](chan *model.FullMessage)),
+		addMissingMsgID: cfg.AddMissingMsgID,
+		generator:       utils.NewGenerator(),
+		pool: &sync.Pool{
+			New: func() interface{} {
+				return &model.FullMessage{}
+			},
 		},
 	}
 
-	store.toStashQueue = queue.NewMessageQueue()
-	store.ackQueue = queue.NewAckQueue()
-	store.nackQueue = queue.NewAckQueue()
-	store.permerrorsQueue = queue.NewAckQueue()
-
-	store.wg = &sync.WaitGroup{}
-
-	store.closedChan = make(chan struct{})
+	store.dests.Store(dests)
 
 	kv, err := badger.Open(badgerOpts)
 	if err != nil {
@@ -380,7 +381,6 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 	store.backend = NewBackend(kv, storeSecret)
 	store.syslogConfigsDB = db.NewPartition(kv, []byte("configs"))
 
-	store.OutputsChans = map[conf.DestinationType](chan *model.FullMessage){}
 	for _, dest := range conf.Destinations {
 		store.OutputsChans[dest] = make(chan *model.FullMessage)
 	}
@@ -774,6 +774,9 @@ func (s *MessageStore) ingest(queue []*model.FullMessage) (n int, err error) {
 
 	marshalledQueue := map[ulid.ULID][]byte{}
 	for _, m = range queue {
+		if s.addMissingMsgID && len(m.Parsed.Fields.Msgid) == 0 {
+			m.Parsed.Fields.Msgid = s.generator.Uid().String()
+		}
 		b, err = m.MarshalMsg(nil)
 		if err == nil {
 			if len(b) == 0 {
@@ -791,18 +794,6 @@ func (s *MessageStore) ingest(queue []*model.FullMessage) (n int, err error) {
 	}
 
 	dests := s.Destinations()
-
-	/*
-		for _, dest := range dests {
-			s.readyMutexes[dest].Lock()
-		}
-
-		unlock := func() {
-			for i := len(dests) - 1; i >= 0; i-- {
-				s.readyMutexes[dests[i]].Unlock()
-			}
-		}
-	*/
 
 	txn := s.badger.NewTransaction(true)
 	defer txn.Discard()

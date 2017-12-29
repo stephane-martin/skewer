@@ -304,7 +304,7 @@ func (o *openedFiles) closeall() {
 	runtime.GC()
 }
 
-type fileDestination struct {
+type FileDestination struct {
 	logger       log15.Logger
 	fatal        chan struct{}
 	once         sync.Once
@@ -317,8 +317,8 @@ type fileDestination struct {
 	encoder      model.Encoder
 }
 
-func NewFileDestination(ctx context.Context, cfnd bool, bc conf.BaseConfig, ack, nack, permerr storeCallback, l log15.Logger) (dest Destination, err error) {
-	d := &fileDestination{
+func NewFileDestination(ctx context.Context, cfnd bool, bc conf.BaseConfig, ack, nack, permerr storeCallback, l log15.Logger) (dest *FileDestination, err error) {
+	dest = &FileDestination{
 		logger:  l,
 		ack:     ack,
 		nack:    nack,
@@ -331,18 +331,18 @@ func NewFileDestination(ctx context.Context, cfnd bool, bc conf.BaseConfig, ack,
 	if cfnd {
 		fname = filepath.Join("/tmp", "filedest", fname)
 	}
-	d.filenameTmpl, err = template.New("filename").Parse(fname)
+	dest.filenameTmpl, err = template.New("filename").Parse(fname)
 	if err != nil {
 		return nil, err
 	}
-	d.encoder, err = model.NewEncoder(bc.FileDest.Format)
+	dest.encoder, err = model.NewEncoder(bc.FileDest.Format)
 	if err != nil {
 		return nil, err
 	}
-	return d, nil
+	return dest, nil
 }
 
-func (d *fileDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *FileDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
 	if len(message.Parsed.Fields.Appname) == 0 {
 		message.Parsed.Fields.Appname = "empty"
 	}
@@ -390,11 +390,11 @@ func (d *fileDestination) Send(message model.FullMessage, partitionKey string, p
 	return nil
 }
 
-func (d *fileDestination) Close() error {
+func (d *FileDestination) Close() error {
 	d.files.closeall()
 	return nil
 }
 
-func (d *fileDestination) Fatal() chan struct{} {
+func (d *FileDestination) Fatal() chan struct{} {
 	return d.fatal
 }

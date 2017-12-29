@@ -141,7 +141,6 @@ func (s *TcpServiceImpl) SetConf(sc []conf.TCPSourceConfig, pc []conf.ParserConf
 func (s *TcpServiceImpl) ParseOne(raw *model.RawTcpMessage, env *ParsersEnv, gen *utils.Generator) {
 	// be sure to free the raw pointer
 	defer s.Pool.Put(raw)
-
 	logger := s.Logger.New(
 		"protocol", "tcp",
 		"client", raw.Client,
@@ -161,13 +160,14 @@ func (s *TcpServiceImpl) ParseOne(raw *model.RawTcpMessage, env *ParsersEnv, gen
 	syslogMsg, err := parser.Parse(raw.Message[:raw.Size], decoder, raw.DontParseSD)
 	if err != nil {
 		base.ParsingErrorCounter.WithLabelValues("tcp", raw.Client, raw.Format).Inc()
-		logger.Info("Parsing error", "Message", raw.Message, "error", err)
+		//logger.Info("Parsing error", "message", string(raw.Message), "error", err)
+		logger.Info("Parsing error", "error", err)
 		return
 	}
 	if syslogMsg == nil {
+		logger.Debug("Empty message")
 		return
 	}
-
 	fatal, nonfatal := s.reporter.Stash(model.FullMessage{
 		Parsed: model.ParsedMessage{
 			Fields:         *syslogMsg,
@@ -298,7 +298,7 @@ func makeLFTCPSplit(delimiter string) func(d []byte, a bool) (int, []byte, error
 		}
 		trimmed := len(data) - len(trimmedData)
 		lf := bytes.IndexByte(trimmedData, delim)
-		if lf == 0 {
+		if lf < 1 {
 			return 0, nil, eoferr
 		}
 		token = bytes.Trim(trimmedData[0:lf], " \r\n")

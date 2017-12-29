@@ -14,7 +14,7 @@ import (
 	"github.com/stephane-martin/skewer/utils/queue"
 )
 
-type relpDestination struct {
+type RELPDestination struct {
 	logger  log15.Logger
 	fatal   chan struct{}
 	client  *clients.RELPClient
@@ -24,8 +24,8 @@ type relpDestination struct {
 	permerr storeCallback
 }
 
-func NewRelpDestination(ctx context.Context, confined bool, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (dest Destination, err error) {
-	clt := clients.NewRELPClient(logger).
+func NewRELPDestination(ctx context.Context, cfnd bool, bc conf.BaseConfig, ack, nack, pe storeCallback, l log15.Logger) (d *RELPDestination, err error) {
+	clt := clients.NewRELPClient(l).
 		Host(bc.RELPDest.Host).
 		Port(bc.RELPDest.Port).
 		Path(bc.RELPDest.UnixSocketPath).
@@ -45,7 +45,7 @@ func NewRelpDestination(ctx context.Context, confined bool, bc conf.BaseConfig, 
 			bc.RELPDest.CertFile,
 			bc.RELPDest.KeyFile,
 			bc.RELPDest.Insecure,
-			confined,
+			cfnd,
 		)
 		if err != nil {
 			return nil, err
@@ -60,11 +60,11 @@ func NewRelpDestination(ctx context.Context, confined bool, bc conf.BaseConfig, 
 	}
 	connCounter.WithLabelValues("relp", "success").Inc()
 
-	d := &relpDestination{
-		logger:  logger,
+	d = &RELPDestination{
+		logger:  l,
 		ack:     ack,
 		nack:    nack,
-		permerr: permerr,
+		permerr: pe,
 		fatal:   make(chan struct{}),
 		client:  clt,
 	}
@@ -76,7 +76,7 @@ func NewRelpDestination(ctx context.Context, confined bool, bc conf.BaseConfig, 
 			case <-ctx.Done():
 				// the store service asked for stop
 			case <-time.After(rebind):
-				logger.Info("RELP destination rebind period has expired", "rebind", rebind.String())
+				l.Info("RELP destination rebind period has expired", "rebind", rebind.String())
 				d.once.Do(func() { close(d.fatal) })
 			}
 		}()
@@ -114,7 +114,7 @@ func NewRelpDestination(ctx context.Context, confined bool, bc conf.BaseConfig, 
 	return d, nil
 }
 
-func (d *relpDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *RELPDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
 	err = d.client.Send(&message)
 	if err != nil {
 		// the client send queue has been disposed
@@ -126,10 +126,10 @@ func (d *relpDestination) Send(message model.FullMessage, partitionKey string, p
 	return
 }
 
-func (d *relpDestination) Close() (err error) {
+func (d *RELPDestination) Close() (err error) {
 	return d.client.Close()
 }
 
-func (d *relpDestination) Fatal() chan struct{} {
+func (d *RELPDestination) Fatal() chan struct{} {
 	return d.fatal
 }

@@ -1,6 +1,7 @@
 package dests
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"sync"
@@ -13,7 +14,7 @@ import (
 	"github.com/stephane-martin/skewer/model"
 )
 
-type kafkaDestination struct {
+type KafkaDestination struct {
 	producer sarama.AsyncProducer
 	logger   log15.Logger
 	fatal    chan struct{}
@@ -21,28 +22,30 @@ type kafkaDestination struct {
 	ack      storeCallback
 	nack     storeCallback
 	permerr  storeCallback
-	format   string
+	encoder  model.Encoder
 }
 
-func NewKafkaDestination(ctx context.Context, confined bool, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (Destination, error) {
-	d := &kafkaDestination{
-		logger:  logger,
+func NewKafkaDestination(ctx context.Context, cfnd bool, bc conf.BaseConfig, ack, nack, pe storeCallback, l log15.Logger) (d *KafkaDestination, err error) {
+	d = &KafkaDestination{
+		logger:  l,
 		ack:     ack,
 		nack:    nack,
-		permerr: permerr,
-		format:  bc.KafkaDest.Format,
+		permerr: pe,
 		fatal:   make(chan struct{}),
 	}
-	var err error
+	d.encoder, err = model.NewEncoder(bc.KafkaDest.Format)
+	if err != nil {
+		return nil, err
+	}
 	for {
-		d.producer, err = bc.KafkaDest.GetAsyncProducer(confined)
+		d.producer, err = bc.KafkaDest.GetAsyncProducer(cfnd)
 		if err == nil {
 			connCounter.WithLabelValues("kafka", "success").Inc()
-			logger.Info("The forwarder got a Kafka producer")
+			l.Info("The forwarder got a Kafka producer")
 			break
 		}
 		connCounter.WithLabelValues("kafka", "fail").Inc()
-		logger.Debug("Error getting a Kafka client", "error", err)
+		l.Debug("Error getting a Kafka client", "error", err)
 		select {
 		case <-ctx.Done():
 			return nil, fmt.Errorf("Kafka destination aborted: %s", err.Error())
@@ -73,19 +76,18 @@ func NewKafkaDestination(ctx context.Context, confined bool, bc conf.BaseConfig,
 	return d, nil
 }
 
-func (d *kafkaDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) error {
-	serialized, err := message.MarshalAll(d.format)
-
+func (d *KafkaDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+	buf := bytes.NewBuffer(nil)
+	err = d.encoder.Enc(message, buf)
 	if err != nil {
 		ackCounter.WithLabelValues("kafka", "permerr", topic).Inc()
 		d.permerr(message.Uid, conf.Kafka)
 		return err
 	}
-
 	kafkaMsg := &sarama.ProducerMessage{
 		Key:       sarama.StringEncoder(partitionKey),
 		Partition: partitionNumber,
-		Value:     sarama.ByteEncoder(serialized),
+		Value:     sarama.ByteEncoder(buf.Bytes()),
 		Topic:     topic,
 		Timestamp: message.Parsed.Fields.GetTimeReported(),
 		Metadata:  message.Uid,
@@ -95,11 +97,11 @@ func (d *kafkaDestination) Send(message model.FullMessage, partitionKey string, 
 	return nil
 }
 
-func (d *kafkaDestination) Close() error {
+func (d *KafkaDestination) Close() error {
 	d.producer.AsyncClose()
 	return nil
 }
 
-func (d *kafkaDestination) Fatal() chan struct{} {
+func (d *KafkaDestination) Fatal() chan struct{} {
 	return d.fatal
 }

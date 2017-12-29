@@ -64,6 +64,7 @@ type StoreConfig struct {
 	FSync            bool   `mapstructure:"fsync" toml:"fsync" json:"fsync"`
 	Secret           string `mapstructure:"secret" toml:"-" json:"secret"`
 	BatchSize        uint32 `mapstructure:"batch_size" toml:"batch_size" json:"batch_size"`
+	AddMissingMsgID  bool   `mapstructure:"add_missing_msgid" toml:"add_missing_msgid" json:"add_missing_msgid"`
 }
 
 // the Secret in StoreConfig will be encrypted with the session secret in Complete()

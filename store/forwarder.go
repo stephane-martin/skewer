@@ -14,12 +14,6 @@ import (
 	"github.com/stephane-martin/skewer/store/dests"
 )
 
-/*
-type forwarderMetrics struct {
-	KafkaConnectionErrorCounter prometheus.Counter
-}
-*/
-
 type fwderImpl struct {
 	messageFilterCounter *prometheus.CounterVec
 	logger               log15.Logger
@@ -172,20 +166,23 @@ func (fwder *fwderImpl) fwdMsg(m *model.FullMessage, envs map[ulid.ULID]*javascr
 		env = envs[m.ConfId]
 	}
 
-	topic, errs = env.Topic(m.Parsed.Fields)
-	for _, err = range errs {
-		fwder.logger.Info("Error calculating topic", "error", err, "uid", m.Uid)
-	}
-	if len(topic) == 0 {
-		topic = "default-topic"
-	}
-	partitionKey, errs = env.PartitionKey(m.Parsed.Fields)
-	for _, err := range errs {
-		fwder.logger.Info("Error calculating the partition key", "error", err, "uid", m.Uid)
-	}
-	partitionNumber, errs = env.PartitionNumber(m.Parsed.Fields)
-	for _, err := range errs {
-		fwder.logger.Info("Error calculating the partition number", "error", err, "uid", m.Uid)
+	if _, ok := dest.(*dests.KafkaDestination); ok {
+		// only calculate proper Topic, PartitionKey and PartitionNumber if we are sending to Kafka
+		topic, errs = env.Topic(m.Parsed.Fields)
+		for _, err = range errs {
+			fwder.logger.Info("Error calculating topic", "error", err, "uid", m.Uid)
+		}
+		if len(topic) == 0 {
+			topic = "default-topic"
+		}
+		partitionKey, errs = env.PartitionKey(m.Parsed.Fields)
+		for _, err := range errs {
+			fwder.logger.Info("Error calculating the partition key", "error", err, "uid", m.Uid)
+		}
+		partitionNumber, errs = env.PartitionNumber(m.Parsed.Fields)
+		for _, err := range errs {
+			fwder.logger.Info("Error calculating the partition number", "error", err, "uid", m.Uid)
+		}
 	}
 
 	filterResult, err = env.FilterMessage(&m.Parsed.Fields)

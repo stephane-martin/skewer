@@ -15,7 +15,7 @@ import (
 
 var sp = []byte(" ")
 
-type tcpDestination struct {
+type TCPDestination struct {
 	logger      log15.Logger
 	fatal       chan struct{}
 	ack         storeCallback
@@ -26,7 +26,7 @@ type tcpDestination struct {
 	once        sync.Once
 }
 
-func NewTcpDestination(ctx context.Context, cfnd bool, bc conf.BaseConfig, ack, nack, permerr storeCallback, l log15.Logger) (dest Destination, err error) {
+func NewTCPDestination(ctx context.Context, cfnd bool, bc conf.BaseConfig, ack, nack, pe storeCallback, l log15.Logger) (d *TCPDestination, err error) {
 	clt := clients.NewSyslogTCPClient(l).
 		Host(bc.TCPDest.Host).
 		Port(bc.TCPDest.Port).
@@ -62,12 +62,12 @@ func NewTcpDestination(ctx context.Context, cfnd bool, bc conf.BaseConfig, ack, 
 	}
 	connCounter.WithLabelValues("tcp", "success").Inc()
 
-	d := &tcpDestination{
+	d = &TCPDestination{
 		logger:  l,
 		fatal:   make(chan struct{}),
 		ack:     ack,
 		nack:    nack,
-		permerr: permerr,
+		permerr: pe,
 		clt:     clt,
 	}
 
@@ -87,7 +87,7 @@ func NewTcpDestination(ctx context.Context, cfnd bool, bc conf.BaseConfig, ack, 
 	return d, nil
 }
 
-func (d *tcpDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *TCPDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
 	err = d.clt.Send(&message)
 	if err == nil {
 		if d.previousUid != utils.ZeroUid {
@@ -113,10 +113,10 @@ func (d *tcpDestination) Send(message model.FullMessage, partitionKey string, pa
 	return
 }
 
-func (d *tcpDestination) Close() error {
+func (d *TCPDestination) Close() error {
 	return d.clt.Close()
 }
 
-func (d *tcpDestination) Fatal() chan struct{} {
+func (d *TCPDestination) Fatal() chan struct{} {
 	return d.fatal
 }

@@ -34,34 +34,37 @@ func ParseRfc3164Format(m []byte, decoder *encoding.Decoder) (smsg *SyslogMessag
 	}
 	m = bytes.TrimSpace(m)
 
-	def_smsg := &SyslogMessage{Message: string(m)}
+	defaultMsg := &SyslogMessage{
+		Message:    string(m),
+		Properties: make(map[string](map[string]string)),
+	}
 	smsg = &SyslogMessage{}
 	n := time.Now().UnixNano()
-	def_smsg.TimeGeneratedNum = n
-	def_smsg.TimeReportedNum = n
+	defaultMsg.TimeGeneratedNum = n
+	defaultMsg.TimeReportedNum = n
 	smsg.TimeGeneratedNum = n
-	smsg.Properties = map[string]map[string]string{}
+	smsg.Properties = make(map[string](map[string]string))
 
 	if !bytes.HasPrefix(m, []byte("<")) {
-		return def_smsg, nil
+		return defaultMsg, nil
 	}
-	end_pri := bytes.Index(m, []byte(">"))
-	if end_pri <= 1 {
-		return def_smsg, nil
+	priEnd := bytes.Index(m, []byte(">"))
+	if priEnd <= 1 {
+		return defaultMsg, nil
 	}
-	pri_s := m[1:end_pri]
-	pri_num, err := strconv.Atoi(string(pri_s))
+	priStr := m[1:priEnd]
+	priNum, err := strconv.Atoi(string(priStr))
 	if err != nil {
-		return def_smsg, nil
+		return defaultMsg, nil
 	}
-	smsg.Priority = Priority(pri_num)
-	smsg.Facility = Facility(pri_num / 8)
-	smsg.Severity = Severity(pri_num % 8)
+	smsg.Priority = Priority(priNum)
+	smsg.Facility = Facility(priNum / 8)
+	smsg.Severity = Severity(priNum % 8)
 
-	if len(m) <= (end_pri + 1) {
+	if len(m) <= (priEnd + 1) {
 		return smsg, nil
 	}
-	m = bytes.TrimSpace(m[end_pri+1:])
+	m = bytes.TrimSpace(m[priEnd+1:])
 	if len(m) == 0 {
 		return smsg, nil
 	}
@@ -75,7 +78,7 @@ func ParseRfc3164Format(m []byte, decoder *encoding.Decoder) (smsg *SyslogMessag
 			t2, e := time.Parse(time.RFC3339, s0)
 			if e != nil {
 				smsg.Message = string(m)
-				smsg.TimeReportedNum = def_smsg.TimeReportedNum
+				smsg.TimeReportedNum = defaultMsg.TimeReportedNum
 				return smsg, nil
 			}
 			smsg.TimeReportedNum = t2.UnixNano()
@@ -90,14 +93,14 @@ func ParseRfc3164Format(m []byte, decoder *encoding.Decoder) (smsg *SyslogMessag
 		// old unix timestamp
 		if len(s) < 3 {
 			smsg.Message = string(m)
-			smsg.TimeReportedNum = def_smsg.TimeReportedNum
+			smsg.TimeReportedNum = defaultMsg.TimeReportedNum
 			return smsg, nil
 		}
-		timestamp_b := bytes.Join(s[0:3], SP)
-		t, e := time.Parse(time.Stamp, string(timestamp_b))
+		timestampBytes := bytes.Join(s[0:3], SP)
+		t, e := time.Parse(time.Stamp, string(timestampBytes))
 		if e != nil {
 			smsg.Message = string(m)
-			smsg.TimeReportedNum = def_smsg.TimeReportedNum
+			smsg.TimeReportedNum = defaultMsg.TimeReportedNum
 			return smsg, nil
 		}
 		t = t.AddDate(time.Now().Year(), 0, 0)
