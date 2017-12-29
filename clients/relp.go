@@ -404,7 +404,7 @@ func (c *RELPClient) handleRspAnswers() {
 		keys := make([]int32, 0)
 		c.txnr2msgid.ForEach(
 			func(txnr int32, uid ulid.ULID) {
-				c.nackChan.Put(uid, conf.Relp)
+				c.nackChan.Put(uid, conf.RELP)
 				keys = append(keys, txnr)
 			},
 		)
@@ -443,9 +443,9 @@ func (c *RELPClient) handleRspAnswers() {
 		uid, err := c.txnr2msgid.Get(txnr)
 		if err == nil {
 			if retcode == 200 {
-				c.ackChan.Put(uid, conf.Relp)
+				c.ackChan.Put(uid, conf.RELP)
 			} else {
-				c.nackChan.Put(uid, conf.Relp)
+				c.nackChan.Put(uid, conf.RELP)
 			}
 		} else {
 			c.logger.Warn("Unknown txnr", "txnr", txnr)
@@ -462,7 +462,7 @@ func (c *RELPClient) doSendOne(msg *model.FullMessage) (err error) {
 		return model.NonEncodableError
 	}
 	if len(buf) == 0 {
-		c.ackChan.Put(msg.Uid, conf.Relp)
+		c.ackChan.Put(msg.Uid, conf.RELP)
 		return nil
 	}
 	if c.writer == nil {
@@ -473,7 +473,7 @@ func (c *RELPClient) doSendOne(msg *model.FullMessage) (err error) {
 	if err == nil {
 		return c.txnr2msgid.Put(txnr, msg.Uid)
 	}
-	c.nackChan.Put(msg.Uid, conf.Relp)
+	c.nackChan.Put(msg.Uid, conf.RELP)
 	return err
 }
 
@@ -486,7 +486,7 @@ func (c *RELPClient) doSend() {
 			if err != nil {
 				break
 			}
-			c.nackChan.Put(msg.Uid, conf.Relp)
+			c.nackChan.Put(msg.Uid, conf.RELP)
 		}
 		c.sendWg.Done()
 	}()

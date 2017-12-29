@@ -445,7 +445,7 @@ func (ch *serveChild) StartJournal() error {
 
 // StartRelp starts the Relp process.
 func (ch *serveChild) StartRelp() error {
-	if len(ch.conf.RelpSource) == 0 {
+	if len(ch.conf.RELPSource) == 0 {
 		return nil
 	}
 	certfiles := ch.conf.GetCertificateFiles()["relpsource"]
@@ -472,7 +472,7 @@ func (ch *serveChild) StartRelp() error {
 
 // StartDirectRelp starts the DirectRelp process.
 func (ch *serveChild) StartDirectRelp() error {
-	if len(ch.conf.DirectRelpSource) == 0 {
+	if len(ch.conf.DirectRELPSource) == 0 {
 		return nil
 	}
 	certfiles := ch.conf.GetCertificateFiles()["directrelpsource"]
@@ -499,7 +499,7 @@ func (ch *serveChild) StartDirectRelp() error {
 
 // StartTcp starts the TCP process.
 func (ch *serveChild) StartTcp() error {
-	if len(ch.conf.TcpSource) == 0 {
+	if len(ch.conf.TCPSource) == 0 {
 		return nil
 	}
 	certfiles := ch.conf.GetCertificateFiles()["tcpsource"]
@@ -531,7 +531,7 @@ func (ch *serveChild) StartTcp() error {
 
 // StartUdp starts the UDP process.
 func (ch *serveChild) StartUdp() error {
-	if len(ch.conf.UdpSource) == 0 {
+	if len(ch.conf.UDPSource) == 0 {
 		return nil
 	}
 	ctl := ch.controllers[services.UDP]

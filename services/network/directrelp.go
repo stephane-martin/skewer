@@ -59,7 +59,7 @@ type DirectRelpService struct {
 	logger         log15.Logger
 	reporter       base.Reporter
 	b              *binder.BinderClientImpl
-	sc             []conf.DirectRelpSourceConfig
+	sc             []conf.DirectRELPSourceConfig
 	pc             []conf.ParserConfig
 	kc             conf.KafkaDestConfig
 	wg             sync.WaitGroup
@@ -155,7 +155,7 @@ func (s *DirectRelpService) Stop() {
 	s.wg.Wait()
 }
 
-func (s *DirectRelpService) SetConf(sc []conf.DirectRelpSourceConfig, pc []conf.ParserConfig, kc conf.KafkaDestConfig, queueSize uint64) {
+func (s *DirectRelpService) SetConf(sc []conf.DirectRELPSourceConfig, pc []conf.ParserConfig, kc conf.KafkaDestConfig, queueSize uint64) {
 	s.sc = sc
 	s.pc = pc
 	s.kc = kc
@@ -164,7 +164,7 @@ func (s *DirectRelpService) SetConf(sc []conf.DirectRelpSourceConfig, pc []conf.
 
 type DirectRelpServiceImpl struct {
 	StreamingService
-	RelpConfigs         []conf.DirectRelpSourceConfig
+	RelpConfigs         []conf.DirectRELPSourceConfig
 	kafkaConf           conf.KafkaDestConfig
 	status              RelpServerStatus
 	StatusChan          chan RelpServerStatus
@@ -173,7 +173,7 @@ type DirectRelpServiceImpl struct {
 	rawMessagesQueue    *tcp.Ring
 	parsedMessagesQueue *queue.MessageQueue
 	parsewg             sync.WaitGroup
-	configs             map[ulid.ULID]conf.DirectRelpSourceConfig
+	configs             map[ulid.ULID]conf.DirectRELPSourceConfig
 	forwarder           *ackForwarder
 }
 
@@ -181,7 +181,7 @@ func NewDirectRelpServiceImpl(confined bool, reporter base.Reporter, b *binder.B
 	s := DirectRelpServiceImpl{
 		status:    Stopped,
 		reporter:  reporter,
-		configs:   map[ulid.ULID]conf.DirectRelpSourceConfig{},
+		configs:   map[ulid.ULID]conf.DirectRELPSourceConfig{},
 		forwarder: newAckForwarder(),
 	}
 	s.StreamingService.init()
@@ -220,13 +220,13 @@ func (s *DirectRelpServiceImpl) Start() ([]model.ListenerInfo, error) {
 
 	s.parsedMessagesQueue = queue.NewMessageQueue()
 	s.rawMessagesQueue = tcp.NewRing(s.QueueSize)
-	s.configs = map[ulid.ULID]conf.DirectRelpSourceConfig{}
+	s.configs = map[ulid.ULID]conf.DirectRELPSourceConfig{}
 
 	for _, l := range s.UnixListeners {
-		s.configs[l.Conf.ConfID] = conf.DirectRelpSourceConfig(l.Conf)
+		s.configs[l.Conf.ConfID] = conf.DirectRELPSourceConfig(l.Conf)
 	}
 	for _, l := range s.TcpListeners {
-		s.configs[l.Conf.ConfID] = conf.DirectRelpSourceConfig(l.Conf)
+		s.configs[l.Conf.ConfID] = conf.DirectRELPSourceConfig(l.Conf)
 	}
 
 	s.wg.Add(1)
@@ -323,10 +323,10 @@ func (s *DirectRelpServiceImpl) doStop(final bool, wait bool) {
 	}
 }
 
-func (s *DirectRelpServiceImpl) SetConf(sc []conf.DirectRelpSourceConfig, pc []conf.ParserConfig, kc conf.KafkaDestConfig, queueSize uint64) {
-	tcpConfigs := []conf.TcpSourceConfig{}
+func (s *DirectRelpServiceImpl) SetConf(sc []conf.DirectRELPSourceConfig, pc []conf.ParserConfig, kc conf.KafkaDestConfig, queueSize uint64) {
+	tcpConfigs := []conf.TCPSourceConfig{}
 	for _, c := range sc {
-		tcpConfigs = append(tcpConfigs, conf.TcpSourceConfig(c))
+		tcpConfigs = append(tcpConfigs, conf.TCPSourceConfig(c))
 	}
 	s.StreamingService.SetConf(tcpConfigs, pc, queueSize, 132000)
 	s.kafkaConf = kc
@@ -540,7 +540,7 @@ func (s *DirectRelpServiceImpl) push2kafka() {
 	var kafkaMsg *sarama.ProducerMessage
 	var serialized []byte
 	var reported time.Time
-	var config conf.DirectRelpSourceConfig
+	var config conf.DirectRELPSourceConfig
 
 ForParsedChan:
 	for s.parsedMessagesQueue.Wait(0) {
@@ -643,9 +643,9 @@ type DirectRelpHandler struct {
 	Server *DirectRelpServiceImpl
 }
 
-func (h DirectRelpHandler) HandleConnection(conn net.Conn, c conf.TcpSourceConfig) {
+func (h DirectRelpHandler) HandleConnection(conn net.Conn, c conf.TCPSourceConfig) {
 	// http://www.rsyslog.com/doc/relp.html
-	config := conf.DirectRelpSourceConfig(c)
+	config := conf.DirectRELPSourceConfig(c)
 	s := h.Server
 	s.AddConnection(conn)
 	connID := s.forwarder.AddConn()

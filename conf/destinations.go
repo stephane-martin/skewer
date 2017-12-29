@@ -25,46 +25,46 @@ func (dests DestinationType) Iterate() (res []DestinationType) {
 
 const (
 	Kafka   DestinationType = 1
-	Udp                     = 2
-	Tcp                     = 4
-	Relp                    = 8
+	UDP                     = 2
+	TCP                     = 4
+	RELP                    = 8
 	File                    = 16
 	Stderr                  = 32
 	Graylog                 = 64
-	Http                    = 128
+	HTTP                    = 128
 )
 
 var Destinations = map[string]DestinationType{
 	"kafka":   Kafka,
-	"udp":     Udp,
-	"tcp":     Tcp,
-	"relp":    Relp,
+	"udp":     UDP,
+	"tcp":     TCP,
+	"relp":    RELP,
 	"file":    File,
 	"stderr":  Stderr,
 	"graylog": Graylog,
-	"http":    Http,
+	"http":    HTTP,
 }
 
 var DestinationNames = map[DestinationType]string{
 	Kafka:   "kafka",
-	Udp:     "udp",
-	Tcp:     "tcp",
-	Relp:    "relp",
+	UDP:     "udp",
+	TCP:     "tcp",
+	RELP:    "relp",
 	File:    "file",
 	Stderr:  "stderr",
 	Graylog: "graylog",
-	Http:    "http",
+	HTTP:    "http",
 }
 
 var RDestinations = map[DestinationType]byte{
 	Kafka:   'k',
-	Udp:     'u',
-	Tcp:     't',
-	Relp:    'r',
+	UDP:     'u',
+	TCP:     't',
+	RELP:    'r',
 	File:    'f',
 	Stderr:  's',
 	Graylog: 'g',
-	Http:    'h',
+	HTTP:    'h',
 }
 
 func (m *MainConfig) GetDestinations() (dests DestinationType, err error) {
@@ -85,19 +85,19 @@ func (m *MainConfig) GetDestinations() (dests DestinationType, err error) {
 
 func (c *BaseConfig) CheckDestinations() error {
 	// note that Graylog destination does not have a Format option
-	c.UdpDest.Format = strings.TrimSpace(strings.ToLower(c.UdpDest.Format))
-	c.TcpDest.Format = strings.TrimSpace(strings.ToLower(c.TcpDest.Format))
+	c.UDPDest.Format = strings.TrimSpace(strings.ToLower(c.UDPDest.Format))
+	c.TCPDest.Format = strings.TrimSpace(strings.ToLower(c.TCPDest.Format))
 	c.HTTPDest.Format = strings.TrimSpace(strings.ToLower(c.HTTPDest.Format))
-	c.RelpDest.Format = strings.TrimSpace(strings.ToLower(c.RelpDest.Format))
+	c.RELPDest.Format = strings.TrimSpace(strings.ToLower(c.RELPDest.Format))
 	c.KafkaDest.Format = strings.TrimSpace(strings.ToLower(c.KafkaDest.Format))
 	c.FileDest.Format = strings.TrimSpace(strings.ToLower(c.FileDest.Format))
 	c.StderrDest.Format = strings.TrimSpace(strings.ToLower(c.StderrDest.Format))
 
 	for _, frmt := range []string{
-		c.UdpDest.Format,
-		c.TcpDest.Format,
+		c.UDPDest.Format,
+		c.TCPDest.Format,
 		c.HTTPDest.Format,
-		c.RelpDest.Format,
+		c.RELPDest.Format,
 		c.KafkaDest.Format,
 		c.FileDest.Format,
 		c.StderrDest.Format,

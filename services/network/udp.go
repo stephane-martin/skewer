@@ -34,7 +34,7 @@ func initUdpRegistry() {
 
 type UdpServiceImpl struct {
 	base.BaseService
-	UdpConfigs     []conf.UdpSourceConfig
+	UdpConfigs     []conf.UDPSourceConfig
 	status         UdpServerStatus
 	stasher        base.Stasher
 	wg             sync.WaitGroup
@@ -49,7 +49,7 @@ func NewUdpService(stasher base.Stasher, b *binder.BinderClientImpl, l log15.Log
 	s := UdpServiceImpl{
 		status:     UdpStopped,
 		stasher:    stasher,
-		UdpConfigs: []conf.UdpSourceConfig{},
+		UdpConfigs: []conf.UDPSourceConfig{},
 	}
 	s.BaseService.Init()
 	s.BaseService.Logger = l.New("class", "UdpServer")
@@ -57,7 +57,7 @@ func NewUdpService(stasher base.Stasher, b *binder.BinderClientImpl, l log15.Log
 	return &s
 }
 
-func (s *UdpServiceImpl) SetConf(sc []conf.UdpSourceConfig, pc []conf.ParserConfig, queueSize uint64) {
+func (s *UdpServiceImpl) SetConf(sc []conf.UDPSourceConfig, pc []conf.ParserConfig, queueSize uint64) {
 	s.BaseService.Pool = &sync.Pool{New: func() interface{} {
 		return &model.RawUdpMessage{}
 	}}
@@ -250,7 +250,7 @@ func (s *UdpServiceImpl) ListenPacket() []model.ListenerInfo {
 	return udpinfos
 }
 
-func (s *UdpServiceImpl) handleConnection(conn net.PacketConn, config conf.UdpSourceConfig) {
+func (s *UdpServiceImpl) handleConnection(conn net.PacketConn, config conf.UDPSourceConfig) {
 	var localPort int
 	var localPortS string
 	var path string

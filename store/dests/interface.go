@@ -26,11 +26,11 @@ func NewDestination(
 	switch typ {
 	case conf.Kafka:
 		return NewKafkaDestination(ctx, confined, bc, ack, nack, permerr, logger)
-	case conf.Udp:
+	case conf.UDP:
 		return NewUdpDestination(ctx, confined, bc, ack, nack, permerr, logger)
-	case conf.Tcp:
+	case conf.TCP:
 		return NewTcpDestination(ctx, confined, bc, ack, nack, permerr, logger)
-	case conf.Relp:
+	case conf.RELP:
 		return NewRelpDestination(ctx, confined, bc, ack, nack, permerr, logger)
 	case conf.File:
 		return NewFileDestination(ctx, confined, bc, ack, nack, permerr, logger)
@@ -38,7 +38,7 @@ func NewDestination(
 		return NewStderrDestination(ctx, confined, bc, ack, nack, permerr, logger)
 	case conf.Graylog:
 		return NewGraylogDestination(ctx, confined, bc, ack, nack, permerr, logger)
-	case conf.Http:
+	case conf.HTTP:
 		return NewHTTPDestination(ctx, confined, bc, ack, nack, permerr, logger)
 	default:
 		return nil, fmt.Errorf("Unknown destination type: %d", typ)

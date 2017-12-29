@@ -130,7 +130,7 @@ func (s *TcpServiceImpl) Stop() {
 }
 
 // SetConf configures the TCP service
-func (s *TcpServiceImpl) SetConf(sc []conf.TcpSourceConfig, pc []conf.ParserConfig, queueSize uint64, messageSize int) {
+func (s *TcpServiceImpl) SetConf(sc []conf.TCPSourceConfig, pc []conf.ParserConfig, queueSize uint64, messageSize int) {
 	s.BaseService.Pool = &sync.Pool{New: func() interface{} {
 		return &model.RawTcpMessage{Message: make([]byte, messageSize)}
 	}}
@@ -207,7 +207,7 @@ type tcpHandler struct {
 	Server *TcpServiceImpl
 }
 
-func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TcpSourceConfig) {
+func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TCPSourceConfig) {
 	s := h.Server
 	s.AddConnection(conn)
 

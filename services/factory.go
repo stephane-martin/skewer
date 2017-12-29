@@ -106,16 +106,16 @@ func ConfigureAndStartService(s Provider, c conf.BaseConfig) ([]model.ListenerIn
 
 	switch s := s.(type) {
 	case *network.TcpServiceImpl:
-		s.SetConf(c.TcpSource, c.Parsers, c.Main.InputQueueSize, c.Main.MaxInputMessageSize)
+		s.SetConf(c.TCPSource, c.Parsers, c.Main.InputQueueSize, c.Main.MaxInputMessageSize)
 		return s.Start()
 	case *network.UdpServiceImpl:
-		s.SetConf(c.UdpSource, c.Parsers, c.Main.InputQueueSize)
+		s.SetConf(c.UDPSource, c.Parsers, c.Main.InputQueueSize)
 		return s.Start()
 	case *network.RelpService:
-		s.SetConf(c.RelpSource, c.Parsers, c.Main.InputQueueSize)
+		s.SetConf(c.RELPSource, c.Parsers, c.Main.InputQueueSize)
 		return s.Start()
 	case *network.DirectRelpService:
-		s.SetConf(c.DirectRelpSource, c.Parsers, c.KafkaDest, c.Main.InputQueueSize)
+		s.SetConf(c.DirectRELPSource, c.Parsers, c.KafkaDest, c.Main.InputQueueSize)
 		return s.Start()
 	case *network.GraylogSvcImpl:
 		s.SetConf(c.GraylogSource)

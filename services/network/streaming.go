@@ -12,23 +12,23 @@ import (
 )
 
 type StreamHandler interface {
-	HandleConnection(conn net.Conn, config conf.TcpSourceConfig)
+	HandleConnection(conn net.Conn, config conf.TCPSourceConfig)
 }
 
 type TCPListenerConf struct {
 	Listener net.Listener
 	Port     int
-	Conf     conf.TcpSourceConfig
+	Conf     conf.TCPSourceConfig
 }
 
 type UnixListenerConf struct {
 	Listener net.Listener
-	Conf     conf.TcpSourceConfig
+	Conf     conf.TCPSourceConfig
 }
 
 type StreamingService struct {
 	base.BaseService
-	TcpConfigs     []conf.TcpSourceConfig
+	TcpConfigs     []conf.TCPSourceConfig
 	TcpListeners   []TCPListenerConf
 	UnixListeners  []UnixListenerConf
 	handler        StreamHandler
@@ -42,7 +42,7 @@ func (s *StreamingService) init() {
 	s.BaseService.Init()
 	s.TcpListeners = []TCPListenerConf{}
 	s.UnixListeners = []UnixListenerConf{}
-	s.TcpConfigs = []conf.TcpSourceConfig{}
+	s.TcpConfigs = []conf.TCPSourceConfig{}
 }
 
 func (s *StreamingService) initTCPListeners() []model.ListenerInfo {
@@ -111,7 +111,7 @@ func (s *StreamingService) resetTCPListeners() {
 	}
 }
 
-func (s *StreamingService) handleConnection(conn net.Conn, config conf.TcpSourceConfig) {
+func (s *StreamingService) handleConnection(conn net.Conn, config conf.TCPSourceConfig) {
 	s.handler.HandleConnection(conn, config)
 }
 
@@ -216,7 +216,7 @@ func (s *StreamingService) Listen() {
 	}()
 }
 
-func (s *StreamingService) SetConf(sc []conf.TcpSourceConfig, pc []conf.ParserConfig, queueSize uint64, messageSize int) {
+func (s *StreamingService) SetConf(sc []conf.TCPSourceConfig, pc []conf.ParserConfig, queueSize uint64, messageSize int) {
 	s.MaxMessageSize = messageSize
 	s.BaseService.SetConf(pc, queueSize)
 	s.TcpConfigs = sc

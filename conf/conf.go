@@ -40,10 +40,10 @@ func (source BaseConfig) Clone() BaseConfig {
 func newBaseConf() BaseConfig {
 	brokers := []string{}
 	baseConf := BaseConfig{
-		TcpSource:        []TcpSourceConfig{},
-		UdpSource:        []UdpSourceConfig{},
-		RelpSource:       []RelpSourceConfig{},
-		DirectRelpSource: []DirectRelpSourceConfig{},
+		TCPSource:        []TCPSourceConfig{},
+		UDPSource:        []UDPSourceConfig{},
+		RELPSource:       []RELPSourceConfig{},
+		DirectRELPSource: []DirectRELPSourceConfig{},
 		GraylogSource:    []GraylogSourceConfig{},
 		KafkaSource:      []KafkaSourceConfig{},
 		Store:            StoreConfig{},
@@ -170,19 +170,19 @@ func (c *FilterSubConfig) CalculateID() []byte {
 	return fnv.New128a().Sum(c.Export())
 }
 
-func (c *TcpSourceConfig) SetConfID() {
+func (c *TCPSourceConfig) SetConfID() {
 	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
 }
 
-func (c *UdpSourceConfig) SetConfID() {
+func (c *UDPSourceConfig) SetConfID() {
 	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
 }
 
-func (c *RelpSourceConfig) SetConfID() {
+func (c *RELPSourceConfig) SetConfID() {
 	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
 }
 
-func (c *DirectRelpSourceConfig) SetConfID() {
+func (c *DirectRELPSourceConfig) SetConfID() {
 	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
 }
 
@@ -202,15 +202,15 @@ func (c *KafkaSourceConfig) SetConfID() {
 	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
 }
 
-func (c *TcpSourceConfig) GetClientAuthType() tls.ClientAuthType {
+func (c *TCPSourceConfig) GetClientAuthType() tls.ClientAuthType {
 	return convertClientAuthType(c.ClientAuthType)
 }
 
-func (c *RelpSourceConfig) GetClientAuthType() tls.ClientAuthType {
+func (c *RELPSourceConfig) GetClientAuthType() tls.ClientAuthType {
 	return convertClientAuthType(c.ClientAuthType)
 }
 
-func (c *DirectRelpSourceConfig) GetClientAuthType() tls.ClientAuthType {
+func (c *DirectRELPSourceConfig) GetClientAuthType() tls.ClientAuthType {
 	return convertClientAuthType(c.ClientAuthType)
 }
 
@@ -256,24 +256,24 @@ func (c *BaseConfig) GetCertificateFiles() (res map[string]([]string)) {
 	res = map[string]([]string){}
 	s := set.New(set.ThreadSafe)
 	s.Add(c.KafkaDest.CAFile, c.KafkaDest.CertFile, c.KafkaDest.KeyFile)
-	s.Add(c.RelpDest.CAFile, c.RelpDest.CertFile, c.RelpDest.KeyFile)
-	s.Add(c.TcpDest.CAFile, c.TcpDest.CertFile, c.TcpDest.KeyFile)
+	s.Add(c.RELPDest.CAFile, c.RELPDest.CertFile, c.RELPDest.KeyFile)
+	s.Add(c.TCPDest.CAFile, c.TCPDest.CertFile, c.TCPDest.KeyFile)
 	res["dests"] = cleanList(s)
 
 	s = set.New(set.ThreadSafe)
-	for _, src := range c.TcpSource {
+	for _, src := range c.TCPSource {
 		s.Add(src.CAFile, src.CertFile, src.KeyFile)
 	}
 	res["tcpsource"] = cleanList(s)
 
 	s = set.New(set.ThreadSafe)
-	for _, src := range c.RelpSource {
+	for _, src := range c.RELPSource {
 		s.Add(src.CAFile, src.CertFile, src.KeyFile)
 	}
 	res["relpsource"] = cleanList(s)
 
 	s = set.New(set.ThreadSafe)
-	for _, src := range c.DirectRelpSource {
+	for _, src := range c.DirectRELPSource {
 		s.Add(src.CAFile, src.CertFile, src.KeyFile)
 	}
 	res["directrelpsource"] = cleanList(s)
@@ -292,24 +292,24 @@ func (c *BaseConfig) GetCertificatePaths() (res map[string]([]string)) {
 	res = map[string]([]string){}
 	s := set.New(set.ThreadSafe)
 	s.Add(c.KafkaDest.CAPath)
-	s.Add(c.RelpDest.CAPath)
-	s.Add(c.TcpDest.CAPath)
+	s.Add(c.RELPDest.CAPath)
+	s.Add(c.TCPDest.CAPath)
 	res["dests"] = cleanList(s)
 
 	s = set.New(set.ThreadSafe)
-	for _, src := range c.TcpSource {
+	for _, src := range c.TCPSource {
 		s.Add(src.CAPath)
 	}
 	res["tcpsource"] = cleanList(s)
 
 	s = set.New(set.ThreadSafe)
-	for _, src := range c.RelpSource {
+	for _, src := range c.RELPSource {
 		s.Add(src.CAPath)
 	}
 	res["relpsource"] = cleanList(s)
 
 	s = set.New(set.ThreadSafe)
-	for _, src := range c.DirectRelpSource {
+	for _, src := range c.DirectRELPSource {
 		s.Add(src.CAPath)
 	}
 	res["directrelpsource"] = cleanList(s)
@@ -346,12 +346,12 @@ func (c *SyslogSourceBaseConfig) GetListenAddrs() (addrs map[int]string, err err
 	return
 }
 
-func (c *TcpSourceConfig) Export() []byte {
+func (c *TCPSourceConfig) Export() []byte {
 	b, _ := json.Marshal(c)
 	return b
 }
 
-func (c *UdpSourceConfig) Export() []byte {
+func (c *UDPSourceConfig) Export() []byte {
 	b, _ := json.Marshal(c)
 	return b
 }
@@ -361,12 +361,12 @@ func (c *GraylogSourceConfig) Export() []byte {
 	return b
 }
 
-func (c *RelpSourceConfig) Export() []byte {
+func (c *RELPSourceConfig) Export() []byte {
 	b, _ := json.Marshal(c)
 	return b
 }
 
-func (c *DirectRelpSourceConfig) Export() []byte {
+func (c *DirectRELPSourceConfig) Export() []byte {
 	b, _ := json.Marshal(c)
 	return b
 }
@@ -746,13 +746,13 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 
 	var vi *viper.Viper
 
-	tcpSourceConfs := []TcpSourceConfig{}
+	tcpSourceConfs := []TCPSourceConfig{}
 	for _, syslogConf := range rawTcpSourceConf {
 		vi = viper.New()
 		for k, v := range syslogConf {
 			vi.Set(k, v)
 		}
-		sconf := TcpSourceConfig{}
+		sconf := TCPSourceConfig{}
 		err := vi.Unmarshal(&sconf)
 		if err == nil {
 			tcpSourceConfs = append(tcpSourceConfs, sconf)
@@ -761,13 +761,13 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 		}
 	}
 
-	udpSourceConfs := []UdpSourceConfig{}
+	udpSourceConfs := []UDPSourceConfig{}
 	for _, syslogConf := range rawUdpSourceConf {
 		vi = viper.New()
 		for k, v := range syslogConf {
 			vi.Set(k, v)
 		}
-		sconf := UdpSourceConfig{}
+		sconf := UDPSourceConfig{}
 		err := vi.Unmarshal(&sconf)
 		if err == nil {
 			udpSourceConfs = append(udpSourceConfs, sconf)
@@ -776,13 +776,13 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 		}
 	}
 
-	relpSourceConfs := []RelpSourceConfig{}
+	relpSourceConfs := []RELPSourceConfig{}
 	for _, syslogConf := range rawRelpSourceConf {
 		vi = viper.New()
 		for k, v := range syslogConf {
 			vi.Set(k, v)
 		}
-		sconf := RelpSourceConfig{}
+		sconf := RELPSourceConfig{}
 		err := vi.Unmarshal(&sconf)
 		if err == nil {
 			relpSourceConfs = append(relpSourceConfs, sconf)
@@ -889,9 +889,9 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 		}
 		c.Main = mainConf
 	}
-	c.TcpSource = append(c.TcpSource, tcpSourceConfs...)
-	c.UdpSource = append(c.UdpSource, udpSourceConfs...)
-	c.RelpSource = append(c.RelpSource, relpSourceConfs...)
+	c.TCPSource = append(c.TCPSource, tcpSourceConfs...)
+	c.UDPSource = append(c.UDPSource, udpSourceConfs...)
+	c.RELPSource = append(c.RELPSource, relpSourceConfs...)
 	c.Parsers = append(c.Parsers, parsersConf...)
 
 	return nil
@@ -944,26 +944,26 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 	}
 
 	syslogConfs := []SyslogSourceConfig{}
-	for i := range c.TcpSource {
-		syslogConfs = append(syslogConfs, &c.TcpSource[i])
+	for i := range c.TCPSource {
+		syslogConfs = append(syslogConfs, &c.TCPSource[i])
 	}
-	for i := range c.UdpSource {
-		syslogConfs = append(syslogConfs, &c.UdpSource[i])
+	for i := range c.UDPSource {
+		syslogConfs = append(syslogConfs, &c.UDPSource[i])
 	}
-	for i := range c.RelpSource {
-		syslogConfs = append(syslogConfs, &c.RelpSource[i])
+	for i := range c.RELPSource {
+		syslogConfs = append(syslogConfs, &c.RELPSource[i])
 	}
-	for i := range c.DirectRelpSource {
-		syslogConfs = append(syslogConfs, &c.DirectRelpSource[i])
+	for i := range c.DirectRELPSource {
+		syslogConfs = append(syslogConfs, &c.DirectRELPSource[i])
 	}
 	for i := range c.GraylogSource {
 		syslogConfs = append(syslogConfs, &c.GraylogSource[i])
 	}
 
 	// set default values for TCP, UDP, Graylog and RELP sources.
-	for i := range c.TcpSource {
-		if len(c.TcpSource[i].FrameDelimiter) == 0 {
-			c.TcpSource[i].FrameDelimiter = "\n"
+	for i := range c.TCPSource {
+		if len(c.TCPSource[i].FrameDelimiter) == 0 {
+			c.TCPSource[i].FrameDelimiter = "\n"
 		}
 	}
 

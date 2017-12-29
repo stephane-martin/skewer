@@ -206,7 +206,7 @@ type RelpService struct {
 	logger         log15.Logger
 	reporter       base.Reporter
 	b              *binder.BinderClientImpl
-	sc             []conf.RelpSourceConfig
+	sc             []conf.RELPSourceConfig
 	pc             []conf.ParserConfig
 	wg             sync.WaitGroup
 	confined       bool
@@ -308,7 +308,7 @@ func (s *RelpService) Stop() {
 	s.wg.Wait()
 }
 
-func (s *RelpService) SetConf(sc []conf.RelpSourceConfig, pc []conf.ParserConfig, queueSize uint64) {
+func (s *RelpService) SetConf(sc []conf.RELPSourceConfig, pc []conf.ParserConfig, queueSize uint64) {
 	s.sc = sc
 	s.pc = pc
 	s.QueueSize = queueSize
@@ -316,13 +316,13 @@ func (s *RelpService) SetConf(sc []conf.RelpSourceConfig, pc []conf.ParserConfig
 
 type RelpServiceImpl struct {
 	StreamingService
-	RelpConfigs      []conf.RelpSourceConfig
+	RelpConfigs      []conf.RELPSourceConfig
 	status           RelpServerStatus
 	StatusChan       chan RelpServerStatus
 	reporter         base.Reporter
 	rawMessagesQueue *tcp.Ring
 	parsewg          sync.WaitGroup
-	configs          map[ulid.ULID]conf.RelpSourceConfig
+	configs          map[ulid.ULID]conf.RELPSourceConfig
 	forwarder        *ackForwarder
 }
 
@@ -330,7 +330,7 @@ func NewRelpServiceImpl(confined bool, reporter base.Reporter, b *binder.BinderC
 	s := RelpServiceImpl{
 		status:    Stopped,
 		reporter:  reporter,
-		configs:   map[ulid.ULID]conf.RelpSourceConfig{},
+		configs:   map[ulid.ULID]conf.RELPSourceConfig{},
 		forwarder: newAckForwarder(),
 	}
 	s.StreamingService.init()
@@ -361,13 +361,13 @@ func (s *RelpServiceImpl) Start() ([]model.ListenerInfo, error) {
 	s.Logger.Info("Listening on RELP", "nb_services", len(infos))
 
 	s.rawMessagesQueue = tcp.NewRing(s.QueueSize)
-	s.configs = map[ulid.ULID]conf.RelpSourceConfig{}
+	s.configs = map[ulid.ULID]conf.RELPSourceConfig{}
 
 	for _, l := range s.UnixListeners {
-		s.configs[l.Conf.ConfID] = conf.RelpSourceConfig(l.Conf)
+		s.configs[l.Conf.ConfID] = conf.RELPSourceConfig(l.Conf)
 	}
 	for _, l := range s.TcpListeners {
-		s.configs[l.Conf.ConfID] = conf.RelpSourceConfig(l.Conf)
+		s.configs[l.Conf.ConfID] = conf.RELPSourceConfig(l.Conf)
 	}
 
 	cpus := runtime.NumCPU()
@@ -456,10 +456,10 @@ func (s *RelpServiceImpl) doStop(final bool, wait bool) {
 	}
 }
 
-func (s *RelpServiceImpl) SetConf(sc []conf.RelpSourceConfig, pc []conf.ParserConfig, queueSize uint64) {
-	tcpConfigs := []conf.TcpSourceConfig{}
+func (s *RelpServiceImpl) SetConf(sc []conf.RELPSourceConfig, pc []conf.ParserConfig, queueSize uint64) {
+	tcpConfigs := []conf.TCPSourceConfig{}
 	for _, c := range sc {
-		tcpConfigs = append(tcpConfigs, conf.TcpSourceConfig(c))
+		tcpConfigs = append(tcpConfigs, conf.TCPSourceConfig(c))
 	}
 	s.StreamingService.SetConf(tcpConfigs, pc, queueSize, 132000)
 	s.BaseService.Pool = &sync.Pool{New: func() interface{} {
@@ -631,9 +631,9 @@ type RelpHandler struct {
 	Server *RelpServiceImpl
 }
 
-func (h RelpHandler) HandleConnection(conn net.Conn, c conf.TcpSourceConfig) {
+func (h RelpHandler) HandleConnection(conn net.Conn, c conf.TCPSourceConfig) {
 	// http://www.rsyslog.com/doc/relp.html
-	config := conf.RelpSourceConfig(c)
+	config := conf.RELPSourceConfig(c)
 	s := h.Server
 	s.AddConnection(conn)
 	connID := s.forwarder.AddConn()

@@ -28,25 +28,25 @@ type tcpDestination struct {
 
 func NewTcpDestination(ctx context.Context, cfnd bool, bc conf.BaseConfig, ack, nack, permerr storeCallback, l log15.Logger) (dest Destination, err error) {
 	clt := clients.NewSyslogTCPClient(l).
-		Host(bc.TcpDest.Host).
-		Port(bc.TcpDest.Port).
-		Path(bc.TcpDest.UnixSocketPath).
-		Format(bc.TcpDest.Format).
-		KeepAlive(bc.TcpDest.KeepAlive).
-		KeepAlivePeriod(bc.TcpDest.KeepAlivePeriod).
-		LineFraming(bc.TcpDest.LineFraming).
-		FrameDelimiter(bc.TcpDest.FrameDelimiter).
-		ConnTimeout(bc.TcpDest.ConnTimeout).
-		FlushPeriod(bc.TcpDest.FlushPeriod)
+		Host(bc.TCPDest.Host).
+		Port(bc.TCPDest.Port).
+		Path(bc.TCPDest.UnixSocketPath).
+		Format(bc.TCPDest.Format).
+		KeepAlive(bc.TCPDest.KeepAlive).
+		KeepAlivePeriod(bc.TCPDest.KeepAlivePeriod).
+		LineFraming(bc.TCPDest.LineFraming).
+		FrameDelimiter(bc.TCPDest.FrameDelimiter).
+		ConnTimeout(bc.TCPDest.ConnTimeout).
+		FlushPeriod(bc.TCPDest.FlushPeriod)
 
-	if bc.TcpDest.TLSEnabled {
+	if bc.TCPDest.TLSEnabled {
 		config, err := utils.NewTLSConfig(
-			bc.TcpDest.Host,
-			bc.TcpDest.CAFile,
-			bc.TcpDest.CAPath,
-			bc.TcpDest.CertFile,
-			bc.TcpDest.KeyFile,
-			bc.TcpDest.Insecure,
+			bc.TCPDest.Host,
+			bc.TCPDest.CAFile,
+			bc.TCPDest.CAPath,
+			bc.TCPDest.CertFile,
+			bc.TCPDest.KeyFile,
+			bc.TCPDest.Insecure,
 			cfnd,
 		)
 		if err != nil {
@@ -71,7 +71,7 @@ func NewTcpDestination(ctx context.Context, cfnd bool, bc conf.BaseConfig, ack, 
 		clt:     clt,
 	}
 
-	rebind := bc.TcpDest.Rebind
+	rebind := bc.TCPDest.Rebind
 	if rebind > 0 {
 		go func() {
 			select {
@@ -92,19 +92,19 @@ func (d *tcpDestination) Send(message model.FullMessage, partitionKey string, pa
 	if err == nil {
 		if d.previousUid != utils.ZeroUid {
 			ackCounter.WithLabelValues("tcp", "ack", "").Inc()
-			d.ack(d.previousUid, conf.Tcp)
+			d.ack(d.previousUid, conf.TCP)
 		}
 		d.previousUid = message.Uid
 	} else if model.IsEncodingError(err) {
 		ackCounter.WithLabelValues("tcp", "permerr", "").Inc()
-		d.permerr(message.Uid, conf.Tcp)
+		d.permerr(message.Uid, conf.TCP)
 	} else {
 		// error writing to the TCP conn
 		ackCounter.WithLabelValues("tcp", "nack", "").Inc()
-		d.nack(message.Uid, conf.Tcp)
+		d.nack(message.Uid, conf.TCP)
 		if d.previousUid != utils.ZeroUid {
 			ackCounter.WithLabelValues("tcp", "nack", "").Inc()
-			d.nack(d.previousUid, conf.Tcp)
+			d.nack(d.previousUid, conf.TCP)
 			d.previousUid = utils.ZeroUid
 		}
 		fatalCounter.WithLabelValues("tcp").Inc()

@@ -26,25 +26,25 @@ type relpDestination struct {
 
 func NewRelpDestination(ctx context.Context, confined bool, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (dest Destination, err error) {
 	clt := clients.NewRELPClient(logger).
-		Host(bc.RelpDest.Host).
-		Port(bc.RelpDest.Port).
-		Path(bc.RelpDest.UnixSocketPath).
-		Format(bc.RelpDest.Format).
-		KeepAlive(bc.RelpDest.KeepAlive).
-		KeepAlivePeriod(bc.RelpDest.KeepAlivePeriod).
-		ConnTimeout(bc.RelpDest.ConnTimeout).
-		RelpTimeout(bc.RelpDest.RelpTimeout).
-		WindowSize(bc.RelpDest.WindowSize).
-		FlushPeriod(bc.RelpDest.FlushPeriod)
+		Host(bc.RELPDest.Host).
+		Port(bc.RELPDest.Port).
+		Path(bc.RELPDest.UnixSocketPath).
+		Format(bc.RELPDest.Format).
+		KeepAlive(bc.RELPDest.KeepAlive).
+		KeepAlivePeriod(bc.RELPDest.KeepAlivePeriod).
+		ConnTimeout(bc.RELPDest.ConnTimeout).
+		RelpTimeout(bc.RELPDest.RelpTimeout).
+		WindowSize(bc.RELPDest.WindowSize).
+		FlushPeriod(bc.RELPDest.FlushPeriod)
 
-	if bc.RelpDest.TLSEnabled {
+	if bc.RELPDest.TLSEnabled {
 		config, err := utils.NewTLSConfig(
-			bc.RelpDest.Host,
-			bc.RelpDest.CAFile,
-			bc.RelpDest.CAPath,
-			bc.RelpDest.CertFile,
-			bc.RelpDest.KeyFile,
-			bc.RelpDest.Insecure,
+			bc.RELPDest.Host,
+			bc.RELPDest.CAFile,
+			bc.RELPDest.CAPath,
+			bc.RELPDest.CertFile,
+			bc.RELPDest.KeyFile,
+			bc.RELPDest.Insecure,
 			confined,
 		)
 		if err != nil {
@@ -69,7 +69,7 @@ func NewRelpDestination(ctx context.Context, confined bool, bc conf.BaseConfig, 
 		client:  clt,
 	}
 
-	rebind := bc.RelpDest.Rebind
+	rebind := bc.RELPDest.Rebind
 	if rebind > 0 {
 		go func() {
 			select {
@@ -94,7 +94,7 @@ func NewRelpDestination(ctx context.Context, confined bool, bc conf.BaseConfig, 
 				if err != nil {
 					break
 				}
-				d.ack(uid, conf.Relp)
+				d.ack(uid, conf.RELP)
 				ackCounter.WithLabelValues("relp", "ack", "").Inc()
 			}
 			for {
@@ -102,7 +102,7 @@ func NewRelpDestination(ctx context.Context, confined bool, bc conf.BaseConfig, 
 				if err != nil {
 					break
 				}
-				d.nack(uid, conf.Relp)
+				d.nack(uid, conf.RELP)
 				d.logger.Info("RELP server returned a NACK", "uid", uid.String())
 				ackCounter.WithLabelValues("relp", "nack", "").Inc()
 				fatalCounter.WithLabelValues("relp").Inc()
@@ -120,7 +120,7 @@ func (d *relpDestination) Send(message model.FullMessage, partitionKey string, p
 		// the client send queue has been disposed
 		ackCounter.WithLabelValues("relp", "nack", "").Inc()
 		fatalCounter.WithLabelValues("relp").Inc()
-		d.nack(message.Uid, conf.Relp)
+		d.nack(message.Uid, conf.RELP)
 		d.once.Do(func() { close(d.fatal) })
 	}
 	return

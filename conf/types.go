@@ -12,10 +12,10 @@ import (
 
 // BaseConfig is the root of all configuration parameters.
 type BaseConfig struct {
-	TcpSource        []TcpSourceConfig        `mapstructure:"tcp_source" toml:"tcp_source" json:"tcp_source"`
-	UdpSource        []UdpSourceConfig        `mapstructure:"udp_source" toml:"udp_source" json:"udp_source"`
-	RelpSource       []RelpSourceConfig       `mapstructure:"relp_source" toml:"relp_source" json:"relp_source"`
-	DirectRelpSource []DirectRelpSourceConfig `mapstructure:"directrelp_source" toml:"directrelp_source" json:"directrelp_source"`
+	TCPSource        []TCPSourceConfig        `mapstructure:"tcp_source" toml:"tcp_source" json:"tcp_source"`
+	UDPSource        []UDPSourceConfig        `mapstructure:"udp_source" toml:"udp_source" json:"udp_source"`
+	RELPSource       []RELPSourceConfig       `mapstructure:"relp_source" toml:"relp_source" json:"relp_source"`
+	DirectRELPSource []DirectRELPSourceConfig `mapstructure:"directrelp_source" toml:"directrelp_source" json:"directrelp_source"`
 	KafkaSource      []KafkaSourceConfig      `mapstructure:"kafka_source" toml:"kafka_source" json:"kafka_source"`
 	GraylogSource    []GraylogSourceConfig    `mapstructure:"graylog_source" toml:"graylog_source" json:"graylog_source"`
 	Store            StoreConfig              `mapstructure:"store" toml:"store" json:"store"`
@@ -25,10 +25,10 @@ type BaseConfig struct {
 	Accounting       AccountingConfig         `mapstructure:"accounting" toml:"accounting" json:"accounting"`
 	Main             MainConfig               `mapstructure:"main" toml:"main" json:"main"`
 	KafkaDest        KafkaDestConfig          `mapstructure:"kafka_destination" toml:"kafka_destination" json:"kafka_destination"`
-	UdpDest          UdpDestConfig            `mapstructure:"udp_destination" toml:"udp_destination" json:"udp_destination"`
-	TcpDest          TcpDestConfig            `mapstructure:"tcp_destination" toml:"tcp_destination" json:"tcp_destination"`
+	UDPDest          UDPDestConfig            `mapstructure:"udp_destination" toml:"udp_destination" json:"udp_destination"`
+	TCPDest          TCPDestConfig            `mapstructure:"tcp_destination" toml:"tcp_destination" json:"tcp_destination"`
 	HTTPDest         HTTPDestConfig           `mapstructure:"http_destination" toml:"http_destination" json:"http_destination"`
-	RelpDest         RelpDestConfig           `mapstructure:"relp_destination" toml:"relp_destination" json:"relp_destination"`
+	RELPDest         RELPDestConfig           `mapstructure:"relp_destination" toml:"relp_destination" json:"relp_destination"`
 	FileDest         FileDestConfig           `mapstructure:"file_destination" toml:"file_destination" json:"file_destination"`
 	StderrDest       StderrDestConfig         `mapstructure:"stderr_destination" toml:"stderr_destination" json:"stderr_destination"`
 	GraylogDest      GraylogDestConfig        `mapstructure:"graylog_destination" toml:"graylog_destination" json:"graylog_destination"`
@@ -200,11 +200,11 @@ type TcpUdpRelpDestBaseConfig struct {
 	Format         string        `mapstructure:"format" toml:"format" json:"format"`
 }
 
-type UdpDestConfig struct {
+type UDPDestConfig struct {
 	TcpUdpRelpDestBaseConfig `mapstructure:",squash"`
 }
 
-type RelpDestConfig struct {
+type RELPDestConfig struct {
 	TcpUdpRelpDestBaseConfig `mapstructure:",squash"`
 	TlsBaseConfig            `mapstructure:",squash"`
 	Insecure                 bool          `mapstructure:"insecure" toml:"insecure" json:"insecure"`
@@ -217,7 +217,7 @@ type RelpDestConfig struct {
 	RelpTimeout time.Duration `mapstructure:"relp_timeout" toml:"relp_timeout" json:"relp_timeout"`
 }
 
-type TcpDestConfig struct {
+type TCPDestConfig struct {
 	TcpUdpRelpDestBaseConfig `mapstructure:",squash"`
 	TlsBaseConfig            `mapstructure:",squash"`
 	Insecure                 bool          `mapstructure:"insecure" toml:"insecure" json:"insecure"`
@@ -290,7 +290,7 @@ type AccountingConfig struct {
 	Enabled         bool          `mapstructure:"enabled" toml:"enabled" json:"enabled"`
 }
 
-type TcpSourceConfig struct {
+type TCPSourceConfig struct {
 	SyslogSourceBaseConfig `mapstructure:",squash"`
 	FilterSubConfig        `mapstructure:",squash"`
 	TlsBaseConfig          `mapstructure:",squash"`
@@ -300,33 +300,33 @@ type TcpSourceConfig struct {
 	ConfID                 ulid.ULID `mapstructure:"-" toml:"-" json:"conf_id"`
 }
 
-func (c *TcpSourceConfig) GetFilterConf() *FilterSubConfig {
+func (c *TCPSourceConfig) GetFilterConf() *FilterSubConfig {
 	return &c.FilterSubConfig
 }
 
-func (c *TcpSourceConfig) GetSyslogConf() *SyslogSourceBaseConfig {
+func (c *TCPSourceConfig) GetSyslogConf() *SyslogSourceBaseConfig {
 	return &c.SyslogSourceBaseConfig
 }
 
-func (c *TcpSourceConfig) DefaultPort() int {
+func (c *TCPSourceConfig) DefaultPort() int {
 	return 1514
 }
 
-type UdpSourceConfig struct {
+type UDPSourceConfig struct {
 	SyslogSourceBaseConfig `mapstructure:",squash"`
 	FilterSubConfig        `mapstructure:",squash"`
 	ConfID                 ulid.ULID `mapstructure:"-" toml:"-" json:"conf_id"`
 }
 
-func (c *UdpSourceConfig) GetFilterConf() *FilterSubConfig {
+func (c *UDPSourceConfig) GetFilterConf() *FilterSubConfig {
 	return &c.FilterSubConfig
 }
 
-func (c *UdpSourceConfig) GetSyslogConf() *SyslogSourceBaseConfig {
+func (c *UDPSourceConfig) GetSyslogConf() *SyslogSourceBaseConfig {
 	return &c.SyslogSourceBaseConfig
 }
 
-func (c *UdpSourceConfig) DefaultPort() int {
+func (c *UDPSourceConfig) DefaultPort() int {
 	return 1514
 }
 
@@ -348,7 +348,7 @@ func (c *GraylogSourceConfig) DefaultPort() int {
 	return 12201
 }
 
-type RelpSourceConfig struct {
+type RELPSourceConfig struct {
 	SyslogSourceBaseConfig `mapstructure:",squash"`
 	FilterSubConfig        `mapstructure:",squash"`
 	TlsBaseConfig          `mapstructure:",squash"`
@@ -358,19 +358,19 @@ type RelpSourceConfig struct {
 	ConfID                 ulid.ULID `mapstructure:"-" toml:"-" json:"conf_id"`
 }
 
-func (c *RelpSourceConfig) GetFilterConf() *FilterSubConfig {
+func (c *RELPSourceConfig) GetFilterConf() *FilterSubConfig {
 	return &c.FilterSubConfig
 }
 
-func (c *RelpSourceConfig) GetSyslogConf() *SyslogSourceBaseConfig {
+func (c *RELPSourceConfig) GetSyslogConf() *SyslogSourceBaseConfig {
 	return &c.SyslogSourceBaseConfig
 }
 
-func (c *RelpSourceConfig) DefaultPort() int {
+func (c *RELPSourceConfig) DefaultPort() int {
 	return 2514
 }
 
-type DirectRelpSourceConfig struct {
+type DirectRELPSourceConfig struct {
 	SyslogSourceBaseConfig `mapstructure:",squash"`
 	FilterSubConfig        `mapstructure:",squash"`
 	TlsBaseConfig          `mapstructure:",squash"`
@@ -380,15 +380,15 @@ type DirectRelpSourceConfig struct {
 	ConfID                 ulid.ULID `mapstructure:"-" toml:"-" json:"conf_id"`
 }
 
-func (c *DirectRelpSourceConfig) GetFilterConf() *FilterSubConfig {
+func (c *DirectRELPSourceConfig) GetFilterConf() *FilterSubConfig {
 	return &c.FilterSubConfig
 }
 
-func (c *DirectRelpSourceConfig) GetSyslogConf() *SyslogSourceBaseConfig {
+func (c *DirectRELPSourceConfig) GetSyslogConf() *SyslogSourceBaseConfig {
 	return &c.SyslogSourceBaseConfig
 }
 
-func (c *DirectRelpSourceConfig) DefaultPort() int {
+func (c *DirectRELPSourceConfig) DefaultPort() int {
 	return 3514
 }
 

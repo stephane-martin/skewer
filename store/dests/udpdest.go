@@ -23,10 +23,10 @@ type udpDestination struct {
 
 func NewUdpDestination(ctx context.Context, confined bool, bc conf.BaseConfig, ack, nack, permerr storeCallback, logger log15.Logger) (dest Destination, err error) {
 	client := clients.NewSyslogUDPClient(logger).
-		Host(bc.UdpDest.Host).
-		Port(bc.UdpDest.Port).
-		Path(bc.UdpDest.UnixSocketPath).
-		Format(bc.UdpDest.Format)
+		Host(bc.UDPDest.Host).
+		Port(bc.UDPDest.Port).
+		Path(bc.UDPDest.UnixSocketPath).
+		Format(bc.UDPDest.Format)
 
 	err = client.Connect()
 	if err != nil {
@@ -44,7 +44,7 @@ func NewUdpDestination(ctx context.Context, confined bool, bc conf.BaseConfig, a
 		client:  client,
 	}
 
-	rebind := bc.UdpDest.Rebind
+	rebind := bc.UDPDest.Rebind
 	if rebind > 0 {
 		go func() {
 			select {
@@ -63,17 +63,17 @@ func (d *udpDestination) Send(message model.FullMessage, partitionKey string, pa
 	err = d.client.Send(&message)
 	if err == nil {
 		ackCounter.WithLabelValues("udp", "ack", "").Inc()
-		d.ack(message.Uid, conf.Udp)
+		d.ack(message.Uid, conf.UDP)
 		return nil
 	} else if model.IsEncodingError(err) {
 		ackCounter.WithLabelValues("udp", "permerr", "").Inc()
-		d.permerr(message.Uid, conf.Udp)
+		d.permerr(message.Uid, conf.UDP)
 		return err
 	} else {
 		// error writing to the UDP conn
 		ackCounter.WithLabelValues("udp", "nack", "").Inc()
 		fatalCounter.WithLabelValues("udp").Inc()
-		d.nack(message.Uid, conf.Udp)
+		d.nack(message.Uid, conf.UDP)
 		d.once.Do(func() { close(d.fatal) })
 		return err
 	}

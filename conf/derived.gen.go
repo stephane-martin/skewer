@@ -11,77 +11,77 @@ func deriveCloneBaseConfig(src BaseConfig) BaseConfig {
 
 // deriveDeepCopy recursively copies the contents of src into dst.
 func deriveDeepCopy(dst, src *BaseConfig) {
-	if src.TcpSource == nil {
-		dst.TcpSource = nil
+	if src.TCPSource == nil {
+		dst.TCPSource = nil
 	} else {
-		if dst.TcpSource != nil {
-			if len(src.TcpSource) > len(dst.TcpSource) {
-				if cap(dst.TcpSource) >= len(src.TcpSource) {
-					dst.TcpSource = (dst.TcpSource)[:len(src.TcpSource)]
+		if dst.TCPSource != nil {
+			if len(src.TCPSource) > len(dst.TCPSource) {
+				if cap(dst.TCPSource) >= len(src.TCPSource) {
+					dst.TCPSource = (dst.TCPSource)[:len(src.TCPSource)]
 				} else {
-					dst.TcpSource = make([]TcpSourceConfig, len(src.TcpSource))
+					dst.TCPSource = make([]TCPSourceConfig, len(src.TCPSource))
 				}
-			} else if len(src.TcpSource) < len(dst.TcpSource) {
-				dst.TcpSource = (dst.TcpSource)[:len(src.TcpSource)]
+			} else if len(src.TCPSource) < len(dst.TCPSource) {
+				dst.TCPSource = (dst.TCPSource)[:len(src.TCPSource)]
 			}
 		} else {
-			dst.TcpSource = make([]TcpSourceConfig, len(src.TcpSource))
+			dst.TCPSource = make([]TCPSourceConfig, len(src.TCPSource))
 		}
-		deriveDeepCopy_(dst.TcpSource, src.TcpSource)
+		deriveDeepCopy_(dst.TCPSource, src.TCPSource)
 	}
-	if src.UdpSource == nil {
-		dst.UdpSource = nil
+	if src.UDPSource == nil {
+		dst.UDPSource = nil
 	} else {
-		if dst.UdpSource != nil {
-			if len(src.UdpSource) > len(dst.UdpSource) {
-				if cap(dst.UdpSource) >= len(src.UdpSource) {
-					dst.UdpSource = (dst.UdpSource)[:len(src.UdpSource)]
+		if dst.UDPSource != nil {
+			if len(src.UDPSource) > len(dst.UDPSource) {
+				if cap(dst.UDPSource) >= len(src.UDPSource) {
+					dst.UDPSource = (dst.UDPSource)[:len(src.UDPSource)]
 				} else {
-					dst.UdpSource = make([]UdpSourceConfig, len(src.UdpSource))
+					dst.UDPSource = make([]UDPSourceConfig, len(src.UDPSource))
 				}
-			} else if len(src.UdpSource) < len(dst.UdpSource) {
-				dst.UdpSource = (dst.UdpSource)[:len(src.UdpSource)]
+			} else if len(src.UDPSource) < len(dst.UDPSource) {
+				dst.UDPSource = (dst.UDPSource)[:len(src.UDPSource)]
 			}
 		} else {
-			dst.UdpSource = make([]UdpSourceConfig, len(src.UdpSource))
+			dst.UDPSource = make([]UDPSourceConfig, len(src.UDPSource))
 		}
-		deriveDeepCopy_1(dst.UdpSource, src.UdpSource)
+		deriveDeepCopy_1(dst.UDPSource, src.UDPSource)
 	}
-	if src.RelpSource == nil {
-		dst.RelpSource = nil
+	if src.RELPSource == nil {
+		dst.RELPSource = nil
 	} else {
-		if dst.RelpSource != nil {
-			if len(src.RelpSource) > len(dst.RelpSource) {
-				if cap(dst.RelpSource) >= len(src.RelpSource) {
-					dst.RelpSource = (dst.RelpSource)[:len(src.RelpSource)]
+		if dst.RELPSource != nil {
+			if len(src.RELPSource) > len(dst.RELPSource) {
+				if cap(dst.RELPSource) >= len(src.RELPSource) {
+					dst.RELPSource = (dst.RELPSource)[:len(src.RELPSource)]
 				} else {
-					dst.RelpSource = make([]RelpSourceConfig, len(src.RelpSource))
+					dst.RELPSource = make([]RELPSourceConfig, len(src.RELPSource))
 				}
-			} else if len(src.RelpSource) < len(dst.RelpSource) {
-				dst.RelpSource = (dst.RelpSource)[:len(src.RelpSource)]
+			} else if len(src.RELPSource) < len(dst.RELPSource) {
+				dst.RELPSource = (dst.RELPSource)[:len(src.RELPSource)]
 			}
 		} else {
-			dst.RelpSource = make([]RelpSourceConfig, len(src.RelpSource))
+			dst.RELPSource = make([]RELPSourceConfig, len(src.RELPSource))
 		}
-		deriveDeepCopy_2(dst.RelpSource, src.RelpSource)
+		deriveDeepCopy_2(dst.RELPSource, src.RELPSource)
 	}
-	if src.DirectRelpSource == nil {
-		dst.DirectRelpSource = nil
+	if src.DirectRELPSource == nil {
+		dst.DirectRELPSource = nil
 	} else {
-		if dst.DirectRelpSource != nil {
-			if len(src.DirectRelpSource) > len(dst.DirectRelpSource) {
-				if cap(dst.DirectRelpSource) >= len(src.DirectRelpSource) {
-					dst.DirectRelpSource = (dst.DirectRelpSource)[:len(src.DirectRelpSource)]
+		if dst.DirectRELPSource != nil {
+			if len(src.DirectRELPSource) > len(dst.DirectRELPSource) {
+				if cap(dst.DirectRELPSource) >= len(src.DirectRELPSource) {
+					dst.DirectRELPSource = (dst.DirectRELPSource)[:len(src.DirectRELPSource)]
 				} else {
-					dst.DirectRelpSource = make([]DirectRelpSourceConfig, len(src.DirectRelpSource))
+					dst.DirectRELPSource = make([]DirectRELPSourceConfig, len(src.DirectRELPSource))
 				}
-			} else if len(src.DirectRelpSource) < len(dst.DirectRelpSource) {
-				dst.DirectRelpSource = (dst.DirectRelpSource)[:len(src.DirectRelpSource)]
+			} else if len(src.DirectRELPSource) < len(dst.DirectRELPSource) {
+				dst.DirectRELPSource = (dst.DirectRELPSource)[:len(src.DirectRELPSource)]
 			}
 		} else {
-			dst.DirectRelpSource = make([]DirectRelpSourceConfig, len(src.DirectRelpSource))
+			dst.DirectRELPSource = make([]DirectRELPSourceConfig, len(src.DirectRELPSource))
 		}
-		deriveDeepCopy_3(dst.DirectRelpSource, src.DirectRelpSource)
+		deriveDeepCopy_3(dst.DirectRELPSource, src.DirectRELPSource)
 	}
 	if src.KafkaSource == nil {
 		dst.KafkaSource = nil
@@ -145,46 +145,46 @@ func deriveDeepCopy(dst, src *BaseConfig) {
 	field := new(KafkaDestConfig)
 	deriveDeepCopy_6(field, &src.KafkaDest)
 	dst.KafkaDest = *field
-	dst.UdpDest = src.UdpDest
-	dst.TcpDest = src.TcpDest
+	dst.UDPDest = src.UDPDest
+	dst.TCPDest = src.TCPDest
 	dst.HTTPDest = src.HTTPDest
-	dst.RelpDest = src.RelpDest
+	dst.RELPDest = src.RELPDest
 	dst.FileDest = src.FileDest
 	dst.StderrDest = src.StderrDest
 	dst.GraylogDest = src.GraylogDest
 }
 
 // deriveDeepCopy_ recursively copies the contents of src into dst.
-func deriveDeepCopy_(dst, src []TcpSourceConfig) {
+func deriveDeepCopy_(dst, src []TCPSourceConfig) {
 	for src_i, src_value := range src {
-		field := new(TcpSourceConfig)
+		field := new(TCPSourceConfig)
 		deriveDeepCopy_7(field, &src_value)
 		dst[src_i] = *field
 	}
 }
 
 // deriveDeepCopy_1 recursively copies the contents of src into dst.
-func deriveDeepCopy_1(dst, src []UdpSourceConfig) {
+func deriveDeepCopy_1(dst, src []UDPSourceConfig) {
 	for src_i, src_value := range src {
-		field := new(UdpSourceConfig)
+		field := new(UDPSourceConfig)
 		deriveDeepCopy_8(field, &src_value)
 		dst[src_i] = *field
 	}
 }
 
 // deriveDeepCopy_2 recursively copies the contents of src into dst.
-func deriveDeepCopy_2(dst, src []RelpSourceConfig) {
+func deriveDeepCopy_2(dst, src []RELPSourceConfig) {
 	for src_i, src_value := range src {
-		field := new(RelpSourceConfig)
+		field := new(RELPSourceConfig)
 		deriveDeepCopy_9(field, &src_value)
 		dst[src_i] = *field
 	}
 }
 
 // deriveDeepCopy_3 recursively copies the contents of src into dst.
-func deriveDeepCopy_3(dst, src []DirectRelpSourceConfig) {
+func deriveDeepCopy_3(dst, src []DirectRELPSourceConfig) {
 	for src_i, src_value := range src {
-		field := new(DirectRelpSourceConfig)
+		field := new(DirectRELPSourceConfig)
 		deriveDeepCopy_10(field, &src_value)
 		dst[src_i] = *field
 	}
@@ -220,7 +220,7 @@ func deriveDeepCopy_6(dst, src *KafkaDestConfig) {
 }
 
 // deriveDeepCopy_7 recursively copies the contents of src into dst.
-func deriveDeepCopy_7(dst, src *TcpSourceConfig) {
+func deriveDeepCopy_7(dst, src *TCPSourceConfig) {
 	field := new(SyslogSourceBaseConfig)
 	deriveDeepCopy_14(field, &src.SyslogSourceBaseConfig)
 	dst.SyslogSourceBaseConfig = *field
@@ -233,7 +233,7 @@ func deriveDeepCopy_7(dst, src *TcpSourceConfig) {
 }
 
 // deriveDeepCopy_8 recursively copies the contents of src into dst.
-func deriveDeepCopy_8(dst, src *UdpSourceConfig) {
+func deriveDeepCopy_8(dst, src *UDPSourceConfig) {
 	field := new(SyslogSourceBaseConfig)
 	deriveDeepCopy_14(field, &src.SyslogSourceBaseConfig)
 	dst.SyslogSourceBaseConfig = *field
@@ -242,7 +242,7 @@ func deriveDeepCopy_8(dst, src *UdpSourceConfig) {
 }
 
 // deriveDeepCopy_9 recursively copies the contents of src into dst.
-func deriveDeepCopy_9(dst, src *RelpSourceConfig) {
+func deriveDeepCopy_9(dst, src *RELPSourceConfig) {
 	field := new(SyslogSourceBaseConfig)
 	deriveDeepCopy_14(field, &src.SyslogSourceBaseConfig)
 	dst.SyslogSourceBaseConfig = *field
@@ -255,7 +255,7 @@ func deriveDeepCopy_9(dst, src *RelpSourceConfig) {
 }
 
 // deriveDeepCopy_10 recursively copies the contents of src into dst.
-func deriveDeepCopy_10(dst, src *DirectRelpSourceConfig) {
+func deriveDeepCopy_10(dst, src *DirectRELPSourceConfig) {
 	field := new(SyslogSourceBaseConfig)
 	deriveDeepCopy_14(field, &src.SyslogSourceBaseConfig)
 	dst.SyslogSourceBaseConfig = *field

@@ -184,7 +184,7 @@ func (d *httpDestination) dosend(ctx context.Context) {
 		urlbuf := bytes.NewBuffer(nil)
 		err = d.url.Execute(urlbuf, msg.Parsed)
 		if err != nil {
-			d.permerr(msg.Uid, conf.Http)
+			d.permerr(msg.Uid, conf.HTTP)
 			ackCounter.WithLabelValues("http", "permerr", "").Inc()
 			d.logger.Warn("Error calculating target URL from template", "error", err)
 			continue
@@ -192,14 +192,14 @@ func (d *httpDestination) dosend(ctx context.Context) {
 		body := bytes.NewBuffer(nil)
 		err = d.encoder.Enc(msg, body)
 		if err != nil {
-			d.permerr(msg.Uid, conf.Http)
+			d.permerr(msg.Uid, conf.HTTP)
 			ackCounter.WithLabelValues("http", "permerr", "").Inc()
 			d.logger.Warn("Error encoding message", "error", err)
 			continue
 		}
 		req, err := http.NewRequest(d.method, urlbuf.String(), body)
 		if err != nil {
-			d.permerr(msg.Uid, conf.Http)
+			d.permerr(msg.Uid, conf.HTTP)
 			ackCounter.WithLabelValues("http", "permerr", "").Inc()
 			d.logger.Warn("Error preparing HTTP request", "error", err)
 			continue
@@ -215,7 +215,7 @@ func (d *httpDestination) dosend(ctx context.Context) {
 		resp, err := d.clt.Do(req)
 		if err != nil {
 			// server down ?
-			d.nack(msg.Uid, conf.Http)
+			d.nack(msg.Uid, conf.HTTP)
 			ackCounter.WithLabelValues("http", "nack", "").Inc()
 			fatalCounter.WithLabelValues("http").Inc()
 			d.logger.Warn("Error sending HTTP request", "error", err)
@@ -229,13 +229,13 @@ func (d *httpDestination) dosend(ctx context.Context) {
 		httpStatusCounter.WithLabelValues(req.Host, strconv.FormatInt(int64(resp.StatusCode), 10)).Inc()
 
 		if 200 <= resp.StatusCode && resp.StatusCode < 300 {
-			d.ack(msg.Uid, conf.Http)
+			d.ack(msg.Uid, conf.HTTP)
 			ackCounter.WithLabelValues("http", "ack", "").Inc()
 			continue
 		}
 		if 400 <= resp.StatusCode && resp.StatusCode < 500 {
 			// client-side error ??!
-			d.nack(msg.Uid, conf.Http)
+			d.nack(msg.Uid, conf.HTTP)
 			ackCounter.WithLabelValues("http", "nack", "").Inc()
 			fatalCounter.WithLabelValues("http").Inc()
 			d.logger.Warn("Client side error sending HTTP request", "code", resp.StatusCode, "status", resp.Status)
@@ -244,14 +244,14 @@ func (d *httpDestination) dosend(ctx context.Context) {
 		}
 		if 500 <= resp.StatusCode && resp.StatusCode < 600 {
 			// server side error
-			d.nack(msg.Uid, conf.Http)
+			d.nack(msg.Uid, conf.HTTP)
 			ackCounter.WithLabelValues("http", "nack", "").Inc()
 			fatalCounter.WithLabelValues("http").Inc()
 			d.logger.Warn("Server side error sending HTTP request", "code", resp.StatusCode, "status", resp.Status)
 			d.dofatal()
 			return
 		}
-		d.nack(msg.Uid, conf.Http)
+		d.nack(msg.Uid, conf.HTTP)
 		ackCounter.WithLabelValues("http", "nack", "").Inc()
 		fatalCounter.WithLabelValues("http").Inc()
 		d.logger.Warn("Unexpected status code sending HTTP request", "code", resp.StatusCode, "status", resp.Status)
@@ -266,7 +266,7 @@ func (d *httpDestination) Send(msg model.FullMessage, partitionKey string, parti
 		// the client send queue has been disposed
 		ackCounter.WithLabelValues("http", "nack", "").Inc()
 		fatalCounter.WithLabelValues("http").Inc()
-		d.nack(msg.Uid, conf.Http)
+		d.nack(msg.Uid, conf.HTTP)
 		d.dofatal()
 	}
 	return err
