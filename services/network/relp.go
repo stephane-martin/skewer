@@ -510,7 +510,8 @@ func (s *RelpServiceImpl) Parse() {
 		decoder = utils.SelectDecoder(raw.Encoding)
 		syslogMsg, err = parser.Parse(raw.Message[:raw.Size], decoder, raw.DontParseSD)
 		if err != nil {
-			logger.Warn("Parsing error", "message", string(raw.Message[:raw.Size]), "error", err)
+			//logger.Warn("Parsing error", "message", string(raw.Message[:raw.Size]), "error", err)
+			logger.Warn("Parsing error", "error", err)
 			s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
 			base.ParsingErrorCounter.WithLabelValues("relp", raw.Client, raw.Format).Inc()
 			s.Pool.Put(raw)

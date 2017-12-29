@@ -164,7 +164,8 @@ func (s *KafkaServiceImpl) ParseOne(env *ParsersEnv, raw *model.RawKafkaMessage)
 	syslogMsg, err := parser.Parse(raw.Message, decoder, false)
 	if err != nil {
 		base.ParsingErrorCounter.WithLabelValues("kafka", raw.Brokers, raw.Format).Inc()
-		logger.Info("Parsing error", "Message", raw.Message, "error", err)
+		//logger.Info("Parsing error", "message", string(raw.Message), "error", err)
+		logger.Info("Parsing error", "error", err)
 		return
 	}
 	if syslogMsg == nil {

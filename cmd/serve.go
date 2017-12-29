@@ -129,7 +129,7 @@ func newServeChild(ring kring.Ring) (*serveChild, error) {
 	if err != nil {
 		return nil, err
 	}
-	childLoggerHdl := services.HandlesMap[services.ServiceHandle{"child", services.Logger}]
+	childLoggerHdl := services.HandlesMap[services.ServiceHandle{Service: "child", Type: services.Logger}]
 	conn, err := net.FileConn(os.NewFile(childLoggerHdl, "logger"))
 	if err != nil {
 		return nil, err

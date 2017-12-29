@@ -197,7 +197,7 @@ func (s *TcpServiceImpl) Parse() {
 	for {
 		raw, err := s.rawMessagesQueue.Get()
 		if raw == nil || err != nil {
-			break
+			return
 		}
 		s.ParseOne(raw, env, gen)
 	}

@@ -16,7 +16,6 @@ import (
 	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/queue/udp"
-	"golang.org/x/text/encoding"
 )
 
 type UdpServerStatus int
@@ -71,68 +70,62 @@ func (s *UdpServiceImpl) Parse() {
 	defer s.wg.Done()
 
 	e := NewParsersEnv(s.ParserConfigs, s.Logger)
-
-	var syslogMsg *model.SyslogMessage
-	var err, fatal, nonfatal error
-	var raw *model.RawUdpMessage
-	var decoder *encoding.Decoder
-	var parser Parser
-	var logger log15.Logger
-
 	gen := utils.NewGenerator()
 
 	for {
-		raw, err = s.rawMessagesQueue.Get()
+		raw, err := s.rawMessagesQueue.Get()
 		if raw == nil || err != nil {
-			break
-		}
-
-		logger = s.Logger.New(
-			"protocol", "udp",
-			"client", raw.Client,
-			"local_port", raw.LocalPort,
-			"unix_socket_path", raw.UnixSocketPath,
-			"format", raw.Format,
-		)
-
-		decoder = utils.SelectDecoder(raw.Encoding)
-		parser = e.GetParser(raw.Format)
-		if parser == nil {
-			logger.Crit("Unknown parser")
 			return
 		}
+		s.ParseOne(raw, e, gen)
+	}
+}
 
-		syslogMsg, err = parser.Parse(raw.Message[:raw.Size], decoder, raw.DontParseSD)
-		if err != nil {
-			s.Pool.Put(raw)
-			base.ParsingErrorCounter.WithLabelValues("udp", raw.Client, raw.Format).Inc()
-			logger.Info("Parsing error", "Message", raw.Message, "error", err)
-			continue
-		}
-		if syslogMsg == nil {
-			s.Pool.Put(raw)
-			continue
-		}
+func (s *UdpServiceImpl) ParseOne(raw *model.RawUdpMessage, e *ParsersEnv, gen *utils.Generator) {
+	defer s.Pool.Put(raw)
 
-		fatal, nonfatal = s.stasher.Stash(model.FullMessage{
-			Parsed: model.ParsedMessage{
-				Fields:         *syslogMsg,
-				Client:         raw.Client,
-				LocalPort:      raw.LocalPort,
-				UnixSocketPath: raw.UnixSocketPath,
-			},
-			Uid:    gen.Uid(),
-			ConfId: raw.ConfID,
-		})
+	logger := s.Logger.New(
+		"protocol", "udp",
+		"client", raw.Client,
+		"local_port", raw.LocalPort,
+		"unix_socket_path", raw.UnixSocketPath,
+		"format", raw.Format,
+	)
 
-		s.Pool.Put(raw)
+	decoder := utils.SelectDecoder(raw.Encoding)
+	parser := e.GetParser(raw.Format)
+	if parser == nil {
+		logger.Crit("Unknown parser")
+		return
+	}
 
-		if fatal != nil {
-			logger.Error("Fatal error stashing UDP message", "error", fatal)
-			s.dofatal()
-		} else if nonfatal != nil {
-			logger.Warn("Non-fatal error stashing UDP message", "error", nonfatal)
-		}
+	syslogMsg, err := parser.Parse(raw.Message[:raw.Size], decoder, raw.DontParseSD)
+	if err != nil {
+		base.ParsingErrorCounter.WithLabelValues("udp", raw.Client, raw.Format).Inc()
+		//logger.Info("Parsing error", "message", string(raw.Message), "error", err)
+		logger.Info("Parsing error", "error", err)
+		return
+	}
+	if syslogMsg == nil {
+		return
+	}
+
+	fatal, nonfatal := s.stasher.Stash(model.FullMessage{
+		Parsed: model.ParsedMessage{
+			Fields:         *syslogMsg,
+			Client:         raw.Client,
+			LocalPort:      raw.LocalPort,
+			UnixSocketPath: raw.UnixSocketPath,
+		},
+		Uid:    gen.Uid(),
+		ConfId: raw.ConfID,
+	})
+
+	if fatal != nil {
+		logger.Error("Fatal error stashing UDP message", "error", fatal)
+		s.dofatal()
+	} else if nonfatal != nil {
+		logger.Warn("Non-fatal error stashing UDP message", "error", nonfatal)
 	}
 }
 
