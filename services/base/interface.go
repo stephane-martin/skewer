@@ -1,4 +1,4 @@
-package services
+package base
 
 import "github.com/stephane-martin/skewer/model"
 import dto "github.com/prometheus/client_model/go"

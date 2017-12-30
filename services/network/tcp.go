@@ -11,13 +11,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/inconshreveable/log15"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/services/errors"
-	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/queue/tcp"
 )
@@ -45,18 +43,18 @@ type TcpServiceImpl struct {
 	fatalOnce        *sync.Once
 }
 
-func NewTcpService(reporter base.Stasher, confined bool, b *binder.BinderClientImpl, l log15.Logger) *TcpServiceImpl {
+func NewTcpService(env *base.ProviderEnv) (base.Provider, error) {
 	initTcpRegistry()
 	s := TcpServiceImpl{
 		status:   TcpStopped,
-		reporter: reporter,
+		reporter: env.Reporter,
 	}
 	s.StreamingService.init()
-	s.StreamingService.BaseService.Logger = l.New("class", "TcpServer")
-	s.StreamingService.BaseService.Binder = b
+	s.StreamingService.BaseService.Logger = env.Logger.New("class", "TcpServer")
+	s.StreamingService.BaseService.Binder = env.Binder
 	s.StreamingService.handler = tcpHandler{Server: &s}
-	s.StreamingService.confined = confined
-	return &s
+	s.StreamingService.confined = env.Confined
+	return &s, nil
 }
 
 // Gather asks the TCP service to report metrics

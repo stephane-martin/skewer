@@ -36,13 +36,13 @@ type AccountingService struct {
 	confined       bool
 }
 
-func NewAccountingService(stasher base.Stasher, confined bool, l log15.Logger) (*AccountingService, error) {
+func NewAccountingService(env *base.ProviderEnv) (base.Provider, error) {
 	initAccountingRegistry()
 	s := AccountingService{
-		stasher:  stasher,
-		logger:   l.New("class", "accounting"),
+		stasher:  env.Reporter,
+		logger:   env.Logger.New("class", "accounting"),
 		wgroup:   &sync.WaitGroup{},
-		confined: confined,
+		confined: env.Confined,
 	}
 	return &s, nil
 }

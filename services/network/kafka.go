@@ -39,15 +39,15 @@ type KafkaServiceImpl struct {
 	confined         bool
 }
 
-func NewKafkaService(reporter base.Stasher, confined bool, l log15.Logger) *KafkaServiceImpl {
+func NewKafkaService(env *base.ProviderEnv) (base.Provider, error) {
 	initKafkaRegistry()
 	s := KafkaServiceImpl{
-		reporter: reporter,
-		logger:   l.New("class", "KafkaService"),
+		reporter: env.Reporter,
+		logger:   env.Logger.New("class", "KafkaService"),
 		stopChan: make(chan struct{}),
-		confined: confined,
+		confined: env.Confined,
 	}
-	return &s
+	return &s, nil
 }
 
 func (s *KafkaServiceImpl) SetConf(sc []conf.KafkaSourceConfig, pc []conf.ParserConfig, queueSize uint64) {

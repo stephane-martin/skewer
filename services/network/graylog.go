@@ -13,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/inconshreveable/log15"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
@@ -60,17 +59,17 @@ type GraylogSvcImpl struct {
 	readersMu      sync.Mutex
 }
 
-func NewGraylogService(stasher base.Stasher, b binder.Client, l log15.Logger) *GraylogSvcImpl {
+func NewGraylogService(env *base.ProviderEnv) (base.Provider, error) {
 	initGraylogRegistry()
 	s := GraylogSvcImpl{
 		status:  GraylogStopped,
-		stasher: stasher,
+		stasher: env.Reporter,
 		Configs: []conf.GraylogSourceConfig{},
 	}
 	s.BaseService.Init()
-	s.BaseService.Logger = l.New("class", "GraylogService")
-	s.BaseService.Binder = b
-	return &s
+	s.BaseService.Logger = env.Logger.New("class", "GraylogService")
+	s.BaseService.Binder = env.Binder
+	return &s, nil
 }
 
 func (s *GraylogSvcImpl) SetConf(sc []conf.GraylogSourceConfig) {

@@ -28,11 +28,11 @@ type JournalService struct {
 	fatalOnce      *sync.Once
 }
 
-func NewJournalService(stasher base.Stasher, l log15.Logger) (*JournalService, error) {
+func NewJournalService(env *base.ProviderEnv) (base.Provider, error) {
 	initJournalRegistry()
 	s := JournalService{
-		stasher: stasher,
-		logger:  l.New("class", "journald"),
+		stasher: env.Reporter,
+		logger:  env.Logger.New("class", "journald"),
 		wgroup:  &sync.WaitGroup{},
 	}
 	return &s, nil

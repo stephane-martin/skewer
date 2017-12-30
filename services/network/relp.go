@@ -205,23 +205,23 @@ type RelpService struct {
 	QueueSize      uint64
 	logger         log15.Logger
 	reporter       base.Reporter
-	b              *binder.BinderClientImpl
+	b              binder.Client
 	sc             []conf.RELPSourceConfig
 	pc             []conf.ParserConfig
 	wg             sync.WaitGroup
 	confined       bool
 }
 
-func NewRelpService(r base.Reporter, confined bool, b *binder.BinderClientImpl, l log15.Logger) *RelpService {
+func NewRelpService(env *base.ProviderEnv) (base.Provider, error) {
 	initRelpRegistry()
-	s := &RelpService{
-		b:        b,
-		logger:   l,
-		reporter: r,
-		confined: confined,
+	s := RelpService{
+		b:        env.Binder,
+		logger:   env.Logger,
+		reporter: env.Reporter,
+		confined: env.Confined,
 	}
-	s.impl = NewRelpServiceImpl(confined, r, s.b, s.logger)
-	return s
+	s.impl = NewRelpServiceImpl(env.Confined, env.Reporter, env.Binder, env.Logger)
+	return &s, nil
 }
 
 func (s *RelpService) FatalError() chan struct{} {
@@ -326,7 +326,7 @@ type RelpServiceImpl struct {
 	forwarder        *ackForwarder
 }
 
-func NewRelpServiceImpl(confined bool, reporter base.Reporter, b *binder.BinderClientImpl, logger log15.Logger) *RelpServiceImpl {
+func NewRelpServiceImpl(confined bool, reporter base.Reporter, b binder.Client, logger log15.Logger) *RelpServiceImpl {
 	s := RelpServiceImpl{
 		status:    Stopped,
 		reporter:  reporter,

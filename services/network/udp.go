@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/inconshreveable/log15"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
@@ -43,17 +42,17 @@ type UdpServiceImpl struct {
 	rawMessagesQueue *udp.Ring
 }
 
-func NewUdpService(stasher base.Stasher, b *binder.BinderClientImpl, l log15.Logger) *UdpServiceImpl {
+func NewUdpService(env *base.ProviderEnv) (base.Provider, error) {
 	initUdpRegistry()
 	s := UdpServiceImpl{
 		status:     UdpStopped,
-		stasher:    stasher,
+		stasher:    env.Reporter,
 		UdpConfigs: []conf.UDPSourceConfig{},
 	}
 	s.BaseService.Init()
-	s.BaseService.Logger = l.New("class", "UdpServer")
-	s.BaseService.Binder = b
-	return &s
+	s.BaseService.Logger = env.Logger.New("class", "UdpServer")
+	s.BaseService.Binder = env.Binder
+	return &s, nil
 }
 
 func (s *UdpServiceImpl) SetConf(sc []conf.UDPSourceConfig, pc []conf.ParserConfig, queueSize uint64) {

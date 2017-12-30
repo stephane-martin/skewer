@@ -430,22 +430,22 @@ func main() {
 		capabilities.NoNewPriv()
 		signal.Ignore(syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
 		var loggerHandle uintptr = 3
-		var bsdSecret *memguard.LockedBuffer
-		rPipe := os.NewFile(4, "bsdpipe")
+		var ringSecret *memguard.LockedBuffer
+		rPipe := os.NewFile(4, "ringsecretpipe")
 		buf := make([]byte, 32)
 		_, err := rPipe.Read(buf)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "Could not read ring secret:", err)
 			os.Exit(-1)
 		}
-		bsdSecret, err = memguard.NewImmutableFromBytes(buf)
+		ringSecret, err = memguard.NewImmutableFromBytes(buf)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "Could not create ring secret:", err)
 			os.Exit(-1)
 		}
 		_ = rPipe.Close()
 		sessionID := ulid.MustParse(sid)
-		ring := kring.GetRing(kring.RingCreds{Secret: bsdSecret, SessionID: sessionID})
+		ring := kring.GetRing(kring.RingCreds{Secret: ringSecret, SessionID: sessionID})
 
 		logger, err := getLogger(loggerCtx, name, ring, loggerHandle)
 		if err != nil {
@@ -558,7 +558,7 @@ func main() {
 		var loggerHdl uintptr
 		var pipeHdl uintptr
 		var ringSecretHdl uintptr
-		var bsdSecret *memguard.LockedBuffer
+		var ringSecret *memguard.LockedBuffer
 
 		if os.Getenv("SKEWER_HAS_BINDER") == "TRUE" {
 			binderHdl = handle
@@ -576,21 +576,21 @@ func main() {
 		}
 
 		ringSecretHdl = handle
-		rPipe := os.NewFile(ringSecretHdl, "bsdpipe")
+		rPipe := os.NewFile(ringSecretHdl, "ringsecretpipe")
 		buf := make([]byte, 32)
 		_, err = rPipe.Read(buf)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Could not read BSD secret:", err)
+			fmt.Fprintln(os.Stderr, "Could not read ring secret:", err)
 			os.Exit(-1)
 		}
-		bsdSecret, err = memguard.NewImmutableFromBytes(buf)
+		ringSecret, err = memguard.NewImmutableFromBytes(buf)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Could not create BSD secret:", err)
+			fmt.Fprintln(os.Stderr, "Could not create ring secret:", err)
 			os.Exit(-1)
 		}
 		_ = rPipe.Close()
 		sessionID := ulid.MustParse(sid)
-		ring := kring.GetRing(kring.RingCreds{Secret: bsdSecret, SessionID: sessionID})
+		ring := kring.GetRing(kring.RingCreds{Secret: ringSecret, SessionID: sessionID})
 		if loggerHdl > 0 {
 			logger, err = getLogger(loggerCtx, name, ring, loggerHdl)
 			if err != nil {
@@ -619,12 +619,12 @@ func main() {
 		}
 		err = services.Launch(
 			services.Names2Types[name],
-			os.Getenv("SKEWER_CONFINED") == "TRUE",
-			os.Getenv("SKEWER_PROFILE") == "TRUE",
-			ring,
-			binderClient,
-			logger,
-			pipe,
+			services.SetConfined(os.Getenv("SKEWER_CONFINED") == "TRUE"),
+			services.SetProfile(os.Getenv("SKEWER_PROFILE") == "TRUE"),
+			services.SetRing(ring),
+			services.SetBinder(binderClient),
+			services.SetLogger(logger),
+			services.SetPipe(pipe),
 		)
 		if err != nil {
 			cleanup("Plugin encountered a fatal error", err, logger, cancelLogger)

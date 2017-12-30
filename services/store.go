@@ -3,6 +3,7 @@ package services
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"sync"
@@ -14,9 +15,9 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/store"
 	"github.com/stephane-martin/skewer/store/dests"
-	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/sys/kring"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/httpserver"
@@ -45,21 +46,20 @@ type storeServiceImpl struct {
 // NewStoreService creates a StoreService.
 // The StoreService is responsible to manage the lifecycle of the Store and the
 // Kafka Forwarder that is fed by the Store.
-func NewStoreService(confined bool, prof bool, b binder.Client, l log15.Logger, ring kring.Ring, pipe *os.File) Provider {
-	if pipe == nil {
-		l.Crit("The Store was not given a message pipe")
-		return nil
+func NewStoreService(env *base.ProviderEnv) (base.Provider, error) {
+	if env.Pipe == nil {
+		return nil, fmt.Errorf("The Store was not given a message pipe")
 	}
 	store.InitRegistry()
 	dests.InitRegistry()
-	impl := &storeServiceImpl{
+	impl := storeServiceImpl{
 		ingestwg: &sync.WaitGroup{},
 		mu:       &sync.Mutex{},
 		status:   false,
-		pipe:     pipe,
-		logger:   l,
-		ring:     ring,
-		confined: confined,
+		pipe:     env.Pipe,
+		logger:   env.Logger,
+		ring:     env.Ring,
+		confined: env.Confined,
 	}
 	impl.fmu = map[conf.DestinationType]*sync.Mutex{}
 	impl.fstatus = map[conf.DestinationType]bool{}
@@ -69,10 +69,10 @@ func NewStoreService(confined bool, prof bool, b binder.Client, l log15.Logger, 
 	}
 	impl.shutdownCtx, impl.shutdownStore = context.WithCancel(context.Background())
 
-	if prof {
-		httpserver.ProfileServer(b)
+	if env.Profile {
+		httpserver.ProfileServer(env.Binder)
 	}
-	return impl
+	return &impl, nil
 }
 
 func (s *storeServiceImpl) SetConfAndRestart(c conf.BaseConfig) ([]model.ListenerInfo, error) {

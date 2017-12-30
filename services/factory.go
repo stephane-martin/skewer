@@ -103,7 +103,8 @@ func BinderHdl(typ Types) uintptr {
 	return HandlesMap[ServiceHandle{Types2Names[typ], Binder}]
 }
 
-func ConfigureAndStartService(s Provider, c conf.BaseConfig) ([]model.ListenerInfo, error) {
+// TODO: refactor
+func ConfigureAndStartService(s base.Provider, c conf.BaseConfig) ([]model.ListenerInfo, error) {
 
 	switch s := s.(type) {
 	case *network.TcpServiceImpl:
@@ -138,38 +139,71 @@ func ConfigureAndStartService(s Provider, c conf.BaseConfig) ([]model.ListenerIn
 
 }
 
-func ProviderFactory(t Types, confined bool, prof bool, r kring.Ring, reporter base.Reporter, b *binder.BinderClientImpl, l log15.Logger, pipe *os.File) Provider {
-	switch t {
-	case TCP:
-		return network.NewTcpService(reporter, confined, b, l)
-	case UDP:
-		return network.NewUdpService(reporter, b, l)
-	case RELP:
-		return network.NewRelpService(reporter, confined, b, l)
-	case DirectRELP:
-		return network.NewDirectRelpService(reporter, confined, b, l)
-	case Graylog:
-		return network.NewGraylogService(reporter, b, l)
-	case Journal:
-		svc, err := linux.NewJournalService(reporter, l)
-		if err == nil {
-			return svc
-		}
-		l.Error("Error creating the journal service", "error", err)
-		return nil
-	case Accounting:
-		svc, err := NewAccountingService(reporter, confined, l)
-		if err == nil {
-			return svc
-		}
-		l.Error("Error creating the accounting service", "error", err)
-		return nil
-	case Store:
-		return NewStoreService(confined, prof, b, l, r, pipe)
-	case KafkaSource:
-		return network.NewKafkaService(reporter, confined, l)
-	default:
-		fmt.Fprintf(os.Stderr, "Unknown service type: %d\n", t)
-		return nil
+func SetConfined(confined bool) func(e *base.ProviderEnv) {
+	return func(e *base.ProviderEnv) {
+		e.Confined = confined
 	}
+}
+
+func SetProfile(profile bool) func(e *base.ProviderEnv) {
+	return func(e *base.ProviderEnv) {
+		e.Profile = profile
+	}
+}
+
+func SetRing(ring kring.Ring) func(e *base.ProviderEnv) {
+	return func(e *base.ProviderEnv) {
+		e.Ring = ring
+	}
+}
+
+func SetReporter(reporter base.Reporter) func(e *base.ProviderEnv) {
+	return func(e *base.ProviderEnv) {
+		e.Reporter = reporter
+	}
+}
+
+func SetLogger(logger log15.Logger) func(e *base.ProviderEnv) {
+	return func(e *base.ProviderEnv) {
+		e.Logger = logger
+	}
+}
+
+func SetBinder(bindr binder.Client) func(e *base.ProviderEnv) {
+	return func(e *base.ProviderEnv) {
+		e.Binder = bindr
+	}
+}
+
+func SetPipe(pipe *os.File) func(e *base.ProviderEnv) {
+	return func(e *base.ProviderEnv) {
+		e.Pipe = pipe
+	}
+}
+
+type ProviderConstructor func(*base.ProviderEnv) (base.Provider, error)
+
+var constructors map[Types]ProviderConstructor = map[Types]ProviderConstructor{
+	TCP:         network.NewTcpService,
+	UDP:         network.NewUdpService,
+	RELP:        network.NewRelpService,
+	DirectRELP:  network.NewDirectRelpService,
+	Graylog:     network.NewGraylogService,
+	Journal:     linux.NewJournalService,
+	Accounting:  NewAccountingService,
+	Store:       NewStoreService,
+	KafkaSource: network.NewKafkaService,
+}
+
+type ProviderOpt func(e *base.ProviderEnv)
+
+func ProviderFactory(t Types, env *base.ProviderEnv) (base.Provider, error) {
+	if constructor, ok := constructors[t]; ok {
+		provider, err := constructor(env)
+		if err == nil {
+			return provider, nil
+		}
+		return nil, err
+	}
+	return nil, fmt.Errorf("Unknown provider type: %d", t)
 }

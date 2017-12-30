@@ -58,7 +58,7 @@ type DirectRelpService struct {
 	QueueSize      uint64
 	logger         log15.Logger
 	reporter       base.Reporter
-	b              *binder.BinderClientImpl
+	b              binder.Client
 	sc             []conf.DirectRELPSourceConfig
 	pc             []conf.ParserConfig
 	kc             conf.KafkaDestConfig
@@ -66,15 +66,15 @@ type DirectRelpService struct {
 	confined       bool
 }
 
-func NewDirectRelpService(r base.Reporter, confined bool, b *binder.BinderClientImpl, l log15.Logger) *DirectRelpService {
-	s := &DirectRelpService{
-		b:        b,
-		logger:   l,
-		reporter: r,
-		confined: confined,
+func NewDirectRelpService(env *base.ProviderEnv) (base.Provider, error) {
+	s := DirectRelpService{
+		b:        env.Binder,
+		logger:   env.Logger,
+		reporter: env.Reporter,
+		confined: env.Confined,
 	}
-	s.impl = NewDirectRelpServiceImpl(confined, r, s.b, s.logger)
-	return s
+	s.impl = NewDirectRelpServiceImpl(env.Confined, env.Reporter, env.Binder, env.Logger)
+	return &s, nil
 }
 
 func (s *DirectRelpService) FatalError() chan struct{} {
@@ -177,7 +177,7 @@ type DirectRelpServiceImpl struct {
 	forwarder           *ackForwarder
 }
 
-func NewDirectRelpServiceImpl(confined bool, reporter base.Reporter, b *binder.BinderClientImpl, logger log15.Logger) *DirectRelpServiceImpl {
+func NewDirectRelpServiceImpl(confined bool, reporter base.Reporter, b binder.Client, logger log15.Logger) *DirectRelpServiceImpl {
 	s := DirectRelpServiceImpl{
 		status:    Stopped,
 		reporter:  reporter,
