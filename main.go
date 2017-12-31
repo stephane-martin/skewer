@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"syscall"
@@ -114,26 +115,6 @@ func getLogger(ctx context.Context, name string, ring kring.Ring, handle uintptr
 		return nil, err
 	}
 	return logging.NewRemoteLogger(ctx, loggerConn, secret).New("proc", name), nil
-}
-
-func cleanup(msg string, err error, logger log15.Logger, cancelLogger context.CancelFunc) {
-	if err != nil {
-		if len(msg) == 0 {
-			msg = "Process fatal error"
-		}
-		logger.Crit(msg, "error", err)
-	} else if len(msg) > 0 {
-		logger.Crit(msg)
-	}
-	time.Sleep(100 * time.Millisecond)
-	if cancelLogger != nil {
-		cancelLogger()
-	}
-	time.Sleep(100 * time.Millisecond)
-	memguard.DestroyAll()
-	if err != nil || len(msg) > 0 {
-		os.Exit(-1)
-	}
 }
 
 type reExecType int
@@ -393,6 +374,7 @@ func execServeParent() (err error) {
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT, syscall.SIGUSR1)
 	logger.Debug("PIDs", "parent", os.Getpid(), "child", childProcess.Process.Pid)
 
+	// TODO: get child return status
 	_, _ = childProcess.Process.Wait()
 	return nil
 }
@@ -442,6 +424,7 @@ func main() {
 		}
 		if err, ok := e.(fatalErr); ok {
 			fmt.Fprintln(os.Stderr, err.Error())
+			fmt.Fprintln(os.Stderr, string(debug.Stack()))
 			os.Exit(err.exitCode)
 			return
 		}
