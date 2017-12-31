@@ -30,6 +30,48 @@ import (
 	"github.com/stephane-martin/skewer/utils/logging"
 )
 
+type fatalErr struct {
+	message  string
+	err      error
+	exitCode int
+}
+
+func (e *fatalErr) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.err == nil {
+		return e.message
+	}
+	if len(e.message) == 0 {
+		return e.err.Error()
+	}
+	return fmt.Sprintf("%s: %s", e.message, e.err.Error())
+}
+
+func newFatalErr(msg string, err error, exitCode int) *fatalErr {
+	if len(msg) == 0 && err == nil {
+		return nil
+	}
+	e := fatalErr{
+		message:  msg,
+		err:      err,
+		exitCode: exitCode,
+	}
+	if exitCode == 0 {
+		e.exitCode = -1
+	}
+	return &e
+}
+
+func dopanic(msg string, err error, exitCode int) {
+	e := newFatalErr(msg, err, exitCode)
+	if e == nil {
+		return
+	}
+	panic(e)
+}
+
 type spair struct {
 	child  uintptr
 	parent uintptr
@@ -80,93 +122,121 @@ func cleanup(msg string, err error, logger log15.Logger, cancelLogger context.Ca
 			msg = "Process fatal error"
 		}
 		logger.Crit(msg, "error", err)
-		time.Sleep(100 * time.Millisecond)
-		memguard.SafeExit(-1)
 	} else if len(msg) > 0 {
 		logger.Crit(msg)
-		time.Sleep(100 * time.Millisecond)
-		memguard.SafeExit(-1)
 	}
+	time.Sleep(100 * time.Millisecond)
 	if cancelLogger != nil {
 		cancelLogger()
 	}
-	memguard.DestroyAll()
 	time.Sleep(100 * time.Millisecond)
+	memguard.DestroyAll()
+	if err != nil || len(msg) > 0 {
+		os.Exit(-1)
+	}
 }
 
-func earlyDropCaps(logger log15.Logger) {
-	if capabilities.CapabilitiesSupported {
-		runtime.LockOSThread()
-		// very early we drop most of linux capabilities
+type reExecType int
 
-		applied, err := capabilities.Predrop()
-		if err != nil {
-			cleanup("Error pre-dropping capabilities", err, logger, nil)
+const (
+	earlyCapsDrop reExecType = iota
+	netBindCapDrop
+	parentCapsDrop
+)
+
+func reExec(t reExecType) {
+	switch t {
+	case earlyCapsDrop:
+		if capabilities.CapabilitiesSupported {
+			runtime.LockOSThread()
+			// very early we drop most of linux capabilities
+
+			applied, err := capabilities.Predrop()
+			if err != nil {
+				dopanic("Error pre-dropping capabilities", err, -1)
+			}
+
+			if applied {
+				exe, err := osext.Executable()
+				if err != nil {
+					dopanic("Error getting executable path", err, -1)
+				}
+				err = syscall.Exec(exe, os.Args, os.Environ())
+				if err != nil {
+					dopanic("Error re-executing self", err, -1)
+				}
+			}
 		}
-
-		if applied {
+	case netBindCapDrop:
+		if capabilities.CapabilitiesSupported {
+			// another execve is necessary on Linux to ensure that
+			// the following capability drop will be effective on
+			// all go threads
+			runtime.LockOSThread()
+			err := capabilities.DropNetBind()
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+			}
 			exe, err := osext.Executable()
 			if err != nil {
-				cleanup("Error getting executable path", err, logger, nil)
+				dopanic("Error getting executable name", err, -1)
 			}
-			err = syscall.Exec(exe, os.Args, os.Environ())
+			err = syscall.Exec(exe, append([]string{"skewer-linux-child"}, os.Args[1:]...), os.Environ())
 			if err != nil {
-				cleanup("Error re-executing self", err, logger, nil)
+				dopanic("Error reexecuting self", err, -1)
 			}
 		}
-
+	case parentCapsDrop:
+		if capabilities.CapabilitiesSupported {
+			// under Linux, re-exec ourself immediately with fewer privileges
+			runtime.LockOSThread()
+			_, err := parseCobraFlags()
+			if err != nil && err != pflag.ErrHelp {
+				dopanic("Error parsing flags", err, -1)
+			}
+			needFix, err := capabilities.NeedFixLinuxPrivileges(cmd.UidFlag, cmd.GidFlag)
+			if err != nil {
+				dopanic("Error dropping privileges", err, -1)
+			}
+			if needFix {
+				err = capabilities.FixLinuxPrivileges(cmd.UidFlag, cmd.GidFlag)
+				if err != nil {
+					dopanic("Error dropping privileges", err, -1)
+				}
+				err = capabilities.NoNewPriv()
+				if err != nil {
+					dopanic("NoNewPriv error", err, -1)
+				}
+				exe, err := os.Executable()
+				if err != nil {
+					dopanic("Error finding executable name", err, -1)
+				}
+				err = syscall.Exec(exe, append([]string{"skewer-parent-dropped"}, os.Args[1:]...), os.Environ())
+				if err != nil {
+					dopanic("Error reexecuting self", err, -1)
+				}
+			}
+		}
+	default:
 	}
 }
 
-func dropNetBindCap(logger log15.Logger) {
-	if capabilities.CapabilitiesSupported {
-		// another execve is necessary on Linux to ensure that
-		// the following capability drop will be effective on
-		// all go threads
-		runtime.LockOSThread()
-		err := capabilities.DropNetBind()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-		}
-		exe, err := osext.Executable()
-		if err != nil {
-			cleanup("Error getting executable name", err, logger, nil)
-		}
-		err = syscall.Exec(exe, append([]string{"skewer-linux-child"}, os.Args[1:]...), os.Environ())
-		if err != nil {
-			cleanup("Error reexecuting self", err, logger, nil)
-		}
-	}
-}
-
-func execChild(logger log15.Logger) {
+func execChild() error {
 	err := scomp.SetupSeccomp("parent")
 	if err != nil {
-		cleanup("Error setting up seccomp", err, logger, nil)
+		dopanic("Error setting up seccomp", err, -1)
 	}
 
 	err = scomp.SetupPledge("parent")
 	if err != nil {
-		cleanup("Error setting up pledge", err, logger, nil)
+		dopanic("Error setting up pledge", err, -1)
 	}
 
 	_, err = parseCobraFlags()
 	if err != nil && err != pflag.ErrHelp {
-		cleanup("Error parsing flags", err, logger, nil)
+		dopanic("Error parsing flags", err, -1)
 	}
-
-	err = cmd.ExecuteChild()
-	if err != nil {
-		cleanup("Error executing child", err, logger, nil)
-	}
-	cleanup("", nil, logger, nil)
-}
-
-func makeErr(msg string, err error) error {
-	if err == nil {
-		return fmt.Errorf(msg)
-	}
-	return fmt.Errorf("%s: %s", msg, err)
+	return cmd.ExecuteChild()
 }
 
 func execServeParent() (err error) {
@@ -184,12 +254,12 @@ func execServeParent() (err error) {
 
 	ring, err := kring.NewRing()
 	if err != nil {
-		return makeErr("Can't make a new keyring", err)
+		dopanic("Can't make a new keyring", err, -1)
 	}
 
 	boxsecret, err := ring.NewBoxSecret()
 	if err != nil {
-		return makeErr("Can't create a new box secret", err)
+		dopanic("Can't create a new box secret", err, -1)
 	}
 
 	defer func() {
@@ -201,16 +271,16 @@ func execServeParent() (err error) {
 	if !cmd.DumpableFlag {
 		err := dumpable.SetNonDumpable()
 		if err != nil {
-			return makeErr("Error setting PR_SET_DUMPABLE", err)
+			dopanic("Error setting PR_SET_DUMPABLE", err, -1)
 		}
 	}
 
 	numuid, numgid, err := sys.LookupUid(cmd.UidFlag, cmd.GidFlag)
 	if err != nil {
-		return makeErr("Error looking up uid", err)
+		dopanic("Error looking up uid", err, -1)
 	}
 	if numuid == 0 {
-		return makeErr("Provide a non-privileged user with --uid flag", nil)
+		dopanic("Provide a non-privileged user with --uid flag", nil, -1)
 	}
 
 	binderSockets := map[string]spair{}
@@ -223,7 +293,7 @@ func execServeParent() (err error) {
 			loggerSockets[h.Service], err = getSocketPair(syscall.SOCK_DGRAM)
 		}
 		if err != nil {
-			return makeErr("Can't create the required socketpairs", err)
+			dopanic("Can't create the required socketpairs", err, -1)
 		}
 	}
 
@@ -233,18 +303,17 @@ func execServeParent() (err error) {
 	}
 	err = binder.Binder(binderParents, logger) // returns immediately
 	if err != nil {
-		return makeErr("Error setting the root binder", err)
+		dopanic("Error setting the root binder", err, -1)
 	}
 
 	remoteLoggerConn := []*net.UnixConn{}
 	for _, s := range loggerSockets {
 		remoteLoggerConn = append(remoteLoggerConn, getLoggerConn(s.parent))
 	}
-	loggingCtx, loggingCancel := context.WithCancel(context.Background())
 	logger.Debug("Receiving from remote loggers", "nb", len(remoteLoggerConn))
-	loggingWg := logging.LogReceiver(loggingCtx, boxsecret, rootlogger, remoteLoggerConn)
+	loggingWg := logging.LogReceiver(loggerCtx, boxsecret, rootlogger, remoteLoggerConn)
 	defer func() {
-		loggingCancel()
+		cancelLogger()
 		loggingWg.Wait()
 	}()
 
@@ -253,7 +322,7 @@ func execServeParent() (err error) {
 	// execute child under the new user
 	exe, err := osext.Executable() // custom Executable() function to support OpenBSD
 	if err != nil {
-		return makeErr("Error getting executable name", err)
+		dopanic("Error getting executable name", err, -1)
 	}
 
 	extraFiles := []*os.File{}
@@ -266,7 +335,7 @@ func execServeParent() (err error) {
 	}
 	rRingSecretPipe, wRingSecretPipe, err := os.Pipe()
 	if err != nil {
-		return makeErr("Error creating OpenBSD-secret pipe", err)
+		dopanic("Error creating ring-secret pipe", err, -1)
 	}
 	extraFiles = append(extraFiles, rRingSecretPipe)
 
@@ -286,7 +355,7 @@ func execServeParent() (err error) {
 	err = childProcess.Start()
 	_ = rRingSecretPipe.Close()
 	if err != nil {
-		return makeErr("Error starting child", err)
+		dopanic("Error starting child", err, -1)
 	}
 
 	for _, h := range services.Handles {
@@ -328,32 +397,27 @@ func execServeParent() (err error) {
 	return nil
 }
 
-func execParent(logger log15.Logger) {
+func execParent() error {
 	err := scomp.SetupSeccomp("parent")
 	if err != nil {
-		cleanup("Error setting up seccomp", err, logger, nil)
+		dopanic("Error setting up seccomp", err, -1)
 	}
 
 	err = scomp.SetupPledge("parent")
 	if err != nil {
-		cleanup("Error setting up pledge", err, logger, nil)
+		dopanic("Error setting up pledge", err, -1)
 	}
 
 	name, err := parseCobraFlags()
 	if err != nil && err != pflag.ErrHelp {
-		cleanup("Error parsing flags", err, logger, nil)
+		dopanic("Error parsing flags", err, -1)
 	}
-	logger.Debug("Executing command", "command", name, "args", strings.Join(os.Args, " "))
 	if name == "serve" && err != pflag.ErrHelp {
 		err = execServeParent()
 	} else {
 		err = cmd.Execute()
 	}
-	if err != nil {
-		cleanup("Error executing command", err, logger, nil)
-	}
-	cleanup("", nil, logger, nil)
-
+	return err
 }
 
 func parseCobraFlags() (string, error) {
@@ -369,41 +433,36 @@ func parseCobraFlags() (string, error) {
 	return c.Name(), c.ParseFlags(flags)
 }
 
-func fixLinuxParentPrivileges(logger log15.Logger) {
-	if capabilities.CapabilitiesSupported {
-		// under Linux, re-exec ourself immediately with fewer privileges
-		runtime.LockOSThread()
-		_, err := parseCobraFlags()
-		if err != nil && err != pflag.ErrHelp {
-			cleanup("Error parsing flags", err, logger, nil)
+func main() {
+	defer func() {
+		memguard.DestroyAll()
+		e := recover()
+		if e == nil {
+			return
 		}
-		needFix, err := capabilities.NeedFixLinuxPrivileges(cmd.UidFlag, cmd.GidFlag)
-		if err != nil {
-			cleanup("Error dropping privileges", err, logger, nil)
+		if err, ok := e.(fatalErr); ok {
+			fmt.Fprintln(os.Stderr, err.Error())
+			os.Exit(err.exitCode)
+			return
 		}
-		if needFix {
-			err = capabilities.FixLinuxPrivileges(cmd.UidFlag, cmd.GidFlag)
-			if err != nil {
-				cleanup("Error dropping privileges", err, logger, nil)
-			}
-			err = capabilities.NoNewPriv()
-			if err != nil {
-				cleanup("NoNewPriv error", err, logger, nil)
-			}
-			exe, err := os.Executable()
-			if err != nil {
-				cleanup("Error finding executable name", err, logger, nil)
-			}
-			err = syscall.Exec(exe, append([]string{"skewer-parent-dropped"}, os.Args[1:]...), os.Environ())
-			if err != nil {
-				cleanup("Error rexecuting self", err, logger, nil)
-			}
-		}
-	}
-
+		panic(e)
+	}()
+	doMain()
 }
 
-func main() {
+var cancelLogger context.CancelFunc
+var loggerCtx context.Context
+
+func init() {
+	loggerCtx, cancelLogger = context.WithCancel(context.Background())
+}
+
+func doMain() {
+	defer func() {
+		cancelLogger()
+		time.Sleep(100 * time.Millisecond)
+	}()
+
 	// calculate the process name
 	name := strings.Trim(os.Args[0], "./ \n\r")
 	spl := strings.Split(name, "/")
@@ -412,10 +471,6 @@ func main() {
 	} else {
 		name = "unknown"
 	}
-
-	loggerCtx, cancelLogger := context.WithCancel(context.Background())
-	logger := log15.New()
-	logger.SetHandler(log15.LvlFilterHandler(log15.LvlWarn, log15.StderrHandler))
 
 	if runtime.GOOS == "openbsd" {
 		// so that we execute IP capabilities probes before the call to pledge
@@ -449,21 +504,21 @@ func main() {
 
 		logger, err := getLogger(loggerCtx, name, ring, loggerHandle)
 		if err != nil {
-			cleanup("Could not create a logger for the configuration service", err, logger, cancelLogger)
+			dopanic("Could not create a logger for the configuration service", err, -1)
 		}
 		err = scomp.SetupSeccomp(name)
 		if err != nil {
-			cleanup("Seccomp setup error", err, logger, cancelLogger)
+			dopanic("Seccomp setup error", err, -1)
 		}
 		err = scomp.SetupPledge(name)
 		if err != nil {
-			cleanup("Pledge setup error", err, logger, cancelLogger)
+			dopanic("Pledge setup error", err, -1)
 		}
 		err = services.LaunchConfProvider(ring, os.Getenv("SKEWER_CONFINED") == "TRUE", logger)
 		if err != nil {
-			cleanup("ConfigurationProvider encountered a fatal error", err, logger, cancelLogger)
+			dopanic("ConfigurationProvider encountered a fatal error", err, -1)
 		}
-		cleanup("", nil, logger, cancelLogger)
+		return
 
 	case services.Types2ConfinedNames[services.Journal]:
 		// journal is a special case, as /run/log/journal and /var/log/journal
@@ -471,25 +526,25 @@ func main() {
 		dumpable.SetNonDumpable()
 		path, err := osext.Executable()
 		if err != nil {
-			cleanup("Error getting executable path", err, logger, cancelLogger)
+			dopanic("Error getting executable path", err, -1)
 		}
 		// mask most of directories, but no pivotroot
 		err = namespaces.SetJournalFs(path)
 		if err != nil {
-			cleanup("mount error", err, logger, cancelLogger)
+			dopanic("mount error", err, -1)
 		}
 		err = sys.SetHostname(name)
 		if err != nil {
-			cleanup("sethostname error", err, logger, cancelLogger)
+			dopanic("sethostname error", err, -1)
 		}
 		// from here we don't need root capabilities in the container
 		err = capabilities.DropAllCapabilities()
 		if err != nil {
-			cleanup("Error dropping caps", err, logger, cancelLogger)
+			dopanic("Error dropping caps", err, -1)
 		}
 		err = syscall.Exec(path, []string{os.Args[0][9:]}, os.Environ())
 		if err != nil {
-			cleanup("execve error", err, logger, cancelLogger)
+			dopanic("execve error", err, -1)
 		}
 
 	case services.Types2ConfinedNames[services.Accounting],
@@ -503,34 +558,32 @@ func main() {
 
 		path, err := osext.Executable()
 		if err != nil {
-			cleanup("Error getting executable path", err, logger, cancelLogger)
+			dopanic("Error getting executable path", err, -1)
 		}
-		if capabilities.CapabilitiesSupported {
-			// we are root inside the user namespace that was created by plugin control
-			dumpable.SetNonDumpable()
+		// we are root inside the user namespace that was created by plugin control
+		dumpable.SetNonDumpable()
 
-			root, err := namespaces.MakeChroot(path)
-			if err != nil {
-				cleanup("mount error", err, logger, cancelLogger)
-			}
-			err = namespaces.PivotRoot(root)
-			if err != nil {
-				cleanup("pivotroot error", err, logger, cancelLogger)
-			}
-			err = sys.SetHostname(name)
-			if err != nil {
-				cleanup("sethostname error", err, logger, cancelLogger)
-			}
-			// from here we don't need root capabilities in the container
-			err = capabilities.DropAllCapabilities()
-			if err != nil {
-				cleanup("Error dropping caps", err, logger, cancelLogger)
-			}
+		root, err := namespaces.MakeChroot(path)
+		if err != nil {
+			dopanic("mount error", err, -1)
+		}
+		err = namespaces.PivotRoot(root)
+		if err != nil {
+			dopanic("pivotroot error", err, -1)
+		}
+		err = sys.SetHostname(name)
+		if err != nil {
+			dopanic("sethostname error", err, -1)
+		}
+		// from here we don't need root capabilities in the container
+		err = capabilities.DropAllCapabilities()
+		if err != nil {
+			dopanic("Error dropping caps", err, -1)
 		}
 		environ := append(os.Environ(), "SKEWER_CONFINED=TRUE")
 		err = syscall.Exec(path, []string{os.Args[0][9:]}, environ)
 		if err != nil {
-			cleanup("execve error", err, logger, cancelLogger)
+			dopanic("execve error", err, -1)
 		}
 
 	case services.Types2Names[services.TCP],
@@ -543,6 +596,8 @@ func main() {
 		services.Types2Names[services.Accounting],
 		services.Types2Names[services.KafkaSource]:
 
+		// TODO: work with service type, not service name
+
 		if name == services.Types2Names[services.Store] {
 			runtime.GOMAXPROCS(128)
 		}
@@ -551,6 +606,7 @@ func main() {
 		capabilities.NoNewPriv()
 
 		var binderClient *binder.BinderClientImpl
+		logger := log15.New()
 		var pipe *os.File
 		var err error
 		var handle uintptr = 3
@@ -611,11 +667,11 @@ func main() {
 
 		err = scomp.SetupSeccomp(name)
 		if err != nil {
-			cleanup("Seccomp setup error", err, logger, cancelLogger)
+			dopanic("Seccomp setup error", err, -1)
 		}
 		err = scomp.SetupPledge(name)
 		if err != nil {
-			cleanup("Pledge setup error", err, logger, cancelLogger)
+			dopanic("Pledge setup error", err, -1)
 		}
 		err = services.Launch(
 			services.Names2Types[name],
@@ -627,29 +683,48 @@ func main() {
 			services.SetPipe(pipe),
 		)
 		if err != nil {
-			cleanup("Plugin encountered a fatal error", err, logger, cancelLogger)
+			dopanic("Plugin encountered a fatal error", err, -1)
 		}
-		cleanup("", nil, logger, cancelLogger)
+		return
 
 	case "skewer-child":
-		dropNetBindCap(logger)
-		execChild(logger)
+		if runtime.GOOS == "linux" {
+			reExec(netBindCapDrop)
+			return
+		}
+		err := execChild()
+		if err != nil {
+			dopanic("Error executing child", err, -1)
+		}
+		return
 
 	case "skewer-linux-child":
-		execChild(logger)
+		err := execChild()
+		if err != nil {
+			dopanic("Error executing linux child", err, -1)
+		}
+		return
 
 	case "skewer-parent-dropped":
-		execParent(logger)
+		err := execParent()
+		if err != nil {
+			dopanic("Error executing linux parent", err, -1)
+		}
+		return
 
 	case "skewer":
-		// we drop most of caps on linux before we even parse the command line
-		earlyDropCaps(logger)
-		// now we can setuid, setgid
-		fixLinuxParentPrivileges(logger)
-		execParent(logger)
+		if runtime.GOOS == "linux" {
+			reExec(earlyCapsDrop)  // we drop most of caps on linux before we even parse the command line
+			reExec(parentCapsDrop) // now we can setuid, setgid
+		}
+		err := execParent()
+		if err != nil {
+			dopanic("Error executing parent", err, -1)
+		}
+		return
 
 	default:
-		cleanup("Unknown process name", nil, logger, cancelLogger)
+		dopanic("Unknown process name", nil, -1)
 	}
-	cleanup("", nil, logger, cancelLogger)
+	return
 }
