@@ -15,7 +15,6 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
@@ -23,13 +22,8 @@ import (
 )
 
 type HTTPDestination struct {
-	logger      log15.Logger
-	fatal       chan struct{}
-	ack         storeCallback
-	nack        storeCallback
-	permerr     storeCallback
+	*baseDestination
 	clt         *http.Client
-	once        sync.Once
 	username    string
 	password    string
 	useragent   string
@@ -37,32 +31,25 @@ type HTTPDestination struct {
 	method      string
 	contentType string
 	sendQueue   *message.Ring
-	encoder     model.Encoder
 	wg          sync.WaitGroup
 }
 
-func NewHTTPDestination(ctx context.Context, cfnd bool, bc conf.BaseConfig, ack, nack, pe storeCallback, l log15.Logger) (d *HTTPDestination, err error) {
-	conf := bc.HTTPDest
+func NewHTTPDestination(ctx context.Context, e *Env) (d *HTTPDestination, err error) {
+	config := e.config.HTTPDest
 	d = &HTTPDestination{
-		logger:    l,
-		fatal:     make(chan struct{}),
-		ack:       ack,
-		nack:      nack,
-		permerr:   pe,
-		useragent: conf.UserAgent,
-		method:    conf.Method,
+		baseDestination: newBaseDestination(conf.HTTP, "http", e),
+		useragent:       config.UserAgent,
+		method:          config.Method,
 	}
-
-	encoder, err := model.NewEncoder(conf.Format)
+	err = d.setFormat(config.Format)
 	if err != nil {
 		return nil, err
 	}
-	d.encoder = encoder
 
-	conf.ContentType = strings.TrimSpace(strings.ToLower(conf.ContentType))
-	d.contentType = conf.ContentType
-	if conf.ContentType == "auto" {
-		switch conf.Format {
+	config.ContentType = strings.TrimSpace(strings.ToLower(config.ContentType))
+	d.contentType = config.ContentType
+	if config.ContentType == "auto" {
+		switch config.Format {
 		case "json", "fulljson", "gelf":
 			d.contentType = "application/json"
 		default:
@@ -70,39 +57,39 @@ func NewHTTPDestination(ctx context.Context, cfnd bool, bc conf.BaseConfig, ack,
 		}
 	}
 
-	if conf.BasicAuth {
-		d.username = conf.Username
-		d.password = conf.Password
+	if config.BasicAuth {
+		d.username = config.Username
+		d.password = config.Password
 	}
 
-	conf.URL = strings.TrimSpace(conf.URL)
-	conf.ProxyURL = strings.TrimSpace(conf.ProxyURL)
+	config.URL = strings.TrimSpace(config.URL)
+	config.ProxyURL = strings.TrimSpace(config.ProxyURL)
 
-	zurl, err := url.Parse(conf.URL)
+	zurl, err := url.Parse(config.URL)
 	if err != nil {
 		return nil, err
 	}
 	host := zurl.Host
 
-	tmpl, err := template.New("url").Parse(conf.URL)
+	tmpl, err := template.New("url").Parse(config.URL)
 	if err != nil {
 		return nil, err
 	}
 	d.url = tmpl
 
-	if strings.HasPrefix(strings.ToLower(conf.URL), "https") {
-		conf.TLSEnabled = true
+	if strings.HasPrefix(strings.ToLower(config.URL), "https") {
+		config.TLSEnabled = true
 	}
 	dialer := &net.Dialer{
-		Timeout: conf.ConnTimeout,
+		Timeout: config.ConnTimeout,
 	}
-	if conf.ConnKeepAlive {
-		dialer.KeepAlive = conf.ConnKeepAlivePeriod
+	if config.ConnKeepAlive {
+		dialer.KeepAlive = config.ConnKeepAlivePeriod
 	}
 
 	transport := &http.Transport{
-		MaxIdleConnsPerHost:   conf.MaxIdleConnsPerHost,
-		IdleConnTimeout:       conf.IdleConnTimeout,
+		MaxIdleConnsPerHost:   config.MaxIdleConnsPerHost,
+		IdleConnTimeout:       config.IdleConnTimeout,
 		Proxy:                 nil,
 		MaxIdleConns:          100,
 		TLSHandshakeTimeout:   10 * time.Second,
@@ -110,15 +97,15 @@ func NewHTTPDestination(ctx context.Context, cfnd bool, bc conf.BaseConfig, ack,
 		DialContext:           dialer.DialContext,
 	}
 
-	if conf.TLSEnabled {
+	if config.TLSEnabled {
 		tlsconfig, err := utils.NewTLSConfig(
 			host,
-			conf.CAFile,
-			conf.CAPath,
-			conf.CertFile,
-			conf.KeyFile,
-			conf.Insecure,
-			cfnd,
+			config.CAFile,
+			config.CAPath,
+			config.CertFile,
+			config.KeyFile,
+			config.Insecure,
+			e.confined,
 		)
 		if err != nil {
 			return nil, err
@@ -126,8 +113,8 @@ func NewHTTPDestination(ctx context.Context, cfnd bool, bc conf.BaseConfig, ack,
 		transport.TLSClientConfig = tlsconfig
 	}
 
-	if len(conf.ProxyURL) > 0 {
-		url, err := url.Parse(conf.ProxyURL)
+	if len(config.ProxyURL) > 0 {
+		url, err := url.Parse(config.ProxyURL)
 		if err != nil {
 			return nil, err
 		}
@@ -138,21 +125,21 @@ func NewHTTPDestination(ctx context.Context, cfnd bool, bc conf.BaseConfig, ack,
 		Transport: transport,
 		Jar:       nil,
 	}
-	d.sendQueue = message.NewRing(4 * uint64(conf.MaxIdleConnsPerHost))
+	d.sendQueue = message.NewRing(4 * uint64(config.MaxIdleConnsPerHost))
 
-	if conf.Rebind > 0 {
+	if config.Rebind > 0 {
 		go func() {
 			select {
 			case <-ctx.Done():
 				// the store service asked for stop
-			case <-time.After(conf.Rebind):
-				l.Info("HTTP destination rebind period has expired", "rebind", conf.Rebind.String())
+			case <-time.After(config.Rebind):
+				e.logger.Info("HTTP destination rebind period has expired", "rebind", config.Rebind.String())
 				d.dofatal()
 			}
 		}()
 	}
 
-	for i := 0; i < conf.MaxIdleConnsPerHost; i++ {
+	for i := 0; i < config.MaxIdleConnsPerHost; i++ {
 		d.wg.Add(1)
 		go d.dosend(ctx)
 	}
@@ -160,18 +147,10 @@ func NewHTTPDestination(ctx context.Context, cfnd bool, bc conf.BaseConfig, ack,
 	return d, nil
 }
 
-func (d *HTTPDestination) dofatal() {
-	d.once.Do(func() { close(d.fatal) })
-}
-
 func (d *HTTPDestination) Close() error {
 	d.sendQueue.Dispose()
 	d.wg.Wait()
 	return nil
-}
-
-func (d *HTTPDestination) Fatal() chan struct{} {
-	return d.fatal
 }
 
 func (d *HTTPDestination) dosend(ctx context.Context) {
@@ -184,23 +163,20 @@ func (d *HTTPDestination) dosend(ctx context.Context) {
 		urlbuf := bytes.NewBuffer(nil)
 		err = d.url.Execute(urlbuf, msg.Parsed)
 		if err != nil {
-			d.permerr(msg.Uid, conf.HTTP)
-			ackCounter.WithLabelValues("http", "permerr", "").Inc()
+			d.permerr(msg.Uid)
 			d.logger.Warn("Error calculating target URL from template", "error", err)
 			continue
 		}
 		body := bytes.NewBuffer(nil)
 		err = d.encoder.Enc(msg, body)
 		if err != nil {
-			d.permerr(msg.Uid, conf.HTTP)
-			ackCounter.WithLabelValues("http", "permerr", "").Inc()
+			d.permerr(msg.Uid)
 			d.logger.Warn("Error encoding message", "error", err)
 			continue
 		}
 		req, err := http.NewRequest(d.method, urlbuf.String(), body)
 		if err != nil {
-			d.permerr(msg.Uid, conf.HTTP)
-			ackCounter.WithLabelValues("http", "permerr", "").Inc()
+			d.permerr(msg.Uid)
 			d.logger.Warn("Error preparing HTTP request", "error", err)
 			continue
 		}
@@ -215,9 +191,7 @@ func (d *HTTPDestination) dosend(ctx context.Context) {
 		resp, err := d.clt.Do(req)
 		if err != nil {
 			// server down ?
-			d.nack(msg.Uid, conf.HTTP)
-			ackCounter.WithLabelValues("http", "nack", "").Inc()
-			fatalCounter.WithLabelValues("http").Inc()
+			d.nack(msg.Uid)
 			d.logger.Warn("Error sending HTTP request", "error", err)
 			d.dofatal()
 			return
@@ -229,31 +203,24 @@ func (d *HTTPDestination) dosend(ctx context.Context) {
 		httpStatusCounter.WithLabelValues(req.Host, strconv.FormatInt(int64(resp.StatusCode), 10)).Inc()
 
 		if 200 <= resp.StatusCode && resp.StatusCode < 300 {
-			d.ack(msg.Uid, conf.HTTP)
-			ackCounter.WithLabelValues("http", "ack", "").Inc()
+			d.ack(msg.Uid)
 			continue
 		}
 		if 400 <= resp.StatusCode && resp.StatusCode < 500 {
 			// client-side error ??!
-			d.nack(msg.Uid, conf.HTTP)
-			ackCounter.WithLabelValues("http", "nack", "").Inc()
-			fatalCounter.WithLabelValues("http").Inc()
+			d.nack(msg.Uid)
 			d.logger.Warn("Client side error sending HTTP request", "code", resp.StatusCode, "status", resp.Status)
 			d.dofatal()
 			return
 		}
 		if 500 <= resp.StatusCode && resp.StatusCode < 600 {
 			// server side error
-			d.nack(msg.Uid, conf.HTTP)
-			ackCounter.WithLabelValues("http", "nack", "").Inc()
-			fatalCounter.WithLabelValues("http").Inc()
+			d.nack(msg.Uid)
 			d.logger.Warn("Server side error sending HTTP request", "code", resp.StatusCode, "status", resp.Status)
 			d.dofatal()
 			return
 		}
-		d.nack(msg.Uid, conf.HTTP)
-		ackCounter.WithLabelValues("http", "nack", "").Inc()
-		fatalCounter.WithLabelValues("http").Inc()
+		d.nack(msg.Uid)
 		d.logger.Warn("Unexpected status code sending HTTP request", "code", resp.StatusCode, "status", resp.Status)
 		d.dofatal()
 		return
@@ -264,9 +231,7 @@ func (d *HTTPDestination) Send(msg model.FullMessage, partitionKey string, parti
 	err = d.sendQueue.Put(&msg)
 	if err != nil {
 		// the client send queue has been disposed
-		ackCounter.WithLabelValues("http", "nack", "").Inc()
-		fatalCounter.WithLabelValues("http").Inc()
-		d.nack(msg.Uid, conf.HTTP)
+		d.nack(msg.Uid)
 		d.dofatal()
 	}
 	return err

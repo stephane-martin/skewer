@@ -304,39 +304,26 @@ func (o *openedFiles) closeall() {
 	runtime.GC()
 }
 
-// TODO: factorize a base destination
 type FileDestination struct {
-	logger       log15.Logger
-	fatal        chan struct{}
-	once         sync.Once
-	ack          storeCallback
-	nack         storeCallback
-	permerr      storeCallback
+	*baseDestination
 	filenameTmpl *template.Template
 	files        *openedFiles
-	format       string
-	encoder      model.Encoder
 }
 
-func NewFileDestination(ctx context.Context, cfnd bool, bc conf.BaseConfig, ack, nack, permerr storeCallback, l log15.Logger) (dest *FileDestination, err error) {
+func NewFileDestination(ctx context.Context, e *Env) (dest *FileDestination, err error) {
 	dest = &FileDestination{
-		logger:  l,
-		ack:     ack,
-		nack:    nack,
-		permerr: permerr,
-		format:  bc.FileDest.Format,
-		fatal:   make(chan struct{}),
-		files:   newOpenedFiles(ctx, bc.FileDest, l),
+		baseDestination: newBaseDestination(conf.File, "file", e),
+		files:           newOpenedFiles(ctx, e.config.FileDest, e.logger),
 	}
-	fname := bc.FileDest.Filename
-	if cfnd {
-		fname = filepath.Join("/tmp", "filedest", fname)
-	}
-	dest.filenameTmpl, err = template.New("filename").Parse(fname)
+	err = dest.setFormat(e.config.FileDest.Format)
 	if err != nil {
 		return nil, err
 	}
-	dest.encoder, err = model.NewEncoder(bc.FileDest.Format)
+	fname := e.config.FileDest.Filename
+	if e.confined {
+		fname = filepath.Join("/tmp", "filedest", fname)
+	}
+	dest.filenameTmpl, err = template.New("filename").Parse(fname)
 	if err != nil {
 		return nil, err
 	}
@@ -351,51 +338,40 @@ func (d *FileDestination) Send(message model.FullMessage, partitionKey string, p
 	err = d.filenameTmpl.Execute(buf, message.Parsed)
 	if err != nil {
 		err = fmt.Errorf("Error calculating filename: %s", err)
-		ackCounter.WithLabelValues("file", "permerr", "").Inc()
-		d.permerr(message.Uid, conf.File)
+		d.permerr(message.Uid)
 		return err
 	}
 	filename := strings.TrimSpace(buf.String())
 	f, err := d.files.open(filename)
 	if err != nil {
 		err = fmt.Errorf("Error opening file '%s': %s", filename, err)
-		ackCounter.WithLabelValues("file", "nack", "").Inc()
-		d.nack(message.Uid, conf.File)
+		d.nack(message.Uid)
 		return err
 	}
 	encoded, err := model.ChainEncode(d.encoder, &message, "\n")
 	if err != nil {
-		ackCounter.WithLabelValues("file", "permerr", "").Inc()
-		d.permerr(message.Uid, conf.File)
+		d.permerr(message.Uid)
 		return err
 	}
 	_, err = f.Write(encoded)
 	if err != nil {
-		ackCounter.WithLabelValues("file", "nack", "").Inc()
-		d.nack(message.Uid, conf.File)
+		d.nack(message.Uid)
 		return err
 	}
 	if f.Closed() {
 		err = f.MarkClosed()
 		if err == nil {
-			ackCounter.WithLabelValues("file", "ack", "").Inc()
-			d.ack(message.Uid, conf.File)
+			d.ack(message.Uid)
 			return nil
 		}
-		ackCounter.WithLabelValues("file", "nack", "").Inc()
-		d.nack(message.Uid, conf.File)
+		d.nack(message.Uid)
 		return err
 	}
-	ackCounter.WithLabelValues("file", "ack", "").Inc()
-	d.ack(message.Uid, conf.File)
+	d.ack(message.Uid)
 	return nil
 }
 
 func (d *FileDestination) Close() error {
 	d.files.closeall()
 	return nil
-}
-
-func (d *FileDestination) Fatal() chan struct{} {
-	return d.fatal
 }

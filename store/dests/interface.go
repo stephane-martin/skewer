@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 )
@@ -15,31 +14,24 @@ type Destination interface {
 	Close() error
 }
 
-func NewDestination(
-	ctx context.Context,
-	typ conf.DestinationType,
-	bc conf.BaseConfig,
-	ack, nack, permerr storeCallback,
-	confined bool,
-	logger log15.Logger) (Destination, error) {
-
+func NewDestination(ctx context.Context, typ conf.DestinationType, e *Env) (Destination, error) {
 	switch typ {
 	case conf.Kafka:
-		return NewKafkaDestination(ctx, confined, bc, ack, nack, permerr, logger)
+		return NewKafkaDestination(ctx, e)
 	case conf.UDP:
-		return NewUDPDestination(ctx, confined, bc, ack, nack, permerr, logger)
+		return NewUDPDestination(ctx, e)
 	case conf.TCP:
-		return NewTCPDestination(ctx, confined, bc, ack, nack, permerr, logger)
+		return NewTCPDestination(ctx, e)
 	case conf.RELP:
-		return NewRELPDestination(ctx, confined, bc, ack, nack, permerr, logger)
+		return NewRELPDestination(ctx, e)
 	case conf.File:
-		return NewFileDestination(ctx, confined, bc, ack, nack, permerr, logger)
+		return NewFileDestination(ctx, e)
 	case conf.Stderr:
-		return NewStderrDestination(ctx, confined, bc, ack, nack, permerr, logger)
+		return NewStderrDestination(ctx, e)
 	case conf.Graylog:
-		return NewGraylogDestination(ctx, confined, bc, ack, nack, permerr, logger)
+		return NewGraylogDestination(ctx, e)
 	case conf.HTTP:
-		return NewHTTPDestination(ctx, confined, bc, ack, nack, permerr, logger)
+		return NewHTTPDestination(ctx, e)
 	default:
 		return nil, fmt.Errorf("Unknown destination type: %d", typ)
 	}

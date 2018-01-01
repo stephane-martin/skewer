@@ -2,10 +2,8 @@ package dests
 
 import (
 	"context"
-	"sync"
 	"time"
 
-	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
 	"github.com/stephane-martin/skewer/clients"
 	"github.com/stephane-martin/skewer/conf"
@@ -15,37 +13,32 @@ import (
 )
 
 type RELPDestination struct {
-	logger  log15.Logger
-	fatal   chan struct{}
-	client  *clients.RELPClient
-	once    sync.Once
-	ack     storeCallback
-	nack    storeCallback
-	permerr storeCallback
+	*baseDestination
+	client *clients.RELPClient
 }
 
-func NewRELPDestination(ctx context.Context, cfnd bool, bc conf.BaseConfig, ack, nack, pe storeCallback, l log15.Logger) (d *RELPDestination, err error) {
-	clt := clients.NewRELPClient(l).
-		Host(bc.RELPDest.Host).
-		Port(bc.RELPDest.Port).
-		Path(bc.RELPDest.UnixSocketPath).
-		Format(bc.RELPDest.Format).
-		KeepAlive(bc.RELPDest.KeepAlive).
-		KeepAlivePeriod(bc.RELPDest.KeepAlivePeriod).
-		ConnTimeout(bc.RELPDest.ConnTimeout).
-		RelpTimeout(bc.RELPDest.RelpTimeout).
-		WindowSize(bc.RELPDest.WindowSize).
-		FlushPeriod(bc.RELPDest.FlushPeriod)
+func NewRELPDestination(ctx context.Context, e *Env) (d *RELPDestination, err error) {
+	clt := clients.NewRELPClient(e.logger).
+		Host(e.config.RELPDest.Host).
+		Port(e.config.RELPDest.Port).
+		Path(e.config.RELPDest.UnixSocketPath).
+		Format(e.config.RELPDest.Format).
+		KeepAlive(e.config.RELPDest.KeepAlive).
+		KeepAlivePeriod(e.config.RELPDest.KeepAlivePeriod).
+		ConnTimeout(e.config.RELPDest.ConnTimeout).
+		RelpTimeout(e.config.RELPDest.RelpTimeout).
+		WindowSize(e.config.RELPDest.WindowSize).
+		FlushPeriod(e.config.RELPDest.FlushPeriod)
 
-	if bc.RELPDest.TLSEnabled {
+	if e.config.RELPDest.TLSEnabled {
 		config, err := utils.NewTLSConfig(
-			bc.RELPDest.Host,
-			bc.RELPDest.CAFile,
-			bc.RELPDest.CAPath,
-			bc.RELPDest.CertFile,
-			bc.RELPDest.KeyFile,
-			bc.RELPDest.Insecure,
-			cfnd,
+			e.config.RELPDest.Host,
+			e.config.RELPDest.CAFile,
+			e.config.RELPDest.CAPath,
+			e.config.RELPDest.CertFile,
+			e.config.RELPDest.KeyFile,
+			e.config.RELPDest.Insecure,
+			e.confined,
 		)
 		if err != nil {
 			return nil, err
@@ -61,23 +54,19 @@ func NewRELPDestination(ctx context.Context, cfnd bool, bc conf.BaseConfig, ack,
 	connCounter.WithLabelValues("relp", "success").Inc()
 
 	d = &RELPDestination{
-		logger:  l,
-		ack:     ack,
-		nack:    nack,
-		permerr: pe,
-		fatal:   make(chan struct{}),
-		client:  clt,
+		baseDestination: newBaseDestination(conf.RELP, "relp", e),
+		client:          clt,
 	}
 
-	rebind := bc.RELPDest.Rebind
+	rebind := e.config.RELPDest.Rebind
 	if rebind > 0 {
 		go func() {
 			select {
 			case <-ctx.Done():
 				// the store service asked for stop
 			case <-time.After(rebind):
-				l.Info("RELP destination rebind period has expired", "rebind", rebind.String())
-				d.once.Do(func() { close(d.fatal) })
+				e.logger.Info("RELP destination rebind period has expired", "rebind", rebind.String())
+				d.dofatal()
 			}
 		}()
 	}
@@ -94,19 +83,16 @@ func NewRELPDestination(ctx context.Context, cfnd bool, bc conf.BaseConfig, ack,
 				if err != nil {
 					break
 				}
-				d.ack(uid, conf.RELP)
-				ackCounter.WithLabelValues("relp", "ack", "").Inc()
+				d.ack(uid)
 			}
 			for {
 				uid, _, err = nackChan.Get()
 				if err != nil {
 					break
 				}
-				d.nack(uid, conf.RELP)
+				d.nack(uid)
 				d.logger.Info("RELP server returned a NACK", "uid", uid.String())
-				ackCounter.WithLabelValues("relp", "nack", "").Inc()
-				fatalCounter.WithLabelValues("relp").Inc()
-				d.once.Do(func() { close(d.fatal) })
+				d.dofatal()
 			}
 		}
 	}()
@@ -118,18 +104,12 @@ func (d *RELPDestination) Send(message model.FullMessage, partitionKey string, p
 	err = d.client.Send(&message)
 	if err != nil {
 		// the client send queue has been disposed
-		ackCounter.WithLabelValues("relp", "nack", "").Inc()
-		fatalCounter.WithLabelValues("relp").Inc()
-		d.nack(message.Uid, conf.RELP)
-		d.once.Do(func() { close(d.fatal) })
+		d.nack(message.Uid)
+		d.dofatal()
 	}
 	return
 }
 
 func (d *RELPDestination) Close() (err error) {
 	return d.client.Close()
-}
-
-func (d *RELPDestination) Fatal() chan struct{} {
-	return d.fatal
 }

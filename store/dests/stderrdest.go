@@ -4,34 +4,20 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"sync"
 
-	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 )
 
 type StderrDestination struct {
-	logger  log15.Logger
-	fatal   chan struct{}
-	once    sync.Once
-	ack     storeCallback
-	nack    storeCallback
-	permerr storeCallback
-	format  string
-	encoder model.Encoder
+	*baseDestination
 }
 
-func NewStderrDestination(ctx context.Context, cfnd bool, bc conf.BaseConfig, ack, nack, pe storeCallback, l log15.Logger) (d *StderrDestination, err error) {
+func NewStderrDestination(ctx context.Context, e *Env) (d *StderrDestination, err error) {
 	d = &StderrDestination{
-		logger:  l,
-		ack:     ack,
-		nack:    nack,
-		permerr: pe,
-		format:  bc.StderrDest.Format,
-		fatal:   make(chan struct{}),
+		baseDestination: newBaseDestination(conf.Stderr, "stderr", e),
 	}
-	d.encoder, err = model.NewEncoder(d.format)
+	err = d.setFormat(e.config.StderrDest.Format)
 	if err != nil {
 		return nil, fmt.Errorf("Error getting encoder: %s", err)
 	}
@@ -43,27 +29,19 @@ func (d *StderrDestination) Send(message model.FullMessage, partitionKey string,
 	var buf []byte
 	buf, err = model.ChainEncode(d.encoder, &message, "\n")
 	if err != nil {
-		ackCounter.WithLabelValues("stderr", "permerr", "").Inc()
-		d.permerr(message.Uid, conf.Stderr)
+		d.permerr(message.Uid)
 		return err
 	}
 	_, err = os.Stderr.Write(buf)
 	if err != nil {
-		ackCounter.WithLabelValues("stderr", "nack", "").Inc()
-		fatalCounter.WithLabelValues("stderr").Inc()
-		d.nack(message.Uid, conf.Stderr)
-		d.once.Do(func() { close(d.fatal) })
+		d.nack(message.Uid)
+		d.dofatal()
 		return err
 	}
-	ackCounter.WithLabelValues("stderr", "ack", "").Inc()
-	d.ack(message.Uid, conf.Stderr)
+	d.ack(message.Uid)
 	return nil
 }
 
 func (d *StderrDestination) Close() error {
 	return nil
-}
-
-func (d *StderrDestination) Fatal() chan struct{} {
-	return d.fatal
 }
