@@ -10,6 +10,7 @@ import (
 
 	seccomp "github.com/seccomp/libseccomp-golang"
 	"github.com/stephane-martin/skewer/services"
+	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/utils"
 )
 
@@ -497,21 +498,21 @@ func applyFilter(filter *seccomp.ScmpFilter) (*seccomp.ScmpFilter, error) {
 	return filter, nil
 }
 
-func SetupSeccomp(name string) (err error) {
-	switch name {
+func SetupSeccomp(t base.Types) (err error) {
+	switch t {
 
-	case services.Types2Names[services.TCP],
-		services.Types2Names[services.UDP],
-		services.Types2Names[services.RELP],
-		services.Types2Names[services.Graylog],
-		services.Types2Names[services.Journal]:
+	case services.TCP,
+		services.UDP,
+		services.RELP,
+		services.Graylog,
+		services.Journal:
 
 		_, err = deriveComposeA(buildSimpleFilter, applyFilter)(baseAllowed, nil)
 
-	case services.Types2Names[services.DirectRELP],
-		services.Types2Names[services.Store],
-		services.Types2Names[services.KafkaSource],
-		services.Types2Names[services.Configuration]:
+	case services.DirectRELP,
+		services.Store,
+		services.KafkaSource,
+		services.Configuration:
 
 		_, err = deriveComposeB(buildSimpleFilter, socketFilter, applyFilter)(baseAllowed, nil)
 

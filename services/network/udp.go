@@ -55,13 +55,18 @@ func NewUdpService(env *base.ProviderEnv) (base.Provider, error) {
 	return &s, nil
 }
 
-func (s *UdpServiceImpl) SetConf(sc []conf.UDPSourceConfig, pc []conf.ParserConfig, queueSize uint64) {
+func (s *UdpServiceImpl) Type() base.Types {
+	return base.UDP
+}
+
+//func (s *UdpServiceImpl) SetConf(sc []conf.UDPSourceConfig, pc []conf.ParserConfig, queueSize uint64) {
+func (s *UdpServiceImpl) SetConf(c conf.BaseConfig) {
 	s.BaseService.Pool = &sync.Pool{New: func() interface{} {
 		return &model.RawUdpMessage{}
 	}}
-	s.BaseService.SetConf(pc, queueSize)
-	s.UdpConfigs = sc
-	s.rawMessagesQueue = udp.NewRing(s.QueueSize)
+	s.BaseService.SetConf(c.Parsers, c.Main.InputQueueSize)
+	s.UdpConfigs = c.UDPSource
+	s.rawMessagesQueue = udp.NewRing(c.Main.InputQueueSize)
 }
 
 // Parse fetch messages from the raw queue, parse them, and push them to be sent.

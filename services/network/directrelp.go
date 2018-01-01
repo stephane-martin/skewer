@@ -77,6 +77,10 @@ func NewDirectRelpService(env *base.ProviderEnv) (base.Provider, error) {
 	return &s, nil
 }
 
+func (s *DirectRelpService) Type() base.Types {
+	return base.DirectRELP
+}
+
 func (s *DirectRelpService) FatalError() chan struct{} {
 	return s.fatalErrorChan
 }
@@ -155,11 +159,11 @@ func (s *DirectRelpService) Stop() {
 	s.wg.Wait()
 }
 
-func (s *DirectRelpService) SetConf(sc []conf.DirectRELPSourceConfig, pc []conf.ParserConfig, kc conf.KafkaDestConfig, queueSize uint64) {
-	s.sc = sc
-	s.pc = pc
-	s.kc = kc
-	s.QueueSize = queueSize
+func (s *DirectRelpService) SetConf(c conf.BaseConfig) {
+	s.sc = c.DirectRELPSource
+	s.pc = c.Parsers
+	s.kc = c.KafkaDest
+	s.QueueSize = c.Main.InputQueueSize
 }
 
 type DirectRelpServiceImpl struct {

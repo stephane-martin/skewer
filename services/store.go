@@ -75,6 +75,13 @@ func NewStoreService(env *base.ProviderEnv) (base.Provider, error) {
 	return &impl, nil
 }
 
+func (s *storeServiceImpl) Type() base.Types {
+	return base.Store
+}
+
+func (s *storeServiceImpl) SetConf(c conf.BaseConfig) {
+}
+
 func (s *storeServiceImpl) SetConfAndRestart(c conf.BaseConfig) ([]model.ListenerInfo, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

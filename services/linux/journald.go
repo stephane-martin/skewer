@@ -38,6 +38,10 @@ func NewJournalService(env *base.ProviderEnv) (base.Provider, error) {
 	return &s, nil
 }
 
+func (s *JournalService) Type() base.Types {
+	return base.Journal
+}
+
 func (s *JournalService) Gather() ([]*dto.MetricFamily, error) {
 	return base.Registry.Gather()
 }
@@ -107,6 +111,6 @@ func (s *JournalService) Shutdown() {
 	s.wgroup.Wait()
 }
 
-func (s *JournalService) SetConf(c conf.JournaldConfig) {
-	s.Conf = c
+func (s *JournalService) SetConf(c conf.BaseConfig) {
+	s.Conf = c.Journald
 }

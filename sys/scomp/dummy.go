@@ -2,6 +2,8 @@
 
 package scomp
 
-func SetupSeccomp(name string) (err error) {
+import "github.com/stephane-martin/skewer/services/base"
+
+func SetupSeccomp(t base.Types) (err error) {
 	return nil
 }

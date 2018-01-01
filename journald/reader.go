@@ -16,6 +16,8 @@ import (
 	"github.com/stephane-martin/skewer/utils/queue"
 )
 
+// TODO: provide a way to link statically to libsystemd
+
 var Supported bool = true
 
 type reader struct {

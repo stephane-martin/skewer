@@ -62,6 +62,10 @@ func (s *TcpServiceImpl) Gather() ([]*dto.MetricFamily, error) {
 	return base.Registry.Gather()
 }
 
+func (s *TcpServiceImpl) Type() base.Types {
+	return base.TCP
+}
+
 // Start makes the TCP service start
 func (s *TcpServiceImpl) Start() ([]model.ListenerInfo, error) {
 	s.LockStatus()
@@ -128,12 +132,13 @@ func (s *TcpServiceImpl) Stop() {
 }
 
 // SetConf configures the TCP service
-func (s *TcpServiceImpl) SetConf(sc []conf.TCPSourceConfig, pc []conf.ParserConfig, queueSize uint64, messageSize int) {
+//func (s *TcpServiceImpl) SetConf(sc []conf.TCPSourceConfig, pc []conf.ParserConfig, queueSize uint64, messageSize int) {
+func (s *TcpServiceImpl) SetConf(c conf.BaseConfig) {
 	s.BaseService.Pool = &sync.Pool{New: func() interface{} {
-		return &model.RawTcpMessage{Message: make([]byte, messageSize)}
+		return &model.RawTcpMessage{Message: make([]byte, c.Main.MaxInputMessageSize)}
 	}}
-	s.StreamingService.SetConf(sc, pc, queueSize, messageSize)
-	s.rawMessagesQueue = tcp.NewRing(queueSize)
+	s.StreamingService.SetConf(c.TCPSource, c.Parsers, c.Main.InputQueueSize, c.Main.MaxInputMessageSize)
+	s.rawMessagesQueue = tcp.NewRing(c.Main.InputQueueSize)
 }
 
 func (s *TcpServiceImpl) ParseOne(raw *model.RawTcpMessage, env *ParsersEnv, gen *utils.Generator) {

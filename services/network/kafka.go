@@ -50,13 +50,17 @@ func NewKafkaService(env *base.ProviderEnv) (base.Provider, error) {
 	return &s, nil
 }
 
-func (s *KafkaServiceImpl) SetConf(sc []conf.KafkaSourceConfig, pc []conf.ParserConfig, queueSize uint64) {
+func (s *KafkaServiceImpl) Type() base.Types {
+	return base.KafkaSource
+}
+
+func (s *KafkaServiceImpl) SetConf(c conf.BaseConfig) {
 	s.rawpool = &sync.Pool{New: func() interface{} {
 		return &model.RawKafkaMessage{}
 	}}
-	s.configs = sc
-	s.parserConfigs = pc
-	s.rawMessagesQueue = kafka.NewRing(queueSize)
+	s.configs = c.KafkaSource
+	s.parserConfigs = c.Parsers
+	s.rawMessagesQueue = kafka.NewRing(c.Main.InputQueueSize)
 }
 
 func (s *KafkaServiceImpl) Gather() ([]*dto.MetricFamily, error) {

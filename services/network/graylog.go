@@ -72,8 +72,12 @@ func NewGraylogService(env *base.ProviderEnv) (base.Provider, error) {
 	return &s, nil
 }
 
-func (s *GraylogSvcImpl) SetConf(sc []conf.GraylogSourceConfig) {
-	s.Configs = sc
+func (s *GraylogSvcImpl) Type() base.Types {
+	return base.Graylog
+}
+
+func (s *GraylogSvcImpl) SetConf(c conf.BaseConfig) {
+	s.Configs = c.GraylogSource
 }
 
 func (s *GraylogSvcImpl) Gather() ([]*dto.MetricFamily, error) {

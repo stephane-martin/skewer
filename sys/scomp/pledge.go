@@ -3,27 +3,27 @@
 package scomp
 
 import (
-	"github.com/stephane-martin/skewer/services"
+	"github.com/stephane-martin/skewer/services/base"
 	"golang.org/x/sys/unix"
 )
 
 var PledgeSupported bool = true
 
 //SetupPledge actually runs the pledge syscall based on the process name
-func SetupPledge(name string) (err error) {
-	switch name {
-	case services.Types2Names[services.TCP],
-		services.Types2Names[services.UDP],
-		services.Types2Names[services.Graylog],
-		services.Types2Names[services.RELP],
-		services.Types2Names[services.DirectRELP],
-		services.Types2Names[services.Configuration],
-		services.Types2Names[services.Accounting],
-		services.Types2Names[services.KafkaSource]:
+func SetupPledge(t base.Types) (err error) {
+	switch t {
+	case base.TCP,
+		base.UDP,
+		base.Graylog,
+		base.RELP,
+		base.DirectRELP,
+		base.Configuration,
+		base.Accounting,
+		base.KafkaSource:
 
 		err = unix.Pledge("stdio rpath flock dns sendfd recvfd ps inet unix getpw", nil)
 
-	case services.Types2Names[services.Store]:
+	case base.Store:
 		err = unix.Pledge("stdio rpath flock dns sendfd recvfd ps inet unix getpw wpath cpath tmppath fattr chown", nil)
 
 	default:

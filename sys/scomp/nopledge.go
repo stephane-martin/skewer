@@ -2,9 +2,10 @@
 
 package scomp
 
+import "github.com/stephane-martin/skewer/services/base"
+
 var PledgeSupported bool = false
 
-func SetupPledge(name string) (err error) {
+func SetupPledge(t base.Types) (err error) {
 	return nil
 }
-

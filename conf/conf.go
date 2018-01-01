@@ -37,7 +37,7 @@ func (source BaseConfig) Clone() BaseConfig {
 	return deriveCloneBaseConfig(source)
 }
 
-func newBaseConf() BaseConfig {
+func NewBaseConf() BaseConfig {
 	brokers := []string{}
 	baseConf := BaseConfig{
 		TCPSource:        []TCPSourceConfig{},
@@ -63,7 +63,7 @@ func newBaseConf() BaseConfig {
 func Default() (BaseConfig, error) {
 	v := viper.New()
 	SetDefaults(v)
-	baseConf := newBaseConf()
+	baseConf := NewBaseConf()
 	err := v.Unmarshal(&baseConf)
 	if err != nil {
 		return baseConf, ConfigurationSyntaxError{Err: err}
@@ -553,7 +553,7 @@ func InitLoad(ctx context.Context, confDir string, params consul.ConnParams, r k
 			logger.Error("Recovered in conf.InitLoad()", "error", err)
 		}
 		if err != nil {
-			c = newBaseConf()
+			c = NewBaseConf()
 			updated = nil
 		}
 	}()
@@ -577,7 +577,7 @@ func InitLoad(ctx context.Context, confDir string, params consul.ConnParams, r k
 	if err != nil {
 		switch err.(type) {
 		default:
-			return newBaseConf(), nil, ConfigurationReadError{err}
+			return NewBaseConf(), nil, ConfigurationReadError{err}
 		case viper.ConfigFileNotFoundError:
 			logger.Info("No configuration file was found")
 		}
@@ -586,7 +586,7 @@ func InitLoad(ctx context.Context, confDir string, params consul.ConnParams, r k
 	var baseConf BaseConfig
 	err = v.Unmarshal(&baseConf)
 	if err != nil {
-		return newBaseConf(), nil, ConfigurationSyntaxError{Err: err, Filename: v.ConfigFileUsed()}
+		return NewBaseConf(), nil, ConfigurationSyntaxError{Err: err, Filename: v.ConfigFileUsed()}
 	}
 	c = baseConf.Clone()
 
@@ -622,7 +622,7 @@ func InitLoad(ctx context.Context, confDir string, params consul.ConnParams, r k
 		if cancelWatch != nil {
 			cancelWatch()
 		}
-		return newBaseConf(), nil, err
+		return NewBaseConf(), nil, err
 	}
 
 	if consulResults != nil {

@@ -28,21 +28,21 @@ func Wout(header []byte, msg []byte) (err error) {
 	return err
 }
 
-func Launch(typ Types, opts ...ProviderOpt) error {
+func Launch(typ base.Types, opts ...ProviderOpt) error {
 	env := &base.ProviderEnv{}
 	for _, opt := range opts {
 		opt(env)
 	}
 
 	var command string
-	name := Types2Names[typ]
+	name := base.Types2Names[typ]
 	hasConf := false
 
-	if typ != Store && typ != Configuration {
+	if typ != base.Store && typ != base.Configuration {
 		if env.Pipe == nil {
 			return fmt.Errorf("Plugin '%s' has a nil pipe", name)
 		}
-		env.Reporter = base.NewReporter(name, env.Logger, env.Pipe)
+		SetReporter(base.NewReporter(name, env.Logger, env.Pipe))(env)
 		defer env.Reporter.Stop() // will close the pipe
 	}
 
@@ -106,14 +106,14 @@ func Launch(typ Types, opts ...ProviderOpt) error {
 			if err != nil {
 				_ = Wout(STARTERROR, []byte(err.Error()))
 				return err
-			} else if len(infos) == 0 && (typ == TCP || typ == UDP) {
+			} else if len(infos) == 0 && (typ == base.TCP || typ == base.UDP) {
 				// only TCP and UDP directly report info about their effective listening ports
 				svc.Stop()
 				err := Wout([]byte("nolistenererror"), []byte("plugin is inactive"))
 				if err != nil {
 					return err
 				}
-			} else if typ == TCP {
+			} else if typ == base.TCP {
 				infosb, _ := json.Marshal(infos)
 				err := Wout(STARTED, infosb)
 				if err != nil {

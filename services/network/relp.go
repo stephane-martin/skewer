@@ -224,6 +224,10 @@ func NewRelpService(env *base.ProviderEnv) (base.Provider, error) {
 	return &s, nil
 }
 
+func (s *RelpService) Type() base.Types {
+	return base.RELP
+}
+
 func (s *RelpService) FatalError() chan struct{} {
 	return s.fatalErrorChan
 }
@@ -308,10 +312,11 @@ func (s *RelpService) Stop() {
 	s.wg.Wait()
 }
 
-func (s *RelpService) SetConf(sc []conf.RELPSourceConfig, pc []conf.ParserConfig, queueSize uint64) {
-	s.sc = sc
-	s.pc = pc
-	s.QueueSize = queueSize
+//func (s *RelpService) SetConf(sc []conf.RELPSourceConfig, pc []conf.ParserConfig, queueSize uint64) {
+func (s *RelpService) SetConf(c conf.BaseConfig) {
+	s.sc = c.RELPSource
+	s.pc = c.Parsers
+	s.QueueSize = c.Main.InputQueueSize
 }
 
 type RelpServiceImpl struct {

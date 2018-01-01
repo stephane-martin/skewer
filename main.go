@@ -21,6 +21,7 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/stephane-martin/skewer/cmd"
 	"github.com/stephane-martin/skewer/services"
+	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/sys"
 	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/sys/capabilities"
@@ -203,12 +204,12 @@ func reExec(t reExecType) {
 }
 
 func execChild() error {
-	err := scomp.SetupSeccomp("parent")
+	err := scomp.SetupSeccomp(-1)
 	if err != nil {
 		dopanic("Error setting up seccomp", err, -1)
 	}
 
-	err = scomp.SetupPledge("parent")
+	err = scomp.SetupPledge(-1)
 	if err != nil {
 		dopanic("Error setting up pledge", err, -1)
 	}
@@ -267,8 +268,8 @@ func execServeParent() (err error) {
 	binderSockets := map[string]spair{}
 	loggerSockets := map[string]spair{}
 
-	for _, h := range services.Handles {
-		if h.Type == services.Binder {
+	for _, h := range base.Handles {
+		if h.Type == base.Binder {
 			binderSockets[h.Service], err = getSocketPair(syscall.SOCK_STREAM)
 		} else {
 			loggerSockets[h.Service], err = getSocketPair(syscall.SOCK_DGRAM)
@@ -307,8 +308,8 @@ func execServeParent() (err error) {
 	}
 
 	extraFiles := []*os.File{}
-	for _, h := range services.Handles {
-		if h.Type == services.Binder {
+	for _, h := range base.Handles {
+		if h.Type == base.Binder {
 			extraFiles = append(extraFiles, os.NewFile(binderSockets[h.Service].child, h.Service))
 		} else {
 			extraFiles = append(extraFiles, os.NewFile(loggerSockets[h.Service].child, h.Service))
@@ -339,8 +340,8 @@ func execServeParent() (err error) {
 		dopanic("Error starting child", err, -1)
 	}
 
-	for _, h := range services.Handles {
-		if h.Type == services.Binder {
+	for _, h := range base.Handles {
+		if h.Type == base.Binder {
 			_ = syscall.Close(int(binderSockets[h.Service].child))
 		} else {
 			_ = syscall.Close(int(loggerSockets[h.Service].child))
@@ -380,12 +381,12 @@ func execServeParent() (err error) {
 }
 
 func execParent() error {
-	err := scomp.SetupSeccomp("parent")
+	err := scomp.SetupSeccomp(-1)
 	if err != nil {
 		dopanic("Error setting up seccomp", err, -1)
 	}
 
-	err = scomp.SetupPledge("parent")
+	err = scomp.SetupPledge(-1)
 	if err != nil {
 		dopanic("Error setting up pledge", err, -1)
 	}
@@ -440,30 +441,15 @@ func init() {
 	loggerCtx, cancelLogger = context.WithCancel(context.Background())
 }
 
-func doMain() {
-	defer func() {
-		cancelLogger()
-		time.Sleep(100 * time.Millisecond)
-	}()
-
-	// calculate the process name
-	name := strings.Trim(os.Args[0], "./ \n\r")
-	spl := strings.Split(name, "/")
-	if len(spl) > 0 {
-		name = spl[len(spl)-1]
-	} else {
-		name = "unknown"
+func runUnconfined(t base.Types) {
+	name, err := base.Name(t, false)
+	if err != nil {
+		dopanic("Unknown process name", nil, -1)
 	}
-
-	if runtime.GOOS == "openbsd" {
-		// so that we execute IP capabilities probes before the call to pledge
-		_, _ = net.Dial("udp4", "127.0.0.1:80")
-	}
-
 	sid := os.Getenv("SKEWER_SESSION")
 
-	switch name {
-	case services.Types2Names[services.Configuration]:
+	switch t {
+	case base.Configuration:
 		dumpable.SetNonDumpable()
 		capabilities.NoNewPriv()
 		signal.Ignore(syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
@@ -489,11 +475,11 @@ func doMain() {
 		if err != nil {
 			dopanic("Could not create a logger for the configuration service", err, -1)
 		}
-		err = scomp.SetupSeccomp(name)
+		err = scomp.SetupSeccomp(t)
 		if err != nil {
 			dopanic("Seccomp setup error", err, -1)
 		}
-		err = scomp.SetupPledge(name)
+		err = scomp.SetupPledge(t)
 		if err != nil {
 			dopanic("Pledge setup error", err, -1)
 		}
@@ -503,85 +489,17 @@ func doMain() {
 		}
 		return
 
-	case services.Types2ConfinedNames[services.Journal]:
-		// journal is a special case, as /run/log/journal and /var/log/journal
-		// can not be bind-mounted (probably because of setgid bits)
-		dumpable.SetNonDumpable()
-		path, err := osext.Executable()
-		if err != nil {
-			dopanic("Error getting executable path", err, -1)
-		}
-		// mask most of directories, but no pivotroot
-		err = namespaces.SetJournalFs(path)
-		if err != nil {
-			dopanic("mount error", err, -1)
-		}
-		err = sys.SetHostname(name)
-		if err != nil {
-			dopanic("sethostname error", err, -1)
-		}
-		// from here we don't need root capabilities in the container
-		err = capabilities.DropAllCapabilities()
-		if err != nil {
-			dopanic("Error dropping caps", err, -1)
-		}
-		err = syscall.Exec(path, []string{os.Args[0][9:]}, os.Environ())
-		if err != nil {
-			dopanic("execve error", err, -1)
-		}
+	case base.TCP,
+		base.UDP,
+		base.Graylog,
+		base.RELP,
+		base.DirectRELP,
+		base.Journal,
+		base.Store,
+		base.Accounting,
+		base.KafkaSource:
 
-	case services.Types2ConfinedNames[services.Accounting],
-		services.Types2ConfinedNames[services.TCP],
-		services.Types2ConfinedNames[services.UDP],
-		services.Types2ConfinedNames[services.Graylog],
-		services.Types2ConfinedNames[services.RELP],
-		services.Types2ConfinedNames[services.Store],
-		services.Types2ConfinedNames[services.Configuration],
-		services.Types2ConfinedNames[services.KafkaSource]:
-
-		path, err := osext.Executable()
-		if err != nil {
-			dopanic("Error getting executable path", err, -1)
-		}
-		// we are root inside the user namespace that was created by plugin control
-		dumpable.SetNonDumpable()
-
-		root, err := namespaces.MakeChroot(path)
-		if err != nil {
-			dopanic("mount error", err, -1)
-		}
-		err = namespaces.PivotRoot(root)
-		if err != nil {
-			dopanic("pivotroot error", err, -1)
-		}
-		err = sys.SetHostname(name)
-		if err != nil {
-			dopanic("sethostname error", err, -1)
-		}
-		// from here we don't need root capabilities in the container
-		err = capabilities.DropAllCapabilities()
-		if err != nil {
-			dopanic("Error dropping caps", err, -1)
-		}
-		environ := append(os.Environ(), "SKEWER_CONFINED=TRUE")
-		err = syscall.Exec(path, []string{os.Args[0][9:]}, environ)
-		if err != nil {
-			dopanic("execve error", err, -1)
-		}
-
-	case services.Types2Names[services.TCP],
-		services.Types2Names[services.UDP],
-		services.Types2Names[services.Graylog],
-		services.Types2Names[services.RELP],
-		services.Types2Names[services.DirectRELP],
-		services.Types2Names[services.Journal],
-		services.Types2Names[services.Store],
-		services.Types2Names[services.Accounting],
-		services.Types2Names[services.KafkaSource]:
-
-		// TODO: work with service type, not service name
-
-		if name == services.Types2Names[services.Store] {
+		if t == base.Store {
 			runtime.GOMAXPROCS(128)
 		}
 		signal.Ignore(syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
@@ -648,16 +566,16 @@ func doMain() {
 			pipe = os.NewFile(pipeHdl, "pipe")
 		}
 
-		err = scomp.SetupSeccomp(name)
+		err = scomp.SetupSeccomp(t)
 		if err != nil {
 			dopanic("Seccomp setup error", err, -1)
 		}
-		err = scomp.SetupPledge(name)
+		err = scomp.SetupPledge(t)
 		if err != nil {
 			dopanic("Pledge setup error", err, -1)
 		}
 		err = services.Launch(
-			services.Names2Types[name],
+			t,
 			services.SetConfined(os.Getenv("SKEWER_CONFINED") == "TRUE"),
 			services.SetProfile(os.Getenv("SKEWER_PROFILE") == "TRUE"),
 			services.SetRing(ring),
@@ -669,7 +587,110 @@ func doMain() {
 			dopanic("Plugin encountered a fatal error", err, -1)
 		}
 		return
+	default:
+		dopanic("Unknown process name", nil, -1)
+	}
 
+}
+
+func runConfined(t base.Types) {
+	name, err := base.Name(t, true)
+	if err != nil {
+		dopanic("Unknown process name", nil, -1)
+	}
+	switch t {
+	case base.Journal:
+		// journal is a special case, as /run/log/journal and /var/log/journal
+		// can not be bind-mounted (probably because of setgid bits)
+		dumpable.SetNonDumpable()
+		path, err := osext.Executable()
+		if err != nil {
+			dopanic("Error getting executable path", err, -1)
+		}
+		// mask most of directories, but no pivotroot
+		err = namespaces.SetJournalFs(path)
+		if err != nil {
+			dopanic("mount error", err, -1)
+		}
+		err = sys.SetHostname(name)
+		if err != nil {
+			dopanic("sethostname error", err, -1)
+		}
+		// from here we don't need root capabilities in the container
+		err = capabilities.DropAllCapabilities()
+		if err != nil {
+			dopanic("Error dropping caps", err, -1)
+		}
+		err = syscall.Exec(path, []string{os.Args[0][9:]}, os.Environ())
+		if err != nil {
+			dopanic("execve error", err, -1)
+		}
+
+	case base.Accounting,
+		base.TCP,
+		base.UDP,
+		base.Graylog,
+		base.RELP,
+		base.DirectRELP,
+		base.Store,
+		base.Configuration,
+		base.KafkaSource:
+
+		path, err := osext.Executable()
+		if err != nil {
+			dopanic("Error getting executable path", err, -1)
+		}
+		// we are root inside the user namespace that was created by plugin control
+		dumpable.SetNonDumpable()
+
+		root, err := namespaces.MakeChroot(path)
+		if err != nil {
+			dopanic("mount error", err, -1)
+		}
+		err = namespaces.PivotRoot(root)
+		if err != nil {
+			dopanic("pivotroot error", err, -1)
+		}
+		err = sys.SetHostname(name)
+		if err != nil {
+			dopanic("sethostname error", err, -1)
+		}
+		// from here we don't need root capabilities in the container
+		err = capabilities.DropAllCapabilities()
+		if err != nil {
+			dopanic("Error dropping caps", err, -1)
+		}
+		environ := append(os.Environ(), "SKEWER_CONFINED=TRUE")
+		err = syscall.Exec(path, []string{os.Args[0][9:]}, environ)
+		if err != nil {
+			dopanic("execve error", err, -1)
+		}
+	default:
+		dopanic("Unknown process name", nil, -1)
+	}
+}
+
+func doMain() {
+	defer func() {
+		cancelLogger()
+		time.Sleep(100 * time.Millisecond)
+	}()
+
+	// calculate the process name
+	name := strings.Trim(os.Args[0], "./ \n\r")
+	spl := strings.Split(name, "/")
+	if len(spl) > 0 {
+		name = spl[len(spl)-1]
+	} else {
+		dopanic("Unknown process name", nil, -1)
+	}
+
+	if runtime.GOOS == "openbsd" {
+		// so that we execute IP capabilities probes before the call to pledge
+		_, _ = net.Dial("udp4", "127.0.0.1:80")
+	}
+
+	switch name {
 	case "skewer-child":
 		if runtime.GOOS == "linux" {
 			reExec(netBindCapDrop)
@@ -707,7 +728,17 @@ func doMain() {
 		return
 
 	default:
+	}
+
+	typ, cfnd, err := base.Type(name)
+	if err != nil {
 		dopanic("Unknown process name", nil, -1)
 	}
+
+	if cfnd {
+		runConfined(typ)
+		return
+	}
+	runUnconfined(typ)
 	return
 }

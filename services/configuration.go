@@ -18,6 +18,7 @@ import (
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/consul"
+	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/sys/capabilities"
 	"github.com/stephane-martin/skewer/sys/kring"
 	"github.com/stephane-martin/skewer/sys/namespaces"
@@ -60,6 +61,10 @@ func NewConfigurationService(ring kring.Ring, signKey *memguard.LockedBuffer, ch
 	}
 	c.boxsec = boxsec
 	return &c, nil
+}
+
+func (c *ConfigurationService) Type() base.Types {
+	return base.Configuration
 }
 
 func (c *ConfigurationService) W(header []byte, message []byte) (err error) {

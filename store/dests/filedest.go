@@ -304,6 +304,7 @@ func (o *openedFiles) closeall() {
 	runtime.GC()
 }
 
+// TODO: factorize a base destination
 type FileDestination struct {
 	logger       log15.Logger
 	fatal        chan struct{}

@@ -1,7 +1,10 @@
 package base
 
-import "github.com/stephane-martin/skewer/model"
-import dto "github.com/prometheus/client_model/go"
+import (
+	dto "github.com/prometheus/client_model/go"
+	"github.com/stephane-martin/skewer/conf"
+	"github.com/stephane-martin/skewer/model"
+)
 
 type Provider interface {
 	Start() ([]model.ListenerInfo, error)
@@ -9,4 +12,6 @@ type Provider interface {
 	Shutdown()
 	Gather() ([]*dto.MetricFamily, error)
 	FatalError() chan struct{}
+	Type() Types
+	SetConf(c conf.BaseConfig)
 }

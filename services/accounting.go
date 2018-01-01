@@ -47,6 +47,10 @@ func NewAccountingService(env *base.ProviderEnv) (base.Provider, error) {
 	return &s, nil
 }
 
+func (s *AccountingService) Type() base.Types {
+	return base.Accounting
+}
+
 func (s *AccountingService) Gather() ([]*dto.MetricFamily, error) {
 	return base.Registry.Gather()
 }
@@ -278,6 +282,6 @@ func (s *AccountingService) Shutdown() {
 	s.wgroup.Wait()
 }
 
-func (s *AccountingService) SetConf(c conf.AccountingConfig) {
-	s.Conf = c
+func (s *AccountingService) SetConf(c conf.BaseConfig) {
+	s.Conf = c.Accounting
 }
