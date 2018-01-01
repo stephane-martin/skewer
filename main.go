@@ -732,7 +732,7 @@ func doMain() {
 
 	typ, cfnd, err := base.Type(name)
 	if err != nil {
-		dopanic("Unknown process name", nil, -1)
+		dopanic(fmt.Sprintf("Unknown process name: '%s'", name), nil, -1)
 	}
 
 	if cfnd {

@@ -37,7 +37,7 @@ func Name(t Types, cfnd bool) (string, error) {
 
 func Type(name string) (t Types, cfnd bool, err error) {
 	name = strings.ToLower(strings.TrimSpace(name))
-	if strings.HasPrefix("name", "confined-") {
+	if strings.HasPrefix(name, "confined-") {
 		name = name[9:]
 		cfnd = true
 	}
