@@ -1,12 +1,12 @@
 package model
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/pquerna/ffjson/ffjson"
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/unicode"
 	"gopkg.in/Graylog2/go-gelf.v2/gelf"
@@ -39,7 +39,7 @@ func ParseFullJsonFormat(m []byte, decoder *encoding.Decoder) (msg *SyslogMessag
 		return nil, &InvalidEncodingError{Err: err}
 	}
 	sourceMsg := RegularSyslog{}
-	err = json.Unmarshal(m, &sourceMsg)
+	err = ffjson.Unmarshal(m, &sourceMsg)
 	if err != nil {
 		return nil, &UnmarshalingJsonError{err}
 	}
@@ -56,7 +56,7 @@ func ParseJsonFormat(m []byte, decoder *encoding.Decoder) (msg *SyslogMessage, r
 		return nil, &InvalidEncodingError{Err: err}
 	}
 	sourceMsg := JsonRsyslogMessage{}
-	err = json.Unmarshal(m, &sourceMsg)
+	err = ffjson.Unmarshal(m, &sourceMsg)
 	if err != nil {
 		return nil, &UnmarshalingJsonError{err}
 	}

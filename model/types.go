@@ -1,5 +1,7 @@
 package model
 
+//go:generate ffjson $GOFILE
+
 import (
 	"encoding/json"
 	"fmt"
@@ -137,6 +139,7 @@ func (m *ParsedMessage) RegularJson() ([]byte, error) {
 	return json.Marshal(m.Regular())
 }
 
+// ffjson: noencoder
 type JsonRsyslogMessage struct {
 	// used to parsed JSON input from rsyslog
 	Message       string `json:"msg"`

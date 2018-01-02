@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/pquerna/ffjson/ffjson"
 	"github.com/stephane-martin/skewer/utils"
 )
 
@@ -216,12 +217,12 @@ func (e *encoderJson) Enc(v interface{}, w io.Writer) error {
 	}
 	switch val := v.(type) {
 	case *FullMessage:
-		return json.NewEncoder(w).Encode(val.Parsed.Fields.Regular())
+		return ffjson.NewEncoder(w).Encode(val.Parsed.Fields.Regular())
 	case *ParsedMessage:
-		return json.NewEncoder(w).Encode(val.Fields.Regular())
+		return ffjson.NewEncoder(w).Encode(val.Fields.Regular())
 	case *SyslogMessage:
 		//val.SetTimeStrings()
-		return json.NewEncoder(w).Encode(val.Regular())
+		return ffjson.NewEncoder(w).Encode(val.Regular())
 	default:
 		return defaultEncode(v, w)
 	}
@@ -242,11 +243,11 @@ func (e *encoderFullJson) Enc(v interface{}, w io.Writer) error {
 	switch val := v.(type) {
 	case *FullMessage:
 		//val.Parsed.Fields.SetTimeStrings()
-		return json.NewEncoder(w).Encode(val.Parsed.Regular())
+		return ffjson.NewEncoder(w).Encode(val.Parsed.Regular())
 	case *ParsedMessage:
-		return json.NewEncoder(w).Encode(val.Regular())
+		return ffjson.NewEncoder(w).Encode(val.Regular())
 	case *SyslogMessage:
-		return json.NewEncoder(w).Encode(val.Regular())
+		return ffjson.NewEncoder(w).Encode(val.Regular())
 	default:
 		return defaultEncode(v, w)
 	}
