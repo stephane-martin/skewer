@@ -223,7 +223,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TCPSourceConfig)
 	path := ""
 	remote := conn.RemoteAddr()
 	localPort := ""
-	var localPortInt int
+	var localPortInt int32
 
 	if remote == nil {
 		client = "localhost"
@@ -233,7 +233,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TCPSourceConfig)
 		local := conn.LocalAddr()
 		if local != nil {
 			s := strings.Split(local.String(), ":")
-			localPortInt, _ = strconv.Atoi(s[len(s)-1])
+			localPortInt, _ = utils.Atoi32(s[len(s)-1])
 			if localPortInt > 0 {
 				localPort = strconv.FormatInt(int64(localPortInt), 10)
 			}

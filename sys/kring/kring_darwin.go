@@ -7,8 +7,8 @@ import (
 
 	"github.com/awnumar/memguard"
 	"github.com/keybase/go-keychain"
-	"github.com/oklog/ulid"
 	"github.com/stephane-martin/skewer/sys/semaphore"
+	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/sbox"
 	"golang.org/x/crypto/ed25519"
 )
@@ -223,6 +223,6 @@ func (r *ring) WriteRingPass(w io.Writer) (err error) {
 	return err
 }
 
-func (r *ring) GetSessionID() ulid.ULID {
+func (r *ring) GetSessionID() utils.MyULID {
 	return r.creds.SessionID
 }

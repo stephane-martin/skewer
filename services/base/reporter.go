@@ -78,7 +78,7 @@ func (s *ReporterImpl) pushqueue() {
 		for s.queue.Wait(100 * time.Millisecond) {
 			m, err = s.queue.Get()
 			if m != nil && err == nil {
-				b, err = m.MarshalMsg(nil)
+				b, err = m.Marshal()
 				if err != nil {
 					// should not happen
 					s.logger.Warn("A syslog message could not be serialized", "type", s.name, "error", err)

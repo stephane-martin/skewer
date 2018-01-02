@@ -80,7 +80,7 @@ func ExecuteChild() (err error) {
 	if err != nil {
 		return err
 	}
-	creds := kring.RingCreds{Secret: ringSecret, SessionID: ulid.MustParse(sessionID)}
+	creds := kring.RingCreds{Secret: ringSecret, SessionID: utils.MyULID(ulid.MustParse(sessionID))}
 	ring := kring.GetRing(creds)
 	secret, err := ring.GetBoxSecret()
 	if err != nil {

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/awnumar/memguard"
-	"github.com/oklog/ulid"
+	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/sbox"
 )
 
@@ -279,13 +279,13 @@ type FilterSubConfig struct {
 
 type JournaldConfig struct {
 	FilterSubConfig `mapstructure:",squash"`
-	ConfID          ulid.ULID `mapstructure:"-" toml:"-" json:"conf_id"`
-	Enabled         bool      `mapstructure:"enabled" toml:"enabled" json:"enabled"`
+	ConfID          utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
+	Enabled         bool         `mapstructure:"enabled" toml:"enabled" json:"enabled"`
 }
 
 type AccountingConfig struct {
 	FilterSubConfig `mapstructure:",squash"`
-	ConfID          ulid.ULID     `mapstructure:"-" toml:"-" json:"conf_id"`
+	ConfID          utils.MyULID  `mapstructure:"-" toml:"-" json:"conf_id"`
 	Period          time.Duration `mapstructure:"period" toml:"period" json:"period"`
 	Path            string        `mapstructure:"path" toml:"path" json:"path"`
 	Enabled         bool          `mapstructure:"enabled" toml:"enabled" json:"enabled"`
@@ -295,10 +295,10 @@ type TCPSourceConfig struct {
 	SyslogSourceBaseConfig `mapstructure:",squash"`
 	FilterSubConfig        `mapstructure:",squash"`
 	TlsBaseConfig          `mapstructure:",squash"`
-	ClientAuthType         string    `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
-	LineFraming            bool      `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
-	FrameDelimiter         string    `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
-	ConfID                 ulid.ULID `mapstructure:"-" toml:"-" json:"conf_id"`
+	ClientAuthType         string       `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
+	LineFraming            bool         `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
+	FrameDelimiter         string       `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
+	ConfID                 utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
 }
 
 func (c *TCPSourceConfig) GetFilterConf() *FilterSubConfig {
@@ -316,7 +316,7 @@ func (c *TCPSourceConfig) DefaultPort() int {
 type UDPSourceConfig struct {
 	SyslogSourceBaseConfig `mapstructure:",squash"`
 	FilterSubConfig        `mapstructure:",squash"`
-	ConfID                 ulid.ULID `mapstructure:"-" toml:"-" json:"conf_id"`
+	ConfID                 utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
 }
 
 func (c *UDPSourceConfig) GetFilterConf() *FilterSubConfig {
@@ -334,7 +334,7 @@ func (c *UDPSourceConfig) DefaultPort() int {
 type GraylogSourceConfig struct {
 	SyslogSourceBaseConfig `mapstructure:",squash"`
 	FilterSubConfig        `mapstructure:",squash"`
-	ConfID                 ulid.ULID `mapstructure:"-" toml:"-" json:"conf_id"`
+	ConfID                 utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
 }
 
 func (c *GraylogSourceConfig) GetFilterConf() *FilterSubConfig {
@@ -353,10 +353,10 @@ type RELPSourceConfig struct {
 	SyslogSourceBaseConfig `mapstructure:",squash"`
 	FilterSubConfig        `mapstructure:",squash"`
 	TlsBaseConfig          `mapstructure:",squash"`
-	ClientAuthType         string    `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
-	LineFraming            bool      `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
-	FrameDelimiter         string    `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
-	ConfID                 ulid.ULID `mapstructure:"-" toml:"-" json:"conf_id"`
+	ClientAuthType         string       `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
+	LineFraming            bool         `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
+	FrameDelimiter         string       `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
+	ConfID                 utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
 }
 
 func (c *RELPSourceConfig) GetFilterConf() *FilterSubConfig {
@@ -375,10 +375,10 @@ type DirectRELPSourceConfig struct {
 	SyslogSourceBaseConfig `mapstructure:",squash"`
 	FilterSubConfig        `mapstructure:",squash"`
 	TlsBaseConfig          `mapstructure:",squash"`
-	ClientAuthType         string    `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
-	LineFraming            bool      `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
-	FrameDelimiter         string    `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
-	ConfID                 ulid.ULID `mapstructure:"-" toml:"-" json:"conf_id"`
+	ClientAuthType         string       `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
+	LineFraming            bool         `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
+	FrameDelimiter         string       `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
+	ConfID                 utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
 }
 
 func (c *DirectRELPSourceConfig) GetFilterConf() *FilterSubConfig {
@@ -420,7 +420,7 @@ type KafkaSourceConfig struct {
 	Insecure                bool          `mapstructure:"insecure" toml:"insecure" json:"insecure"`
 	Format                  string        `mapstructure:"format" toml:"format" json:"format"`
 	Encoding                string        `mapstructure:"encoding" toml:"encoding" json:"encoding"`
-	ConfID                  ulid.ULID     `mapstructure:"-" toml:"-" json:"conf_id"`
+	ConfID                  utils.MyULID  `mapstructure:"-" toml:"-" json:"conf_id"`
 	SessionTimeout          time.Duration `mapstructure:"session_timeout" toml:"session_timeout" json:"session_timeout"`
 	HeartbeatInterval       time.Duration `mapstructure:"heartbeat_interval" toml:"heartbeat_interval" json:"heartbeat_interval"`
 	OffsetsMaxRetry         int           `mapstructure:"offsets_max_retry" toml:"offsets_max_retry" json:"offsets_max_retry"`

@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package logging;
+
+import "vendor/github.com/gogo/protobuf/gogoproto/gogo.proto";
+
+option (gogoproto.marshaler_all) = true; 
+option (gogoproto.unmarshaler_all) = true; 
+option (gogoproto.sizer_all) = true; 
+
+message Record {
+	int64 time = 1;
+	int32 lvl = 2;
+	string msg = 3;
+	map<string, string> ctx = 4 [(gogoproto.nullable) = false];
+}

@@ -13,8 +13,6 @@ import (
 	"time"
 
 	sarama "github.com/Shopify/sarama"
-	"github.com/oklog/ulid"
-	"github.com/pquerna/ffjson/ffjson"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"golang.org/x/text/encoding"
@@ -177,7 +175,7 @@ type DirectRelpServiceImpl struct {
 	rawMessagesQueue    *tcp.Ring
 	parsedMessagesQueue *queue.MessageQueue
 	parsewg             sync.WaitGroup
-	configs             map[ulid.ULID]conf.DirectRELPSourceConfig
+	configs             map[utils.MyULID]conf.DirectRELPSourceConfig
 	forwarder           *ackForwarder
 }
 
@@ -185,7 +183,7 @@ func NewDirectRelpServiceImpl(confined bool, reporter base.Reporter, b binder.Cl
 	s := DirectRelpServiceImpl{
 		status:    Stopped,
 		reporter:  reporter,
-		configs:   map[ulid.ULID]conf.DirectRELPSourceConfig{},
+		configs:   map[utils.MyULID]conf.DirectRELPSourceConfig{},
 		forwarder: newAckForwarder(),
 	}
 	s.StreamingService.init()
@@ -224,7 +222,7 @@ func (s *DirectRelpServiceImpl) Start() ([]model.ListenerInfo, error) {
 
 	s.parsedMessagesQueue = queue.NewMessageQueue()
 	s.rawMessagesQueue = tcp.NewRing(s.QueueSize)
-	s.configs = map[ulid.ULID]conf.DirectRELPSourceConfig{}
+	s.configs = map[utils.MyULID]conf.DirectRELPSourceConfig{}
 
 	for _, l := range s.UnixListeners {
 		s.configs[l.Conf.ConfID] = conf.DirectRELPSourceConfig(l.Conf)
@@ -401,7 +399,7 @@ func (s *DirectRelpServiceImpl) Parse() {
 			},
 			Txnr:   raw.Txnr,
 			ConfId: raw.ConfID,
-			ConnID: raw.ConnID,
+			ConnId: raw.ConnID,
 		}
 		s.Pool.Put(raw)
 
@@ -451,21 +449,21 @@ func (s *DirectRelpServiceImpl) handleKafkaResponses() {
 
 }
 
-func (s *DirectRelpServiceImpl) handleResponses(conn net.Conn, connID uintptr, client string, logger log15.Logger) {
+func (s *DirectRelpServiceImpl) handleResponses(conn net.Conn, connID uint32, client string, logger log15.Logger) {
 	defer func() {
 		s.wg.Done()
 	}()
 
-	successes := map[int]bool{}
-	failures := map[int]bool{}
+	successes := map[int32]bool{}
+	failures := map[int32]bool{}
 	var err error
 
-	writeSuccess := func(txnr int) (err error) {
+	writeSuccess := func(txnr int32) (err error) {
 		_, err = fmt.Fprintf(conn, "%d rsp 6 200 OK\n", txnr)
 		return err
 	}
 
-	writeFailure := func(txnr int) (err error) {
+	writeFailure := func(txnr int32) (err error) {
 		_, err = fmt.Fprintf(conn, "%d rsp 6 500 KO\n", txnr)
 		return err
 	}
@@ -530,7 +528,7 @@ func (s *DirectRelpServiceImpl) push2kafka() {
 		s.producer.AsyncClose()
 		s.wg.Done()
 	}()
-	envs := map[ulid.ULID]*javascript.Environment{}
+	envs := map[utils.MyULID]*javascript.Environment{}
 	var e *javascript.Environment
 	var haveEnv bool
 	var message *model.FullMessage
@@ -585,7 +583,7 @@ ForParsedChan:
 		}
 		if len(topic) == 0 {
 			logger.Warn("Topic or PartitionKey could not be calculated", "txnr", message.Txnr)
-			s.forwarder.ForwardFail(message.ConnID, message.Txnr)
+			s.forwarder.ForwardFail(message.ConnId, message.Txnr)
 			continue ForParsedChan
 		}
 		partitionKey, errs = e.PartitionKey(message.Parsed.Fields)
@@ -601,31 +599,27 @@ ForParsedChan:
 
 		switch filterResult {
 		case javascript.DROPPED:
-			s.forwarder.ForwardFail(message.ConnID, message.Txnr)
+			s.forwarder.ForwardFail(message.ConnId, message.Txnr)
 			base.MessageFilteringCounter.WithLabelValues("dropped", message.Parsed.Client).Inc()
 			continue ForParsedChan
 		case javascript.REJECTED:
-			s.forwarder.ForwardFail(message.ConnID, message.Txnr)
+			s.forwarder.ForwardFail(message.ConnId, message.Txnr)
 			base.MessageFilteringCounter.WithLabelValues("rejected", message.Parsed.Client).Inc()
 			continue ForParsedChan
 		case javascript.PASS:
 			base.MessageFilteringCounter.WithLabelValues("passing", message.Parsed.Client).Inc()
 		default:
-			s.forwarder.ForwardFail(message.ConnID, message.Txnr)
+			s.forwarder.ForwardFail(message.ConnId, message.Txnr)
 			base.MessageFilteringCounter.WithLabelValues("unknown", message.Parsed.Client).Inc()
 			logger.Warn("Error happened processing message", "txnr", message.Txnr, "error", err)
 			continue ForParsedChan
 		}
 
-		reported = time.Unix(0, message.Parsed.Fields.TimeReportedNum).UTC()
-		message.Parsed.Fields.TimeGenerated = time.Unix(0, message.Parsed.Fields.TimeGeneratedNum).UTC().Format(time.RFC3339Nano)
-		message.Parsed.Fields.TimeReported = reported.Format(time.RFC3339Nano)
-
-		serialized, err = ffjson.Marshal(&message.Parsed)
+		serialized, err = message.Parsed.RegularJson()
 
 		if err != nil {
 			logger.Warn("Error generating Kafka message", "error", err, "txnr", message.Txnr)
-			s.forwarder.ForwardFail(message.ConnID, message.Txnr)
+			s.forwarder.ForwardFail(message.ConnId, message.Txnr)
 			continue ForParsedChan
 		}
 
@@ -635,7 +629,7 @@ ForParsedChan:
 			Value:     sarama.ByteEncoder(serialized),
 			Topic:     topic,
 			Timestamp: reported,
-			Metadata:  meta{Txnr: message.Txnr, ConnID: message.ConnID},
+			Metadata:  meta{Txnr: message.Txnr, ConnID: message.ConnId},
 		}
 
 		s.producer.Input() <- kafkaMsg
@@ -669,7 +663,7 @@ func (h DirectRelpHandler) HandleConnection(conn net.Conn, c conf.TCPSourceConfi
 	path := ""
 	remote := conn.RemoteAddr()
 
-	var localPort int
+	var localPort int32
 	if remote == nil {
 		client = "localhost"
 		localPort = 0
@@ -679,7 +673,7 @@ func (h DirectRelpHandler) HandleConnection(conn net.Conn, c conf.TCPSourceConfi
 		local := conn.LocalAddr()
 		if local != nil {
 			s := strings.Split(local.String(), ":")
-			localPort, _ = strconv.Atoi(s[len(s)-1])
+			localPort, _ = utils.Atoi32(s[len(s)-1])
 		}
 	}
 	client = strings.TrimSpace(client)
@@ -706,12 +700,12 @@ func (h DirectRelpHandler) HandleConnection(conn net.Conn, c conf.TCPSourceConfi
 	scanner.Split(utils.RelpSplit)
 	scanner.Buffer(make([]byte, 0, 132000), 132000)
 	var rawmsg *model.RawTcpMessage
-	var previous = int(-1)
+	var previous = int32(-1)
 
 Loop:
 	for scanner.Scan() {
 		splits := bytes.SplitN(scanner.Bytes(), sp, 4)
-		txnr, _ := strconv.Atoi(string(splits[0]))
+		txnr, _ := utils.Atoi32(string(splits[0]))
 		if txnr <= previous {
 			logger.Warn("TXNR did not increase", "previous", previous, "current", txnr)
 			relpProtocolErrorsCounter.WithLabelValues(client).Inc()

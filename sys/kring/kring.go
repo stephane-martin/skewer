@@ -6,7 +6,6 @@ import (
 	"io"
 
 	"github.com/awnumar/memguard"
-	"github.com/oklog/ulid"
 	"github.com/stephane-martin/skewer/sys/semaphore"
 	"github.com/stephane-martin/skewer/utils"
 )
@@ -19,7 +18,7 @@ type Ring interface {
 	DeleteBoxSecret() error
 	DeleteSignaturePubKey() error
 	WriteRingPass(io.Writer) error
-	GetSessionID() ulid.ULID
+	GetSessionID() utils.MyULID
 	Destroy() error
 }
 
@@ -37,7 +36,7 @@ func NewSecret() (m *memguard.LockedBuffer, err error) {
 }
 
 type RingCreds struct {
-	SessionID ulid.ULID
+	SessionID utils.MyULID
 	Secret    *memguard.LockedBuffer
 }
 
@@ -52,6 +51,6 @@ func NewCreds() (creds RingCreds, err error) {
 	return creds, nil
 }
 
-func destroySem(sessionID ulid.ULID) error {
+func destroySem(sessionID utils.MyULID) error {
 	return semaphore.Destroy(fmt.Sprintf("skw%s", sessionID.String()))
 }

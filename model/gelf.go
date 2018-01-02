@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/oklog/ulid"
 	"github.com/stephane-martin/skewer/utils"
 	"gopkg.in/Graylog2/go-gelf.v2/gelf"
 )
@@ -12,7 +11,7 @@ import (
 func (m *FullMessage) ToGelfMessage() *gelf.Message {
 	gm := m.Parsed.ToGelfMessage()
 	if m.Uid != utils.ZeroUid {
-		gm.Extra["skewer_uid"] = ulid.ULID(m.Uid).String()
+		gm.Extra["skewer_uid"] = m.Uid.String()
 	}
 	if m.Txnr > 0 {
 		gm.Extra["txnr"] = m.Txnr
@@ -37,7 +36,7 @@ func (m *ParsedMessage) ToGelfMessage() *gelf.Message {
 func (m *SyslogMessage) ToGelfMessage() *gelf.Message {
 	gelfm := gelf.Message{
 		Version:  "1.1",
-		Host:     m.Hostname,
+		Host:     m.HostName,
 		Short:    m.Message,
 		Full:     "",
 		TimeUnix: float64(m.TimeReportedNum) / 1000000000,
@@ -46,21 +45,21 @@ func (m *SyslogMessage) ToGelfMessage() *gelf.Message {
 		RawExtra: nil,
 	}
 	gelfm.Extra = map[string]interface{}{}
-	for domain, props := range m.Properties {
+	for domain, props := range m.Properties.GetMap() {
 		gelfm.Extra[domain] = map[string]string{}
-		for k, v := range props {
+		for k, v := range props.GetMap() {
 			(gelfm.Extra[domain]).(map[string]string)[k] = v
 		}
 	}
 	gelfm.Extra["facility"] = gelfm.Facility
-	if len(m.Appname) > 0 {
-		gelfm.Extra["appname"] = m.Appname
+	if len(m.AppName) > 0 {
+		gelfm.Extra["appname"] = m.AppName
 	}
-	if len(m.Procid) > 0 {
-		gelfm.Extra["procid"] = m.Procid
+	if len(m.ProcId) > 0 {
+		gelfm.Extra["procid"] = m.ProcId
 	}
-	if len(m.Msgid) > 0 {
-		gelfm.Extra["msgid"] = m.Msgid
+	if len(m.MsgId) > 0 {
+		gelfm.Extra["msgid"] = m.MsgId
 	}
 
 	return &gelfm
@@ -79,28 +78,17 @@ func FullFromGelfMessage(gelfm *gelf.Message) (msg *FullMessage) {
 }
 
 func (m *SyslogMessage) FromGelfMessage(gelfm *gelf.Message) {
-	m.TimeReported = ""
-	m.TimeGenerated = ""
+	//m.TimeReported = ""
+	//m.TimeGenerated = ""
 	m.Structured = ""
 	if gelfm == nil {
-		m.Message = ""
-		m.TimeReportedNum = 0
-		m.TimeGeneratedNum = 0
-		m.Hostname = ""
-		m.Version = 0
-		m.Severity = 0
-		m.Facility = 0
-		m.Priority = 0
-		m.Appname = ""
-		m.Procid = ""
-		m.Msgid = ""
-		m.Properties = map[string]map[string]string{}
+		m.Reset()
 		return
 	}
 	m.Message = gelfm.Short
 	m.TimeReportedNum = int64(gelfm.TimeUnix * 1000000000)
 	m.TimeGeneratedNum = time.Now().UnixNano()
-	m.Hostname = gelfm.Host
+	m.HostName = gelfm.Host
 	m.Version = 1
 	m.Severity = Severity(gelfm.Level)
 
@@ -113,39 +101,34 @@ func (m *SyslogMessage) FromGelfMessage(gelfm *gelf.Message) {
 	}
 	m.Priority = Priority(int(m.Facility)*8 + int(m.Severity))
 
-	m.Appname = ""
+	m.AppName = ""
 	if appname, ok := gelfm.Extra["appname"]; ok {
-		m.Appname = fmt.Sprintf("%s", appname)
+		m.AppName = fmt.Sprintf("%s", appname)
 	}
-	m.Procid = ""
+	m.ProcId = ""
 	if procid, ok := gelfm.Extra["procid"]; ok {
-		m.Procid = fmt.Sprintf("%s", procid)
+		m.ProcId = fmt.Sprintf("%s", procid)
 	}
-	m.Msgid = ""
+	m.MsgId = ""
 	if msgid, ok := gelfm.Extra["msgid"]; ok {
-		m.Msgid = fmt.Sprintf("%s", msgid)
+		m.MsgId = fmt.Sprintf("%s", msgid)
 	}
-
-	m.Properties = map[string]map[string]string{}
-	m.Properties["gelf"] = map[string]string{}
+	m.ClearProperties()
 	if len(gelfm.Full) > 0 {
-		m.Properties["gelf"]["full"] = gelfm.Full
+		m.SetProperty("gelf", "full", gelfm.Full)
 	}
 	for k, v := range gelfm.Extra {
 		switch k {
 		case "facility", "appname", "procid", "msgid":
 		default:
 			if vs, ok := v.(string); ok {
-				m.Properties["gelf"][k] = vs
+				m.SetProperty("gelf", k, vs)
 			} else if vm, ok := v.(map[string]string); ok {
-				if _, ok := m.Properties[k]; !ok {
-					m.Properties[k] = map[string]string{}
-				}
 				for k1, v1 := range vm {
-					m.Properties[k][k1] = v1
+					m.SetProperty(k, k1, v1)
 				}
 			} else {
-				m.Properties["gelf"][k] = fmt.Sprintf("%s", v)
+				m.SetProperty("gelf", k, fmt.Sprintf("%s", v))
 			}
 		}
 	}

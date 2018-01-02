@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package model;
+
+import "vendor/github.com/gogo/protobuf/gogoproto/gogo.proto";
+
+option (gogoproto.marshaler_all) = true; 
+option (gogoproto.unmarshaler_all) = true; 
+option (gogoproto.sizer_all) = true; 
+
+message InnerProperties {
+	map<string, string> map = 1; 
+}
+
+message Properties {
+	map<string, InnerProperties> map = 1; 
+}
+
+message SyslogMessage {
+	int32 priority = 1 [(gogoproto.casttype) = "Priority"]; 
+	int32 facility = 2 [(gogoproto.casttype) = "Facility"];
+	int32 severity = 3 [(gogoproto.casttype) = "Severity"];
+	int32 version = 4 [(gogoproto.casttype) = "Version"];
+	int64 time_reported_num = 5; 
+	int64 time_generated_num = 6;
+	string host_name = 7;
+	string app_name = 8;
+	string proc_id = 9;
+	string msg_id = 10;
+	string structured = 11;
+	string message = 12;
+	Properties properties = 13 [(gogoproto.nullable) = false];
+}
+
+message ParsedMessage {
+	int32 local_port = 1;
+	string client = 2;
+	string unix_socket_path = 3;	
+	SyslogMessage fields = 4 [(gogoproto.nullable) = false];
+}
+
+message FullMessage {
+	int32 txnr = 1;
+	uint32 conn_id = 2;	
+	bytes conf_id = 3 [(gogoproto.customtype) = "github.com/stephane-martin/skewer/utils.MyULID",(gogoproto.nullable) = false];
+	bytes uid = 4 [(gogoproto.customtype) = "github.com/stephane-martin/skewer/utils.MyULID",(gogoproto.nullable) = false];
+	ParsedMessage parsed = 5 [(gogoproto.nullable) = false];
+}
+

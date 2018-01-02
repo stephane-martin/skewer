@@ -5,13 +5,13 @@ import (
 	"sync"
 
 	"github.com/inconshreveable/log15"
-	"github.com/oklog/ulid"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/javascript"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/store/dests"
+	"github.com/stephane-martin/skewer/utils"
 )
 
 type fwderImpl struct {
@@ -106,7 +106,7 @@ func (fwder *fwderImpl) doForward(ctx context.Context) {
 		}
 	}()
 
-	jsenvs := map[ulid.ULID]*javascript.Environment{}
+	jsenvs := map[utils.MyULID]*javascript.Environment{}
 	done := ctx.Done()
 	outputs := fwder.store.Outputs(fwder.desttype)
 
@@ -125,14 +125,14 @@ func (fwder *fwderImpl) doForward(ctx context.Context) {
 				err = fwder.fwdMsg(message, jsenvs, dest)
 				fwder.store.ReleaseMsg(message)
 				if err != nil {
-					fwder.logger.Warn("Error forwarding message", "error", err, "uid", ulid.ULID(message.Uid).String())
+					fwder.logger.Warn("Error forwarding message", "error", err, "uid", utils.MyULID(message.Uid).String())
 				}
 			}
 		}
 	}
 }
 
-func (fwder *fwderImpl) fwdMsg(m *model.FullMessage, envs map[ulid.ULID]*javascript.Environment, dest dests.Destination) (err error) {
+func (fwder *fwderImpl) fwdMsg(m *model.FullMessage, envs map[utils.MyULID]*javascript.Environment, dest dests.Destination) (err error) {
 	var errs []error
 	var config *conf.FilterSubConfig
 	var topic, partitionKey string
@@ -146,8 +146,8 @@ func (fwder *fwderImpl) fwdMsg(m *model.FullMessage, envs map[ulid.ULID]*javascr
 		if err != nil {
 			fwder.logger.Warn(
 				"could not find the stored configuration for a message",
-				"confId", ulid.ULID(m.ConfId).String(),
-				"msgId", ulid.ULID(m.Uid).String(),
+				"confId", utils.MyULID(m.ConfId).String(),
+				"msgId", utils.MyULID(m.Uid).String(),
 			)
 			fwder.store.PermError(m.Uid, fwder.desttype)
 			return err

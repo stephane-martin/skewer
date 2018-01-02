@@ -49,11 +49,10 @@ func BinderListen(ctx context.Context, logger log15.Logger, schan chan *External
 	}()
 
 	go func() {
-		gen := utils.NewGenerator()
 		for {
 			c, err := l.Accept()
 			if err == nil {
-				uids := gen.Uid().String()
+				uids := utils.NewUidString()
 				logger.Debug("New accepted connection", "uid", uids, "addr", addr)
 				schan <- &ExternalConn{Uid: uids, Conn: c, Addr: addr}
 			} else {
@@ -176,7 +175,6 @@ func binderOne(parentFD uintptr, logger log15.Logger) error {
 	go func() {
 		defer cancel()
 		scanner := bufio.NewScanner(childConn)
-		gen := utils.NewGenerator()
 
 		listeners := map[string]net.Listener{}
 		var rmsg string
@@ -208,7 +206,7 @@ func binderOne(parentFD uintptr, logger log15.Logger) error {
 					} else {
 						c, err := BinderPacket(addr)
 						if err == nil {
-							pchan <- &ExternalPacketConn{Addr: addr, Conn: c, Uid: gen.Uid().String()}
+							pchan <- &ExternalPacketConn{Addr: addr, Conn: c, Uid: utils.NewUidString()}
 						} else {
 							logger.Warn("ListenPacket error", "error", err, "addr", addr)
 							_, _ = childConn.Write([]byte(fmt.Sprintf("error %s %s", addr, err.Error())))

@@ -1,8 +1,8 @@
 package dests
 
 import (
-	"github.com/oklog/ulid"
 	"github.com/stephane-martin/skewer/conf"
+	"github.com/stephane-martin/skewer/utils"
 )
 
-type storeCallback func(uid ulid.ULID, dest conf.DestinationType)
+type storeCallback func(uid utils.MyULID, dest conf.DestinationType)

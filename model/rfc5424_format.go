@@ -42,9 +42,8 @@ func ParseRfc5424Format(m []byte, decoder *encoding.Decoder, dont_parse_sd bool)
 	if len(splits) < 7 {
 		return nil, &NotEnoughPartsError{len(splits)}
 	}
-	smsg = &SyslogMessage{
-		Properties: make(map[string](map[string]string)),
-	}
+	smsg = &SyslogMessage{}
+	smsg.ClearProperties()
 	smsg.Priority, smsg.Facility, smsg.Severity, smsg.Version, err = parsePriority(splits[0])
 	if err != nil {
 		return nil, err
@@ -72,19 +71,19 @@ func ParseRfc5424Format(m []byte, decoder *encoding.Decoder, dont_parse_sd bool)
 
 	s = string(splits[2])
 	if s != "-" {
-		smsg.Hostname = s
+		smsg.HostName = s
 	}
 	s = string(splits[3])
 	if s != "-" {
-		smsg.Appname = s
+		smsg.AppName = s
 	}
 	s = string(splits[4])
 	if s != "-" {
-		smsg.Procid = s
+		smsg.ProcId = s
 	}
 	s = string(splits[5])
 	if s != "-" {
-		smsg.Msgid = s
+		smsg.MsgId = s
 	}
 	structured_and_msg := bytes.TrimSpace(splits[6])
 	if bytes.HasPrefix(structured_and_msg, DASH) {
@@ -105,7 +104,7 @@ func ParseRfc5424Format(m []byte, decoder *encoding.Decoder, dont_parse_sd bool)
 				return nil, err
 			}
 			if len(props) > 0 {
-				smsg.Properties = props
+				smsg.SetAllProperties(props)
 			}
 		}
 	} else {

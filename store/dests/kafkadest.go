@@ -7,9 +7,9 @@ import (
 	"time"
 
 	sarama "github.com/Shopify/sarama"
-	"github.com/oklog/ulid"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/utils"
 )
 
 type KafkaDestination struct {
@@ -44,14 +44,14 @@ func NewKafkaDestination(ctx context.Context, e *Env) (d *KafkaDestination, err 
 	go func() {
 		var m *sarama.ProducerMessage
 		for m = range d.producer.Successes() {
-			d.ack(m.Metadata.(ulid.ULID))
+			d.ack(m.Metadata.(utils.MyULID))
 		}
 	}()
 
 	go func() {
 		var m *sarama.ProducerError
 		for m = range d.producer.Errors() {
-			d.nack(m.Msg.Metadata.(ulid.ULID))
+			d.nack(m.Msg.Metadata.(utils.MyULID))
 			if model.IsFatalKafkaError(m.Err) {
 				d.dofatal()
 			}

@@ -383,6 +383,13 @@
 			"revisionTime": "2017-05-04T03:43:18Z"
 		},
 		{
+			"checksumSHA1": "COGBi/40rRFMZGN9+SAGJbpocLM=",
+			"path": "github.com/gogo/protobuf",
+			"revision": "d4d8b59fa8e8122dd8d69302cce9fb279bc60368",
+			"revisionTime": "2018-01-02T15:04:22Z",
+			"tree": true
+		},
+		{
 			"checksumSHA1": "qlPUeFabwF4RKAOF1H+yBFU1Veg=",
 			"path": "github.com/golang/protobuf/proto",
 			"revision": "6a1fa9404c0aebf36c879bc50152edcc953910d2",
@@ -792,12 +799,6 @@
 			"path": "github.com/syndtr/gocapability/capability",
 			"revision": "db04d3cc01c8b54962a58ec7e491717d06cfcc16",
 			"revisionTime": "2017-07-04T07:02:18Z"
-		},
-		{
-			"checksumSHA1": "JfcyRh0rxqwrYvFmsuqo1oU73i4=",
-			"path": "github.com/tinylib/msgp/msgp",
-			"revision": "bfa68fe30b555b40d68871606ee725537f8023a1",
-			"revisionTime": "2017-08-23T13:43:00Z"
 		},
 		{
 			"checksumSHA1": "MxLnUmfrP+r5HfCZM29+WPKebn8=",

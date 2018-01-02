@@ -2,7 +2,7 @@ package db
 
 import (
 	"github.com/dgraph-io/badger"
-	"github.com/oklog/ulid"
+	"github.com/stephane-martin/skewer/utils"
 )
 
 type partitionImpl struct {
@@ -10,14 +10,14 @@ type partitionImpl struct {
 	prefix []byte
 }
 
-func concat(prefix []byte, key ulid.ULID) (res []byte) {
+func concat(prefix []byte, key utils.MyULID) (res []byte) {
 	res = make([]byte, 0, len(prefix)+16)
 	res = append(res, prefix...)
 	res = append(res, key[:]...)
 	return res
 }
 
-func (p *partitionImpl) Get(key ulid.ULID, txn *badger.Txn) ([]byte, error) {
+func (p *partitionImpl) Get(key utils.MyULID, txn *badger.Txn) ([]byte, error) {
 	if txn == nil {
 		txn = p.parent.NewTransaction(false)
 		defer txn.Discard()
@@ -36,7 +36,7 @@ func (p *partitionImpl) Get(key ulid.ULID, txn *badger.Txn) ([]byte, error) {
 	return val, nil
 }
 
-func (p *partitionImpl) Set(key ulid.ULID, value []byte, txn *badger.Txn) (err error) {
+func (p *partitionImpl) Set(key utils.MyULID, value []byte, txn *badger.Txn) (err error) {
 	n := false
 	if txn == nil {
 		txn = p.parent.NewTransaction(true)
@@ -58,7 +58,7 @@ func (p *partitionImpl) Set(key ulid.ULID, value []byte, txn *badger.Txn) (err e
 	return
 }
 
-func (p *partitionImpl) AddMany(m map[ulid.ULID]([]byte), txn *badger.Txn) (err error) {
+func (p *partitionImpl) AddMany(m map[utils.MyULID]([]byte), txn *badger.Txn) (err error) {
 	if len(m) == 0 {
 		return
 	}
@@ -87,7 +87,7 @@ func (p *partitionImpl) AddMany(m map[ulid.ULID]([]byte), txn *badger.Txn) (err 
 	return
 }
 
-func (p *partitionImpl) Exists(key ulid.ULID, txn *badger.Txn) (bool, error) {
+func (p *partitionImpl) Exists(key utils.MyULID, txn *badger.Txn) (bool, error) {
 	if txn == nil {
 		txn = p.parent.NewTransaction(false)
 		defer txn.Discard()
@@ -102,7 +102,7 @@ func (p *partitionImpl) Exists(key ulid.ULID, txn *badger.Txn) (bool, error) {
 	}
 }
 
-func (p *partitionImpl) Delete(key ulid.ULID, txn *badger.Txn) (err error) {
+func (p *partitionImpl) Delete(key utils.MyULID, txn *badger.Txn) (err error) {
 	n := false
 	if txn == nil {
 		txn = p.parent.NewTransaction(true)
@@ -125,7 +125,7 @@ func (p *partitionImpl) Delete(key ulid.ULID, txn *badger.Txn) (err error) {
 	return
 }
 
-func (p *partitionImpl) DeleteMany(keys []ulid.ULID, txn *badger.Txn) (err error) {
+func (p *partitionImpl) DeleteMany(keys []utils.MyULID, txn *badger.Txn) (err error) {
 	if len(keys) == 0 {
 		return
 	}
@@ -155,12 +155,12 @@ func (p *partitionImpl) DeleteMany(keys []ulid.ULID, txn *badger.Txn) (err error
 	return
 }
 
-func (p *partitionImpl) ListKeys(txn *badger.Txn) []ulid.ULID {
+func (p *partitionImpl) ListKeys(txn *badger.Txn) []utils.MyULID {
 	if txn == nil {
 		txn = p.parent.NewTransaction(false)
 		defer txn.Discard()
 	}
-	l := []ulid.ULID{}
+	l := []utils.MyULID{}
 	iter := p.KeyIterator(1000, txn)
 	for iter.Rewind(); iter.Valid(); iter.Next() {
 		l = append(l, iter.Key())
@@ -254,7 +254,7 @@ func (i *partitionIterImpl) Valid() bool {
 	return i.iterator.ValidForPrefix([]byte(i.partition.prefix))
 }
 
-func (i *partitionIterImpl) Key() (uid ulid.ULID) {
+func (i *partitionIterImpl) Key() (uid utils.MyULID) {
 	item := i.iterator.Item()
 	if item == nil {
 		return uid

@@ -15,7 +15,6 @@ import (
 
 	"github.com/free/concurrent-writer/concurrent"
 	"github.com/inconshreveable/log15"
-	"github.com/oklog/ulid"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
@@ -56,7 +55,7 @@ func NewTxnrMap(maxsize int32) *Txnr2UidMap {
 	return &m
 }
 
-func (m *Txnr2UidMap) Put(txnr int32, uid ulid.ULID) (err error) {
+func (m *Txnr2UidMap) Put(txnr int32, uid utils.MyULID) (err error) {
 	// if there is enough room in m, put (txnr, uid)
 	// if not, wait for some room
 	// can be interrupted, in that case, return error
@@ -69,23 +68,23 @@ func (m *Txnr2UidMap) Put(txnr int32, uid ulid.ULID) (err error) {
 	return nil
 }
 
-func (m *Txnr2UidMap) Get(txnr int32) (uid ulid.ULID, err error) {
+func (m *Txnr2UidMap) Get(txnr int32) (uid utils.MyULID, err error) {
 	// get the uid for the given txnr
 	// if found, delete (uid, txnr) from m
 	// if not found, return error
 	if t, present := m.h.Delete(IntKey(txnr)); present {
 		m.sem.Release()
-		return t.(ulid.ULID), nil
+		return t.(utils.MyULID), nil
 	}
 	err = fmt.Errorf("unknown txnr: %d", txnr)
 	return
 }
 
-type Iterator func(int32, ulid.ULID)
+type Iterator func(int32, utils.MyULID)
 
 func (m *Txnr2UidMap) ForEach(f Iterator) {
 	g := func(k gotomic.Hashable, v gotomic.Thing) bool {
-		f(int32(k.(IntKey)), v.(ulid.ULID))
+		f(int32(k.(IntKey)), v.(utils.MyULID))
 		return false
 	}
 	m.h.Each(g)
@@ -403,7 +402,7 @@ func (c *RELPClient) handleRspAnswers() {
 		// as no more txnr2msgid entries will be added by doSend
 		keys := make([]int32, 0)
 		c.txnr2msgid.ForEach(
-			func(txnr int32, uid ulid.ULID) {
+			func(txnr int32, uid utils.MyULID) {
 				c.nackChan.Put(uid, conf.RELP)
 				keys = append(keys, txnr)
 			},
@@ -504,7 +503,7 @@ func (c *RELPClient) doSend() {
 			c.logger.Debug("the queue has been disposed")
 			return
 		} else if model.IsEncodingError(err) {
-			c.logger.Warn("dropped non-encodable message", "uid", ulid.ULID(msg.Uid).String())
+			c.logger.Warn("dropped non-encodable message", "uid", utils.MyULID(msg.Uid).String())
 			continue
 		} else if err != nil {
 			if utils.IsBrokenPipe(err) {

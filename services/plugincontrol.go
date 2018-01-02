@@ -261,7 +261,7 @@ func (s *PluginController) listenpipe(secret *memguard.LockedBuffer) {
 
 	for scanner.Scan() {
 		buf = scanner.Bytes()
-		_, err = message.UnmarshalMsg(buf)
+		err = message.Unmarshal(buf)
 		if err != nil {
 			s.logger.Error("Unexpected error decrypting message from the plugin pipe", "type", s.name, "error", err)
 			return
@@ -802,7 +802,7 @@ func (s *StorePlugin) pushqueue(secret *memguard.LockedBuffer) {
 			return
 		}
 		for _, message = range messages {
-			messageb, err = message.MarshalMsg(nil)
+			messageb, err = message.Marshal()
 			if err == nil {
 				_, err = writeToStore.Write(messageb)
 				if err != nil {

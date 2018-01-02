@@ -41,14 +41,13 @@ var testjsCmd = &cobra.Command{
 		m.Severity = 2
 		m.Priority = 11
 		m.Version = 3
-		m.Hostname = "myhostname"
-		m.Procid = "myprocid"
-		m.Msgid = "mymsgid"
-		m.Appname = "myapp"
+		m.HostName = "myhostname"
+		m.ProcId = "myprocid"
+		m.MsgId = "mymsgid"
+		m.AppName = "myapp"
 		m.Message = "orig message"
-		ma := map[string]string{"zog": "zogzog"}
-		m.Properties = map[string]map[string]string{"foo": ma, "ma": ma}
-		//m.AuditSubMessages = []model.AuditSubMessage{model.AuditSubMessage{Type: 12, Data: "zob"}}
+		m.SetProperty("foo", "zog", "zogzog")
+		m.SetProperty("bar", "zobi", "la mouche")
 		mparsed := model.ParsedMessage{Fields: m}
 		result, err := env.FilterMessage(&mparsed.Fields)
 		fmt.Println(err)

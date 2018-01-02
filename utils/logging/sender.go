@@ -41,7 +41,7 @@ func NewRemoteLogger(ctx context.Context, remote *net.UnixConn, secret *memguard
 				if r == nil {
 					return
 				}
-				rbis = Record{Time: r.Time, Lvl: int(r.Lvl), Msg: r.Msg, Ctx: map[string]string{}}
+				rbis = Record{Time: r.Time.UnixNano(), Lvl: int32(r.Lvl), Msg: r.Msg, Ctx: map[string]string{}}
 				l := len(r.Ctx)
 				var i int
 				var ok bool
@@ -60,7 +60,7 @@ func NewRemoteLogger(ctx context.Context, remote *net.UnixConn, secret *memguard
 					}
 
 				}
-				dec, err := rbis.MarshalMsg(nil)
+				dec, err := rbis.Marshal()
 				if err != nil {
 					continue Send
 				}

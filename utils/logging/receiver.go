@@ -52,12 +52,12 @@ Listen:
 				l.Warn("Error decrypting logs", "error", err)
 				continue Listen
 			}
-			_, err = r.UnmarshalMsg(dec)
+			err = r.Unmarshal(dec)
 			if err != nil {
 				l.Warn("Error decoding logs", "error", err)
 				continue Listen
 			}
-			logr := log15.Record{Lvl: log15.Lvl(r.Lvl), Msg: r.Msg, Time: r.Time, KeyNames: keyNames}
+			logr := log15.Record{Lvl: log15.Lvl(r.Lvl), Msg: r.Msg, Time: time.Unix(0, r.Time), KeyNames: keyNames}
 			logr.Ctx = make([]interface{}, 0, 2*len(r.Ctx))
 			for _, k := range deriveSortRecord(deriveKeysRecord(r.Ctx)) {
 				logr.Ctx = append(logr.Ctx, k)

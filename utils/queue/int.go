@@ -12,7 +12,7 @@ import (
 
 type intNode struct {
 	next *intNode
-	uid  int
+	uid  int32
 }
 
 type IntQueue struct {
@@ -38,7 +38,7 @@ func (q *IntQueue) Dispose() {
 	atomic.StoreInt32(&q.disposed, 1)
 }
 
-func (q *IntQueue) Get() (int, error) {
+func (q *IntQueue) Get() (int32, error) {
 	if q.Disposed() {
 		return -1, utils.ErrDisposed
 	}
@@ -52,7 +52,7 @@ func (q *IntQueue) Get() (int, error) {
 	return -1, nil
 }
 
-func (q *IntQueue) Peek() (int, error) {
+func (q *IntQueue) Peek() (int32, error) {
 	if q.Disposed() {
 		return -1, utils.ErrDisposed
 	}
@@ -63,7 +63,7 @@ func (q *IntQueue) Peek() (int, error) {
 	return -1, nil
 }
 
-func (q *IntQueue) Put(uid int) error {
+func (q *IntQueue) Put(uid int32) error {
 	if q.Disposed() {
 		return utils.ErrDisposed
 	}

@@ -14,7 +14,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/oklog/ulid"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"golang.org/x/text/encoding"
@@ -72,45 +71,45 @@ type ackForwarder struct {
 	succ sync.Map
 	fail sync.Map
 	comm sync.Map
-	next uintptr
+	next uint32
 }
 
 func newAckForwarder() *ackForwarder {
 	return &ackForwarder{}
 }
 
-func txnr2bytes(txnr int) []byte {
-	bs := make([]byte, 8)
-	ux := uint64(txnr) << 1
+func txnr2bytes(txnr int32) []byte {
+	bs := make([]byte, 4)
+	ux := uint32(txnr) << 1
 	if txnr < 0 {
 		ux = ^ux
 	}
-	binary.LittleEndian.PutUint64(bs, ux)
+	binary.LittleEndian.PutUint32(bs, ux)
 	return bs
 }
 
-func bytes2txnr(b []byte) int {
-	ux := binary.LittleEndian.Uint64(b)
+func bytes2txnr(b []byte) int32 {
+	ux := binary.LittleEndian.Uint32(b)
 	x := int64(ux >> 1)
 	if ux&1 != 0 {
 		x = ^x
 	}
-	return int(x)
+	return int32(x)
 }
 
-func (f *ackForwarder) Received(connID uintptr, txnr int) {
+func (f *ackForwarder) Received(connID uint32, txnr int32) {
 	if c, ok := f.comm.Load(connID); ok {
 		_ = c.(*queue.IntQueue).Put(txnr)
 	}
 }
 
-func (f *ackForwarder) Commit(connID uintptr) {
+func (f *ackForwarder) Commit(connID uint32) {
 	if c, ok := f.comm.Load(connID); ok {
 		_, _ = c.(*queue.IntQueue).Get()
 	}
 }
 
-func (f *ackForwarder) NextToCommit(connID uintptr) int {
+func (f *ackForwarder) NextToCommit(connID uint32) int32 {
 	if c, ok := f.comm.Load(connID); ok {
 		next, err := c.(*queue.IntQueue).Peek()
 		if err != nil {
@@ -121,13 +120,13 @@ func (f *ackForwarder) NextToCommit(connID uintptr) int {
 	return -1
 }
 
-func (f *ackForwarder) ForwardSucc(connID uintptr, txnr int) {
+func (f *ackForwarder) ForwardSucc(connID uint32, txnr int32) {
 	if q, ok := f.succ.Load(connID); ok {
 		_ = q.(*queue.IntQueue).Put(txnr)
 	}
 }
 
-func (f *ackForwarder) GetSucc(connID uintptr) int {
+func (f *ackForwarder) GetSucc(connID uint32) int32 {
 	if q, ok := f.succ.Load(connID); ok {
 		txnr, err := q.(*queue.IntQueue).Get()
 		if err != nil {
@@ -138,13 +137,13 @@ func (f *ackForwarder) GetSucc(connID uintptr) int {
 	return -1
 }
 
-func (f *ackForwarder) ForwardFail(connID uintptr, txnr int) {
+func (f *ackForwarder) ForwardFail(connID uint32, txnr int32) {
 	if q, ok := f.fail.Load(connID); ok {
 		_ = q.(*queue.IntQueue).Put(txnr)
 	}
 }
 
-func (f *ackForwarder) GetFail(connID uintptr) int {
+func (f *ackForwarder) GetFail(connID uint32) int32 {
 	if q, ok := f.fail.Load(connID); ok {
 		txnr, err := q.(*queue.IntQueue).Get()
 		if err != nil {
@@ -155,15 +154,15 @@ func (f *ackForwarder) GetFail(connID uintptr) int {
 	return -1
 }
 
-func (f *ackForwarder) AddConn() uintptr {
-	connID := atomic.AddUintptr(&f.next, 1)
+func (f *ackForwarder) AddConn() uint32 {
+	connID := atomic.AddUint32(&f.next, 1)
 	f.succ.Store(connID, queue.NewIntQueue())
 	f.fail.Store(connID, queue.NewIntQueue())
 	f.comm.Store(connID, queue.NewIntQueue())
 	return connID
 }
 
-func (f *ackForwarder) RemoveConn(connID uintptr) {
+func (f *ackForwarder) RemoveConn(connID uint32) {
 	if q, ok := f.succ.Load(connID); ok {
 		q.(*queue.IntQueue).Dispose()
 		f.succ.Delete(connID)
@@ -181,7 +180,7 @@ func (f *ackForwarder) RemoveAll() {
 	f.comm = sync.Map{}
 }
 
-func (f *ackForwarder) Wait(connID uintptr) bool {
+func (f *ackForwarder) Wait(connID uint32) bool {
 	qsucc, ok := f.succ.Load(connID)
 	if !ok {
 		return false
@@ -194,8 +193,8 @@ func (f *ackForwarder) Wait(connID uintptr) bool {
 }
 
 type meta struct {
-	Txnr   int
-	ConnID uintptr
+	Txnr   int32
+	ConnID uint32
 }
 
 type RelpService struct {
@@ -327,7 +326,7 @@ type RelpServiceImpl struct {
 	reporter         base.Reporter
 	rawMessagesQueue *tcp.Ring
 	parsewg          sync.WaitGroup
-	configs          map[ulid.ULID]conf.RELPSourceConfig
+	configs          map[utils.MyULID]conf.RELPSourceConfig
 	forwarder        *ackForwarder
 }
 
@@ -335,7 +334,7 @@ func NewRelpServiceImpl(confined bool, reporter base.Reporter, b binder.Client, 
 	s := RelpServiceImpl{
 		status:    Stopped,
 		reporter:  reporter,
-		configs:   map[ulid.ULID]conf.RELPSourceConfig{},
+		configs:   map[utils.MyULID]conf.RELPSourceConfig{},
 		forwarder: newAckForwarder(),
 	}
 	s.StreamingService.init()
@@ -366,7 +365,7 @@ func (s *RelpServiceImpl) Start() ([]model.ListenerInfo, error) {
 	s.Logger.Info("Listening on RELP", "nb_services", len(infos))
 
 	s.rawMessagesQueue = tcp.NewRing(s.QueueSize)
-	s.configs = map[ulid.ULID]conf.RELPSourceConfig{}
+	s.configs = map[utils.MyULID]conf.RELPSourceConfig{}
 
 	for _, l := range s.UnixListeners {
 		s.configs[l.Conf.ConfID] = conf.RELPSourceConfig(l.Conf)
@@ -537,7 +536,7 @@ func (s *RelpServiceImpl) Parse() {
 			},
 			Txnr:   raw.Txnr,
 			ConfId: raw.ConfID,
-			ConnID: raw.ConnID,
+			ConnId: raw.ConnID,
 		}
 		s.Pool.Put(raw)
 
@@ -545,35 +544,35 @@ func (s *RelpServiceImpl) Parse() {
 		parsedMsg.Uid = gen.Uid()
 		f, nonf = s.reporter.Stash(parsedMsg)
 		if f == nil && nonf == nil {
-			s.forwarder.ForwardSucc(parsedMsg.ConnID, parsedMsg.Txnr)
+			s.forwarder.ForwardSucc(parsedMsg.ConnId, parsedMsg.Txnr)
 		} else if f != nil {
-			s.forwarder.ForwardFail(parsedMsg.ConnID, parsedMsg.Txnr)
+			s.forwarder.ForwardFail(parsedMsg.ConnId, parsedMsg.Txnr)
 			logger.Error("Fatal error pushing RELP message to the Store", "err", f)
 			s.StopAndWait()
 			return
 		} else {
-			s.forwarder.ForwardFail(parsedMsg.ConnID, parsedMsg.Txnr)
+			s.forwarder.ForwardFail(parsedMsg.ConnId, parsedMsg.Txnr)
 			logger.Warn("Non fatal error pushing RELP message to the Store", "err", nonf)
 		}
 	}
 
 }
 
-func (s *RelpServiceImpl) handleResponses(conn net.Conn, connID uintptr, client string, logger log15.Logger) {
+func (s *RelpServiceImpl) handleResponses(conn net.Conn, connID uint32, client string, logger log15.Logger) {
 	defer func() {
 		s.wg.Done()
 	}()
 
-	successes := map[int]bool{}
-	failures := map[int]bool{}
+	successes := map[int32]bool{}
+	failures := map[int32]bool{}
 	var err error
 
-	writeSuccess := func(txnr int) (err error) {
+	writeSuccess := func(txnr int32) (err error) {
 		_, err = fmt.Fprintf(conn, "%d rsp 6 200 OK\n", txnr)
 		return err
 	}
 
-	writeFailure := func(txnr int) (err error) {
+	writeFailure := func(txnr int32) (err error) {
 		_, err = fmt.Fprintf(conn, "%d rsp 6 500 KO\n", txnr)
 		return err
 	}
@@ -659,7 +658,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, c conf.TCPSourceConfig) {
 	path := ""
 	remote := conn.RemoteAddr()
 
-	var localPort int
+	var localPort int32
 	if remote == nil {
 		client = "localhost"
 		localPort = 0
@@ -669,7 +668,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, c conf.TCPSourceConfig) {
 		local := conn.LocalAddr()
 		if local != nil {
 			s := strings.Split(local.String(), ":")
-			localPort, _ = strconv.Atoi(s[len(s)-1])
+			localPort, _ = utils.Atoi32(s[len(s)-1])
 		}
 	}
 	client = strings.TrimSpace(client)
@@ -696,12 +695,12 @@ func (h RelpHandler) HandleConnection(conn net.Conn, c conf.TCPSourceConfig) {
 	scanner.Split(utils.RelpSplit)
 	scanner.Buffer(make([]byte, 0, 132000), 132000)
 	var rawmsg *model.RawTcpMessage
-	var previous = int(-1)
+	var previous = int32(-1)
 
 Loop:
 	for scanner.Scan() {
 		splits := bytes.SplitN(scanner.Bytes(), sp, 4)
-		txnr, _ := strconv.Atoi(string(splits[0]))
+		txnr, _ := utils.Atoi32(string(splits[0]))
 		if txnr <= previous {
 			logger.Warn("TXNR did not increase", "previous", previous, "current", txnr)
 			relpProtocolErrorsCounter.WithLabelValues(client).Inc()

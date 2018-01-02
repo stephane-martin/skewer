@@ -331,8 +331,8 @@ func NewFileDestination(ctx context.Context, e *Env) (dest *FileDestination, err
 }
 
 func (d *FileDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
-	if len(message.Parsed.Fields.Appname) == 0 {
-		message.Parsed.Fields.Appname = "empty"
+	if len(message.Parsed.Fields.AppName) == 0 {
+		message.Parsed.Fields.AppName = "empty"
 	}
 	buf := bytes.NewBuffer(nil)
 	err = d.filenameTmpl.Execute(buf, message.Parsed)

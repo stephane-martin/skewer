@@ -35,15 +35,15 @@ func ParseRfc3164Format(m []byte, decoder *encoding.Decoder) (smsg *SyslogMessag
 	m = bytes.TrimSpace(m)
 
 	defaultMsg := &SyslogMessage{
-		Message:    string(m),
-		Properties: make(map[string](map[string]string)),
+		Message: string(m),
 	}
+	defaultMsg.ClearProperties()
 	smsg = &SyslogMessage{}
 	n := time.Now().UnixNano()
 	defaultMsg.TimeGeneratedNum = n
 	defaultMsg.TimeReportedNum = n
 	smsg.TimeGeneratedNum = n
-	smsg.Properties = make(map[string](map[string]string))
+	smsg.ClearProperties()
 
 	if !bytes.HasPrefix(m, []byte("<")) {
 		return defaultMsg, nil
@@ -120,38 +120,38 @@ func ParseRfc3164Format(m []byte, decoder *encoding.Decoder) (smsg *SyslogMessag
 		// we either have HOSTNAME/MESSAGE or TAG/MESSAGE or HOSTNAME/TAG
 		if bytes.Count(s[0], []byte(":")) == 7 || bytes.Count(s[0], []byte(".")) == 3 {
 			// looks like an IPv6/IPv4 address
-			smsg.Hostname = string(s[0])
+			smsg.HostName = string(s[0])
 			if bytes.ContainsAny(s[1], "[]:") {
 
-				smsg.Appname, smsg.Procid = pair2str(parseTag(s[1]))
+				smsg.AppName, smsg.ProcId = pair2str(parseTag(s[1]))
 			} else {
 				smsg.Message = string(s[1])
 			}
 			return smsg, nil
 		}
 		if bytes.ContainsAny(s[0], "[]:") {
-			smsg.Appname, smsg.Procid = pair2str(parseTag(s[0]))
+			smsg.AppName, smsg.ProcId = pair2str(parseTag(s[0]))
 			smsg.Message = string(s[1])
 			return smsg, nil
 		}
 		if bytes.ContainsAny(s[1], "[]:") {
-			smsg.Hostname = string(s[0])
-			smsg.Appname, smsg.Procid = pair2str(parseTag(s[0]))
+			smsg.HostName = string(s[0])
+			smsg.AppName, smsg.ProcId = pair2str(parseTag(s[0]))
 			return smsg, nil
 		}
-		smsg.Appname = string(s[0])
+		smsg.AppName = string(s[0])
 		smsg.Message = string(s[1])
 		return smsg, nil
 	}
 
 	if bytes.ContainsAny(s[0], "[]:") || !isHostname(s[0]) {
 		// hostname is omitted
-		smsg.Appname, smsg.Procid = pair2str(parseTag(s[0]))
+		smsg.AppName, smsg.ProcId = pair2str(parseTag(s[0]))
 		smsg.Message = string(bytes.Join(s[1:], SP))
 		return smsg, nil
 	}
-	smsg.Hostname = string(s[0])
-	smsg.Appname, smsg.Procid = pair2str(parseTag(s[1]))
+	smsg.HostName = string(s[0])
+	smsg.AppName, smsg.ProcId = pair2str(parseTag(s[1]))
 	smsg.Message = string(bytes.Join(s[2:], SP))
 	return smsg, nil
 }

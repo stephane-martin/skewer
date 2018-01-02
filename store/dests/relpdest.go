@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/oklog/ulid"
 	"github.com/stephane-martin/skewer/clients"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
@@ -75,7 +74,7 @@ func NewRELPDestination(ctx context.Context, e *Env) (d *RELPDestination, err er
 		ackChan := d.client.Ack()
 		nackChan := d.client.Nack()
 		var err error
-		var uid ulid.ULID
+		var uid utils.MyULID
 
 		for queue.WaitManyAckQueues(ackChan, nackChan) {
 			for {

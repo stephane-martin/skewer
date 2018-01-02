@@ -1,12 +1,12 @@
 package model
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/pquerna/ffjson/ffjson"
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/unicode"
 	"gopkg.in/Graylog2/go-gelf.v2/gelf"
@@ -38,12 +38,12 @@ func ParseFullJsonFormat(m []byte, decoder *encoding.Decoder) (msg *SyslogMessag
 	if err != nil {
 		return nil, &InvalidEncodingError{Err: err}
 	}
-	sourceMsg := ParsedMessage{}
-	err = ffjson.Unmarshal(m, &sourceMsg)
+	sourceMsg := RegularSyslog{}
+	err = json.Unmarshal(m, &sourceMsg)
 	if err != nil {
 		return nil, &UnmarshalingJsonError{err}
 	}
-	return &sourceMsg.Fields, nil
+	return sourceMsg.Internal(), nil
 }
 
 func ParseJsonFormat(m []byte, decoder *encoding.Decoder) (msg *SyslogMessage, rerr error) {
@@ -56,7 +56,7 @@ func ParseJsonFormat(m []byte, decoder *encoding.Decoder) (msg *SyslogMessage, r
 		return nil, &InvalidEncodingError{Err: err}
 	}
 	sourceMsg := JsonRsyslogMessage{}
-	err = ffjson.Unmarshal(m, &sourceMsg)
+	err = json.Unmarshal(m, &sourceMsg)
 	if err != nil {
 		return nil, &UnmarshalingJsonError{err}
 	}
@@ -118,20 +118,16 @@ func ParseJsonFormat(m []byte, decoder *encoding.Decoder) (msg *SyslogMessage, r
 		Version:          1,
 		TimeReportedNum:  reported.UnixNano(),
 		TimeGeneratedNum: generated.UnixNano(),
-		Hostname:         hostname,
-		Appname:          appname,
-		Procid:           procid,
-		Msgid:            msgid,
+		HostName:         hostname,
+		AppName:          appname,
+		ProcId:           procid,
+		MsgId:            msgid,
 		Structured:       structured,
 		Message:          strings.TrimSpace(sourceMsg.Message),
 	}
 
-	if len(sourceMsg.Properties) > 0 {
-		msg.Properties = map[string]map[string]string{}
-		msg.Properties["rsyslog"] = map[string]string{}
-		for k, v := range sourceMsg.Properties {
-			msg.Properties["rsyslog"][strings.TrimSpace(k)] = strings.TrimSpace(fmt.Sprintf("%v", v))
-		}
+	for k, v := range sourceMsg.Properties {
+		msg.SetProperty("rsyslog", strings.TrimSpace(k), strings.TrimSpace(fmt.Sprintf("%v", v)))
 	}
 
 	return msg, nil

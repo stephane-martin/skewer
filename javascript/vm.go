@@ -456,13 +456,13 @@ func (e *Environment) toJsMessage(m model.SyslogMessage) (sm goja.Value, err err
 	v := e.runtime.ToValue(int(m.Version))
 	timeg := e.runtime.ToValue(m.TimeGeneratedNum / 1000000)
 	timer := e.runtime.ToValue(m.TimeReportedNum / 1000000)
-	host := e.runtime.ToValue(m.Hostname)
-	app := e.runtime.ToValue(m.Appname)
-	proc := e.runtime.ToValue(m.Procid)
-	msgid := e.runtime.ToValue(m.Msgid)
+	host := e.runtime.ToValue(m.HostName)
+	app := e.runtime.ToValue(m.AppName)
+	proc := e.runtime.ToValue(m.ProcId)
+	msgid := e.runtime.ToValue(m.MsgId)
 	structured := e.runtime.ToValue(m.Structured)
 	msg := e.runtime.ToValue(m.Message)
-	props := e.runtime.ToValue(m.Properties)
+	props := e.runtime.ToValue(m.GetAllProperties())
 
 	sm, err = e.jsNewSyslogMessage(nil, p, f, s, v, timer, timeg, host, app, proc, msgid, structured, msg, props)
 	if err != nil {
@@ -486,19 +486,20 @@ func (e *Environment) fromJsMessage(sm goja.Value) (m *model.SyslogMessage, err 
 		return m, err
 	}
 
-	return &model.SyslogMessage{
+	res := model.SyslogMessage{
 		Priority:         model.Priority(imsg.Priority),
 		Facility:         model.Facility(imsg.Facility),
 		Severity:         model.Severity(imsg.Severity),
 		Version:          model.Version(imsg.Version),
 		TimeGeneratedNum: imsg.TimeGenerated * 1000000,
 		TimeReportedNum:  imsg.TimeReported * 1000000,
-		Hostname:         imsg.Hostname,
-		Appname:          imsg.Appname,
-		Procid:           imsg.Procid,
-		Msgid:            imsg.Msgid,
+		HostName:         imsg.Hostname,
+		AppName:          imsg.Appname,
+		ProcId:           imsg.Procid,
+		MsgId:            imsg.Msgid,
 		Structured:       imsg.Structured,
 		Message:          imsg.Message,
-		Properties:       imsg.Properties,
-	}, nil
+	}
+	res.SetAllProperties(imsg.Properties)
+	return &res, nil
 }

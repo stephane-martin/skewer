@@ -71,6 +71,23 @@ func readFileUntilEnd(f *os.File, size int) (err error) {
 func (s *AccountingService) makeMessage(buf []byte, tick int64, hostname string, gen *utils.Generator) model.FullMessage {
 	acct := accounting.MakeAcct(buf, tick)
 	props := acct.Properties()
+	fields := model.SyslogMessage{
+		AppName:          "accounting",
+		Facility:         0,
+		HostName:         hostname,
+		MsgId:            "",
+		Priority:         0,
+		ProcId:           props["pid"],
+		Severity:         0,
+		Structured:       "",
+		TimeGeneratedNum: acct.Btime.UnixNano(),
+		TimeReportedNum:  time.Now().UnixNano(),
+		Version:          0,
+		Message:          fmt.Sprintf("Accounting: %s (%s/%s)", props["comm"], props["uid"], props["gid"]),
+	}
+	fields.ClearDomain("acct")
+	fields.Properties.Map["acct"].Map = acct.Properties()
+
 	return model.FullMessage{
 		ConfId: s.Conf.ConfID,
 		Uid:    gen.Uid(),
@@ -78,21 +95,7 @@ func (s *AccountingService) makeMessage(buf []byte, tick int64, hostname string,
 			Client:         hostname,
 			LocalPort:      0,
 			UnixSocketPath: "",
-			Fields: model.SyslogMessage{
-				Appname:          "accounting",
-				Facility:         0,
-				Hostname:         hostname,
-				Msgid:            "",
-				Priority:         0,
-				Procid:           props["pid"],
-				Severity:         0,
-				Properties:       map[string]map[string]string{"acct": acct.Properties()},
-				Structured:       "",
-				TimeGeneratedNum: acct.Btime.UnixNano(),
-				TimeReportedNum:  time.Now().UnixNano(),
-				Version:          0,
-				Message:          fmt.Sprintf("Accounting: %s (%s/%s)", props["comm"], props["uid"], props["gid"]),
-			},
+			Fields:         fields,
 		},
 	}
 }

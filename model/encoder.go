@@ -11,7 +11,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/pquerna/ffjson/ffjson"
 	"github.com/stephane-martin/skewer/utils"
 )
 
@@ -103,18 +102,18 @@ func (e *encoderFile) Enc(v interface{}, w io.Writer) error {
 	}
 	switch val := v.(type) {
 	case *SyslogMessage:
-		if len(val.Hostname) == 0 {
-			val.Hostname = "-"
+		if len(val.HostName) == 0 {
+			val.HostName = "-"
 		}
-		if len(val.Appname) == 0 {
-			val.Appname = "-"
+		if len(val.AppName) == 0 {
+			val.AppName = "-"
 		}
 		_, err := fmt.Fprintf(
 			w,
 			"%s %s %s %s",
 			val.GetTimeReported().Format(time.RFC3339),
-			val.Hostname,
-			val.Appname,
+			val.HostName,
+			val.AppName,
 			val.Message,
 		)
 		return err
@@ -217,11 +216,12 @@ func (e *encoderJson) Enc(v interface{}, w io.Writer) error {
 	}
 	switch val := v.(type) {
 	case *FullMessage:
-		val.Parsed.Fields.SetTimeStrings()
-		return ffjson.NewEncoder(w).Encode(&val.Parsed.Fields)
+		return json.NewEncoder(w).Encode(val.Parsed.Fields.Regular())
+	case *ParsedMessage:
+		return json.NewEncoder(w).Encode(val.Fields.Regular())
 	case *SyslogMessage:
-		val.SetTimeStrings()
-		return ffjson.NewEncoder(w).Encode(val)
+		//val.SetTimeStrings()
+		return json.NewEncoder(w).Encode(val.Regular())
 	default:
 		return defaultEncode(v, w)
 	}
@@ -241,8 +241,12 @@ func (e *encoderFullJson) Enc(v interface{}, w io.Writer) error {
 	}
 	switch val := v.(type) {
 	case *FullMessage:
-		val.Parsed.Fields.SetTimeStrings()
-		return ffjson.NewEncoder(w).Encode(&val.Parsed)
+		//val.Parsed.Fields.SetTimeStrings()
+		return json.NewEncoder(w).Encode(val.Parsed.Regular())
+	case *ParsedMessage:
+		return json.NewEncoder(w).Encode(val.Regular())
+	case *SyslogMessage:
+		return json.NewEncoder(w).Encode(val.Regular())
 	default:
 		return defaultEncode(v, w)
 	}
@@ -308,36 +312,36 @@ func invalid5424(property string, value interface{}) error {
 }
 
 func (m *SyslogMessage) validRfc5424() error {
-	if !utils.PrintableUsASCII(m.Hostname) {
-		return invalid5424("Hostname", m.Hostname)
+	if !utils.PrintableUsASCII(m.HostName) {
+		return invalid5424("Hostname", m.HostName)
 	}
-	if len(m.Hostname) > 255 {
-		return invalid5424("Hostname", m.Hostname)
+	if len(m.HostName) > 255 {
+		return invalid5424("Hostname", m.HostName)
 	}
-	if !utils.PrintableUsASCII(m.Appname) {
-		return invalid5424("Appname", m.Appname)
+	if !utils.PrintableUsASCII(m.AppName) {
+		return invalid5424("Appname", m.AppName)
 	}
-	if len(m.Appname) > 48 {
-		return invalid5424("Appname", m.Appname)
+	if len(m.AppName) > 48 {
+		return invalid5424("Appname", m.AppName)
 	}
-	if !utils.PrintableUsASCII(m.Procid) {
-		return invalid5424("Procid", m.Procid)
+	if !utils.PrintableUsASCII(m.ProcId) {
+		return invalid5424("Procid", m.ProcId)
 	}
-	if len(m.Procid) > 128 {
-		return invalid5424("Procid", m.Procid)
+	if len(m.ProcId) > 128 {
+		return invalid5424("Procid", m.ProcId)
 	}
-	if !utils.PrintableUsASCII(m.Msgid) {
-		return invalid5424("Msgid", m.Msgid)
+	if !utils.PrintableUsASCII(m.MsgId) {
+		return invalid5424("Msgid", m.MsgId)
 	}
-	if len(m.Msgid) > 32 {
-		return invalid5424("Msgid", m.Msgid)
+	if len(m.MsgId) > 32 {
+		return invalid5424("Msgid", m.MsgId)
 	}
 
-	for sid := range m.Properties {
+	for sid := range m.Properties.GetMap() {
 		if !validName(sid) {
 			return invalid5424("StructuredData/ID", sid)
 		}
-		for param, value := range m.Properties[sid] {
+		for param, value := range m.Properties.Map[sid].GetMap() {
 			if !validName(param) {
 				return invalid5424("StructuredData/Name", param)
 			}
@@ -408,29 +412,29 @@ func encodeMsg5424(m *SyslogMessage, b io.Writer) (err error) {
 		"<%d>1 %s %s %s %s %s ",
 		m.Priority,
 		m.GetTimeReported().Format(time.RFC3339),
-		nilify(m.Hostname),
-		nilify(m.Appname),
-		nilify(m.Procid),
-		nilify(m.Msgid),
+		nilify(m.HostName),
+		nilify(m.AppName),
+		nilify(m.ProcId),
+		nilify(m.MsgId),
 	)
 
 	if err != nil {
 		return err
 	}
 
-	if len(m.Properties) == 0 {
+	if len(m.Properties.GetMap()) == 0 {
 		_, err = fmt.Fprint(b, "-")
 		if err != nil {
 			return err
 		}
 	}
 
-	for sid := range m.Properties {
+	for sid := range m.Properties.GetMap() {
 		_, err = fmt.Fprintf(b, "[%s", sid)
 		if err != nil {
 			return err
 		}
-		for name, value := range m.Properties[sid] {
+		for name, value := range m.Properties.Map[sid].GetMap() {
 			if len(name) > 32 {
 				name = name[:32]
 			}
@@ -459,11 +463,11 @@ func encodeMsg5424(m *SyslogMessage, b io.Writer) (err error) {
 }
 
 func encodeMsg3164(m *SyslogMessage, b io.Writer) (err error) {
-	procid := strings.TrimSpace(m.Procid)
+	procid := strings.TrimSpace(m.ProcId)
 	if len(procid) > 0 {
 		procid = fmt.Sprintf("[%s]", procid)
 	}
-	hostname := strings.TrimSpace(m.Hostname)
+	hostname := strings.TrimSpace(m.HostName)
 	if len(hostname) == 0 {
 		hostname, _ = os.Hostname()
 	}
@@ -472,7 +476,7 @@ func encodeMsg3164(m *SyslogMessage, b io.Writer) (err error) {
 		m.Priority,
 		m.GetTimeReported().Format("Jan _2 15:04:05"),
 		hostname,
-		m.Appname,
+		m.AppName,
 		procid,
 		m.Message,
 	)

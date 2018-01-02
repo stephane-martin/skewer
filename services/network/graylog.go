@@ -189,7 +189,7 @@ func (s *GraylogSvcImpl) handleConnection(conn net.PacketConn, config conf.Grayl
 		s.wg.Done()
 	}()
 
-	var localPort int
+	var localPort int32
 	var localPortS string
 	var path string
 	var err error
@@ -206,7 +206,7 @@ func (s *GraylogSvcImpl) handleConnection(conn net.PacketConn, config conf.Grayl
 	if local != nil {
 		l := local.String()
 		s := strings.Split(l, ":")
-		localPort, err = strconv.Atoi(s[len(s)-1])
+		localPort, err = utils.Atoi32(s[len(s)-1])
 		if err != nil {
 			path = strings.TrimSpace(l)
 		} else {

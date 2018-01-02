@@ -29,6 +29,7 @@ import (
 	"github.com/stephane-martin/skewer/sys/kring"
 	"github.com/stephane-martin/skewer/sys/namespaces"
 	"github.com/stephane-martin/skewer/sys/scomp"
+	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/logging"
 )
 
@@ -468,7 +469,7 @@ func runUnconfined(t base.Types) {
 			os.Exit(-1)
 		}
 		_ = rPipe.Close()
-		sessionID := ulid.MustParse(sid)
+		sessionID := utils.MyULID(ulid.MustParse(sid))
 		ring := kring.GetRing(kring.RingCreds{Secret: ringSecret, SessionID: sessionID})
 
 		logger, err := getLogger(loggerCtx, name, ring, loggerHandle)
@@ -546,7 +547,7 @@ func runUnconfined(t base.Types) {
 			os.Exit(-1)
 		}
 		_ = rPipe.Close()
-		sessionID := ulid.MustParse(sid)
+		sessionID := utils.MyULID(ulid.MustParse(sid))
 		ring := kring.GetRing(kring.RingCreds{Secret: ringSecret, SessionID: sessionID})
 		if loggerHdl > 0 {
 			logger, err = getLogger(loggerCtx, name, ring, loggerHdl)

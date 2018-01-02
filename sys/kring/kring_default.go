@@ -6,9 +6,9 @@ import (
 	"unsafe"
 
 	"github.com/awnumar/memguard"
-	"github.com/oklog/ulid"
 	"github.com/stephane-martin/skewer/sys/semaphore"
 	"github.com/stephane-martin/skewer/sys/shm"
+	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/sbox"
 	"golang.org/x/crypto/ed25519"
 	"golang.org/x/crypto/nacl/secretbox"
@@ -64,7 +64,7 @@ func (r *defring) WriteRingPass(w io.Writer) (err error) {
 	return err
 }
 
-func (r *defring) GetSessionID() ulid.ULID {
+func (r *defring) GetSessionID() utils.MyULID {
 	return r.creds.SessionID
 }
 

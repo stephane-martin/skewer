@@ -6,13 +6,9 @@ import (
 	"bytes"
 	"unicode/utf8"
 
-	"github.com/oklog/ulid"
+	"github.com/stephane-martin/skewer/utils"
 	"golang.org/x/text/encoding"
 )
-
-func (m *SyslogMessage) Equals(other *SyslogMessage) bool {
-	return deriveEqualSyslogMsg(m, other)
-}
 
 type Stasher interface {
 	Stash(m *FullMessage) (error, error)
@@ -32,22 +28,22 @@ type ListenerInfo struct {
 
 type RawMessage struct {
 	Client         string
-	LocalPort      int
+	LocalPort      int32
 	UnixSocketPath string
 	Format         string
 	Encoding       string
 	DontParseSD    bool
-	ConfID         ulid.ULID
+	ConfID         utils.MyULID
 }
 
 type RawKafkaMessage struct {
 	Brokers    string
 	Format     string
 	Encoding   string
-	ConfID     ulid.ULID
+	ConfID     utils.MyULID
 	ConsumerID uint32
 	Message    []byte
-	UID        ulid.ULID
+	UID        utils.MyULID
 	Topic      string
 	Partition  int32
 	Offset     int64
@@ -57,8 +53,8 @@ type RawTcpMessage struct {
 	RawMessage
 	Message []byte
 	Size    int
-	Txnr    int
-	ConnID  uintptr
+	Txnr    int32
+	ConnID  uint32
 }
 
 type RawUdpMessage struct {
@@ -80,19 +76,16 @@ func Fuzz(m []byte) int {
 	if err != nil {
 		return 0
 	}
-	b, err := msg.MarshalMsg(nil)
+	b, err := msg.Marshal()
 	if err != nil {
 		panic(err)
 	}
-	msg2 := SyslogMessage{}
-	rest, err := msg2.UnmarshalMsg(b)
+	msg2 := &SyslogMessage{}
+	err = msg2.Unmarshal(b)
 	if err != nil {
 		panic("Unmarshaling failed")
 	}
-	if len(rest) > 0 {
-		panic("after marshalling there is more bytes remaining")
-	}
-	if !msg.Equals(&msg2) {
+	if !msg.Equal(msg2) {
 		panic("msg and msg2 are not equal")
 	}
 	return 1

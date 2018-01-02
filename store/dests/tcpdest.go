@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/oklog/ulid"
 	"github.com/stephane-martin/skewer/clients"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
@@ -15,7 +14,7 @@ var sp = []byte(" ")
 
 type TCPDestination struct {
 	*baseDestination
-	previousUid ulid.ULID
+	previousUid utils.MyULID
 	clt         *clients.SyslogTCPClient
 }
 

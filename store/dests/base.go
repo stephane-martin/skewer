@@ -4,10 +4,10 @@ import (
 	"sync"
 
 	"github.com/inconshreveable/log15"
-	"github.com/oklog/ulid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/utils"
 )
 
 var Registry *prometheus.Registry
@@ -116,7 +116,7 @@ func (e *Env) Config(c conf.BaseConfig) *Env {
 	return e
 }
 
-type callback func(uid ulid.ULID)
+type callback func(uid utils.MyULID)
 
 type baseDestination struct {
 	logger   log15.Logger
@@ -141,15 +141,15 @@ func newBaseDestination(typ conf.DestinationType, codename string, e *Env) *base
 		codename: codename,
 		typ:      typ,
 	}
-	base.ack = func(uid ulid.ULID) {
+	base.ack = func(uid utils.MyULID) {
 		e.ack(uid, typ)
 		ackCounter.WithLabelValues(codename, "ack").Inc()
 	}
-	base.nack = func(uid ulid.ULID) {
+	base.nack = func(uid utils.MyULID) {
 		e.nack(uid, typ)
 		ackCounter.WithLabelValues(codename, "nack").Inc()
 	}
-	base.permerr = func(uid ulid.ULID) {
+	base.permerr = func(uid utils.MyULID) {
 		e.permerr(uid, typ)
 		ackCounter.WithLabelValues(codename, "permerr").Inc()
 	}

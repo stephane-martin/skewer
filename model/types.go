@@ -1,16 +1,14 @@
 package model
 
 import (
+	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/awnumar/memguard"
 	"github.com/stephane-martin/skewer/utils/sbox"
 )
-
-//go:generate msgp
-//go:generate ffjson $GOFILE
-//msgp:ignore JsonRsyslogMessage
 
 var Facilities map[Facility]string = map[Facility]string{
 	0:  "kern",
@@ -48,10 +46,10 @@ func init() {
 	}
 }
 
-type Priority int
-type Facility int
-type Severity int
-type Version int
+type Priority int32
+type Facility int32
+type Severity int32
+type Version int32
 
 func (f Facility) String() string {
 	if s, ok := Facilities[f]; ok {
@@ -67,43 +65,80 @@ func FacilityFromString(s string) Facility {
 	return 1
 }
 
-// ffjson: nodecoder
-type SyslogMessage struct {
-	Priority         Priority                     `json:"priority,string" msg:"priority"`
-	Facility         Facility                     `json:"facility,string" msg:"facility"`
-	Severity         Severity                     `json:"severity,string" msg:"severity"`
-	Version          Version                      `json:"version,string" msg:"version"`
-	TimeReportedNum  int64                        `json:"-" msg:"timereportednum"`
-	TimeGeneratedNum int64                        `json:"-" msg:"timegeneratednum"`
-	TimeReported     string                       `json:"timereported" msg:"timereported"`
-	TimeGenerated    string                       `json:"timegenerated" msg:"timegenerated"`
-	Hostname         string                       `json:"hostname" msg:"hostname"`
-	Appname          string                       `json:"appname" msg:"appname"`
-	Procid           string                       `json:"procid" msg:"procid"`
-	Msgid            string                       `json:"msgid" msg:"msgid"`
-	Structured       string                       `json:"structured" msg:"structured"`
-	Message          string                       `json:"message" msg:"message"`
-	Properties       map[string]map[string]string `json:"properties" msg:"properties"`
+type RegularSyslog struct {
+	Priority      Priority                     `json:"priority"`
+	Facility      Facility                     `json:"facility"`
+	Severity      Severity                     `json:"severity"`
+	Version       Version                      `json:"version"`
+	TimeReported  time.Time                    `json:"timereported"`
+	TimeGenerated time.Time                    `json:"timegenerated"`
+	HostName      string                       `json:"hostname"`
+	AppName       string                       `json:"appname"`
+	ProcId        string                       `json:"procid"`
+	MsgId         string                       `json:"msgid"`
+	Structured    string                       `json:"structured"`
+	Message       string                       `json:"message"`
+	Properties    map[string]map[string]string `json:"properties"`
 }
 
-type ParsedMessage struct {
-	Fields         SyslogMessage `json:"fields" msg:"fields"`
-	Client         string        `json:"client,omitempty" msg:"client"`
-	LocalPort      int           `json:"local_port,string" msg:"local_port"`
-	UnixSocketPath string        `json:"unix_socket_path,omitempty" msg:"unix_socket_path"`
+func (m *RegularSyslog) Internal() (res *SyslogMessage) {
+	res = &SyslogMessage{
+		Priority:         m.Priority,
+		Facility:         m.Facility,
+		Severity:         m.Severity,
+		Version:          m.Version,
+		TimeReportedNum:  m.TimeReported.UnixNano(),
+		TimeGeneratedNum: m.TimeGenerated.UnixNano(),
+		HostName:         m.HostName,
+		AppName:          m.AppName,
+		ProcId:           m.ProcId,
+		MsgId:            m.MsgId,
+		Structured:       m.Structured,
+		Message:          m.Message,
+	}
+	res.SetAllProperties(m.Properties)
+	return res
 }
 
-// ffjson: skip
-type FullMessage struct {
-	Parsed ParsedMessage `json:"parsed" msg:"parsed"`
-	Uid    [16]byte      `json:"uid" msg:"uid"`
-	ConfId [16]byte      `json:"conf_id" msg:"conf_id"`
-	Txnr   int           `json:"txnr" msg:"txnr"`
-	ConnID uintptr       `json:"-" msg:"-"`
+func (m *SyslogMessage) Regular() (reg *RegularSyslog) {
+	return &RegularSyslog{
+		Priority:      m.Priority,
+		Facility:      m.Facility,
+		Severity:      m.Severity,
+		Version:       m.Version,
+		TimeReported:  time.Unix(0, m.TimeReportedNum),
+		TimeGenerated: time.Unix(0, m.TimeGeneratedNum),
+		HostName:      m.HostName,
+		AppName:       m.AppName,
+		ProcId:        m.ProcId,
+		MsgId:         m.MsgId,
+		Structured:    m.Structured,
+		Message:       m.Message,
+		Properties:    m.GetAllProperties(),
+	}
 }
 
-// ffjson: noencoder
+func (m *SyslogMessage) RegularJson() ([]byte, error) {
+	return json.Marshal(m.Regular())
+}
+
+func (m *ParsedMessage) Regular() (reg *RegularSyslog) {
+	reg = m.Fields.Regular()
+	if _, ok := reg.Properties["skewer"]; !ok {
+		reg.Properties["skewer"] = map[string]string{}
+	}
+	reg.Properties["skewer"]["client"] = m.Client
+	reg.Properties["skewer"]["path"] = m.UnixSocketPath
+	reg.Properties["skewer"]["port"] = strconv.FormatInt(int64(m.LocalPort), 10)
+	return reg
+}
+
+func (m *ParsedMessage) RegularJson() ([]byte, error) {
+	return json.Marshal(m.Regular())
+}
+
 type JsonRsyslogMessage struct {
+	// used to parsed JSON input from rsyslog
 	Message       string `json:"msg"`
 	TimeReported  string `json:"timereported"`
 	TimeGenerated string `json:"timegenerated"`
@@ -118,52 +153,91 @@ type JsonRsyslogMessage struct {
 	Properties map[string]interface{} `json:"$!"`
 }
 
-var syslogMessageFmt string = `Facility: %d
-Severity: %d
-Version: %d
-TimeReported: %s
-TimeGenerated: %s
-Hostname: %s
-Appname: %s
-ProcID: %s
-MsgID: %s
-Structured: %s
-Message: %s
-Properties: %s`
-
-func (m *SyslogMessage) String() string {
-	return fmt.Sprintf(
-		syslogMessageFmt,
-		m.Facility,
-		m.Severity,
-		m.Version,
-		m.GetTimeReported().Format(time.RFC3339Nano),
-		m.GetTimeGenerated().Format(time.RFC3339Nano),
-		m.Hostname,
-		m.Appname,
-		m.Procid,
-		m.Msgid,
-		m.Structured,
-		m.Message,
-		m.Properties,
-	)
-}
-
-func (m SyslogMessage) GetTimeReported() time.Time {
+func (m *SyslogMessage) GetTimeReported() time.Time {
 	return time.Unix(0, m.TimeReportedNum).UTC()
 }
 
-func (m SyslogMessage) GetTimeGenerated() time.Time {
+func (m *SyslogMessage) GetTimeGenerated() time.Time {
 	return time.Unix(0, m.TimeGeneratedNum).UTC()
 }
 
-func (m SyslogMessage) Date() string {
+func (m *SyslogMessage) Date() string {
 	return m.GetTimeReported().Format("2006-01-02")
 }
 
-// Empty returns true if the message is empty
-func (m *SyslogMessage) Empty() bool {
-	return len(m.Message) == 0 && len(m.Structured) == 0 && len(m.Properties) == 0
+func (m *SyslogMessage) ClearProperties() {
+	m.Properties = Properties{
+		Map: map[string]*InnerProperties{},
+	}
+}
+
+func (m *SyslogMessage) ClearDomain(domain string) {
+	if m.Properties.Map == nil {
+		m.Properties.Map = map[string]*InnerProperties{}
+	}
+	m.Properties.Map[domain] = &InnerProperties{
+		Map: map[string]string{},
+	}
+}
+
+func (m *SyslogMessage) GetProperty(domain, key string) string {
+	if len(m.Properties.Map) == 0 {
+		return ""
+	}
+	kv := m.Properties.Map[domain]
+	if kv == nil {
+		return ""
+	}
+	if len(kv.Map) == 0 {
+		return ""
+	}
+	return kv.Map[key]
+}
+
+func (m *SyslogMessage) SetProperty(domain, key, value string) {
+	if m.Properties.Map == nil {
+		m.Properties.Map = map[string]*InnerProperties{}
+	}
+	kv := m.Properties.Map[domain]
+	if kv == nil {
+		m.Properties.Map[domain] = &InnerProperties{
+			Map: map[string]string{},
+		}
+		kv = m.Properties.Map[domain]
+	}
+	if kv.Map == nil {
+		kv.Map = map[string]string{}
+	}
+	kv.Map[key] = value
+}
+
+func (m *SyslogMessage) SetAllProperties(all map[string](map[string]string)) {
+	m.ClearProperties()
+	for domain, kv := range all {
+		for k, v := range kv {
+			m.SetProperty(domain, k, v)
+		}
+	}
+}
+
+func (m *SyslogMessage) GetAllProperties() (res map[string](map[string]string)) {
+	res = map[string](map[string]string){}
+	if len(m.Properties.Map) == 0 {
+		return res
+	}
+	for domain, inner := range m.Properties.Map {
+		if inner == nil {
+			continue
+		}
+		if len(inner.Map) == 0 {
+			continue
+		}
+		res[domain] = map[string]string{}
+		for k, v := range inner.Map {
+			res[domain][k] = v
+		}
+	}
+	return res
 }
 
 /*
@@ -196,11 +270,6 @@ func (m *FullMessage) Decrypt(secret *memguard.LockedBuffer, enc []byte) (err er
 	} else {
 		dec = enc
 	}
-	_, err = m.UnmarshalMsg(dec)
+	err = m.Unmarshal(dec)
 	return err
-}
-
-func (m *SyslogMessage) SetTimeStrings() {
-	m.TimeReported = m.GetTimeReported().Format(time.RFC3339)
-	m.TimeGenerated = m.GetTimeGenerated().Format(time.RFC3339)
 }
