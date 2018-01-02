@@ -58,6 +58,7 @@ func (c *ExternalConns) Close() {
 	for _, conn := range c.conns {
 		close(conn)
 	}
+	c.conns = map[string](chan *FileConn){}
 	c.Unlock()
 }
 
@@ -104,6 +105,7 @@ func (c *ExternalPacketConns) Close() {
 	for _, conn := range c.conns {
 		close(conn)
 	}
+	c.conns = map[string](chan *FilePacketConn){}
 	c.Unlock()
 }
 
@@ -145,8 +147,6 @@ func NewExternalPacketConns() *ExternalPacketConns {
 	return &ext
 }
 
-
-
 type BinderClientImpl struct {
 	conn           *net.UnixConn
 	NewStreamConns *ExternalConns
@@ -169,9 +169,16 @@ func NewBinderClient(binderFile *os.File, logger log15.Logger) (*BinderClientImp
 			oob := make([]byte, syscall.CmsgSpace(4))
 			n, oobn, _, _, err := c.conn.ReadMsgUnix(buf, oob)
 			if err != nil {
-				logger.Debug("Error reading message from parent binder", "error", err)
+				logger.Error("Error reading message from parent binder", "error", err)
 				c.NewStreamConns.Close()
 				c.NewPacketConns.Close()
+				// the skewer parent process may be gone... for whatever reason
+				// we should stop before catastrophe happens
+				pid := os.Getpid()
+				process, err := os.FindProcess(pid)
+				if err == nil {
+					process.Signal(syscall.SIGTERM)
+				}
 				return
 			}
 			if n > 0 {

@@ -673,6 +673,15 @@ func (ch *serveChild) Serve() error {
 		return fmt.Errorf("error starting a controller: %s", err)
 	}
 
+	go func() {
+		// if parent disappears for any reason, we shutdown
+		deadManPipe := os.NewFile(uintptr(len(base.Handles)+4), "deadmanpipe")
+		dummy := make([]byte, 1)
+		deadManPipe.Read(dummy)
+		fmt.Fprintln(os.Stderr, "Parent has gone!!! Shutting down")
+		ch.shutdown()
+	}()
+
 	ch.logger.Debug("Main loop is starting")
 	for {
 		select {

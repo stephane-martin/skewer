@@ -222,7 +222,7 @@ func execChild() error {
 	return cmd.ExecuteChild()
 }
 
-func execServeParent() (err error) {
+func execServeParent() (status int) {
 
 	/*
 		err := capabilities.NoNewPriv()
@@ -321,6 +321,12 @@ func execServeParent() (err error) {
 		dopanic("Error creating ring-secret pipe", err, -1)
 	}
 	extraFiles = append(extraFiles, rRingSecretPipe)
+	// the dead man pipe is used by the child to detect that the parent had disappeared
+	rDeadManPipe, wDeadManPipe, err := os.Pipe()
+	if err != nil {
+		dopanic("Error creating dead man pipe", err, -1)
+	}
+	extraFiles = append(extraFiles, rDeadManPipe)
 
 	childProcess := exec.Cmd{
 		Args:       append([]string{"skewer-child"}, os.Args[1:]...),
@@ -337,6 +343,7 @@ func execServeParent() (err error) {
 	}
 	err = childProcess.Start()
 	_ = rRingSecretPipe.Close()
+	_ = rDeadManPipe.Close()
 	if err != nil {
 		dopanic("Error starting child", err, -1)
 	}
@@ -376,9 +383,12 @@ func execServeParent() (err error) {
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT, syscall.SIGUSR1)
 	logger.Debug("PIDs", "parent", os.Getpid(), "child", childProcess.Process.Pid)
 
-	// TODO: get child return status
-	_, _ = childProcess.Process.Wait()
-	return nil
+	state, _ := childProcess.Process.Wait()
+	_ = wDeadManPipe.Close()
+	if code, ok := state.Sys().(syscall.WaitStatus); ok {
+		return code.ExitStatus()
+	}
+	return 0
 }
 
 func execParent() error {
@@ -397,7 +407,11 @@ func execParent() error {
 		dopanic("Error parsing flags", err, -1)
 	}
 	if name == "serve" && err != pflag.ErrHelp {
-		err = execServeParent()
+		status := execServeParent()
+		if status != 0 {
+			return fmt.Errorf("Child exited with non-zero status code: '%d'", status)
+		}
+		return nil
 	} else {
 		err = cmd.Execute()
 	}
