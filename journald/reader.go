@@ -39,12 +39,12 @@ func EntryToSyslog(entry map[string]string) model.ParsedMessage {
 		switch k {
 		case "syslog_identifier":
 		case "_comm":
-			m.Appname = v
+			m.AppName = v
 		case "message":
 			m.Message = v
 		case "syslog_pid":
 		case "_pid":
-			m.Procid = v
+			m.ProcId = v
 		case "priority":
 			p, err := strconv.Atoi(v)
 			if err == nil {
@@ -56,7 +56,7 @@ func EntryToSyslog(entry map[string]string) model.ParsedMessage {
 				m.Facility = model.Facility(f)
 			}
 		case "_hostname":
-			m.Hostname = v
+			m.HostName = v
 		case "_source_realtime_timestamp": // microseconds
 			t, err := strconv.ParseInt(v, 10, 64)
 			if err == nil {
@@ -69,19 +69,19 @@ func EntryToSyslog(entry map[string]string) model.ParsedMessage {
 
 		}
 	}
-	if len(m.Appname) == 0 {
-		m.Appname = entry["SYSLOG_IDENTIFIER"]
+	if len(m.AppName) == 0 {
+		m.AppName = entry["SYSLOG_IDENTIFIER"]
 	}
-	if len(m.Procid) == 0 {
-		m.Procid = entry["SYSLOG_PID"]
+	if len(m.ProcId) == 0 {
+		m.ProcId = entry["SYSLOG_PID"]
 	}
 	m.TimeGeneratedNum = time.Now().UnixNano()
 	if m.TimeReportedNum == 0 {
 		m.TimeReportedNum = m.TimeGeneratedNum
 	}
 	m.Priority = model.Priority(int(m.Facility)*8 + int(m.Severity))
-	m.Properties = map[string]map[string]string{}
-	m.Properties["journald"] = properties
+	m.ClearDomain("journald")
+	m.Properties.Map["journald"].Map = properties
 
 	return model.ParsedMessage{
 		Client:         "journald",
