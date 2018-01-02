@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"sync"
@@ -274,7 +273,7 @@ func (s *PluginController) listenpipe(secret *memguard.LockedBuffer) {
 
 	}
 	err = scanner.Err()
-	if err == io.EOF || err == io.ErrClosedPipe || err == io.ErrUnexpectedEOF {
+	if utils.IsFileClosed(err) {
 		s.logger.Debug("listenpipe stops", "type", s.typ)
 	} else if err != nil {
 		s.logger.Error("Unexpected error when listening to the plugin pipe", "type", s.name, "error", err)

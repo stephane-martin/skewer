@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"sync"
 	"time"
@@ -156,7 +155,7 @@ func (s *storeServiceImpl) create() error {
 		}
 
 		err = scanner.Err()
-		if err == io.EOF || err == io.ErrClosedPipe || err == io.ErrUnexpectedEOF {
+		if utils.IsFileClosed(err) {
 			s.logger.Debug("Stopped to read the ingestion store pipe")
 		} else if err != nil {
 			s.logger.Warn("Unexpected error decoding message from the Store pipe", "error", err)
