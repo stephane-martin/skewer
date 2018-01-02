@@ -455,7 +455,7 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 		} else {
 			// plugin has sent an invalid message that could not be interpreted by scanner
 			startError(err, nil)
-			if err == io.EOF || err == io.ErrClosedPipe || err == io.ErrUnexpectedEOF || err == os.ErrClosed {
+			if utils.IsFileClosed(err) {
 				<-s.ShutdownChan
 			} else {
 				s.logger.Warn("Plugin scanner error", "type", s.name, "error", err)

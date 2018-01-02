@@ -422,11 +422,16 @@ func main() {
 		memguard.DestroyAll()
 		e := recover()
 		if e == nil {
+			os.Stdout.Close()
+			os.Stderr.Close()
+			os.Exit(0)
 			return
 		}
-		if err, ok := e.(fatalErr); ok {
+		if err, ok := e.(*fatalErr); ok {
 			fmt.Fprintln(os.Stderr, err.Error())
 			fmt.Fprintln(os.Stderr, string(debug.Stack()))
+			os.Stdout.Close()
+			os.Stderr.Close()
 			os.Exit(err.exitCode)
 			return
 		}

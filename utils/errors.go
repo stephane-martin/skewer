@@ -2,6 +2,7 @@ package utils
 
 import (
 	"errors"
+	"io"
 	"net"
 	"os"
 	"syscall"
@@ -48,6 +49,16 @@ func IsBrokenPipe(err error) bool {
 		if serr, ok := (operr.Err).(*os.SyscallError); ok {
 			return serr.Err == syscall.EPIPE
 		}
+	}
+	return false
+}
+
+func IsFileClosed(err error) bool {
+	if e, ok := err.(*os.PathError); ok {
+		err = e
+	}
+	if err == io.EOF || err == io.ErrClosedPipe || err == io.ErrUnexpectedEOF || err == os.ErrClosed {
+		return true
 	}
 	return false
 }
