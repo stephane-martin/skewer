@@ -66,15 +66,7 @@ func SyslogToGelfMessage(m *model.SyslogMessage) *gelf.Message {
 	return &gelfm
 }
 
-type encoderGELF struct {
-	w io.Writer
-}
-
-func newEncoderGELF() *encoderGELF {
-	return &encoderGELF{}
-}
-
-func (e *encoderGELF) Enc(v interface{}, w io.Writer) (err error) {
+func encodeGELF(v interface{}, w io.Writer) (err error) {
 	if v == nil {
 		return nil
 	}

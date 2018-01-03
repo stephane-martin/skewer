@@ -63,7 +63,7 @@ func NewKafkaDestination(ctx context.Context, e *Env) (d *KafkaDestination, err 
 
 func (d *KafkaDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
 	buf := bytes.NewBuffer(nil)
-	err = d.encoder.Enc(message, buf)
+	err = d.encoder(message, buf)
 	if err != nil {
 		d.permerr(message.Uid)
 		return err

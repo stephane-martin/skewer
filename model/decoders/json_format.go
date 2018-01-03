@@ -13,7 +13,7 @@ import (
 	"gopkg.in/Graylog2/go-gelf.v2/gelf"
 )
 
-func ParseGelfFormat(m []byte, decoder *encoding.Decoder) (msg *model.SyslogMessage, rerr error) {
+func pGelf(m []byte, decoder *encoding.Decoder) (msg *model.SyslogMessage, rerr error) {
 	// we ignore decoder, JSON is always UTF-8
 	decoder = unicode.UTF8.NewDecoder()
 
@@ -30,7 +30,7 @@ func ParseGelfFormat(m []byte, decoder *encoding.Decoder) (msg *model.SyslogMess
 	return FromGelfMessage(gelfMsg), nil
 }
 
-func ParseFullJsonFormat(m []byte, decoder *encoding.Decoder) (msg *model.SyslogMessage, rerr error) {
+func pFulljson(m []byte, decoder *encoding.Decoder) (msg *model.SyslogMessage, rerr error) {
 	// we ignore decoder, JSON is always UTF-8
 	decoder = unicode.UTF8.NewDecoder()
 
@@ -47,7 +47,7 @@ func ParseFullJsonFormat(m []byte, decoder *encoding.Decoder) (msg *model.Syslog
 	return sourceMsg.Internal(), nil
 }
 
-func ParseJsonFormat(m []byte, decoder *encoding.Decoder) (msg *model.SyslogMessage, rerr error) {
+func pJson(m []byte, decoder *encoding.Decoder) (msg *model.SyslogMessage, rerr error) {
 	// we ignore decoder, JSON is always UTF-8
 	decoder = unicode.UTF8.NewDecoder()
 

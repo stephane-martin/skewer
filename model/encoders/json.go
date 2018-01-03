@@ -7,15 +7,7 @@ import (
 	"github.com/stephane-martin/skewer/model"
 )
 
-type encoderJson struct {
-	w io.Writer
-}
-
-func newEncoderJson() *encoderJson {
-	return &encoderJson{}
-}
-
-func (e *encoderJson) Enc(v interface{}, w io.Writer) error {
+func encodeJson(v interface{}, w io.Writer) error {
 	if v == nil {
 		return nil
 	}
@@ -32,15 +24,7 @@ func (e *encoderJson) Enc(v interface{}, w io.Writer) error {
 	}
 }
 
-type encoderFullJson struct {
-	w io.Writer
-}
-
-func newEncoderFullJson() *encoderFullJson {
-	return &encoderFullJson{}
-}
-
-func (e *encoderFullJson) Enc(v interface{}, w io.Writer) error {
+func encodeFullJson(v interface{}, w io.Writer) error {
 	if v == nil {
 		return nil
 	}

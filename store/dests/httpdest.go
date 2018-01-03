@@ -168,7 +168,7 @@ func (d *HTTPDestination) dosend(ctx context.Context) {
 			continue
 		}
 		body := bytes.NewBuffer(nil)
-		err = d.encoder.Enc(msg, body)
+		err = d.encoder(msg, body)
 		if err != nil {
 			d.permerr(msg.Uid)
 			d.logger.Warn("Error encoding message", "error", err)

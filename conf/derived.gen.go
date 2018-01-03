@@ -368,7 +368,6 @@ func deriveDeepCopy_14(dst, src *SyslogSourceBaseConfig) {
 	dst.BindAddr = src.BindAddr
 	dst.UnixSocketPath = src.UnixSocketPath
 	dst.Format = src.Format
-	dst.DontParseSD = src.DontParseSD
 	dst.KeepAlive = src.KeepAlive
 	dst.KeepAlivePeriod = src.KeepAlivePeriod
 	dst.Timeout = src.Timeout

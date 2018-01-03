@@ -25,7 +25,7 @@ func pair2str(s1 []byte, s2 []byte) (string, string) {
 	return string(s1), string(s2)
 }
 
-func ParseRfc3164Format(m []byte, decoder *encoding.Decoder) (smsg *model.SyslogMessage, err error) {
+func p3164(m []byte, decoder *encoding.Decoder) (smsg *model.SyslogMessage, err error) {
 	if decoder == nil {
 		decoder = unicode.UTF8.NewDecoder()
 	}

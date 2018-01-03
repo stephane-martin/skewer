@@ -405,7 +405,6 @@ type SyslogSourceBaseConfig struct {
 	BindAddr        string        `mapstructure:"bind_addr" toml:"bind_addr" json:"bind_addr"`
 	UnixSocketPath  string        `mapstructure:"unix_socket_path" toml:"unix_socket_path" json:"unix_socket_path"`
 	Format          string        `mapstructure:"format" toml:"format" json:"format"`
-	DontParseSD     bool          `mapstructure:"dont_parse_structured_data" toml:"dont_parse_structured_data" json:"dont_parse_structured_data"`
 	KeepAlive       bool          `mapstructure:"keepalive" toml:"keepalive" json:"keepalive"`
 	KeepAlivePeriod time.Duration `mapstructure:"keepalive_period" toml:"keepalive_period" json:"keepalive_period"`
 	Timeout         time.Duration `mapstructure:"timeout" toml:"timeout" json:"timeout"`

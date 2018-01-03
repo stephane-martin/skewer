@@ -8,15 +8,7 @@ import (
 	"github.com/stephane-martin/skewer/model"
 )
 
-type encoderFile struct {
-	w io.Writer
-}
-
-func newEncoderFile() *encoderFile {
-	return &encoderFile{}
-}
-
-func (e *encoderFile) Enc(v interface{}, w io.Writer) error {
+func encodeFile(v interface{}, w io.Writer) error {
 	if v == nil {
 		return nil
 	}
@@ -38,7 +30,7 @@ func (e *encoderFile) Enc(v interface{}, w io.Writer) error {
 		)
 		return err
 	case *model.FullMessage:
-		return e.Enc(&val.Parsed.Fields, w)
+		return encodeFile(&val.Parsed.Fields, w)
 	default:
 		return defaultEncode(v, w)
 	}

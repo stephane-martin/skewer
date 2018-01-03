@@ -97,13 +97,13 @@ func (s *UdpServiceImpl) ParseOne(raw *model.RawUdpMessage, e *ParsersEnv, gen *
 	)
 
 	decoder := utils.SelectDecoder(raw.Encoding)
-	parser := e.GetParser(raw.Format)
-	if parser == nil {
+	parser, err := e.GetParser(raw.Format)
+	if parser == nil || err != nil {
 		logger.Crit("Unknown parser")
 		return
 	}
 
-	syslogMsg, err := parser.Parse(raw.Message[:raw.Size], decoder, raw.DontParseSD)
+	syslogMsg, err := parser(raw.Message[:raw.Size], decoder)
 	if err != nil {
 		base.ParsingErrorCounter.WithLabelValues("udp", raw.Client, raw.Format).Inc()
 		//logger.Info("Parsing error", "message", string(raw.Message), "error", err)
@@ -295,7 +295,6 @@ func (s *UdpServiceImpl) handleConnection(conn net.PacketConn, config conf.UDPSo
 		rawmsg.Encoding = config.Encoding
 		rawmsg.Format = config.Format
 		rawmsg.ConfID = config.ConfID
-		rawmsg.DontParseSD = config.DontParseSD
 		rawmsg.Client = ""
 		if remote == nil {
 			// unix socket

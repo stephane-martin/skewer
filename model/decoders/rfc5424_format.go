@@ -24,7 +24,7 @@ func isASCII(s []byte) bool {
 var SP []byte = []byte(" ")
 var DASH []byte = []byte("-")
 
-func ParseRfc5424Format(m []byte, decoder *encoding.Decoder, dont_parse_sd bool) (smsg *model.SyslogMessage, err error) {
+func p5424(m []byte, decoder *encoding.Decoder) (smsg *model.SyslogMessage, err error) {
 	// HEADER = PRI VERSION SP TIMESTAMP SP HOSTNAME SP APP-NAME SP PROCID SP MSGID
 	// PRI = "<" PRIVAL ">"
 	// SYSLOG-MSG = HEADER SP STRUCTURED-DATA [SP MSG]
@@ -96,17 +96,13 @@ func ParseRfc5424Format(m []byte, decoder *encoding.Decoder, dont_parse_sd bool)
 			return nil, err
 		}
 		smsg.Message = string(s2)
-		if dont_parse_sd {
-			smsg.Structured = string(s1)
-		} else {
-			smsg.Structured = ""
-			props, err := parseStructData(s1)
-			if err != nil {
-				return nil, err
-			}
-			if len(props) > 0 {
-				smsg.SetAllProperties(props)
-			}
+		smsg.Structured = ""
+		props, err := parseStructData(s1)
+		if err != nil {
+			return nil, err
+		}
+		if len(props) > 0 {
+			smsg.SetAllProperties(props)
 		}
 	} else {
 		return nil, &InvalidStructuredDataError{"Structured data is not nil but does not start with '['"}

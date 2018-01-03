@@ -77,12 +77,8 @@ type iSyslogMessage struct {
 	Properties    map[string]map[string]string
 }
 
-type Parser interface {
-	Parse(rawMessage []byte, decoder *encoding.Decoder, dont_parse_sd bool) (*model.SyslogMessage, error)
-}
-
 type ParsersEnvironment interface {
-	GetParser(name string) *ConcreteParser
+	GetParser(name string) (decoders.Parser, error)
 	AddParser(name string, parserFunc string) error
 }
 
@@ -120,7 +116,7 @@ type ConcreteParser struct {
 	name string
 }
 
-func (p *ConcreteParser) Parse(rawMessage []byte, decoder *encoding.Decoder, dont_parse_sd bool) (parsedMessage *model.SyslogMessage, err error) {
+func (p *ConcreteParser) Parse(rawMessage []byte, decoder *encoding.Decoder) (parsedMessage *model.SyslogMessage, err error) {
 	jsParser, ok := p.env.jsParsers[p.name]
 	if !ok {
 		return nil, &decoders.UnknownFormatError{}
@@ -215,13 +211,13 @@ func newEnv(filterFunc, topicFunc, topicTmpl, partitionKeyFunc, partitionKeyTmpl
 	return &e
 }
 
-func (e *Environment) GetParser(name string) *ConcreteParser {
-	// TODO: explicit error
+func (e *Environment) GetParser(name string) (decoders.Parser, error) {
 	_, ok := e.jsParsers[name]
 	if !ok {
-		return nil
+		return nil, fmt.Errorf("Unknown javascript parser: %s", name)
 	}
-	return &ConcreteParser{env: e, name: name}
+	c := &ConcreteParser{env: e, name: name}
+	return c.Parse, nil
 }
 
 func (e *Environment) AddParser(name string, parserFunc string) error {

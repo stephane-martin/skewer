@@ -21,6 +21,7 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/javascript"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/model/decoders"
 	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/services/errors"
 	"github.com/stephane-martin/skewer/sys/binder"
@@ -343,7 +344,7 @@ func (s *DirectRelpServiceImpl) Parse() {
 	e := NewParsersEnv(s.ParserConfigs, s.Logger)
 
 	var raw *model.RawTcpMessage
-	var parser Parser
+	var parser decoders.Parser
 	var syslogMsg *model.SyslogMessage
 	var parsedMsg model.FullMessage
 	var err error
@@ -368,15 +369,15 @@ func (s *DirectRelpServiceImpl) Parse() {
 			"format", raw.Format,
 			"txnr", raw.Txnr,
 		)
-		parser = e.GetParser(raw.Format)
-		if parser == nil {
+		parser, err = e.GetParser(raw.Format)
+		if err != nil || parser == nil {
 			s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
 			logger.Crit("Unknown parser")
 			s.Pool.Put(raw)
 			return
 		}
 		decoder = utils.SelectDecoder(raw.Encoding)
-		syslogMsg, err = parser.Parse(raw.Message[:raw.Size], decoder, raw.DontParseSD)
+		syslogMsg, err = parser(raw.Message[:raw.Size], decoder)
 		if err != nil {
 			logger.Warn("Parsing error", "message", string(raw.Message[:raw.Size]), "error", err)
 			s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
@@ -761,7 +762,6 @@ Loop:
 			rawmsg.LocalPort = localPort
 			rawmsg.UnixSocketPath = path
 			rawmsg.ConfID = config.ConfID
-			rawmsg.DontParseSD = config.DontParseSD
 			rawmsg.Encoding = config.Encoding
 			rawmsg.Format = config.Format
 			rawmsg.ConnID = connID

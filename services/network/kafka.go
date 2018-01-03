@@ -159,13 +159,13 @@ func (s *KafkaServiceImpl) ParseOne(env *ParsersEnv, raw *model.RawKafkaMessage)
 		"topic", raw.Topic,
 	)
 	decoder := utils.SelectDecoder(raw.Encoding)
-	parser := env.GetParser(raw.Format)
-	if parser == nil {
+	parser, err := env.GetParser(raw.Format)
+	if parser == nil || err != nil {
 		logger.Error("Unknown parser")
 		return
 	}
 
-	syslogMsg, err := parser.Parse(raw.Message, decoder, false)
+	syslogMsg, err := parser(raw.Message, decoder)
 	if err != nil {
 		base.ParsingErrorCounter.WithLabelValues("kafka", raw.Brokers, raw.Format).Inc()
 		//logger.Info("Parsing error", "message", string(raw.Message), "error", err)

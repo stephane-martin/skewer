@@ -10,21 +10,15 @@ import (
 	"github.com/stephane-martin/skewer/utils"
 )
 
-type encoder5424 struct {
-	w io.Writer
-}
-
-func newEncoder5424() *encoder5424 {
-	return &encoder5424{}
-}
-
-func (e *encoder5424) Enc(v interface{}, w io.Writer) error {
+func encode5424(v interface{}, w io.Writer) error {
 	if v == nil {
 		return nil
 	}
 	switch val := v.(type) {
 	case *model.FullMessage:
 		return encodeMsg5424(&val.Parsed.Fields, w)
+	case *model.ParsedMessage:
+		return encodeMsg5424(&val.Fields, w)
 	case *model.SyslogMessage:
 		return encodeMsg5424(val, w)
 	default:

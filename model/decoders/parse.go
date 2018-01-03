@@ -2,6 +2,7 @@ package decoders
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"unicode/utf8"
 
@@ -19,6 +20,7 @@ const (
 	GELF
 	InfluxDB
 	Auto
+	Protobuf
 )
 
 var Formats = map[string]Format{
@@ -29,6 +31,18 @@ var Formats = map[string]Format{
 	"gelf":     GELF,
 	"influxdb": InfluxDB,
 	"auto":     Auto,
+	"protobuf": Protobuf,
+}
+
+var parsers = map[Format]Parser{
+	RFC5424:  p5424,
+	RFC3164:  p3164,
+	JSON:     pJson,
+	FullJSON: pFulljson,
+	GELF:     pGelf,
+	InfluxDB: pInflux,
+	Auto:     pAuto,
+	Protobuf: pProtobuf,
 }
 
 func ParseFormat(format string) Format {
@@ -39,16 +53,10 @@ func ParseFormat(format string) Format {
 	return -1
 }
 
-type Parser struct {
-	format Format
-}
-
-func (p *Parser) Parse(m []byte, decoder *encoding.Decoder, dont_parse_sd bool) (*model.SyslogMessage, error) {
-	return Parse(m, p.format, decoder, dont_parse_sd)
-}
+type Parser func(m []byte, decoder *encoding.Decoder) (*model.SyslogMessage, error)
 
 func Fuzz(m []byte) int {
-	msg, err := Parse(m, Auto, nil, false)
+	msg, err := pAuto(m, nil)
 	if err != nil {
 		return 0
 	}
@@ -67,51 +75,35 @@ func Fuzz(m []byte) int {
 	return 1
 }
 
-func GetParser(format Format) *Parser {
-	return &Parser{format: format}
+func GetParser(format Format) (Parser, error) {
+	if p, ok := parsers[format]; ok {
+		return p, nil
+	}
+	return nil, fmt.Errorf("Unknown decoding format: %d", format)
 }
 
-func Parse(m []byte, format Format, decoder *encoding.Decoder, dont_parse_sd bool) (sm *model.SyslogMessage, err error) {
-
-	switch format {
-	case RFC5424:
-		sm, err = ParseRfc5424Format(m, decoder, dont_parse_sd)
-	case RFC3164:
-		sm, err = ParseRfc3164Format(m, decoder)
-	case JSON:
-		sm, err = ParseJsonFormat(m, decoder)
-	case FullJSON:
-		sm, err = ParseFullJsonFormat(m, decoder)
-	case GELF:
-		sm, err = ParseGelfFormat(m, decoder)
-	case InfluxDB:
-		sm, err = ParseInfluxFormat(m, decoder)
-	case Auto:
-		if len(m) == 0 {
-			return sm, &EmptyMessageError{}
+func pAuto(m []byte, decoder *encoding.Decoder) (sm *model.SyslogMessage, err error) {
+	if len(m) == 0 {
+		return sm, &EmptyMessageError{}
+	}
+	if m[0] == byte('{') {
+		sm, err = pJson(m, decoder)
+		if err != nil {
+			sm, err = pFulljson(m, decoder)
 		}
-		if m[0] == byte('{') {
-			sm, err = ParseJsonFormat(m, decoder)
-			if err != nil {
-				sm, err = ParseFullJsonFormat(m, decoder)
-			}
-		} else if m[0] != byte('<') {
-			sm, err = ParseRfc3164Format(m, decoder)
+	} else if m[0] != byte('<') {
+		sm, err = p3164(m, decoder)
+	} else {
+		i := bytes.Index(m, []byte(">"))
+		if i < 2 {
+			sm, err = p3164(m, decoder)
+		} else if len(m) == (i + 1) {
+			sm, err = p3164(m, decoder)
+		} else if m[i+1] == byte('1') {
+			sm, err = p5424(m, decoder)
 		} else {
-			i := bytes.Index(m, []byte(">"))
-			if i < 2 {
-				sm, err = ParseRfc3164Format(m, decoder)
-			} else if len(m) == (i + 1) {
-				sm, err = ParseRfc3164Format(m, decoder)
-			} else if m[i+1] == byte('1') {
-				sm, err = ParseRfc5424Format(m, decoder, dont_parse_sd)
-			} else {
-				sm, err = ParseRfc3164Format(m, decoder)
-			}
+			sm, err = p3164(m, decoder)
 		}
-
-	default:
-		return sm, &UnknownFormatError{format}
 	}
 	return sm, err
 }

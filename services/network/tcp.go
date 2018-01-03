@@ -153,14 +153,14 @@ func (s *TcpServiceImpl) ParseOne(raw *model.RawTcpMessage, env *ParsersEnv, gen
 	)
 
 	decoder := utils.SelectDecoder(raw.Encoding)
-	parser := env.GetParser(raw.Format)
+	parser, err := env.GetParser(raw.Format)
 
-	if parser == nil {
+	if parser == nil || err != nil {
 		logger.Error("Unknown parser")
 		return
 	}
 
-	syslogMsg, err := parser.Parse(raw.Message[:raw.Size], decoder, raw.DontParseSD)
+	syslogMsg, err := parser(raw.Message[:raw.Size], decoder)
 	if err != nil {
 		base.ParsingErrorCounter.WithLabelValues("tcp", raw.Client, raw.Format).Inc()
 		//logger.Info("Parsing error", "message", string(raw.Message), "error", err)
@@ -274,7 +274,6 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TCPSourceConfig)
 		rawmsg.UnixSocketPath = path
 		rawmsg.Size = len(buf)
 		rawmsg.ConfID = config.ConfID
-		rawmsg.DontParseSD = config.DontParseSD
 		rawmsg.Encoding = config.Encoding
 		rawmsg.Format = config.Format
 		copy(rawmsg.Message, buf)

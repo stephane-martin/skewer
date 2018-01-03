@@ -26,7 +26,6 @@ type RawMessage struct {
 	UnixSocketPath string
 	Format         string
 	Encoding       string
-	DontParseSD    bool
 	ConfID         utils.MyULID
 }
 

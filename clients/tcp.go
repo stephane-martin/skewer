@@ -130,7 +130,7 @@ func (c *SyslogTCPClient) Connect() (err error) {
 		return nil
 	}
 
-	c.encoder, err = encoders.NewEncoder(c.format)
+	c.encoder, err = encoders.GetEncoder(c.format)
 	if err != nil {
 		return err
 	}

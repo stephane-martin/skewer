@@ -21,6 +21,7 @@ const (
 	FullJSON
 	File
 	GELF
+	Protobuf
 )
 
 var Formats = map[string]Format{
@@ -30,6 +31,17 @@ var Formats = map[string]Format{
 	"fulljson": FullJSON,
 	"file":     File,
 	"gelf":     GELF,
+	"protobuf": Protobuf,
+}
+
+var encoders = map[Format]Encoder{
+	RFC5424:  encode5424,
+	RFC3164:  encode3164,
+	JSON:     encodeJson,
+	FullJSON: encodeFullJson,
+	File:     encodeFile,
+	GELF:     encodeGELF,
+	Protobuf: encodePB,
 }
 
 func ParseFormat(format string) Format {
@@ -40,9 +52,7 @@ func ParseFormat(format string) Format {
 	return -1
 }
 
-type Encoder interface {
-	Enc(v interface{}, w io.Writer) error
-}
+type Encoder func(v interface{}, w io.Writer) error
 
 var NonEncodableError = fmt.Errorf("non encodable message")
 
@@ -58,23 +68,11 @@ func IsEncodingError(err error) bool {
 	}
 }
 
-func NewEncoder(frmt Format) (Encoder, error) {
-	switch frmt {
-	case RFC5424:
-		return newEncoder5424(), nil
-	case RFC3164:
-		return newEncoder3164(), nil
-	case JSON:
-		return newEncoderJson(), nil
-	case FullJSON:
-		return newEncoderFullJson(), nil
-	case File:
-		return newEncoderFile(), nil
-	case GELF:
-		return newEncoderGELF(), nil
-	default:
-		return nil, fmt.Errorf("NewEncoder: unknown encoding format '%d'", frmt)
+func GetEncoder(frmt Format) (Encoder, error) {
+	if e, ok := encoders[frmt]; ok {
+		return e, nil
 	}
+	return nil, fmt.Errorf("NewEncoder: unknown encoding format '%d'", frmt)
 }
 
 func defaultEncode(v interface{}, w io.Writer) error {
@@ -115,7 +113,7 @@ func ChainEncode(e Encoder, objs ...interface{}) ([]byte, error) {
 	var err error
 	buf := bytes.NewBuffer(nil)
 	for _, obj := range objs {
-		err = e.Enc(obj, buf)
+		err = e(obj, buf)
 		if err != nil {
 			return nil, err
 		}
@@ -129,7 +127,7 @@ func TcpOctetEncode(e Encoder, obj interface{}) ([]byte, error) {
 	}
 	var err error
 	buf := bytes.NewBuffer(nil)
-	err = e.Enc(obj, buf)
+	err = e(obj, buf)
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +144,7 @@ func RelpEncode(e Encoder, txnr int32, command string, obj interface{}) ([]byte,
 	}
 	var err error
 	buf := bytes.NewBuffer(nil)
-	err = e.Enc(obj, buf)
+	err = e(obj, buf)
 	if err != nil {
 		return nil, err
 	}

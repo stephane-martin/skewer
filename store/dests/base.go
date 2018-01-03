@@ -162,7 +162,7 @@ func (base *baseDestination) setFormat(format string) error {
 	if frmt == -1 {
 		return fmt.Errorf("Unknown encoding format: %s", format)
 	}
-	encoder, err := encoders.NewEncoder(frmt)
+	encoder, err := encoders.GetEncoder(frmt)
 	if err != nil {
 		return err
 	}

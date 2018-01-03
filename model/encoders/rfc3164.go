@@ -9,15 +9,7 @@ import (
 	"github.com/stephane-martin/skewer/model"
 )
 
-type encoder3164 struct {
-	w io.Writer
-}
-
-func newEncoder3164() *encoder3164 {
-	return &encoder3164{}
-}
-
-func (e *encoder3164) Enc(v interface{}, w io.Writer) error {
+func encode3164(v interface{}, w io.Writer) error {
 	if v == nil {
 		return nil
 	}

@@ -10,7 +10,7 @@ import (
 	"golang.org/x/text/encoding/unicode"
 )
 
-func ParseInfluxFormat(m []byte, decoder *encoding.Decoder) (msg *model.SyslogMessage, rerr error) {
+func pInflux(m []byte, decoder *encoding.Decoder) (msg *model.SyslogMessage, rerr error) {
 	// we assume influxdb line protocol is always UTF-8
 	decoder = unicode.UTF8.NewDecoder()
 
