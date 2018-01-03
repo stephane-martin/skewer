@@ -25,6 +25,7 @@ import (
 	"github.com/inconshreveable/log15"
 	"github.com/spf13/viper"
 	"github.com/stephane-martin/skewer/consul"
+	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/sys/kring"
 	"github.com/stephane-martin/skewer/utils"
 )
@@ -911,21 +912,20 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 	parsersNames := map[string]bool{}
 	for _, parserConf := range c.Parsers {
 		name := strings.TrimSpace(parserConf.Name)
-		switch name {
-		case "rfc5424", "rfc3164", "json", "fulljson", "gelf", "auto":
+		if model.IsNativeParser(parserConf.Name) {
 			return ConfigurationCheckError{ErrString: "Parser configuration must not use a reserved name"}
-		case "":
-			return ConfigurationCheckError{ErrString: "Empty parser name"}
-		default:
-			if _, ok := parsersNames[name]; ok {
-				return ConfigurationCheckError{ErrString: "The same parser name is used multiple times"}
-			}
-			f := strings.TrimSpace(parserConf.Func)
-			if len(f) == 0 {
-				return ConfigurationCheckError{ErrString: "Empty parser func"}
-			}
-			parsersNames[name] = true
 		}
+		if name == "" {
+			return ConfigurationCheckError{ErrString: "Empty parser name"}
+		}
+		if _, ok := parsersNames[name]; ok {
+			return ConfigurationCheckError{ErrString: "The same parser name is used multiple times"}
+		}
+		f := strings.TrimSpace(parserConf.Func)
+		if len(f) == 0 {
+			return ConfigurationCheckError{ErrString: "Empty parser func"}
+		}
+		parsersNames[name] = true
 	}
 
 	_, err = c.Main.GetDestinations()
@@ -1015,13 +1015,12 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 			return ConfigurationCheckError{Err: err}
 		}
 
-		switch baseConf.Format {
-		case "rfc5424", "rfc3164", "json", "fulljson", "gelf", "auto":
-		default:
+		if !model.IsNativeParser(baseConf.Format) {
 			if _, ok := parsersNames[baseConf.Format]; !ok {
 				return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown parser: '%s'", baseConf.Format)}
 			}
 		}
+
 		syslogConf.SetConfID()
 	}
 
@@ -1105,9 +1104,7 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 			conf.OffsetsInitial = sarama.OffsetOldest
 		}
 
-		switch conf.Format {
-		case "rfc5424", "rfc3164", "json", "fulljson", "gelf", "auto":
-		default:
+		if !model.IsNativeParser(conf.Format) {
 			if _, ok := parsersNames[conf.Format]; !ok {
 				return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown parser: '%s'", conf.Format)}
 			}

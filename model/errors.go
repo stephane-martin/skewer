@@ -66,6 +66,16 @@ func (e *InvalidEncodingError) Error() string {
 
 func (e *InvalidEncodingError) Parsing() {}
 
+type InfluxDecodingError struct {
+	Err error
+}
+
+func (e *InfluxDecodingError) Parsing() {}
+
+func (e *InfluxDecodingError) Error() string {
+	return fmt.Sprintf("Error decoding InfluxDB line protocol: %s", e.Err.Error())
+}
+
 type InvalidStructuredDataError struct {
 	Message string
 }

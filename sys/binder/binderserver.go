@@ -56,7 +56,7 @@ func BinderListen(ctx context.Context, logger log15.Logger, schan chan *External
 				logger.Debug("New accepted connection", "uid", uids, "addr", addr)
 				schan <- &ExternalConn{Uid: uids, Conn: c, Addr: addr}
 			} else {
-				logger.Warn("Accept error", "error", err, "addr", addr)
+				logger.Debug("Accept error", "error", err, "addr", addr)
 				cancel()
 				return
 			}

@@ -55,7 +55,7 @@ func IsBrokenPipe(err error) bool {
 
 func IsFileClosed(err error) bool {
 	if e, ok := err.(*os.PathError); ok {
-		err = e
+		err = e.Err
 	}
 	if err == io.EOF || err == io.ErrClosedPipe || err == io.ErrUnexpectedEOF || err == os.ErrClosed {
 		return true

@@ -17,21 +17,19 @@ type ParsersEnv struct {
 }
 
 func NewParsersEnv(parsersConf []conf.ParserConfig, logger log15.Logger) *ParsersEnv {
-	p := javascript.NewParsersEnvironment(logger)
+	jsenv := javascript.NewParsersEnvironment(logger)
 	for _, parserConf := range parsersConf {
-		err := p.AddParser(parserConf.Name, parserConf.Func)
+		err := jsenv.AddParser(parserConf.Name, parserConf.Func)
 		if err != nil {
 			logger.Warn("Error initializing parser", "name", parserConf.Name, "error", err)
 		}
 	}
-	return &ParsersEnv{p}
+	return &ParsersEnv{jsenv: jsenv}
 }
 
 func (e *ParsersEnv) GetParser(parserName string) Parser {
-	switch parserName {
-	case "rfc5424", "rfc3164", "json", "auto":
+	if model.IsNativeParser(parserName) {
 		return model.GetParser(parserName)
-	default:
-		return e.jsenv.GetParser(parserName)
 	}
+	return e.jsenv.GetParser(parserName)
 }

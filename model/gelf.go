@@ -99,7 +99,7 @@ func (m *SyslogMessage) FromGelfMessage(gelfm *gelf.Message) {
 	} else {
 		m.Facility = 1
 	}
-	m.Priority = Priority(int(m.Facility)*8 + int(m.Severity))
+	m.SetPriority()
 
 	m.AppName = ""
 	if appname, ok := gelfm.Extra["appname"]; ok {

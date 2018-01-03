@@ -507,6 +507,18 @@
 			"revisionTime": "2014-10-17T20:07:13Z"
 		},
 		{
+			"checksumSHA1": "cfumoC9gHEUROd+fA8qK3WLFAZQ=",
+			"path": "github.com/influxdata/influxdb/models",
+			"revision": "da9774fd278f0a5df36d247f8a2e2fd53a651f41",
+			"revisionTime": "2018-01-02T20:34:37Z"
+		},
+		{
+			"checksumSHA1": "H/J/qLqzUONXIecHHKtVZmxJZZA=",
+			"path": "github.com/influxdata/influxdb/pkg/escape",
+			"revision": "da9774fd278f0a5df36d247f8a2e2fd53a651f41",
+			"revisionTime": "2018-01-02T20:34:37Z"
+		},
+		{
 			"checksumSHA1": "PKCbn95g/mlPlUCtLgqYajuYeyo=",
 			"path": "github.com/jsipprell/keyctl",
 			"revision": "988d05162bc59cf7789c35af405be8f1599a87a3",

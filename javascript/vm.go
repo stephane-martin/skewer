@@ -215,6 +215,7 @@ func newEnv(filterFunc, topicFunc, topicTmpl, partitionKeyFunc, partitionKeyTmpl
 }
 
 func (e *Environment) GetParser(name string) *ConcreteParser {
+	// TODO: explicit error
 	_, ok := e.jsParsers[name]
 	if !ok {
 		return nil

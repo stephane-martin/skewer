@@ -156,6 +156,10 @@ type JsonRsyslogMessage struct {
 	Properties map[string]interface{} `json:"$!"`
 }
 
+func (m *SyslogMessage) SetPriority() {
+	m.Priority = Priority(int(m.Facility)*8 + int(m.Severity))
+}
+
 func (m *SyslogMessage) GetTimeReported() time.Time {
 	return time.Unix(0, m.TimeReportedNum).UTC()
 }

@@ -91,13 +91,20 @@ func Fuzz(m []byte) int {
 	return 1
 }
 
-func GetParser(format string) *Parser {
+func IsNativeParser(format string) bool {
 	switch format {
-	case "rfc5424", "rfc3164", "json", "fulljson", "gelf", "auto":
-		return &Parser{format: format}
+	case "rfc5424", "rfc3164", "json", "fulljson", "gelf", "influxdb", "auto":
+		return true
 	default:
-		return nil
+		return false
 	}
+}
+
+func GetParser(format string) *Parser {
+	if IsNativeParser(format) {
+		return &Parser{format: format}
+	}
+	return nil
 }
 
 func Parse(m []byte, format string, decoder *encoding.Decoder, dont_parse_sd bool) (sm *SyslogMessage, err error) {
@@ -113,6 +120,8 @@ func Parse(m []byte, format string, decoder *encoding.Decoder, dont_parse_sd boo
 		sm, err = ParseFullJsonFormat(m, decoder)
 	case "gelf":
 		sm, err = ParseGelfFormat(m, decoder)
+	case "influxdb":
+		sm, err = ParseInfluxFormat(m, decoder)
 	case "auto":
 		if len(m) == 0 {
 			return sm, &EmptyMessageError{}
