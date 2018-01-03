@@ -80,13 +80,15 @@ Loop:
 			key = key + "_string"
 		case models.Empty:
 			continue Loop
-		case models.Unsigned:
-			val, err := iter.UnsignedValue()
-			if err != nil {
-				continue Loop
-			}
-			key = key + "_unsigned"
-			value = strconv.FormatUint(val, 10)
+			/*
+				case models.Unsigned:
+					val, err := iter.UnsignedValue()
+					if err != nil {
+						continue Loop
+					}
+					key = key + "_unsigned"
+					value = strconv.FormatUint(val, 10)
+			*/
 		}
 		msg.SetProperty("influxdb_fields", key, value)
 	}

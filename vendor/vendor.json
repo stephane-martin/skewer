@@ -383,11 +383,13 @@
 			"revisionTime": "2017-05-04T03:43:18Z"
 		},
 		{
-			"checksumSHA1": "COGBi/40rRFMZGN9+SAGJbpocLM=",
+			"checksumSHA1": "oWPNYuXUm3WK/808dtZdIDObhyI=",
 			"path": "github.com/gogo/protobuf",
-			"revision": "d4d8b59fa8e8122dd8d69302cce9fb279bc60368",
-			"revisionTime": "2018-01-02T15:04:22Z",
-			"tree": true
+			"revision": "342cbe0a04158f6dcb03ca0079991a51a4248c02",
+			"revisionTime": "2017-10-07T14:25:47Z",
+			"tree": true,
+			"version": "v0.5",
+			"versionExact": "v0.5"
 		},
 		{
 			"checksumSHA1": "qlPUeFabwF4RKAOF1H+yBFU1Veg=",
@@ -507,10 +509,12 @@
 			"revisionTime": "2014-10-17T20:07:13Z"
 		},
 		{
-			"checksumSHA1": "cfumoC9gHEUROd+fA8qK3WLFAZQ=",
+			"checksumSHA1": "+XUWLdQoAv/6blNS1qVV/rnJYHM=",
 			"path": "github.com/influxdata/influxdb/models",
-			"revision": "da9774fd278f0a5df36d247f8a2e2fd53a651f41",
-			"revisionTime": "2018-01-02T20:34:37Z"
+			"revision": "009a7b203537e0fe34b8c14014523c7c0f1846c7",
+			"revisionTime": "2017-12-04T17:56:49Z",
+			"version": "v1.3.8",
+			"versionExact": "v1.3.8"
 		},
 		{
 			"checksumSHA1": "H/J/qLqzUONXIecHHKtVZmxJZZA=",
@@ -571,6 +575,21 @@
 			"path": "github.com/mitchellh/mapstructure",
 			"revision": "cc8532a8e9a55ea36402aa21efdf403a60d34096",
 			"revisionTime": "2017-04-22T00:02:51Z"
+		},
+		{
+			"checksumSHA1": "9Ki/3ePAZwKEOyy0lQe2eTk5OzI=",
+			"path": "github.com/nats-io/go-nats",
+			"revision": "d66cb54e6b7bdd93f0b28afc8450d84c780dfb68",
+			"revisionTime": "2017-12-20T17:16:17Z",
+			"tree": true,
+			"version": "v1.4.0",
+			"versionExact": "v1.4.0"
+		},
+		{
+			"checksumSHA1": "wcu8OXDGeGvmK9JY73+aoOQf1Ho=",
+			"path": "github.com/nats-io/nuid",
+			"revision": "33c603157d6fd1b0ac2599bcc4a286b36479a06d",
+			"revisionTime": "2017-10-25T20:31:29Z"
 		},
 		{
 			"checksumSHA1": "B1iGaUz7NrjEmCjVdIgH5pvkTe8=",
