@@ -32,6 +32,7 @@ const (
 	Stderr                  = 32
 	Graylog                 = 64
 	HTTP                    = 128
+	NATS                    = 256
 )
 
 var Destinations = map[string]DestinationType{
@@ -43,6 +44,7 @@ var Destinations = map[string]DestinationType{
 	"stderr":  Stderr,
 	"graylog": Graylog,
 	"http":    HTTP,
+	"nats":    NATS,
 }
 
 var DestinationNames = map[DestinationType]string{
@@ -54,6 +56,7 @@ var DestinationNames = map[DestinationType]string{
 	Stderr:  "stderr",
 	Graylog: "graylog",
 	HTTP:    "http",
+	NATS:    "nats",
 }
 
 var RDestinations = map[DestinationType]byte{
@@ -65,6 +68,7 @@ var RDestinations = map[DestinationType]byte{
 	Stderr:  's',
 	Graylog: 'g',
 	HTTP:    'h',
+	NATS:    'n',
 }
 
 func (m *MainConfig) GetDestinations() (dests DestinationType, err error) {

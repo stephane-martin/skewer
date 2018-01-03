@@ -17,7 +17,7 @@ type GraylogDestination struct {
 	writer gelf.Writer
 }
 
-func NewGraylogDestination(ctx context.Context, e *Env) (d *GraylogDestination, err error) {
+func NewGraylogDestination(ctx context.Context, e *Env) (Destination, error) {
 	hostport := net.JoinHostPort(e.config.GraylogDest.Host, strconv.FormatInt(int64(e.config.GraylogDest.Port), 10))
 	var w gelf.Writer
 	if strings.ToLower(strings.TrimSpace(e.config.GraylogDest.Mode)) == "udp" {
@@ -51,7 +51,7 @@ func NewGraylogDestination(ctx context.Context, e *Env) (d *GraylogDestination, 
 		w = writer
 	}
 
-	d = &GraylogDestination{
+	d := &GraylogDestination{
 		baseDestination: newBaseDestination(conf.Graylog, "graylog", e),
 		writer:          w,
 	}

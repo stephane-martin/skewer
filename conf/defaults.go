@@ -5,6 +5,7 @@ import (
 	"os"
 
 	sarama "github.com/Shopify/sarama"
+	nats "github.com/nats-io/go-nats"
 	"github.com/spf13/viper"
 )
 
@@ -25,11 +26,30 @@ func SetDefaults(v *viper.Viper) {
 		SetStderrDestDefaults,
 		SetGraylogDestDefaults,
 		SetHTTPDestDefaults,
+		SetNatsDestDefaults,
 		SetMainDefaults,
 	}
 	for _, f := range funcs {
 		f(v, true)
 	}
+}
+
+func SetNatsDestDefaults(v *viper.Viper, prefixed bool) {
+	prefix := ""
+	if prefixed {
+		prefix = "nats_destination."
+	}
+	v.SetDefault(prefix+"format", "fulljson")
+	v.SetDefault(prefix+"name", "skewer")
+	v.SetDefault(prefix+"max_reconnect", nats.DefaultMaxReconnect)
+	v.SetDefault(prefix+"reconnect_wait", nats.DefaultReconnectWait)
+	v.SetDefault(prefix+"connection_timeout", nats.DefaultTimeout)
+	v.SetDefault(prefix+"ping_interval", nats.DefaultPingInterval)
+	v.SetDefault(prefix+"max_pings_out", nats.DefaultMaxPingOut)
+	v.SetDefault(prefix+"reconnect_buf_size", nats.DefaultReconnectBufSize)
+	v.SetDefault(prefix+"allow_reconnect", true)
+	v.SetDefault(prefix+"no_randomize", false)
+	v.SetDefault(prefix+"flusher_timeout", 0)
 }
 
 func SetHTTPDestDefaults(v *viper.Viper, prefixed bool) {

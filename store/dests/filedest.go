@@ -311,12 +311,12 @@ type FileDestination struct {
 	files        *openedFiles
 }
 
-func NewFileDestination(ctx context.Context, e *Env) (dest *FileDestination, err error) {
-	dest = &FileDestination{
+func NewFileDestination(ctx context.Context, e *Env) (Destination, error) {
+	dest := &FileDestination{
 		baseDestination: newBaseDestination(conf.File, "file", e),
 		files:           newOpenedFiles(ctx, e.config.FileDest, e.logger),
 	}
-	err = dest.setFormat(e.config.FileDest.Format)
+	err := dest.setFormat(e.config.FileDest.Format)
 	if err != nil {
 		return nil, err
 	}

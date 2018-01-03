@@ -19,11 +19,11 @@ type TCPDestination struct {
 	clt         *clients.SyslogTCPClient
 }
 
-func NewTCPDestination(ctx context.Context, e *Env) (d *TCPDestination, err error) {
-	d = &TCPDestination{
+func NewTCPDestination(ctx context.Context, e *Env) (Destination, error) {
+	d := &TCPDestination{
 		baseDestination: newBaseDestination(conf.TCP, "tcp", e),
 	}
-	err = d.setFormat(e.config.TCPDest.Format)
+	err := d.setFormat(e.config.TCPDest.Format)
 	if err != nil {
 		return nil, err
 	}

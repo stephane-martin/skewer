@@ -28,10 +28,15 @@ var defaultConfigCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		c, err := conf.Default()
 		if err != nil {
-			fmt.Println(err)
+			fmt.Fprintln(os.Stderr, err)
 			os.Exit(-1)
 		}
-		fmt.Println(c)
+		exp, err := c.Export()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(-1)
+		}
+		fmt.Println(exp)
 	},
 }
 

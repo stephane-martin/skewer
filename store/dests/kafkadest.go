@@ -17,11 +17,11 @@ type KafkaDestination struct {
 	producer sarama.AsyncProducer
 }
 
-func NewKafkaDestination(ctx context.Context, e *Env) (d *KafkaDestination, err error) {
-	d = &KafkaDestination{
+func NewKafkaDestination(ctx context.Context, e *Env) (Destination, error) {
+	d := &KafkaDestination{
 		baseDestination: newBaseDestination(conf.Kafka, "kafka", e),
 	}
-	err = d.setFormat(e.config.KafkaDest.Format)
+	err := d.setFormat(e.config.KafkaDest.Format)
 	if err != nil {
 		return nil, err
 	}

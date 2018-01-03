@@ -14,25 +14,23 @@ type Destination interface {
 	Close() error
 }
 
+type constructor func(ctx context.Context, e *Env) (Destination, error)
+
+var destinations = map[conf.DestinationType]constructor{
+	conf.Kafka:   NewKafkaDestination,
+	conf.UDP:     NewUDPDestination,
+	conf.TCP:     NewTCPDestination,
+	conf.RELP:    NewRELPDestination,
+	conf.File:    NewFileDestination,
+	conf.Stderr:  NewStderrDestination,
+	conf.Graylog: NewGraylogDestination,
+	conf.HTTP:    NewHTTPDestination,
+	conf.NATS:    NewNATSDestination,
+}
+
 func NewDestination(ctx context.Context, typ conf.DestinationType, e *Env) (Destination, error) {
-	switch typ {
-	case conf.Kafka:
-		return NewKafkaDestination(ctx, e)
-	case conf.UDP:
-		return NewUDPDestination(ctx, e)
-	case conf.TCP:
-		return NewTCPDestination(ctx, e)
-	case conf.RELP:
-		return NewRELPDestination(ctx, e)
-	case conf.File:
-		return NewFileDestination(ctx, e)
-	case conf.Stderr:
-		return NewStderrDestination(ctx, e)
-	case conf.Graylog:
-		return NewGraylogDestination(ctx, e)
-	case conf.HTTP:
-		return NewHTTPDestination(ctx, e)
-	default:
-		return nil, fmt.Errorf("Unknown destination type: %d", typ)
+	if c, ok := destinations[typ]; ok {
+		return c(ctx, e)
 	}
+	return nil, fmt.Errorf("Unknown destination type: %d", typ)
 }

@@ -161,7 +161,7 @@ func (s *DirectRelpService) Stop() {
 func (s *DirectRelpService) SetConf(c conf.BaseConfig) {
 	s.sc = c.DirectRELPSource
 	s.pc = c.Parsers
-	s.kc = c.KafkaDest
+	s.kc = *c.KafkaDest
 	s.QueueSize = c.Main.InputQueueSize
 }
 

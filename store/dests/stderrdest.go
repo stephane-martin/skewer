@@ -14,11 +14,11 @@ type StderrDestination struct {
 	*baseDestination
 }
 
-func NewStderrDestination(ctx context.Context, e *Env) (d *StderrDestination, err error) {
-	d = &StderrDestination{
+func NewStderrDestination(ctx context.Context, e *Env) (Destination, error) {
+	d := &StderrDestination{
 		baseDestination: newBaseDestination(conf.Stderr, "stderr", e),
 	}
-	err = d.setFormat(e.config.StderrDest.Format)
+	err := d.setFormat(e.config.StderrDest.Format)
 	if err != nil {
 		return nil, fmt.Errorf("Error getting encoder: %s", err)
 	}

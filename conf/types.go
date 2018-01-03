@@ -24,10 +24,11 @@ type BaseConfig struct {
 	Metrics          MetricsConfig            `mapstructure:"metrics" toml:"metrics" json:"metrics"`
 	Accounting       AccountingConfig         `mapstructure:"accounting" toml:"accounting" json:"accounting"`
 	Main             MainConfig               `mapstructure:"main" toml:"main" json:"main"`
-	KafkaDest        KafkaDestConfig          `mapstructure:"kafka_destination" toml:"kafka_destination" json:"kafka_destination"`
+	KafkaDest        *KafkaDestConfig          `mapstructure:"kafka_destination" toml:"kafka_destination" json:"kafka_destination"`
 	UDPDest          UDPDestConfig            `mapstructure:"udp_destination" toml:"udp_destination" json:"udp_destination"`
 	TCPDest          TCPDestConfig            `mapstructure:"tcp_destination" toml:"tcp_destination" json:"tcp_destination"`
 	HTTPDest         HTTPDestConfig           `mapstructure:"http_destination" toml:"http_destination" json:"http_destination"`
+	NATSDest         *NATSDestConfig           `mapstructure:"nats_destination" toml:"nats_destination" json:"nats_destination"`
 	RELPDest         RELPDestConfig           `mapstructure:"relp_destination" toml:"relp_destination" json:"relp_destination"`
 	FileDest         FileDestConfig           `mapstructure:"file_destination" toml:"file_destination" json:"file_destination"`
 	StderrDest       StderrDestConfig         `mapstructure:"stderr_destination" toml:"stderr_destination" json:"stderr_destination"`
@@ -249,6 +250,25 @@ type HTTPDestConfig struct {
 	Password            string        `mapstructure:"password" toml:"password" json:"password"`
 	UserAgent           string        `mapstructure:"user_agent" toml:"user_agent" json:"user_agent"`
 	ContentType         string        `mapstructure:"content_type" toml:"content_type" json:"content_type"`
+}
+
+type NATSDestConfig struct {
+	TlsBaseConfig    `mapstructure:",squash"`
+	Insecure         bool          `mapstructure:"insecure" toml:"insecure" json:"insecure"`
+	NServers         []string      `mapstructure:"servers" toml:"servers" json:"servers"`
+	Format           string        `mapstructure:"format" toml:"format" json:"format"`
+	Name             string        `mapstructure:"name" toml:"name" json:"name"`
+	MaxReconnect     int           `mapstructure:"max_reconnect" toml:"max_reconnect" json:"max_reconnect"`
+	ReconnectWait    time.Duration `mapstructure:"reconnect_wait" toml:"reconnect_wait" json:"reconnect_wait"`
+	ConnTimeout      time.Duration `mapstructure:"connection_timeout" toml:"connection_timeout" json:"connection_timeout"`
+	FlusherTimeout   time.Duration `mapstructure:"flusher_timeout" toml:"flusher_timeout" json:"flusher_timeout"`
+	PingInterval     time.Duration `mapstructure:"ping_interval" toml:"ping_interval" json:"ping_interval"`
+	MaxPingsOut      int           `mapstructure:"max_pings_out" toml:"max_pings_out" json:"max_pings_out"`
+	ReconnectBufSize int           `mapstructure:"reconnect_buf_size" toml:"reconnect_buf_size" json:"reconnect_buf_size"`
+	Username         string        `mapstructure:"username" toml:"username" json:"username"`
+	Password         string        `mapstructure:"password" toml:"password" json:"password"`
+	NoRandomize      bool          `mapstructure:"no_randomize" toml:"no_randomize" json:"no_randomize"`
+	AllowReconnect   bool          `mapstructure:"allow_reconnect" toml:"allow_reconnect" json:"allow_reconnect"`
 }
 
 type FileDestConfig struct {

@@ -16,11 +16,11 @@ type RELPDestination struct {
 	client *clients.RELPClient
 }
 
-func NewRELPDestination(ctx context.Context, e *Env) (d *RELPDestination, err error) {
-	d = &RELPDestination{
+func NewRELPDestination(ctx context.Context, e *Env) (Destination, error) {
+	d := &RELPDestination{
 		baseDestination: newBaseDestination(conf.RELP, "relp", e),
 	}
-	err = d.setFormat(e.config.RELPDest.Format)
+	err := d.setFormat(e.config.RELPDest.Format)
 	if err != nil {
 		return nil, err
 	}

@@ -13,6 +13,7 @@ import (
 func NewTLSConfig(address, caFile, caPath, certFile, keyFile string, insecure bool, confined bool) (*tls.Config, error) {
 	tlsClientConfig := &tls.Config{
 		InsecureSkipVerify: insecure,
+		MinVersion:         tls.VersionTLS12,
 	}
 
 	if address != "" {

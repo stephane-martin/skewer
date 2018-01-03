@@ -34,14 +34,14 @@ type HTTPDestination struct {
 	wg          sync.WaitGroup
 }
 
-func NewHTTPDestination(ctx context.Context, e *Env) (d *HTTPDestination, err error) {
+func NewHTTPDestination(ctx context.Context, e *Env) (Destination, error) {
 	config := e.config.HTTPDest
-	d = &HTTPDestination{
+	d := &HTTPDestination{
 		baseDestination: newBaseDestination(conf.HTTP, "http", e),
 		useragent:       config.UserAgent,
 		method:          config.Method,
 	}
-	err = d.setFormat(config.Format)
+	err := d.setFormat(config.Format)
 	if err != nil {
 		return nil, err
 	}

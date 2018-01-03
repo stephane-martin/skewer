@@ -15,11 +15,11 @@ type UDPDestination struct {
 	client *clients.SyslogUDPClient
 }
 
-func NewUDPDestination(ctx context.Context, e *Env) (d *UDPDestination, err error) {
-	d = &UDPDestination{
+func NewUDPDestination(ctx context.Context, e *Env) (Destination, error) {
+	d := &UDPDestination{
 		baseDestination: newBaseDestination(conf.UDP, "udp", e),
 	}
-	err = d.setFormat(e.config.UDPDest.Format)
+	err := d.setFormat(e.config.UDPDest.Format)
 	if err != nil {
 		return nil, err
 	}

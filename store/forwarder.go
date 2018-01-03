@@ -125,7 +125,7 @@ func (fwder *fwderImpl) doForward(ctx context.Context) {
 				err = fwder.fwdMsg(message, jsenvs, dest)
 				fwder.store.ReleaseMsg(message)
 				if err != nil {
-					fwder.logger.Warn("Error forwarding message", "error", err, "uid", utils.MyULID(message.Uid).String())
+					fwder.logger.Warn("Error forwarding message", "error", err)
 				}
 			}
 		}
@@ -164,8 +164,10 @@ func (fwder *fwderImpl) fwdMsg(m *model.FullMessage, envs map[utils.MyULID]*java
 		env = envs[m.ConfId]
 	}
 
-	if _, ok := dest.(*dests.KafkaDestination); ok {
-		// only calculate proper Topic, PartitionKey and PartitionNumber if we are sending to Kafka
+	_, ok1 := dest.(*dests.KafkaDestination)
+	_, ok2 := dest.(*dests.NATSDestination)
+	if ok1 || ok2 {
+		// only calculate proper Topic, PartitionKey and PartitionNumber if we are sending to Kafka or NATS
 		topic, errs = env.Topic(m.Parsed.Fields)
 		for _, err = range errs {
 			fwder.logger.Info("Error calculating topic", "error", err, "uid", m.Uid)

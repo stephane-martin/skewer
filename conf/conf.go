@@ -19,6 +19,7 @@ import (
 	sarama "github.com/Shopify/sarama"
 	cluster "github.com/bsm/sarama-cluster"
 	"github.com/fatih/set"
+	nats "github.com/nats-io/go-nats"
 
 	"github.com/BurntSushi/toml"
 	"github.com/hashicorp/errwrap"
@@ -39,7 +40,6 @@ func (source BaseConfig) Clone() BaseConfig {
 }
 
 func NewBaseConf() BaseConfig {
-	brokers := []string{}
 	baseConf := BaseConfig{
 		TCPSource:        []TCPSourceConfig{},
 		UDPSource:        []UDPSourceConfig{},
@@ -52,10 +52,14 @@ func NewBaseConf() BaseConfig {
 		Journald:         JournaldConfig{},
 		Metrics:          MetricsConfig{},
 
-		KafkaDest: KafkaDestConfig{
+		KafkaDest: &KafkaDestConfig{
 			KafkaBaseConfig: KafkaBaseConfig{
-				Brokers: brokers,
+				Brokers: []string{},
 			},
+		},
+
+		NATSDest: &NATSDestConfig{
+			NServers: []string{},
 		},
 	}
 	return baseConf
@@ -832,7 +836,7 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 		if err != nil {
 			return err
 		}
-		c.KafkaDest = kafkaConf
+		c.KafkaDest = &kafkaConf
 	}
 
 	storeConf := StoreConfig{}
@@ -941,6 +945,26 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 	_, err = ParseVersion(c.KafkaDest.Version)
 	if err != nil {
 		return ConfigurationCheckError{ErrString: "Kafka version can't be parsed", Err: err}
+	}
+
+	if len(c.NATSDest.NServers) == 0 {
+		if c.NATSDest.TLSEnabled {
+			return ConfigurationCheckError{ErrString: "Explicitly configure NATS servers for TLS"}
+		}
+		c.NATSDest.NServers = []string{nats.DefaultURL}
+	}
+
+	for i := range c.NATSDest.NServers {
+		c.NATSDest.NServers[i] = strings.TrimSpace(c.NATSDest.NServers[i])
+		if !strings.HasPrefix(c.NATSDest.NServers[i], "tls://") && !strings.HasPrefix(c.NATSDest.NServers[i], "nats://") {
+			return ConfigurationCheckError{ErrString: "Every NATS server must start with tls:// or nats://"}
+		}
+		if c.NATSDest.TLSEnabled && !strings.HasPrefix(c.NATSDest.NServers[i], "tls") {
+			return ConfigurationCheckError{ErrString: "TLS is required for NATS, but a server lacks the tls:// prefix"}
+		}
+		if !c.NATSDest.TLSEnabled && !strings.HasPrefix(c.NATSDest.NServers[i], "nats") {
+			return ConfigurationCheckError{ErrString: "TLS is not required for NATS, but a server lacks the nats:// prefix"}
+		}
 	}
 
 	syslogConfs := []SyslogSourceConfig{}
