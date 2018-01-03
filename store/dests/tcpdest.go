@@ -7,6 +7,7 @@ import (
 	"github.com/stephane-martin/skewer/clients"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/model/encoders"
 	"github.com/stephane-martin/skewer/utils"
 )
 
@@ -19,11 +20,18 @@ type TCPDestination struct {
 }
 
 func NewTCPDestination(ctx context.Context, e *Env) (d *TCPDestination, err error) {
+	d = &TCPDestination{
+		baseDestination: newBaseDestination(conf.TCP, "tcp", e),
+	}
+	err = d.setFormat(e.config.TCPDest.Format)
+	if err != nil {
+		return nil, err
+	}
 	clt := clients.NewSyslogTCPClient(e.logger).
 		Host(e.config.TCPDest.Host).
 		Port(e.config.TCPDest.Port).
 		Path(e.config.TCPDest.UnixSocketPath).
-		Format(e.config.TCPDest.Format).
+		Format(d.format).
 		KeepAlive(e.config.TCPDest.KeepAlive).
 		KeepAlivePeriod(e.config.TCPDest.KeepAlivePeriod).
 		LineFraming(e.config.TCPDest.LineFraming).
@@ -54,10 +62,7 @@ func NewTCPDestination(ctx context.Context, e *Env) (d *TCPDestination, err erro
 	}
 	connCounter.WithLabelValues("tcp", "success").Inc()
 
-	d = &TCPDestination{
-		baseDestination: newBaseDestination(conf.TCP, "tcp", e),
-		clt:             clt,
-	}
+	d.clt = clt
 
 	rebind := e.config.TCPDest.Rebind
 	if rebind > 0 {
@@ -82,7 +87,7 @@ func (d *TCPDestination) Send(message model.FullMessage, partitionKey string, pa
 			d.ack(d.previousUid)
 		}
 		d.previousUid = message.Uid
-	} else if model.IsEncodingError(err) {
+	} else if encoders.IsEncodingError(err) {
 		d.permerr(message.Uid)
 	} else {
 		// error writing to the TCP conn

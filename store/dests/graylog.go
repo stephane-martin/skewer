@@ -8,6 +8,7 @@ import (
 
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/model/encoders"
 	"gopkg.in/Graylog2/go-gelf.v2/gelf"
 )
 
@@ -62,7 +63,7 @@ func (d *GraylogDestination) Close() error {
 }
 
 func (d *GraylogDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
-	err = d.writer.WriteMessage(message.ToGelfMessage())
+	err = d.writer.WriteMessage(encoders.FullToGelfMessage(&message))
 	if err == nil {
 		d.ack(message.Uid)
 	} else {

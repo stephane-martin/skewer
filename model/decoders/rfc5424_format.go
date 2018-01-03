@@ -1,4 +1,4 @@
-package model
+package decoders
 
 import (
 	"bytes"
@@ -7,6 +7,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/stephane-martin/skewer/model"
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/unicode"
 )
@@ -23,7 +24,7 @@ func isASCII(s []byte) bool {
 var SP []byte = []byte(" ")
 var DASH []byte = []byte("-")
 
-func ParseRfc5424Format(m []byte, decoder *encoding.Decoder, dont_parse_sd bool) (smsg *SyslogMessage, err error) {
+func ParseRfc5424Format(m []byte, decoder *encoding.Decoder, dont_parse_sd bool) (smsg *model.SyslogMessage, err error) {
 	// HEADER = PRI VERSION SP TIMESTAMP SP HOSTNAME SP APP-NAME SP PROCID SP MSGID
 	// PRI = "<" PRIVAL ">"
 	// SYSLOG-MSG = HEADER SP STRUCTURED-DATA [SP MSG]
@@ -42,7 +43,7 @@ func ParseRfc5424Format(m []byte, decoder *encoding.Decoder, dont_parse_sd bool)
 	if len(splits) < 7 {
 		return nil, &NotEnoughPartsError{len(splits)}
 	}
-	smsg = &SyslogMessage{}
+	smsg = &model.SyslogMessage{}
 	smsg.ClearProperties()
 	smsg.Priority, smsg.Facility, smsg.Severity, smsg.Version, err = parsePriority(splits[0])
 	if err != nil {
@@ -129,7 +130,7 @@ func splitStructuredData(structured_and_msg []byte) ([]byte, []byte, error) {
 	return []byte{}, []byte{}, &InvalidStructuredDataError{"Can not find the last ']' that marks the end of structured data"}
 }
 
-func parsePriority(pv []byte) (Priority, Facility, Severity, Version, error) {
+func parsePriority(pv []byte) (model.Priority, model.Facility, model.Severity, model.Version, error) {
 	if pv[0] != byte('<') {
 		return 0, 0, 0, 0, &InvalidPriorityError{}
 	}
@@ -146,14 +147,14 @@ func parsePriority(pv []byte) (Priority, Facility, Severity, Version, error) {
 		return 0, 0, 0, 0, &InvalidPriorityError{}
 	}
 
-	f := Facility(p / 8)
-	s := Severity(p % 8)
+	f := model.Facility(p / 8)
+	s := model.Severity(p % 8)
 	v, err := strconv.Atoi(string(pv[i+1:]))
 	if err != nil {
 		return 0, 0, 0, 0, &InvalidPriorityError{}
 	}
 
-	return Priority(p), f, s, Version(v), nil
+	return model.Priority(p), f, s, model.Version(v), nil
 }
 
 func parseStructData(sd []byte) (m map[string](map[string]string), err error) {

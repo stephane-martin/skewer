@@ -12,6 +12,7 @@ import (
 	"github.com/free/concurrent-writer/concurrent"
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/model/encoders"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/queue"
 )
@@ -20,7 +21,7 @@ type SyslogTCPClient struct {
 	host            string
 	port            int
 	path            string
-	format          string
+	format          encoders.Format
 	keepAlive       bool
 	keepAlivePeriod time.Duration
 	connTimeout     time.Duration
@@ -32,7 +33,7 @@ type SyslogTCPClient struct {
 
 	conn    net.Conn
 	writer  *concurrent.Writer
-	encoder model.Encoder
+	encoder encoders.Encoder
 	ticker  *time.Ticker
 	logger  log15.Logger
 
@@ -61,7 +62,7 @@ func (c *SyslogTCPClient) Path(path string) *SyslogTCPClient {
 	return c
 }
 
-func (c *SyslogTCPClient) Format(format string) *SyslogTCPClient {
+func (c *SyslogTCPClient) Format(format encoders.Format) *SyslogTCPClient {
 	c.format = format
 	return c
 }
@@ -129,7 +130,7 @@ func (c *SyslogTCPClient) Connect() (err error) {
 		return nil
 	}
 
-	c.encoder, err = model.NewEncoder(c.format)
+	c.encoder, err = encoders.NewEncoder(c.format)
 	if err != nil {
 		return err
 	}
@@ -219,12 +220,12 @@ func (c *SyslogTCPClient) Send(msg *model.FullMessage) (err error) {
 	}
 	var buf []byte
 	if c.lineFraming {
-		buf, err = model.ChainEncode(c.encoder, msg, []byte{c.frameDelimiter})
+		buf, err = encoders.ChainEncode(c.encoder, msg, []byte{c.frameDelimiter})
 	} else {
-		buf, err = model.TcpOctetEncode(c.encoder, msg)
+		buf, err = encoders.TcpOctetEncode(c.encoder, msg)
 	}
 	if err != nil {
-		return model.NonEncodableError
+		return encoders.NonEncodableError
 	}
 	if len(buf) == 0 {
 		return nil

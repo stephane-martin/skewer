@@ -1,12 +1,13 @@
 package dests
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/inconshreveable/log15"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stephane-martin/skewer/conf"
-	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/model/encoders"
 	"github.com/stephane-martin/skewer/utils"
 )
 
@@ -126,8 +127,8 @@ type baseDestination struct {
 	nack     callback
 	permerr  callback
 	confined bool
-	format   string
-	encoder  model.Encoder
+	format   encoders.Format
+	encoder  encoders.Encoder
 	codename string
 	typ      conf.DestinationType
 }
@@ -157,11 +158,15 @@ func newBaseDestination(typ conf.DestinationType, codename string, e *Env) *base
 }
 
 func (base *baseDestination) setFormat(format string) error {
-	encoder, err := model.NewEncoder(format)
+	frmt := encoders.ParseFormat(format)
+	if frmt == -1 {
+		return fmt.Errorf("Unknown encoding format: %s", format)
+	}
+	encoder, err := encoders.NewEncoder(frmt)
 	if err != nil {
 		return err
 	}
-	base.format = format
+	base.format = frmt
 	base.encoder = encoder
 	return nil
 }

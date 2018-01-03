@@ -5,6 +5,7 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/javascript"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/model/decoders"
 	"golang.org/x/text/encoding"
 )
 
@@ -28,8 +29,9 @@ func NewParsersEnv(parsersConf []conf.ParserConfig, logger log15.Logger) *Parser
 }
 
 func (e *ParsersEnv) GetParser(parserName string) Parser {
-	if model.IsNativeParser(parserName) {
-		return model.GetParser(parserName)
+	frmt := decoders.ParseFormat(parserName)
+	if frmt != -1 {
+		return decoders.GetParser(frmt)
 	}
 	return e.jsenv.GetParser(parserName)
 }

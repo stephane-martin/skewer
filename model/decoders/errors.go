@@ -1,4 +1,4 @@
-package model
+package decoders
 
 import "fmt"
 
@@ -8,11 +8,11 @@ type ParsingError interface {
 }
 
 type UnknownFormatError struct {
-	Format string
+	format Format
 }
 
 func (e *UnknownFormatError) Error() string {
-	return fmt.Sprintf("Unknown parsing format: '%s'", e.Format)
+	return fmt.Sprintf("Unknown parsing format: '%d'", e.format)
 }
 
 func (e *UnknownFormatError) Parsing() {}

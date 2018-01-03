@@ -17,11 +17,18 @@ type RELPDestination struct {
 }
 
 func NewRELPDestination(ctx context.Context, e *Env) (d *RELPDestination, err error) {
+	d = &RELPDestination{
+		baseDestination: newBaseDestination(conf.RELP, "relp", e),
+	}
+	err = d.setFormat(e.config.RELPDest.Format)
+	if err != nil {
+		return nil, err
+	}
 	clt := clients.NewRELPClient(e.logger).
 		Host(e.config.RELPDest.Host).
 		Port(e.config.RELPDest.Port).
 		Path(e.config.RELPDest.UnixSocketPath).
-		Format(e.config.RELPDest.Format).
+		Format(d.format).
 		KeepAlive(e.config.RELPDest.KeepAlive).
 		KeepAlivePeriod(e.config.RELPDest.KeepAlivePeriod).
 		ConnTimeout(e.config.RELPDest.ConnTimeout).
@@ -52,10 +59,7 @@ func NewRELPDestination(ctx context.Context, e *Env) (d *RELPDestination, err er
 	}
 	connCounter.WithLabelValues("relp", "success").Inc()
 
-	d = &RELPDestination{
-		baseDestination: newBaseDestination(conf.RELP, "relp", e),
-		client:          clt,
-	}
+	d.client = clt
 
 	rebind := e.config.RELPDest.Rebind
 	if rebind > 0 {

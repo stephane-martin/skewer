@@ -7,6 +7,7 @@ import (
 
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/model/encoders"
 )
 
 type StderrDestination struct {
@@ -27,7 +28,7 @@ func NewStderrDestination(ctx context.Context, e *Env) (d *StderrDestination, er
 
 func (d *StderrDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
 	var buf []byte
-	buf, err = model.ChainEncode(d.encoder, &message, "\n")
+	buf, err = encoders.ChainEncode(d.encoder, &message, "\n")
 	if err != nil {
 		d.permerr(message.Uid)
 		return err

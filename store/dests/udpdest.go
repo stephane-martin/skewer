@@ -7,6 +7,7 @@ import (
 	"github.com/stephane-martin/skewer/clients"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/model/encoders"
 )
 
 type UDPDestination struct {
@@ -15,11 +16,18 @@ type UDPDestination struct {
 }
 
 func NewUDPDestination(ctx context.Context, e *Env) (d *UDPDestination, err error) {
+	d = &UDPDestination{
+		baseDestination: newBaseDestination(conf.UDP, "udp", e),
+	}
+	err = d.setFormat(e.config.UDPDest.Format)
+	if err != nil {
+		return nil, err
+	}
 	client := clients.NewSyslogUDPClient(e.logger).
 		Host(e.config.UDPDest.Host).
 		Port(e.config.UDPDest.Port).
 		Path(e.config.UDPDest.UnixSocketPath).
-		Format(e.config.UDPDest.Format)
+		Format(d.format)
 
 	err = client.Connect()
 	if err != nil {
@@ -28,10 +36,7 @@ func NewUDPDestination(ctx context.Context, e *Env) (d *UDPDestination, err erro
 	}
 	connCounter.WithLabelValues("udp", "success").Inc()
 
-	d = &UDPDestination{
-		baseDestination: newBaseDestination(conf.UDP, "udp", e),
-		client:          client,
-	}
+	d.client = client
 
 	rebind := e.config.UDPDest.Rebind
 	if rebind > 0 {
@@ -53,7 +58,7 @@ func (d *UDPDestination) Send(message model.FullMessage, partitionKey string, pa
 	if err == nil {
 		d.ack(message.Uid)
 		return nil
-	} else if model.IsEncodingError(err) {
+	} else if encoders.IsEncodingError(err) {
 		d.permerr(message.Uid)
 		return err
 	} else {

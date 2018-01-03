@@ -20,6 +20,7 @@ import (
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/model/encoders"
 )
 
 // ensure thread safety for the gzip writer
@@ -348,7 +349,7 @@ func (d *FileDestination) Send(message model.FullMessage, partitionKey string, p
 		d.nack(message.Uid)
 		return err
 	}
-	encoded, err := model.ChainEncode(d.encoder, &message, "\n")
+	encoded, err := encoders.ChainEncode(d.encoder, &message, "\n")
 	if err != nil {
 		d.permerr(message.Uid)
 		return err

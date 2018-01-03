@@ -17,6 +17,7 @@ import (
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/model/encoders"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/queue"
 	"github.com/stephane-martin/skewer/utils/queue/message"
@@ -98,7 +99,7 @@ type RELPClient struct {
 	host            string
 	port            int
 	path            string
-	format          string
+	format          encoders.Format
 	keepAlive       bool
 	keepAlivePeriod time.Duration
 	connTimeout     time.Duration
@@ -109,7 +110,7 @@ type RELPClient struct {
 
 	conn    net.Conn
 	writer  *concurrent.Writer
-	encoder model.Encoder
+	encoder encoders.Encoder
 	scanner *bufio.Scanner
 	logger  log15.Logger
 	ticker  *time.Ticker
@@ -146,7 +147,7 @@ func (c *RELPClient) Path(path string) *RELPClient {
 	return c
 }
 
-func (c *RELPClient) Format(format string) *RELPClient {
+func (c *RELPClient) Format(format encoders.Format) *RELPClient {
 	c.format = format
 	return c
 }
@@ -204,7 +205,7 @@ func (c *RELPClient) Connect() (err error) {
 		return nil
 	}
 
-	c.encoder, err = model.NewEncoder(c.format)
+	c.encoder, err = encoders.NewEncoder(c.format)
 	if err != nil {
 		return err
 	}
@@ -316,16 +317,16 @@ func (c *RELPClient) Connect() (err error) {
 
 func (c *RELPClient) encode(command string, v interface{}) (buf []byte, txnr int32, err error) {
 	// first encode the message
-	buf, err = model.ChainEncode(c.encoder, v)
+	buf, err = encoders.ChainEncode(c.encoder, v)
 	if err != nil {
 		return nil, 0, err
 	}
 	// if no error, we can increment txnr
 	txnr = atomic.AddInt32(&c.curtxnr, 1)
 	if len(buf) == 0 {
-		buf, err = model.RelpEncode(c.encoder, txnr, command, nil) // cannot fail
+		buf, err = encoders.RelpEncode(c.encoder, txnr, command, nil) // cannot fail
 	} else {
-		buf, err = model.RelpEncode(c.encoder, txnr, command, buf) // cannot fail
+		buf, err = encoders.RelpEncode(c.encoder, txnr, command, buf) // cannot fail
 	}
 	if err != nil {
 		c.logger.Error("RelpEncode error, should not happen", "error", err)
@@ -336,7 +337,7 @@ func (c *RELPClient) encode(command string, v interface{}) (buf []byte, txnr int
 
 func (c *RELPClient) wopen() (err error) {
 	var buf []byte
-	buf, err = model.ChainEncode(c.encoder, int(0), sp, "open", sp, len(OPEN), sp, OPEN, endl)
+	buf, err = encoders.ChainEncode(c.encoder, int(0), sp, "open", sp, len(OPEN), sp, OPEN, endl)
 	if err != nil {
 		return err
 	}
@@ -458,7 +459,7 @@ func (c *RELPClient) doSendOne(msg *model.FullMessage) (err error) {
 	}
 	buf, txnr, err := c.encode("syslog", msg)
 	if err != nil {
-		return model.NonEncodableError
+		return encoders.NonEncodableError
 	}
 	if len(buf) == 0 {
 		c.ackChan.Put(msg.Uid, conf.RELP)
@@ -502,7 +503,7 @@ func (c *RELPClient) doSend() {
 		if err == utils.ErrDisposed {
 			c.logger.Debug("the queue has been disposed")
 			return
-		} else if model.IsEncodingError(err) {
+		} else if encoders.IsEncodingError(err) {
 			c.logger.Warn("dropped non-encodable message", "uid", utils.MyULID(msg.Uid).String())
 			continue
 		} else if err != nil {

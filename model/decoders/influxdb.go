@@ -1,15 +1,16 @@
-package model
+package decoders
 
 import (
 	"strconv"
 	"time"
 
 	"github.com/influxdata/influxdb/models"
+	"github.com/stephane-martin/skewer/model"
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/unicode"
 )
 
-func ParseInfluxFormat(m []byte, decoder *encoding.Decoder) (msg *SyslogMessage, rerr error) {
+func ParseInfluxFormat(m []byte, decoder *encoding.Decoder) (msg *model.SyslogMessage, rerr error) {
 	// we assume influxdb line protocol is always UTF-8
 	decoder = unicode.UTF8.NewDecoder()
 
@@ -26,7 +27,7 @@ func ParseInfluxFormat(m []byte, decoder *encoding.Decoder) (msg *SyslogMessage,
 		return nil, nil
 	}
 	point := points[0]
-	msg = &SyslogMessage{
+	msg = &model.SyslogMessage{
 		AppName:          "influxdb",
 		TimeReportedNum:  point.UnixNano(),
 		TimeGeneratedNum: time.Now().UnixNano(),

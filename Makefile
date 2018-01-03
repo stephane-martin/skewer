@@ -72,8 +72,6 @@ sys/namespaces/derived.gen.go: sys/namespaces/base.go
 	test -n "${GOPATH}"  # test $$GOPATH
 	go generate github.com/stephane-martin/skewer/sys/namespaces
 
-generate: utils/logging/types_gen.go conf/derived.gen.go utils/logging/derived.gen.go metrics/derived.gen.go consul/derived.gen.go sys/derived.gen.go sys/scomp/derived.gen.go sys/namespaces/derived.gen.go utils/queue/tcp/ring.go utils/queue/udp/ring.go utils/queue/message/ring.go
-
 clean:
 	rm -f ${BINARY} 
 

@@ -9,6 +9,7 @@ import (
 	"github.com/dop251/goja"
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/model/decoders"
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/unicode"
 )
@@ -122,7 +123,7 @@ type ConcreteParser struct {
 func (p *ConcreteParser) Parse(rawMessage []byte, decoder *encoding.Decoder, dont_parse_sd bool) (parsedMessage *model.SyslogMessage, err error) {
 	jsParser, ok := p.env.jsParsers[p.name]
 	if !ok {
-		return nil, &model.UnknownFormatError{Format: p.name}
+		return nil, &decoders.UnknownFormatError{}
 	}
 
 	if decoder == nil {
@@ -130,7 +131,7 @@ func (p *ConcreteParser) Parse(rawMessage []byte, decoder *encoding.Decoder, don
 	}
 	rawMessage, err = decoder.Bytes(rawMessage)
 	if err != nil {
-		return nil, &model.InvalidEncodingError{Err: err}
+		return nil, &decoders.InvalidEncodingError{Err: err}
 	}
 
 	rawMessage = bytes.Trim(rawMessage, "\r\n ")
@@ -143,7 +144,7 @@ func (p *ConcreteParser) Parse(rawMessage []byte, decoder *encoding.Decoder, don
 		if jserr, ok := err.(*goja.Exception); ok {
 			message, ok := jserr.Value().Export().(string)
 			if ok {
-				return nil, &model.JSParsingError{ParserName: p.name, Message: message}
+				return nil, &decoders.JSParsingError{ParserName: p.name, Message: message}
 			} else {
 				return nil, err
 			}
@@ -345,8 +346,8 @@ func (e *Environment) Topic(m model.SyslogMessage) (topic string, errs []error) 
 		}
 	}
 	if len(topic) > 0 {
-		if !model.TopicNameIsValid(topic) {
-			errs = append(errs, &model.InvalidTopic{Topic: topic})
+		if !decoders.TopicNameIsValid(topic) {
+			errs = append(errs, &decoders.InvalidTopic{Topic: topic})
 			return "", errs
 		}
 	}

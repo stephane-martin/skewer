@@ -9,16 +9,17 @@ import (
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/model/encoders"
 )
 
 type SyslogUDPClient struct {
 	host   string
 	port   int
 	path   string
-	format string
+	format encoders.Format
 
 	conn    net.Conn
-	encoder model.Encoder
+	encoder encoders.Encoder
 	logger  log15.Logger
 
 	sync.Mutex
@@ -43,7 +44,7 @@ func (c *SyslogUDPClient) Path(path string) *SyslogUDPClient {
 	return c
 }
 
-func (c *SyslogUDPClient) Format(format string) *SyslogUDPClient {
+func (c *SyslogUDPClient) Format(format encoders.Format) *SyslogUDPClient {
 	c.format = format
 	return c
 }
@@ -71,7 +72,7 @@ func (c *SyslogUDPClient) Connect() (err error) {
 		return nil
 	}
 
-	c.encoder, err = model.NewEncoder(c.format)
+	c.encoder, err = encoders.NewEncoder(c.format)
 	if err != nil {
 		return err
 	}
@@ -125,9 +126,9 @@ func (c *SyslogUDPClient) Send(msg *model.FullMessage) (err error) {
 	if msg == nil {
 		return nil
 	}
-	buf, err := model.ChainEncode(c.encoder, msg)
+	buf, err := encoders.ChainEncode(c.encoder, msg)
 	if err != nil {
-		return model.NonEncodableError
+		return encoders.NonEncodableError
 	}
 	if len(buf) == 0 {
 		return nil

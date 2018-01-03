@@ -25,7 +25,7 @@ import (
 	"github.com/inconshreveable/log15"
 	"github.com/spf13/viper"
 	"github.com/stephane-martin/skewer/consul"
-	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/model/decoders"
 	"github.com/stephane-martin/skewer/sys/kring"
 	"github.com/stephane-martin/skewer/utils"
 )
@@ -912,7 +912,7 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 	parsersNames := map[string]bool{}
 	for _, parserConf := range c.Parsers {
 		name := strings.TrimSpace(parserConf.Name)
-		if model.IsNativeParser(parserConf.Name) {
+		if decoders.ParseFormat(parserConf.Name) != -1 {
 			return ConfigurationCheckError{ErrString: "Parser configuration must not use a reserved name"}
 		}
 		if name == "" {
@@ -1015,7 +1015,7 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 			return ConfigurationCheckError{Err: err}
 		}
 
-		if !model.IsNativeParser(baseConf.Format) {
+		if decoders.ParseFormat(baseConf.Format) == -1 {
 			if _, ok := parsersNames[baseConf.Format]; !ok {
 				return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown parser: '%s'", baseConf.Format)}
 			}
@@ -1104,7 +1104,7 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 			conf.OffsetsInitial = sarama.OffsetOldest
 		}
 
-		if !model.IsNativeParser(conf.Format) {
+		if decoders.ParseFormat(conf.Format) == -1 {
 			if _, ok := parsersNames[conf.Format]; !ok {
 				return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown parser: '%s'", conf.Format)}
 			}

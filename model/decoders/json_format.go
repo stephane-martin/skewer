@@ -1,4 +1,4 @@
-package model
+package decoders
 
 import (
 	"fmt"
@@ -7,12 +7,13 @@ import (
 	"time"
 
 	"github.com/pquerna/ffjson/ffjson"
+	"github.com/stephane-martin/skewer/model"
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/unicode"
 	"gopkg.in/Graylog2/go-gelf.v2/gelf"
 )
 
-func ParseGelfFormat(m []byte, decoder *encoding.Decoder) (msg *SyslogMessage, rerr error) {
+func ParseGelfFormat(m []byte, decoder *encoding.Decoder) (msg *model.SyslogMessage, rerr error) {
 	// we ignore decoder, JSON is always UTF-8
 	decoder = unicode.UTF8.NewDecoder()
 
@@ -29,7 +30,7 @@ func ParseGelfFormat(m []byte, decoder *encoding.Decoder) (msg *SyslogMessage, r
 	return FromGelfMessage(gelfMsg), nil
 }
 
-func ParseFullJsonFormat(m []byte, decoder *encoding.Decoder) (msg *SyslogMessage, rerr error) {
+func ParseFullJsonFormat(m []byte, decoder *encoding.Decoder) (msg *model.SyslogMessage, rerr error) {
 	// we ignore decoder, JSON is always UTF-8
 	decoder = unicode.UTF8.NewDecoder()
 
@@ -38,7 +39,7 @@ func ParseFullJsonFormat(m []byte, decoder *encoding.Decoder) (msg *SyslogMessag
 	if err != nil {
 		return nil, &InvalidEncodingError{Err: err}
 	}
-	sourceMsg := RegularSyslog{}
+	sourceMsg := model.RegularSyslog{}
 	err = ffjson.Unmarshal(m, &sourceMsg)
 	if err != nil {
 		return nil, &UnmarshalingJsonError{err}
@@ -46,7 +47,7 @@ func ParseFullJsonFormat(m []byte, decoder *encoding.Decoder) (msg *SyslogMessag
 	return sourceMsg.Internal(), nil
 }
 
-func ParseJsonFormat(m []byte, decoder *encoding.Decoder) (msg *SyslogMessage, rerr error) {
+func ParseJsonFormat(m []byte, decoder *encoding.Decoder) (msg *model.SyslogMessage, rerr error) {
 	// we ignore decoder, JSON is always UTF-8
 	decoder = unicode.UTF8.NewDecoder()
 
@@ -55,7 +56,7 @@ func ParseJsonFormat(m []byte, decoder *encoding.Decoder) (msg *SyslogMessage, r
 	if err != nil {
 		return nil, &InvalidEncodingError{Err: err}
 	}
-	sourceMsg := JsonRsyslogMessage{}
+	sourceMsg := model.JsonRsyslogMessage{}
 	err = ffjson.Unmarshal(m, &sourceMsg)
 	if err != nil {
 		return nil, &UnmarshalingJsonError{err}
@@ -111,10 +112,10 @@ func ParseJsonFormat(m []byte, decoder *encoding.Decoder) (msg *SyslogMessage, r
 		structured = strings.TrimSpace(sourceMsg.Structured)
 	}
 
-	msg = &SyslogMessage{
-		Priority:         Priority(pri),
-		Facility:         Facility(pri / 8),
-		Severity:         Severity(pri % 8),
+	msg = &model.SyslogMessage{
+		Priority:         model.Priority(pri),
+		Facility:         model.Facility(pri / 8),
+		Severity:         model.Severity(pri % 8),
 		Version:          1,
 		TimeReportedNum:  reported.UnixNano(),
 		TimeGeneratedNum: generated.UnixNano(),

@@ -16,6 +16,7 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/model/decoders"
 	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/services/errors"
 	"github.com/stephane-martin/skewer/sys/binder"
@@ -332,5 +333,5 @@ func fullMsg(buf []byte) (full *model.FullMessage, err error) {
 	if err := json.NewDecoder(reader).Decode(gelfmsg); err != nil {
 		return nil, fmt.Errorf("json.Unmarshal: %s", err)
 	}
-	return model.FullFromGelfMessage(gelfmsg), nil
+	return decoders.FullFromGelfMessage(gelfmsg), nil
 }

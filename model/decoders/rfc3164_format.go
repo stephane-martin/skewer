@@ -1,4 +1,4 @@
-package model
+package decoders
 
 import (
 	"bytes"
@@ -6,6 +6,7 @@ import (
 	"time"
 	uni "unicode"
 
+	"github.com/stephane-martin/skewer/model"
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/unicode"
 )
@@ -24,7 +25,7 @@ func pair2str(s1 []byte, s2 []byte) (string, string) {
 	return string(s1), string(s2)
 }
 
-func ParseRfc3164Format(m []byte, decoder *encoding.Decoder) (smsg *SyslogMessage, err error) {
+func ParseRfc3164Format(m []byte, decoder *encoding.Decoder) (smsg *model.SyslogMessage, err error) {
 	if decoder == nil {
 		decoder = unicode.UTF8.NewDecoder()
 	}
@@ -34,11 +35,11 @@ func ParseRfc3164Format(m []byte, decoder *encoding.Decoder) (smsg *SyslogMessag
 	}
 	m = bytes.TrimSpace(m)
 
-	defaultMsg := &SyslogMessage{
+	defaultMsg := &model.SyslogMessage{
 		Message: string(m),
 	}
 	defaultMsg.ClearProperties()
-	smsg = &SyslogMessage{}
+	smsg = &model.SyslogMessage{}
 	n := time.Now().UnixNano()
 	defaultMsg.TimeGeneratedNum = n
 	defaultMsg.TimeReportedNum = n
@@ -57,9 +58,9 @@ func ParseRfc3164Format(m []byte, decoder *encoding.Decoder) (smsg *SyslogMessag
 	if err != nil {
 		return defaultMsg, nil
 	}
-	smsg.Priority = Priority(priNum)
-	smsg.Facility = Facility(priNum / 8)
-	smsg.Severity = Severity(priNum % 8)
+	smsg.Priority = model.Priority(priNum)
+	smsg.Facility = model.Facility(priNum / 8)
+	smsg.Severity = model.Severity(priNum % 8)
 
 	if len(m) <= (priEnd + 1) {
 		return smsg, nil
