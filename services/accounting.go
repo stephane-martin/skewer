@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -58,10 +59,15 @@ func (s *AccountingService) Gather() ([]*dto.MetricFamily, error) {
 func readFileUntilEnd(f *os.File, size int) (err error) {
 	// read the acct file until the end
 	buf := make([]byte, accounting.Ssize)
+	reader := bufio.NewReader(f)
 	for {
-		_, err = io.ReadAtLeast(f, buf, size)
-		if err == io.EOF || err == io.ErrUnexpectedEOF {
+		_, err = io.ReadFull(reader, buf)
+		if err == io.EOF {
+			// we are at the end of the file
 			return nil
+		} else if err == io.ErrUnexpectedEOF {
+			// the file size is not a multiple of Ssize
+			return fmt.Errorf("Accounting file seems corrupted")
 		} else if err != nil {
 			return fmt.Errorf("Unexpected error while reading the accounting file: %s", err)
 		}
@@ -109,7 +115,7 @@ func (s *AccountingService) readFile(f *os.File, tick int64, hostname string, si
 	buf := make([]byte, accounting.Ssize)
 	gen := utils.NewGenerator()
 	for {
-		_, err = io.ReadAtLeast(f, buf, size)
+		_, err = io.ReadFull(f, buf)
 		if err == io.EOF || err == io.ErrUnexpectedEOF {
 			// check if file has been truncated
 			offset, err = f.Seek(0, 1)
@@ -263,6 +269,7 @@ func (s *AccountingService) Start() (infos []model.ListenerInfo, err error) {
 			s.dofatal()
 			return
 		}
+		s.logger.Debug("Finished going through accounting file")
 		s.wgroup.Add(1)
 		go s.doStart(watcher, hostname, f, tick)
 	}()
