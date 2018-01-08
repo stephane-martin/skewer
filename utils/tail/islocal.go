@@ -1,6 +1,6 @@
 package tail
 
-func isLocalFS(magic uint32) bool {
+func isLocalFS(magic int64) bool {
 	switch magic {
 	case S_MAGIC_AAFS:
 		return true

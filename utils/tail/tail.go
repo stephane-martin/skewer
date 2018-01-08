@@ -301,7 +301,7 @@ func fremote(f *os.File) (b bool, err error) {
 		}
 		fmt.Fprintln(os.Stderr, string(fsname))
 	*/
-	b = !isLocalFS(stats.Type)
+	b = !isLocalFS(int64(stats.Type))
 	return
 }
 
@@ -796,7 +796,6 @@ type lineBuffer struct {
 }
 
 func pipeLines(file *os.File, nbLines int, output io.Writer) (readPos int64, err error) {
-	//fmt.Fprintln(os.Stderr, "pipeLines")
 	if nbLines <= 0 {
 		return
 	}
@@ -982,8 +981,15 @@ func followNotify(ctx context.Context, pwg *sync.WaitGroup, fspecs fileSpecs, wa
 	m := map[string]bool{}
 	fspecsMap := map[string]*fileSpec{}
 	for _, fspec := range fspecs {
+		absName, err := filepath.Abs(fspec.name)
+		if err != nil {
+			if fspec.errors != nil {
+				fspec.errors <- err
+			}
+			return
+		}
 		m[filepath.Dir(fspec.name)] = true
-		fspecsMap[fspec.name] = fspec
+		fspecsMap[absName] = fspec
 	}
 	directories := make([]string, 0, len(fspecs))
 	for dname := range m {
@@ -1015,7 +1021,15 @@ func followNotify(ctx context.Context, pwg *sync.WaitGroup, fspecs fileSpecs, wa
 					fspec.print()
 				}
 			})
-			if fspec, ok = fspecsMap[ev.Name]; ok {
+			absName, err := filepath.Abs(ev.Name)
+			if err != nil {
+				if watcherErrors != nil {
+					watcherErrors <- err
+				}
+				continue
+			}
+			//fmt.Fprintln(os.Stderr, "watcher", "filename", absName, "operation", ev.Op)
+			if fspec, ok = fspecsMap[absName]; ok {
 				switch ev.Op {
 				case fsnotify.Write:
 					fspec.print()
