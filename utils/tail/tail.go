@@ -372,6 +372,7 @@ type TailFileOpts struct {
 	results  chan string
 	errors   chan error
 	wg       *sync.WaitGroup
+	period   time.Duration
 }
 
 type FileLine struct {
@@ -384,17 +385,26 @@ type TailFilesOpts struct {
 	nbLines   int
 	results   chan FileLine
 	errors    chan error
+	period    time.Duration
 }
 
 type TailFilesOpt func(opts *TailFilesOpts)
 
-func (opts *TailFilesOpts) Filenames() (r []string) {
+func (opts *TailFilesOpts) allFiles() (r []string) {
 	r = make([]string, 0, len(opts.filenames))
 	for fname := range opts.filenames {
 		r = append(r, fname)
 	}
 	sort.Strings(r)
 	return r
+}
+
+func MSleepPeriod(period time.Duration) TailFilesOpt {
+	return func(opts *TailFilesOpts) {
+		if period > 0 {
+			opts.period = period
+		}
+	}
 }
 
 func MFilename(filename string) TailFilesOpt {
@@ -451,6 +461,14 @@ type TailFileOpt func(opts *TailFileOpts)
 func waitgroup(wg *sync.WaitGroup) TailFileOpt {
 	return func(opts *TailFileOpts) {
 		opts.wg = wg
+	}
+}
+
+func SleepPeriod(period time.Duration) TailFileOpt {
+	return func(opts *TailFileOpts) {
+		if period > 0 {
+			opts.period = period
+		}
 	}
 }
 
@@ -537,7 +555,7 @@ func TailFiles(ctx context.Context, opts ...TailFilesOpt) {
 		opt(&env)
 	}
 
-	filenames := env.Filenames()
+	filenames := env.allFiles()
 	if len(filenames) == 0 {
 		if env.results != nil {
 			close(env.results)
@@ -1061,13 +1079,11 @@ func followNotify(ctx context.Context, pwg *sync.WaitGroup, fspecs fileSpecs, wa
 	wg.Wait()
 }
 
-func FollowFiles(ctx context.Context, sleepInterval time.Duration, opts ...TailFilesOpt) {
+func FollowFiles(ctx context.Context, opts ...TailFilesOpt) {
 	var wg sync.WaitGroup
-	if sleepInterval == 0 {
-		sleepInterval = time.Second
-	}
 	env := TailFilesOpts{
 		nbLines: 10,
+		period:  time.Second,
 	}
 
 	for _, opt := range opts {
@@ -1088,7 +1104,7 @@ func FollowFiles(ctx context.Context, sleepInterval time.Duration, opts ...TailF
 		}()
 	}
 
-	filenames := env.Filenames()
+	filenames := env.allFiles()
 	if len(filenames) == 0 {
 		close(env.results)
 		return
@@ -1145,7 +1161,7 @@ func FollowFiles(ctx context.Context, sleepInterval time.Duration, opts ...TailF
 	var followWg sync.WaitGroup
 	for _, fspec := range classicalSpecs {
 		followWg.Add(1)
-		go followClassical(ctx, &followWg, fspec, sleepInterval)
+		go followClassical(ctx, &followWg, fspec, env.period)
 	}
 	followWg.Add(1)
 	go followNotify(ctx, &followWg, notifySpecs, env.errors)
@@ -1163,12 +1179,10 @@ func FollowFiles(ctx context.Context, sleepInterval time.Duration, opts ...TailF
 
 }
 
-func FollowFile(ctx context.Context, sleepInterval time.Duration, opts ...TailFileOpt) {
-	if sleepInterval == 0 {
-		sleepInterval = time.Second
-	}
+func FollowFile(ctx context.Context, opts ...TailFileOpt) {
 	env := TailFileOpts{
 		nbLines: 10,
+		period:  time.Second,
 	}
 
 	for _, opt := range opts {
@@ -1213,7 +1227,7 @@ func FollowFile(ctx context.Context, sleepInterval time.Duration, opts ...TailFi
 	var followWg sync.WaitGroup
 	followWg.Add(1)
 	if fspec.hasClassicalFollow() {
-		go followClassical(ctx, &followWg, fspec, sleepInterval)
+		go followClassical(ctx, &followWg, fspec, env.period)
 	} else {
 		go followNotify(ctx, &followWg, []*fileSpec{fspec}, env.errors)
 	}
