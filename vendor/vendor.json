@@ -559,6 +559,18 @@
 			"revisionTime": "2017-03-22T23:44:13Z"
 		},
 		{
+			"checksumSHA1": "dRJZvT5HWleLgwM8w7g09IE6Q4w=",
+			"path": "github.com/mattn/go-zglob",
+			"revision": "4959821b481786922ac53e7ef25c61ae19fb7c36",
+			"revisionTime": "2017-12-30T10:41:32Z"
+		},
+		{
+			"checksumSHA1": "8yK2nkx5rtMHoQQH8D5/+fhTrWQ=",
+			"path": "github.com/mattn/go-zglob/fastwalk",
+			"revision": "4959821b481786922ac53e7ef25c61ae19fb7c36",
+			"revisionTime": "2017-12-30T10:41:32Z"
+		},
+		{
 			"checksumSHA1": "bKMZjd2wPw13VwoE7mBeSv5djFA=",
 			"path": "github.com/matttproud/golang_protobuf_extensions/pbutil",
 			"revision": "c12348ce28de40eed0136aa2b644d0ee0650e56c",
@@ -811,6 +823,12 @@
 			"revision": "25b30aa063fc18e48662b86996252eabdcf2f0c7",
 			"revisionTime": "2017-07-23T05:52:07Z",
 			"tree": true
+		},
+		{
+			"checksumSHA1": "G7MxSnBfyxidM5U3P6uyzsxP40E=",
+			"path": "github.com/streadway/amqp",
+			"revision": "ff34ec9cc65c2a23db5126d962c431018f65af59",
+			"revisionTime": "2017-12-11T07:51:41Z"
 		},
 		{
 			"checksumSHA1": "K0crHygPTP42i1nLKWphSlvOQJw=",
