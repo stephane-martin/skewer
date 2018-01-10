@@ -123,6 +123,12 @@ func getDev(infos os.FileInfo) uint64 {
 	panic("Can't type assert FileInfo to Stat_t")
 }
 
+func (f *fileSpec) logerror(err error) {
+	if err != nil && f.errors != nil {
+		f.errors <- err
+	}
+}
+
 func (f *fileSpec) record(file *os.File, size int64, infos os.FileInfo) {
 	f.file = file
 	f.size = size
@@ -152,9 +158,7 @@ func (f *fileSpec) print() {
 		f.err = err
 		f.file.Close()
 		f.file = nil
-		if f.errors != nil {
-			f.errors <- err
-		}
+		f.logerror(err)
 		return
 	}
 
@@ -168,10 +172,7 @@ func (f *fileSpec) print() {
 
 	n, err := io.Copy(f.writer, f.file)
 	f.size += n
-
-	if err != nil && f.errors != nil {
-		f.errors <- err
-	}
+	f.logerror(err)
 }
 
 func (f *fileSpec) recheck(notifyMode bool) {
@@ -266,10 +267,7 @@ func (f *fileSpec) recheck(notifyMode bool) {
 		file.Seek(0, 0)
 	}
 
-	if f.errors != nil && f.err != nil {
-		f.errors <- f.err
-	}
-
+	f.logerror(f.err)
 	return
 }
 
@@ -346,8 +344,6 @@ func (fspec *fileSpec) initTail(ctx context.Context, pwg *sync.WaitGroup, nbLine
 			}
 		}
 	}
-	if fspec.err != nil && fspec.errors != nil {
-		fspec.errors <- fspec.err
-	}
+	fspec.logerror(fspec.err)
 
 }

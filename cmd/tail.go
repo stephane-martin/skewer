@@ -1,16 +1,3 @@
-// Copyright © 2018 NAME HERE <EMAIL ADDRESS>
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package cmd
 
 import (
@@ -47,29 +34,18 @@ to quickly create a Cobra application.`,
 			<-sigchan
 			cancel()
 		}()
-		if len(args) == 1 {
+
+		if len(args) == 1 && follow && !recursive {
 			filename := args[0]
 			output := make(chan string)
-			if follow {
-				go tail.FollowFile(
-					ctx,
-					tail.SleepPeriod(time.Second*time.Duration(pause)),
-					tail.Filename(filename),
-					tail.NLines(int(nbLines)),
-					tail.LinesChan(output),
-				)
-			} else {
-				err = tail.TailFile(
-					ctx,
-					tail.Filename(filename),
-					tail.NLines(int(nbLines)),
-					tail.LinesChan(output),
-				)
-			}
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return
-			}
+			go tail.FollowFile(
+				ctx,
+				tail.SleepPeriod(time.Second*time.Duration(pause)),
+				tail.Filename(filename),
+				tail.NLines(int(nbLines)),
+				tail.LinesChan(output),
+			)
+
 			n := 1
 			for l := range output {
 				if printLineNumbers {
@@ -79,62 +55,108 @@ to quickly create a Cobra application.`,
 				}
 				n++
 			}
-		} else {
+		}
+
+		if len(args) == 1 && follow && recursive {
+			dirname := args[0]
 			output := make(chan tail.FileLine)
-			if follow {
-				go tail.FollowFiles(
-					ctx,
-					tail.MSleepPeriod(time.Second*time.Duration(pause)),
-					tail.MFilenames(args),
-					tail.MNLines(int(nbLines)),
-					tail.MLinesChan(output),
-				)
-				filename := ""
-				for fl := range output {
-					if filename != fl.Filename {
-						filename = fl.Filename
-						fmt.Println()
-						fmt.Println(strings.Repeat("-", len(filename)))
-						fmt.Println(filename)
-						fmt.Println(strings.Repeat("-", len(filename)))
-					}
-					fmt.Println(fl.Line)
-				}
+			tailor, err := tail.NewTailor(output, nil)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
 			} else {
-				tail.TailFiles(
-					ctx,
-					tail.MFilenames(args),
-					tail.MNLines(int(nbLines)),
-					tail.MLinesChan(output),
-				)
-				results := map[string]([]string){}
+				tailor.AddRecursiveDirectory(dirname, func(relname string) bool {
+					return true
+				})
+				tailor.CloseOnContext(ctx)
 				for fl := range output {
-					if _, ok := results[fl.Filename]; !ok {
-						results[fl.Filename] = make([]string, 0)
-					}
-					results[fl.Filename] = append(results[fl.Filename], fl.Line)
+					fmt.Println(fl.Filename, fl.Line)
 				}
-				filenames := make([]string, 0, len(args))
-				for fname := range results {
-					filenames = append(filenames, fname)
+			}
+		}
+
+		if len(args) == 1 && !follow {
+			filename := args[0]
+			output := make(chan string)
+
+			err = tail.TailFile(
+				ctx,
+				tail.Filename(filename),
+				tail.NLines(int(nbLines)),
+				tail.LinesChan(output),
+			)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return
+			}
+
+			n := 1
+			for l := range output {
+				if printLineNumbers {
+					fmt.Println(n, l)
+				} else {
+					fmt.Println(l)
 				}
-				sort.Strings(filenames)
-				for _, fname := range filenames {
-					fmt.Println(strings.Repeat("-", len(fname)))
-					fmt.Println(fname)
-					fmt.Println(strings.Repeat("-", len(fname)))
+				n++
+			}
+		}
+
+		if len(args) > 1 && follow {
+			output := make(chan tail.FileLine)
+			go tail.FollowFiles(
+				ctx,
+				tail.MSleepPeriod(time.Second*time.Duration(pause)),
+				tail.MFilenames(args),
+				tail.MNLines(int(nbLines)),
+				tail.MLinesChan(output),
+			)
+			filename := ""
+			for fl := range output {
+				if filename != fl.Filename {
+					filename = fl.Filename
 					fmt.Println()
-					n := 1
-					for _, l := range results[fname] {
-						if printLineNumbers {
-							fmt.Println(n, l)
-						} else {
-							fmt.Println(l)
-						}
-						n++
-					}
-					fmt.Println()
+					fmt.Println(strings.Repeat("-", len(filename)))
+					fmt.Println(filename)
+					fmt.Println(strings.Repeat("-", len(filename)))
 				}
+				fmt.Println(fl.Line)
+			}
+		}
+
+		if len(args) > 1 && !follow {
+			output := make(chan tail.FileLine)
+			tail.TailFiles(
+				ctx,
+				tail.MFilenames(args),
+				tail.MNLines(int(nbLines)),
+				tail.MLinesChan(output),
+			)
+			results := map[string]([]string){}
+			for fl := range output {
+				if _, ok := results[fl.Filename]; !ok {
+					results[fl.Filename] = make([]string, 0)
+				}
+				results[fl.Filename] = append(results[fl.Filename], fl.Line)
+			}
+			filenames := make([]string, 0, len(args))
+			for fname := range results {
+				filenames = append(filenames, fname)
+			}
+			sort.Strings(filenames)
+			for _, fname := range filenames {
+				fmt.Println(strings.Repeat("-", len(fname)))
+				fmt.Println(fname)
+				fmt.Println(strings.Repeat("-", len(fname)))
+				fmt.Println()
+				n := 1
+				for _, l := range results[fname] {
+					if printLineNumbers {
+						fmt.Println(n, l)
+					} else {
+						fmt.Println(l)
+					}
+					n++
+				}
+				fmt.Println()
 			}
 		}
 	},
@@ -145,21 +167,14 @@ var filename string
 var printLineNumbers bool
 var follow bool
 var pause uint
+var recursive bool
 
 func init() {
 	RootCmd.AddCommand(tailCmd)
 
-	// Here you will define your flags and configuration settings.
-
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// tailCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// tailCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 	tailCmd.Flags().UintVarP(&nbLines, "nblines", "n", 10, "how many lines to read")
 	tailCmd.Flags().BoolVarP(&printLineNumbers, "linenb", "l", false, "print line numbers")
 	tailCmd.Flags().BoolVarP(&follow, "follow", "f", false, "follow file")
 	tailCmd.Flags().UintVarP(&pause, "pause", "p", 1, "pause period in seconds")
+	tailCmd.Flags().BoolVarP(&recursive, "recursive", "r", false, "recursively watch directory")
 }

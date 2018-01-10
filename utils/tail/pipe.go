@@ -55,8 +55,8 @@ func pipeLines(file *os.File, nbLines int, output io.Writer) (readPos int64, err
 			}
 		}
 	}
-	// when nbLines == 0, we exhaust the pipe then return
-	if last.nBytes == 0 || nbLines == 0 {
+	if last.nBytes == 0 {
+		// empty file
 		return
 	}
 

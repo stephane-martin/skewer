@@ -7,7 +7,13 @@ import (
 )
 
 func fileLines(file *os.File, nbLines int, startPos, endPos int64, output io.Writer) (readPos int64, err error) {
-	if nbLines <= 0 {
+	if nbLines < 0 {
+		// dump the full file
+		file.Seek(startPos, 0)
+		readPos, err = io.Copy(output, file)
+		return
+	}
+	if nbLines == 0 {
 		return
 	}
 	buf := make([]byte, bufferSize)
