@@ -53,7 +53,7 @@ to quickly create a Cobra application.`,
 			if follow {
 				go tail.FollowFile(
 					ctx,
-					time.Second*time.Duration(pause),
+					tail.SleepPeriod(time.Second*time.Duration(pause)),
 					tail.Filename(filename),
 					tail.NLines(int(nbLines)),
 					tail.LinesChan(output),
@@ -84,7 +84,7 @@ to quickly create a Cobra application.`,
 			if follow {
 				go tail.FollowFiles(
 					ctx,
-					time.Second*time.Duration(pause),
+					tail.MSleepPeriod(time.Second*time.Duration(pause)),
 					tail.MFilenames(args),
 					tail.MNLines(int(nbLines)),
 					tail.MLinesChan(output),
