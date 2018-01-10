@@ -21,6 +21,8 @@ func (s *Semaphore) Acquire() error {
 		}
 		wait.Wait()
 	}
+	// at most one user of the semaphore arrives here
+	// wait for the semaphore to be acquired
 	wait = ExpWait{}
 	atomic.AddInt32(&s.count, -1)
 	for atomic.LoadInt32(&s.count) < 0 {
