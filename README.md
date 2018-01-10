@@ -164,6 +164,3 @@ Flags are documented in the command line help.
 
     Generates a secret that you can use in the Store configuration, so that
     log messages are not written in clear text on disk.
-
-
-
