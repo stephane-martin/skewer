@@ -6,7 +6,7 @@ import (
 	"unsafe"
 
 	"github.com/awnumar/memguard"
-	"github.com/stephane-martin/skewer/sys/semaphore"
+	"github.com/stephane-martin/go-semaphore"
 	"github.com/stephane-martin/skewer/sys/shm"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/sbox"
@@ -82,7 +82,7 @@ func (r *defring) NewSignaturePubkey() (privkey *memguard.LockedBuffer, err erro
 		return nil, err
 	}
 
-	sem, err := semaphore.New(r.semName)
+	sem, err := semaphore.New(r.semName, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +124,7 @@ func (r *defring) NewSignaturePubkey() (privkey *memguard.LockedBuffer, err erro
 }
 
 func (r *defring) GetSignaturePubkey() (pubkey *memguard.LockedBuffer, err error) {
-	sem, err := semaphore.New(r.semName)
+	sem, err := semaphore.New(r.semName, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +168,7 @@ func (r *defring) NewBoxSecret() (secret *memguard.LockedBuffer, err error) {
 		return nil, err
 	}
 
-	sem, err := semaphore.New(r.semName)
+	sem, err := semaphore.New(r.semName, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +207,7 @@ func (r *defring) NewBoxSecret() (secret *memguard.LockedBuffer, err error) {
 }
 
 func (r *defring) GetBoxSecret() (secret *memguard.LockedBuffer, err error) {
-	sem, err := semaphore.New(r.semName)
+	sem, err := semaphore.New(r.semName, 1)
 	if err != nil {
 		return nil, err
 	}

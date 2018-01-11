@@ -9,7 +9,7 @@ import (
 
 	"github.com/awnumar/memguard"
 	"github.com/jsipprell/keyctl"
-	"github.com/stephane-martin/skewer/sys/semaphore"
+	"github.com/stephane-martin/go-semaphore"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/sbox"
 	"golang.org/x/crypto/ed25519"
@@ -59,7 +59,7 @@ func (r *ring) GetSessionID() utils.MyULID {
 
 func getSecret(creds RingCreds, label string) (pubkey *memguard.LockedBuffer, err error) {
 	sessionStr := creds.SessionID.String()
-	sem, err := semaphore.New(fmt.Sprintf("skw%s", sessionStr))
+	sem, err := semaphore.New(fmt.Sprintf("skw%s", sessionStr), 1)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "new semaphore error", err)
 		return nil, err
@@ -108,7 +108,7 @@ func (r *ring) NewSignaturePubkey() (privkey *memguard.LockedBuffer, err error) 
 		return nil, err
 	}
 
-	sem, err := semaphore.New(fmt.Sprintf("skw%s", sessionStr))
+	sem, err := semaphore.New(fmt.Sprintf("skw%s", sessionStr), 1)
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +154,7 @@ func (r *ring) NewBoxSecret() (secret *memguard.LockedBuffer, err error) {
 		return nil, err
 	}
 
-	sem, err := semaphore.New(fmt.Sprintf("skw%s", sessionStr))
+	sem, err := semaphore.New(fmt.Sprintf("skw%s", sessionStr), 1)
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +193,7 @@ func (r *ring) GetBoxSecret() (secret *memguard.LockedBuffer, err error) {
 
 func (r *ring) DeleteBoxSecret() error {
 	sessionStr := r.creds.SessionID.String()
-	sem, err := semaphore.New(fmt.Sprintf("skw%s", sessionStr))
+	sem, err := semaphore.New(fmt.Sprintf("skw%s", sessionStr), 1)
 	if err != nil {
 		return err
 	}
@@ -219,7 +219,7 @@ func (r *ring) DeleteBoxSecret() error {
 
 func (r *ring) DeleteSignaturePubKey() error {
 	sessionStr := r.creds.SessionID.String()
-	sem, err := semaphore.New(fmt.Sprintf("skw%s", sessionStr))
+	sem, err := semaphore.New(fmt.Sprintf("skw%s", sessionStr), 1)
 	if err != nil {
 		return err
 	}

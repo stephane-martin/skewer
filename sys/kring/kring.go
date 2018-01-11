@@ -6,7 +6,7 @@ import (
 	"io"
 
 	"github.com/awnumar/memguard"
-	"github.com/stephane-martin/skewer/sys/semaphore"
+	"github.com/stephane-martin/go-semaphore"
 	"github.com/stephane-martin/skewer/utils"
 )
 
