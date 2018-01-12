@@ -17,20 +17,27 @@ import (
 	mmap "github.com/edsrzf/mmap-go"
 )
 
-type SharedMem struct {
+type sharedMem struct {
 	mem  mmap.MMap
 	f    *os.File
 	name string
 }
 
-func Create(regionName string, size int) (s *SharedMem, err error) {
+type SharedMemory interface {
+	Close() error
+	Len() int
+	Pointer() unsafe.Pointer
+	Delete() error
+}
+
+func Create(regionName string, size int) (sh SharedMemory, err error) {
 	if size <= 0 {
 		return nil, fmt.Errorf("Size must be strictly positive")
 	}
 	if !strings.HasPrefix(regionName, "/") {
 		regionName = "/" + regionName
 	}
-	s = &SharedMem{name: regionName}
+	s := sharedMem{name: regionName}
 	s.f, err = open(regionName, int(C.O_RDWR|C.O_CREAT|C.O_EXCL), 0600)
 	if err != nil {
 		return nil, err
@@ -42,17 +49,17 @@ func Create(regionName string, size int) (s *SharedMem, err error) {
 	s.mem, err = mmap.MapRegion(s.f, size, mmap.RDWR, 0, 0)
 	if err != nil {
 		_ = s.f.Close()
-		_ = Delete(regionName)
+		_ = del(regionName)
 		return nil, err
 	}
-	return s, nil
+	return &s, nil
 }
 
-func Open(regionName string) (s *SharedMem, err error) {
+func Open(regionName string) (sh SharedMemory, err error) {
 	if !strings.HasPrefix(regionName, "/") {
 		regionName = "/" + regionName
 	}
-	s = &SharedMem{name: regionName}
+	s := sharedMem{name: regionName}
 	s.f, err = open(regionName, int(C.O_RDWR), 0600)
 	if err != nil {
 		return nil, err
@@ -62,10 +69,10 @@ func Open(regionName string) (s *SharedMem, err error) {
 		_ = s.f.Close()
 		return nil, err
 	}
-	return s, nil
+	return &s, nil
 }
 
-func (s *SharedMem) Close() (err error) {
+func (s *sharedMem) Close() (err error) {
 	err = s.mem.Unmap()
 	if err != nil {
 		return err
@@ -73,14 +80,14 @@ func (s *SharedMem) Close() (err error) {
 	return s.f.Close()
 }
 
-func (s *SharedMem) Delete() error {
-	return Delete(s.name)
+func (s *sharedMem) Delete() error {
+	return del(s.name)
 }
 
-func (s *SharedMem) Pointer() unsafe.Pointer {
+func (s *sharedMem) Pointer() unsafe.Pointer {
 	return unsafe.Pointer(&((s.mem)[0]))
 }
 
-func (s *SharedMem) Len() int {
+func (s *sharedMem) Len() int {
 	return len(s.mem)
 }

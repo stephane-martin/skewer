@@ -16,7 +16,7 @@ import (
 
 type defring struct {
 	creds   RingCreds
-	sh      *shm.SharedMem
+	sh      shm.SharedMemory
 	shmName string
 	semName string
 }

@@ -36,7 +36,7 @@ func open(regionName string, flags int, perm os.FileMode) (f *os.File, err error
 	return f, nil
 }
 
-func Delete(regionName string) error {
+func del(regionName string) error {
 	if !strings.HasPrefix(regionName, "/") {
 		regionName = "/" + regionName
 	}
