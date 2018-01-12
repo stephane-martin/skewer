@@ -831,6 +831,12 @@
 			"revisionTime": "2018-01-11T22:11:07Z"
 		},
 		{
+			"checksumSHA1": "KHzf+o/98ZpVzGCPto+HH0XlzbQ=",
+			"path": "github.com/stephane-martin/go-shm",
+			"revision": "57b2cc65a4862b2542fccf5c1f648731b890e19f",
+			"revisionTime": "2018-01-12T00:04:49Z"
+		},
+		{
 			"checksumSHA1": "G7MxSnBfyxidM5U3P6uyzsxP40E=",
 			"path": "github.com/streadway/amqp",
 			"revision": "ff34ec9cc65c2a23db5126d962c431018f65af59",

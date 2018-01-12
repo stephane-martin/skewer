@@ -7,7 +7,7 @@ import (
 
 	"github.com/awnumar/memguard"
 	"github.com/stephane-martin/go-semaphore"
-	"github.com/stephane-martin/skewer/sys/shm"
+	"github.com/stephane-martin/go-shm"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/sbox"
 	"golang.org/x/crypto/ed25519"
