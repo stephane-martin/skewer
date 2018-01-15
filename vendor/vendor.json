@@ -837,6 +837,12 @@
 			"revisionTime": "2018-01-12T00:04:49Z"
 		},
 		{
+			"checksumSHA1": "+m8FcNL0VAAku9i5K5iLuRneN3k=",
+			"path": "github.com/stephane-martin/gotail/tail",
+			"revision": "c96ffcaab871f3ce4387043cbe68f7837245f93c",
+			"revisionTime": "2018-01-11T19:30:15Z"
+		},
+		{
 			"checksumSHA1": "G7MxSnBfyxidM5U3P6uyzsxP40E=",
 			"path": "github.com/streadway/amqp",
 			"revision": "ff34ec9cc65c2a23db5126d962c431018f65af59",
