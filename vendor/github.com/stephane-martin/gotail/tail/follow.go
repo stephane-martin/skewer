@@ -50,7 +50,7 @@ func FollowFiles(ctx context.Context, opts ...TailFilesOpt) {
 	for _, filename := range filenames {
 		fname := filename
 
-		resultsChan := make(chan string)
+		resultsChan := make(chan []byte)
 		prefixLine(resultsChan, env.results, fname, &wg)
 		errChan := make(chan error)
 		prefixErrors(errChan, env.errors, fname, &wg)

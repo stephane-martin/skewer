@@ -313,7 +313,7 @@ func (t *Tailor) addFile(filename string, uids []ulid.ULID, new bool, mu *sync.M
 		//fmt.Fprintln(os.Stderr, "duplicate", filename)
 		return
 	}
-	results := make(chan string)
+	results := make(chan []byte)
 	errors := make(chan error)
 	ctx := context.Background()
 	prefixLineID(results, t.results, filename, uids, &t.prefixWg)

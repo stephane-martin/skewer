@@ -3,25 +3,24 @@ package tail
 import (
 	"bytes"
 	"context"
-	"strings"
 )
 
 type resultLines struct {
-	output chan string
+	output chan []byte
 	buf    *bytes.Buffer
 }
 
-func makeWriter(ctx context.Context, results chan string) (w *resultLines) {
+func makeWriter(ctx context.Context, results chan []byte) (w *resultLines) {
 	w = &resultLines{
-		output: make(chan string),
+		output: make(chan []byte),
 		buf:    bytes.NewBuffer(nil),
 	}
 	removeNLChans(ctx, w.output, results)
 	return w
 }
 
-func (r *resultLines) flushend() string {
-	return strings.Trim(r.buf.String(), lineEndString)
+func (r *resultLines) flushend() []byte {
+	return bytes.Trim(r.buf.Bytes(), lineEndString)
 }
 
 func (r *resultLines) Close() {
@@ -56,7 +55,7 @@ func (r *resultLines) Write(p []byte) (int, error) {
 			return lorig, nil
 		}
 		r.buf.Write(p[0 : idx+1])
-		r.output <- r.buf.String()
+		r.output <- r.buf.Bytes()
 		r.buf = bytes.NewBuffer(nil)
 		if idx == l-1 {
 			return lorig, nil

@@ -75,7 +75,7 @@ func TailFiles(ctx context.Context, opts ...TailFilesOpt) {
 	for _, filename := range filenames {
 		fname := filename
 		errChan := make(chan error)
-		resultsChan := make(chan string)
+		resultsChan := make(chan []byte)
 		prefixErrors(errChan, env.errors, fname, &wg)
 		prefixLine(resultsChan, env.results, fname, &wg)
 		err := TailFile(

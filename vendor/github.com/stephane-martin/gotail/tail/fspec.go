@@ -28,7 +28,7 @@ type fileSpec struct {
 	errors         chan error
 }
 
-func makeFspec(ctx context.Context, filename string, results chan string, errors chan error) *fileSpec {
+func makeFspec(ctx context.Context, filename string, results chan []byte, errors chan error) *fileSpec {
 	return &fileSpec{
 		name:   filename,
 		writer: makeWriter(ctx, results),

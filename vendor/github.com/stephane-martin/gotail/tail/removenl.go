@@ -1,19 +1,19 @@
 package tail
 
 import (
+	"bytes"
 	"context"
-	"strings"
 )
 
 // TODO: use wg instead of ctx ?
-func removeNLChans(ctx context.Context, input chan string, output chan string) {
+func removeNLChans(ctx context.Context, input chan []byte, output chan []byte) {
 	go func() {
 		defer func() {
 			if output != nil {
 				close(output)
 			}
 		}()
-		var line string
+		var line []byte
 		var more bool
 		for {
 			select {
@@ -22,7 +22,7 @@ func removeNLChans(ctx context.Context, input chan string, output chan string) {
 			case line, more = <-input:
 				if more {
 					if output != nil {
-						output <- strings.Trim(line, lineEndString)
+						output <- bytes.Trim(line, lineEndString)
 					}
 				} else {
 					return

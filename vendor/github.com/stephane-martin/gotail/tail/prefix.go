@@ -62,7 +62,7 @@ func prefixErrorsID(input chan error, output chan error, filename string, uids [
 	}()
 }
 
-func prefixLine(input chan string, output chan FileLine, filename string, wg *sync.WaitGroup) {
+func prefixLine(input chan []byte, output chan FileLine, filename string, wg *sync.WaitGroup) {
 	if wg != nil {
 		wg.Add(1)
 	}
@@ -78,7 +78,7 @@ func prefixLine(input chan string, output chan FileLine, filename string, wg *sy
 	}()
 }
 
-func prefixLineID(input chan string, output chan FileLineID, filename string, uids []ulid.ULID, wg *sync.WaitGroup) {
+func prefixLineID(input chan []byte, output chan FileLineID, filename string, uids []ulid.ULID, wg *sync.WaitGroup) {
 	if wg != nil {
 		wg.Add(1)
 	}

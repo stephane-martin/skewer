@@ -12,7 +12,7 @@ import (
 type tailFileOpts struct {
 	filename string
 	nbLines  int
-	results  chan string
+	results  chan []byte
 	errors   chan error
 	wg       *sync.WaitGroup
 	period   time.Duration
@@ -21,7 +21,7 @@ type tailFileOpts struct {
 // FileLine is used to report a line and a filename.
 type FileLine struct {
 	Filename string
-	Line     string
+	Line     []byte
 }
 
 type FileLineID struct {
@@ -152,7 +152,7 @@ func NLines(nbLines int) TailFileOpt {
 }
 
 // LinesChan is the TailFile and FollowFile option to set the channel that will be used to send resulting lines
-func LinesChan(results chan string) TailFileOpt {
+func LinesChan(results chan []byte) TailFileOpt {
 	return func(opts *tailFileOpts) {
 		if results != nil {
 			opts.results = results
