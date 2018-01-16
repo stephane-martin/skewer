@@ -383,6 +383,54 @@
 			"revisionTime": "2017-05-04T03:43:18Z"
 		},
 		{
+			"checksumSHA1": "/RE0VzeaXdaBUNeNMUXWqzly7qY=",
+			"path": "github.com/gobwas/glob",
+			"revision": "51eb1ee00b6d931c66d229ceeb7c31b985563420",
+			"revisionTime": "2017-02-12T20:01:51Z"
+		},
+		{
+			"checksumSHA1": "OIV3k+Xbx7u4rP0TSgxzY2Xn4MI=",
+			"path": "github.com/gobwas/glob/compiler",
+			"revision": "51eb1ee00b6d931c66d229ceeb7c31b985563420",
+			"revisionTime": "2017-02-12T20:01:51Z"
+		},
+		{
+			"checksumSHA1": "WHQ6bs/IWj0Oj2FMVR5uis5FWno=",
+			"path": "github.com/gobwas/glob/match",
+			"revision": "51eb1ee00b6d931c66d229ceeb7c31b985563420",
+			"revisionTime": "2017-02-12T20:01:51Z"
+		},
+		{
+			"checksumSHA1": "2KhDNUE98XhHnIgg2S9E4gcWoig=",
+			"path": "github.com/gobwas/glob/syntax",
+			"revision": "51eb1ee00b6d931c66d229ceeb7c31b985563420",
+			"revisionTime": "2017-02-12T20:01:51Z"
+		},
+		{
+			"checksumSHA1": "0aauhx71LcqUSUbdb/mr8DC0XCw=",
+			"path": "github.com/gobwas/glob/syntax/ast",
+			"revision": "51eb1ee00b6d931c66d229ceeb7c31b985563420",
+			"revisionTime": "2017-02-12T20:01:51Z"
+		},
+		{
+			"checksumSHA1": "umyztSrQrQIl9JgwhDDb6wrSLeI=",
+			"path": "github.com/gobwas/glob/syntax/lexer",
+			"revision": "51eb1ee00b6d931c66d229ceeb7c31b985563420",
+			"revisionTime": "2017-02-12T20:01:51Z"
+		},
+		{
+			"checksumSHA1": "vux29fN5O22F3QPLOnjQ37278vg=",
+			"path": "github.com/gobwas/glob/util/runes",
+			"revision": "51eb1ee00b6d931c66d229ceeb7c31b985563420",
+			"revisionTime": "2017-02-12T20:01:51Z"
+		},
+		{
+			"checksumSHA1": "O8jtulDdZMB+CdlRORLultMKQrE=",
+			"path": "github.com/gobwas/glob/util/strings",
+			"revision": "51eb1ee00b6d931c66d229ceeb7c31b985563420",
+			"revisionTime": "2017-02-12T20:01:51Z"
+		},
+		{
 			"checksumSHA1": "oWPNYuXUm3WK/808dtZdIDObhyI=",
 			"path": "github.com/gogo/protobuf",
 			"revision": "342cbe0a04158f6dcb03ca0079991a51a4248c02",
@@ -833,14 +881,14 @@
 		{
 			"checksumSHA1": "KHzf+o/98ZpVzGCPto+HH0XlzbQ=",
 			"path": "github.com/stephane-martin/go-shm",
-			"revision": "57b2cc65a4862b2542fccf5c1f648731b890e19f",
-			"revisionTime": "2018-01-12T00:04:49Z"
+			"revision": "15e40642e1a4d518e9c4a5aace9936747987b9ea",
+			"revisionTime": "2018-01-12T21:46:04Z"
 		},
 		{
-			"checksumSHA1": "+m8FcNL0VAAku9i5K5iLuRneN3k=",
+			"checksumSHA1": "kgzrIRR1VTeT/KacKRgQ+Fb+Bss=",
 			"path": "github.com/stephane-martin/gotail/tail",
-			"revision": "c96ffcaab871f3ce4387043cbe68f7837245f93c",
-			"revisionTime": "2018-01-11T19:30:15Z"
+			"revision": "a4e04b033ea4f00d82caddeca3fff31b054cc412",
+			"revisionTime": "2018-01-16T13:20:14Z"
 		},
 		{
 			"checksumSHA1": "G7MxSnBfyxidM5U3P6uyzsxP40E=",

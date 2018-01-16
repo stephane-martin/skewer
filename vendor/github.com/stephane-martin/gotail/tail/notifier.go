@@ -60,15 +60,12 @@ func (n *notifier) Stop() (err error) {
 	return nil
 }
 
-func (n *notifier) addFile(fspec *fileSpec) error {
+func (n *notifier) addFile(fspec *fileSpec) {
 	// add fspec to fspecmap
-	absName, err := filepath.Abs(fspec.name)
-	if err != nil {
-		return err
-	}
+	absName := n.abs(fspec.name)
 	if n.fspecsMap.Load(absName) != nil {
 		// the fspec was already added
-		return nil
+		return
 	}
 	n.fspecsMap.Store(absName, fspec)
 	dirname := filepath.Dir(absName)
@@ -79,26 +76,20 @@ func (n *notifier) addFile(fspec *fileSpec) error {
 			n.watcher.Add(dirname)
 		}
 	}
-	return nil
 }
 
-func (n *notifier) AddFile(fspec *fileSpec) error {
+func (n *notifier) AddFile(fspec *fileSpec) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	return n.addFile(fspec)
+	n.addFile(fspec)
 }
 
-func (n *notifier) AddFiles(fspecs fileSpecs) error {
+func (n *notifier) AddFiles(fspecs fileSpecs) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	var err error
 	for _, fspec := range fspecs {
-		err = n.addFile(fspec)
-		if err != nil {
-			return err
-		}
+		n.addFile(fspec)
 	}
-	return nil
 }
 
 func (n *notifier) follow() {

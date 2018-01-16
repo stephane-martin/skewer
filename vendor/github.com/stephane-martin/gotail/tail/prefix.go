@@ -3,12 +3,19 @@ package tail
 import (
 	"fmt"
 	"sync"
+
+	"github.com/oklog/ulid"
 )
 
 // FileError is an error that was generated when dealing with some given filename
 type FileError struct {
 	Filename string
 	Err      error
+}
+
+type FileErrorID struct {
+	FileError
+	Uid ulid.ULID
 }
 
 func (err FileError) Error() string {
@@ -31,6 +38,30 @@ func prefixErrors(input chan error, output chan error, filename string, wg *sync
 	}()
 }
 
+func prefixErrorsID(input chan error, output chan error, filename string, uids []ulid.ULID, wg *sync.WaitGroup) {
+	if wg != nil {
+		wg.Add(1)
+	}
+	go func() {
+		if wg != nil {
+			defer wg.Done()
+		}
+		for err := range input {
+			if output != nil {
+				for _, uid := range uids {
+					output <- FileErrorID{
+						FileError: FileError{
+							Filename: filename,
+							Err:      err,
+						},
+						Uid: uid,
+					}
+				}
+			}
+		}
+	}()
+}
+
 func prefixLine(input chan string, output chan FileLine, filename string, wg *sync.WaitGroup) {
 	if wg != nil {
 		wg.Add(1)
@@ -42,6 +73,30 @@ func prefixLine(input chan string, output chan FileLine, filename string, wg *sy
 		for line := range input {
 			if output != nil {
 				output <- FileLine{Filename: filename, Line: line}
+			}
+		}
+	}()
+}
+
+func prefixLineID(input chan string, output chan FileLineID, filename string, uids []ulid.ULID, wg *sync.WaitGroup) {
+	if wg != nil {
+		wg.Add(1)
+	}
+	go func() {
+		if wg != nil {
+			defer wg.Done()
+		}
+		for line := range input {
+			if output != nil {
+				for _, uid := range uids {
+					output <- FileLineID{
+						FileLine: FileLine{
+							Filename: filename,
+							Line:     line,
+						},
+						Uid: uid,
+					}
+				}
 			}
 		}
 	}()

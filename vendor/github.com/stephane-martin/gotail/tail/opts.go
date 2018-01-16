@@ -5,6 +5,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/oklog/ulid"
 )
 
 type tailFileOpts struct {
@@ -20,6 +22,11 @@ type tailFileOpts struct {
 type FileLine struct {
 	Filename string
 	Line     string
+}
+
+type FileLineID struct {
+	FileLine
+	Uid ulid.ULID
 }
 
 type tailFilesOpts struct {
