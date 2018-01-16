@@ -10,6 +10,17 @@ type resultLines struct {
 	buf    *bytes.Buffer
 }
 
+func copybuf(buf *bytes.Buffer) (res []byte) {
+	l := buf.Len()
+	if l == 0 {
+		return nil
+	}
+	res = make([]byte, l)
+	copy(res, buf.Bytes())
+	buf.Reset()
+	return res
+}
+
 func makeWriter(ctx context.Context, results chan []byte) (w *resultLines) {
 	w = &resultLines{
 		output: make(chan []byte),
@@ -19,15 +30,10 @@ func makeWriter(ctx context.Context, results chan []byte) (w *resultLines) {
 	return w
 }
 
-func (r *resultLines) flushend() []byte {
-	return bytes.Trim(r.buf.Bytes(), lineEndString)
-}
-
 func (r *resultLines) Close() {
-	rest := r.flushend()
+	rest := bytes.Trim(copybuf(r.buf), lineEndString)
 	if len(rest) > 0 {
 		r.output <- rest
-		r.buf = bytes.NewBuffer(nil)
 	}
 	close(r.output)
 }
@@ -55,8 +61,7 @@ func (r *resultLines) Write(p []byte) (int, error) {
 			return lorig, nil
 		}
 		r.buf.Write(p[0 : idx+1])
-		r.output <- r.buf.Bytes()
-		r.buf = bytes.NewBuffer(nil)
+		r.output <- copybuf(r.buf)
 		if idx == l-1 {
 			return lorig, nil
 		}
