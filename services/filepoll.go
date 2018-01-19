@@ -2,6 +2,7 @@ package services
 
 import (
 	"os"
+	"path/filepath"
 	"runtime"
 	"sync"
 
@@ -87,7 +88,11 @@ func (s *FilePollingService) Start() (infos []model.ListenerInfo, err error) {
 		if err != nil {
 			return infos, err
 		}
-		dirUID, err := tailor.AddRecursiveDirectory(config.BaseDirectory, filter)
+		d := config.BaseDirectory
+		if s.confined {
+			d = filepath.Join("/tmp", "polldirs", d)
+		}
+		dirUID, err := tailor.AddRecursiveDirectory(d, filter)
 		if err == nil {
 			s.confsMap[dirUID] = config.ConfID
 		} else {
@@ -211,6 +216,9 @@ func (s *FilePollingService) fetchLines(results chan tail.FileLineID) {
 		raw.Directory = config.BaseDirectory
 		raw.Glob = config.Glob
 		raw.Filename = result.Filename
+		if s.confined && len(raw.Filename) >= 13 {
+			raw.Filename = raw.Filename[13:] // /tmp/polldirs/...
+		}
 		raw.Line = result.Line
 		raw.ConfID = config.ConfID
 		s.rawQueue <- raw

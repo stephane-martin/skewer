@@ -375,10 +375,20 @@ func (ch *serveChild) StartController(typ base.Types) error {
 }
 
 func (ch *serveChild) StartFSPoll() error {
-	if len(ch.conf.FSSource) > 0 {
+	if len(ch.conf.FSSource) == 0 {
+		return nil
+	}
+	dirs := make([]string, 0, len(ch.conf.FSSource))
+	for _, source := range ch.conf.FSSource {
+		if utils.IsDir(source.BaseDirectory) {
+			dirs = append(dirs, source.BaseDirectory)
+		}
+	}
+	if len(dirs) > 0 {
 		ch.logger.Info("FS polling is enabled")
 		err := ch.controllers[base.Filesystem].Create(
 			services.DumpableOpt(DumpableFlag),
+			services.PollDirectories(dirs),
 		)
 		if err != nil {
 			return fmt.Errorf("error creating the fspoll plugin: %s", err)

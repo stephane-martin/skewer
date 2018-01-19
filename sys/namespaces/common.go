@@ -22,6 +22,7 @@ type NamespacedCmd struct {
 	fileDestTmpl string
 	certFiles    []string
 	certPaths    []string
+	polldirs     []string
 }
 
 func NewNamespacedCmd(cmd *PluginCmd) *NamespacedCmd {
@@ -60,6 +61,11 @@ func (c *NamespacedCmd) CertFiles(list []string) *NamespacedCmd {
 
 func (c *NamespacedCmd) CertPaths(list []string) *NamespacedCmd {
 	c.certPaths = list
+	return c
+}
+
+func (c *NamespacedCmd) PollDirectories(dirs []string) *NamespacedCmd {
+	c.polldirs = dirs
 	return c
 }
 
@@ -192,6 +198,7 @@ type envPaths struct {
 	confPath          string
 	certFiles         []string
 	certPaths         []string
+	polldirs          []string
 }
 
 func setupEnv(paths envPaths, ttyName string) (env []string) {
@@ -217,11 +224,15 @@ func setupEnv(paths envPaths, ttyName string) (env []string) {
 	}
 
 	if len(paths.certFiles) > 0 {
-		env = append(env, fmt.Sprintf("SKEWER_CERT_FILES=%s", filepath.Join(paths.certFiles...)))
+		env = append(env, fmt.Sprintf("SKEWER_CERT_FILES=%s", strings.Join(paths.certFiles, string(filepath.ListSeparator))))
 	}
 
 	if len(paths.certPaths) > 0 {
-		env = append(env, fmt.Sprintf("SKEWER_CERT_PATHS=%s", filepath.Join(paths.certPaths...)))
+		env = append(env, fmt.Sprintf("SKEWER_CERT_PATHS=%s", strings.Join(paths.certPaths, string(filepath.ListSeparator))))
+	}
+
+	if len(paths.polldirs) > 0 {
+		env = append(env, fmt.Sprintf("SKEWER_POLLDIRS=%s", strings.Join(paths.polldirs, string(filepath.ListSeparator))))
 	}
 
 	_, err := exec.LookPath("systemctl")

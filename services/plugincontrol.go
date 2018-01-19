@@ -532,14 +532,15 @@ func (s *PluginController) Start() (infos []model.ListenerInfo, err error) {
 }
 
 type PluginCreateOpts struct {
-	dumpable     bool
-	profile      bool
-	storePath    string
-	confDir      string
-	acctPath     string
-	fileDestTmpl string
-	certFiles    []string
-	certPaths    []string
+	dumpable        bool
+	profile         bool
+	storePath       string
+	confDir         string
+	acctPath        string
+	fileDestTmpl    string
+	certFiles       []string
+	certPaths       []string
+	polldirectories []string
 }
 
 func ProfileOpt(profile bool) func(*PluginCreateOpts) {
@@ -587,6 +588,12 @@ func CertFilesOpt(list []string) func(*PluginCreateOpts) {
 func CertPathsOpt(list []string) func(*PluginCreateOpts) {
 	return func(opts *PluginCreateOpts) {
 		opts.certPaths = list
+	}
+}
+
+func PollDirectories(dirs []string) func(*PluginCreateOpts) {
+	return func(opts *PluginCreateOpts) {
+		opts.polldirectories = dirs
 	}
 }
 
@@ -645,6 +652,7 @@ func (s *PluginController) Create(optsfuncs ...func(*PluginCreateOpts)) error {
 				AccountingPath(opts.acctPath).
 				CertFiles(opts.certFiles).
 				CertPaths(opts.certPaths).
+				PollDirectories(opts.polldirectories).
 				Start()
 		}
 

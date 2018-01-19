@@ -20,6 +20,18 @@ func (c *NamespacedCmd) Start() (err error) {
 	paths := envPaths{
 		certFiles: make([]string, 0),
 		certPaths: make([]string, 0),
+		polldirs:  make([]string, 0),
+	}
+
+	for _, d := range c.polldirs {
+		if !utils.IsDir(d) {
+			return fmt.Errorf("The path to poll '%s' is not a directory", d)
+		}
+		abs, err := filepath.Abs(d)
+		if err != nil {
+			return err
+		}
+		paths.polldirs = append(paths.polldirs, abs)
 	}
 
 	for _, f := range c.certFiles {
@@ -544,7 +556,7 @@ func MakeChroot(targetExec string) (string, error) {
 	}
 
 	// mount SKEWER_CERT_FILES
-	certFiles := strings.Split(strings.TrimSpace(os.Getenv("SKEWER_CERT_FILES")), ";")
+	certFiles = filepath.SplitList(os.Getenv("SKEWER_CERT_FILES"))
 	if len(certFiles) > 0 {
 		for _, certFile := range certFiles {
 			if len(certFile) == 0 {
@@ -563,7 +575,7 @@ func MakeChroot(targetExec string) (string, error) {
 	}
 
 	// mount SKEWER_CERT_PATHS directories
-	certPaths := strings.Split(strings.TrimSpace(os.Getenv("SKEWER_CERT_PATHS")), ";")
+	certPaths = filepath.SplitList(os.Getenv("SKEWER_CERT_PATHS"))
 	if len(certPaths) > 0 {
 		for _, certPath := range certPaths {
 			if len(certPath) == 0 {
@@ -573,6 +585,25 @@ func MakeChroot(targetExec string) (string, error) {
 				baseMountPoint: baseMountPoint{
 					Source: certPath,
 					Target: filepath.Join(root, "newroot", "tmp", "certpaths", certPath),
+				},
+				ReadOnly: true,
+				IsDir:    true,
+				Flags:    syscall.MS_NOSUID | syscall.MS_NOEXEC | syscall.MS_NODEV,
+			})
+		}
+	}
+
+	// mount the directories we have to poll
+	polldirs := filepath.SplitList(os.Getenv("SKEWER_POLLDIRS"))
+	if len(polldirs) > 0 {
+		for _, pdir := range polldirs {
+			if len(pdir) == 0 {
+				continue
+			}
+			bindMounts = append(bindMounts, bindMountPoint{
+				baseMountPoint: baseMountPoint{
+					Source: pdir,
+					Target: filepath.Join(root, "newroot", "tmp", "polldirs", pdir),
 				},
 				ReadOnly: true,
 				IsDir:    true,
