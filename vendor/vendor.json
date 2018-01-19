@@ -879,10 +879,10 @@
 			"revisionTime": "2018-01-11T22:11:07Z"
 		},
 		{
-			"checksumSHA1": "KHzf+o/98ZpVzGCPto+HH0XlzbQ=",
+			"checksumSHA1": "R9iIRlMSWuN9kJ4BCa763Kr3hdY=",
 			"path": "github.com/stephane-martin/go-shm",
-			"revision": "15e40642e1a4d518e9c4a5aace9936747987b9ea",
-			"revisionTime": "2018-01-12T21:46:04Z"
+			"revision": "27251c7df31fef867716489b813577e740f91c43",
+			"revisionTime": "2018-01-19T12:49:12Z"
 		},
 		{
 			"checksumSHA1": "IHdFMmEpo0J5FPM53dr096lDkOc=",

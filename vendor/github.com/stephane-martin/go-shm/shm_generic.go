@@ -9,16 +9,12 @@ import (
 	"fmt"
 	"os"
 	"strings"
-)
-import (
 	"syscall"
 	"unsafe"
-
-	mmap "github.com/edsrzf/mmap-go"
 )
 
 type sharedMem struct {
-	mem  mmap.MMap
+	mem  MMap
 	f    *os.File
 	name string
 }
@@ -46,7 +42,7 @@ func Create(regionName string, size int) (sh SharedMemory, err error) {
 	if err != nil {
 		return nil, err
 	}
-	s.mem, err = mmap.MapRegion(s.f, size, mmap.RDWR, 0, 0)
+	s.mem, err = MapRegion(s.f, size, RDWR, 0, 0)
 	if err != nil {
 		_ = s.f.Close()
 		_ = del(regionName)
@@ -64,7 +60,7 @@ func Open(regionName string) (sh SharedMemory, err error) {
 	if err != nil {
 		return nil, err
 	}
-	s.mem, err = mmap.MapRegion(s.f, -1, mmap.RDWR, 0, 0)
+	s.mem, err = MapRegion(s.f, -1, RDWR, 0, 0)
 	if err != nil {
 		_ = s.f.Close()
 		return nil, err
