@@ -109,7 +109,7 @@ func (f *CFactory) New(typ base.Types) (*PluginController, error) {
 func (f *CFactory) NewStore(loggerHandle uintptr) *StorePlugin {
 	st, _ := f.New(base.Store)
 	s := &StorePlugin{PluginController: st}
-	s.MessageQueue = queue.NewMessageQueue()
+	s.BSliceQueue = queue.NewBSliceQueue()
 	s.pushwg = &sync.WaitGroup{}
 	return s
 }
@@ -256,16 +256,18 @@ func (s *PluginController) listenpipe(secret *memguard.LockedBuffer) {
 
 	var err error
 	var buf []byte
-	var message model.FullMessage
+	var message *model.FullMessage
 
 	for scanner.Scan() {
 		buf = scanner.Bytes()
+		message = model.FullFactory()
 		err = message.Unmarshal(buf)
 		if err != nil {
 			s.logger.Error("Unexpected error decrypting message from the plugin pipe", "type", s.name, "error", err)
 			return
 		}
 		err = s.stasher.Stash(message) // send message to the Store controller
+		model.Free(message.Fields)
 		if err != nil {
 			s.logger.Error("Error stashing message", "error", err)
 			return
@@ -340,7 +342,7 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 		scanner.Buffer(make([]byte, 0, 132000), 132000)
 		command := ""
 		infos := []model.ListenerInfo{}
-		var m model.FullMessage
+		var m *model.FullMessage
 
 		for scanner.Scan() {
 			parts := bytes.SplitN(scanner.Bytes(), space, 2)
@@ -357,10 +359,11 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 						kill = true
 						return
 					}
-					m = model.FullMessage{}
+					m = model.FullFactory()
 					err := m.Decrypt(secret, parts[1])
 					if err == nil {
 						err = s.stasher.Stash(m)
+						model.Free(m.Fields)
 						if err != nil {
 							s.logger.Error("Error stashing message", "error", err)
 							kill = true
@@ -608,7 +611,7 @@ func (s *PluginController) Create(optsfuncs ...func(*PluginCreateOpts)) error {
 	var err error
 
 	switch s.typ {
-	case base.RELP, base.DirectRELP, base.TCP, base.UDP, base.Graylog, base.Accounting, base.Journal, base.KafkaSource:
+	case base.RELP, base.DirectRELP, base.TCP, base.UDP, base.Graylog, base.Accounting, base.Journal, base.KafkaSource, base.Filesystem:
 		cname, _ := base.Name(s.typ, true)
 		// the plugin will use this pipe to report syslog messages
 		piper, pipew, err := os.Pipe()
@@ -783,33 +786,27 @@ func (s *PluginController) Create(optsfuncs ...func(*PluginCreateOpts)) error {
 // StorePlugin is the specialized controller that takes care of the Store.
 type StorePlugin struct {
 	*PluginController
-	*queue.MessageQueue
+	*queue.BSliceQueue
 	pushwg *sync.WaitGroup
 }
 
 func (s *StorePlugin) pushqueue(secret *memguard.LockedBuffer) {
-	var messages []*model.FullMessage
-	var message *model.FullMessage
-	var messageb []byte
+	var messages [][]byte
+	var message []byte
 	var err error
 	bufpipe := bufio.NewWriter(s.pipe)
 	writeToStore := utils.NewEncryptWriter(bufpipe, secret)
 
 	for {
-		messages = s.MessageQueue.GetMany(s.conf.Store.BatchSize)
+		messages = s.BSliceQueue.GetMany(s.conf.Store.BatchSize)
 		if len(messages) == 0 {
 			return
 		}
 		for _, message = range messages {
-			messageb, err = message.Marshal()
-			if err == nil {
-				_, err = writeToStore.Write(messageb)
-				if err != nil {
-					s.logger.Error("Unexpected error when writing messages to the Store pipe", "error", err)
-					return
-				}
-			} else {
-				s.logger.Warn("A message provided by a plugin could not be serialized", "error", err)
+			_, err = writeToStore.Write(message)
+			if err != nil {
+				s.logger.Error("Unexpected error when writing messages to the Store pipe", "error", err)
+				return
 			}
 		}
 		err = bufpipe.Flush()
@@ -821,7 +818,7 @@ func (s *StorePlugin) pushqueue(secret *memguard.LockedBuffer) {
 }
 
 func (s *StorePlugin) push(secret *memguard.LockedBuffer) {
-	for s.MessageQueue.Wait(0) {
+	for s.BSliceQueue.Wait(0) {
 		s.pushqueue(secret)
 	}
 	s.pushwg.Done()
@@ -829,8 +826,8 @@ func (s *StorePlugin) push(secret *memguard.LockedBuffer) {
 
 // Shutdown stops definetely the Store.
 func (s *StorePlugin) Shutdown(killTimeOut time.Duration) {
-	s.MessageQueue.Dispose() // will make push() return
-	s.pushwg.Wait()          // wait that push() returns
+	s.BSliceQueue.Dispose() // will make push() return
+	s.pushwg.Wait()         // wait that push() returns
 
 	if s.conf.Main.EncryptIPC {
 		secret, err := s.ring.GetBoxSecret()
@@ -844,10 +841,15 @@ func (s *StorePlugin) Shutdown(killTimeOut time.Duration) {
 }
 
 // Stash stores the given message into the Store
-func (s *StorePlugin) Stash(m model.FullMessage) error {
+func (s *StorePlugin) Stash(m *model.FullMessage) (err error) {
 	// this method is called very frequently, so we avoid to lock anything
-	// the MessageQueue ensures that we write the messages sequentially to the store child
-	return s.MessageQueue.Put(m)
+	// the BSliceQueue ensures that we write the messages sequentially to the store child
+	var b []byte
+	b, err = m.Marshal()
+	if err != nil {
+		return err
+	}
+	return s.BSliceQueue.Put(b)
 }
 
 func (s *StorePlugin) Start() (infos []model.ListenerInfo, err error) {

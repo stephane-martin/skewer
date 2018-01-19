@@ -112,20 +112,19 @@ func pJson(m []byte, decoder *encoding.Decoder) (msg *model.SyslogMessage, rerr 
 		structured = strings.TrimSpace(sourceMsg.Structured)
 	}
 
-	msg = &model.SyslogMessage{
-		Priority:         model.Priority(pri),
-		Facility:         model.Facility(pri / 8),
-		Severity:         model.Severity(pri % 8),
-		Version:          1,
-		TimeReportedNum:  reported.UnixNano(),
-		TimeGeneratedNum: generated.UnixNano(),
-		HostName:         hostname,
-		AppName:          appname,
-		ProcId:           procid,
-		MsgId:            msgid,
-		Structured:       structured,
-		Message:          strings.TrimSpace(sourceMsg.Message),
-	}
+	msg = model.Factory()
+	msg.Priority = model.Priority(pri)
+	msg.Facility = model.Facility(pri / 8)
+	msg.Severity = model.Severity(pri % 8)
+	msg.Version = 1
+	msg.TimeReportedNum = reported.UnixNano()
+	msg.TimeGeneratedNum = generated.UnixNano()
+	msg.HostName = hostname
+	msg.AppName = appname
+	msg.ProcId = procid
+	msg.MsgId = msgid
+	msg.Structured = structured
+	msg.Message = strings.TrimSpace(sourceMsg.Message)
 
 	for k, v := range sourceMsg.Properties {
 		msg.SetProperty("rsyslog", strings.TrimSpace(k), strings.TrimSpace(fmt.Sprintf("%v", v)))

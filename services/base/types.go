@@ -18,7 +18,22 @@ const (
 	KafkaSource
 	Configuration
 	Graylog
+	Filesystem
 )
+
+var Names2Types map[string]Types = map[string]Types{
+	"skewer-tcp":         TCP,
+	"skewer-udp":         UDP,
+	"skewer-relp":        RELP,
+	"skewer-directrelp":  DirectRELP,
+	"skewer-journal":     Journal,
+	"skewer-store":       Store,
+	"skewer-accounting":  Accounting,
+	"skewer-kafkasource": KafkaSource,
+	"skewer-conf":        Configuration,
+	"skewer-graylog":     Graylog,
+	"skewer-files":       Filesystem,
+}
 
 var ErrNotFound = errors.New("Not found")
 
@@ -45,19 +60,6 @@ func Type(name string) (t Types, cfnd bool, err error) {
 		return t, cfnd, nil
 	}
 	return -1, false, ErrNotFound
-}
-
-var Names2Types map[string]Types = map[string]Types{
-	"skewer-tcp":         TCP,
-	"skewer-udp":         UDP,
-	"skewer-relp":        RELP,
-	"skewer-directrelp":  DirectRELP,
-	"skewer-journal":     Journal,
-	"skewer-store":       Store,
-	"skewer-accounting":  Accounting,
-	"skewer-kafkasource": KafkaSource,
-	"skewer-conf":        Configuration,
-	"skewer-graylog":     Graylog,
 }
 
 var Types2Names map[Types]string
@@ -105,6 +107,7 @@ func init() {
 		{Types2Names[Accounting], Logger},
 		{Types2Names[KafkaSource], Logger},
 		{Types2Names[Graylog], Logger},
+		{Types2Names[Filesystem], Logger},
 	}
 
 	HandlesMap = map[ServiceHandle]uintptr{}

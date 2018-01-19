@@ -15,13 +15,11 @@ import (
 	sarama "github.com/Shopify/sarama"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
-	"golang.org/x/text/encoding"
 
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/javascript"
 	"github.com/stephane-martin/skewer/model"
-	"github.com/stephane-martin/skewer/model/decoders"
 	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/services/errors"
 	"github.com/stephane-martin/skewer/sys/binder"
@@ -240,7 +238,7 @@ func (s *DirectRelpServiceImpl) Start() ([]model.ListenerInfo, error) {
 	cpus := runtime.NumCPU()
 	for i := 0; i < cpus; i++ {
 		s.parsewg.Add(1)
-		go s.Parse()
+		go s.parse()
 	}
 
 	s.status = Started
@@ -338,18 +336,63 @@ func (s *DirectRelpServiceImpl) SetConf(sc []conf.DirectRELPSourceConfig, pc []c
 	}}
 }
 
-func (s *DirectRelpServiceImpl) Parse() {
+func makeDRELPLogger(logger log15.Logger, raw *model.RawTcpMessage) log15.Logger {
+	return logger.New(
+		"protocol", "directrelp",
+		"client", raw.Client,
+		"local_port", raw.LocalPort,
+		"unix_socket_path", raw.UnixSocketPath,
+		"format", raw.Format,
+		"txnr", raw.Txnr,
+	)
+}
+
+func (s *DirectRelpServiceImpl) parseOne(raw *model.RawTcpMessage, e *base.ParsersEnv) {
+
+	parser, err := e.GetParser(raw.Format)
+	if err != nil || parser == nil {
+		s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
+		makeDRELPLogger(s.Logger, raw).Crit("Unknown parser")
+		return
+	}
+	decoder := utils.SelectDecoder(raw.Encoding)
+	syslogMsg, err := parser(raw.Message[:raw.Size], decoder)
+	if err != nil {
+		makeDRELPLogger(s.Logger, raw).Warn("Parsing error", "message", string(raw.Message[:raw.Size]), "error", err)
+		s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
+		base.ParsingErrorCounter.WithLabelValues("directrelp", raw.Client, raw.Format).Inc()
+		return
+	}
+	if syslogMsg == nil {
+		s.forwarder.ForwardSucc(raw.ConnID, raw.Txnr)
+		return
+	}
+
+	if raw.Client != "" {
+		syslogMsg.SetProperty("skewer", "client", raw.Client)
+	}
+	if raw.LocalPort != 0 {
+		syslogMsg.SetProperty("skewer", "localport", strconv.FormatInt(int64(raw.LocalPort), 10))
+	}
+	if raw.UnixSocketPath != "" {
+		syslogMsg.SetProperty("skewer", "socketpath", raw.UnixSocketPath)
+	}
+
+	parsedMsg := &model.FullMessage{
+		Fields: syslogMsg,
+		Txnr:   raw.Txnr,
+		ConfId: raw.ConfID,
+		ConnId: raw.ConnID,
+	}
+	_ = s.parsedMessagesQueue.Put(parsedMsg)
+}
+
+func (s *DirectRelpServiceImpl) parse() {
 	defer s.parsewg.Done()
 
-	e := NewParsersEnv(s.ParserConfigs, s.Logger)
-
 	var raw *model.RawTcpMessage
-	var parser decoders.Parser
-	var syslogMsg *model.SyslogMessage
-	var parsedMsg model.FullMessage
 	var err error
-	var decoder *encoding.Decoder
-	var logger log15.Logger
+	e := base.NewParsersEnv(s.ParserConfigs, s.Logger)
 
 	for {
 		raw, err = s.rawMessagesQueue.Get()
@@ -360,53 +403,9 @@ func (s *DirectRelpServiceImpl) Parse() {
 			s.Logger.Error("rawMessagesQueue returns nil, should not happen!")
 			return
 		}
-
-		logger = s.Logger.New(
-			"protocol", "directrelp",
-			"client", raw.Client,
-			"local_port", raw.LocalPort,
-			"unix_socket_path", raw.UnixSocketPath,
-			"format", raw.Format,
-			"txnr", raw.Txnr,
-		)
-		parser, err = e.GetParser(raw.Format)
-		if err != nil || parser == nil {
-			s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
-			logger.Crit("Unknown parser")
-			s.Pool.Put(raw)
-			return
-		}
-		decoder = utils.SelectDecoder(raw.Encoding)
-		syslogMsg, err = parser(raw.Message[:raw.Size], decoder)
-		if err != nil {
-			logger.Warn("Parsing error", "message", string(raw.Message[:raw.Size]), "error", err)
-			s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
-			base.ParsingErrorCounter.WithLabelValues("directrelp", raw.Client, raw.Format).Inc()
-			s.Pool.Put(raw)
-			continue
-		}
-		if syslogMsg == nil {
-			s.forwarder.ForwardSucc(raw.ConnID, raw.Txnr)
-			s.Pool.Put(raw)
-			continue
-		}
-
-		parsedMsg = model.FullMessage{
-			Parsed: model.ParsedMessage{
-				Fields:         *syslogMsg,
-				Client:         raw.Client,
-				LocalPort:      raw.LocalPort,
-				UnixSocketPath: raw.UnixSocketPath,
-			},
-			Txnr:   raw.Txnr,
-			ConfId: raw.ConfID,
-			ConnId: raw.ConnID,
-		}
+		s.parseOne(raw, e)
 		s.Pool.Put(raw)
-
-		_ = s.parsedMessagesQueue.Put(parsedMsg)
 	}
-
 }
 
 func (s *DirectRelpServiceImpl) handleKafkaResponses() {
@@ -558,12 +557,13 @@ ForParsedChan:
 			// should not happen
 			continue ForParsedChan
 		}
-		logger = s.Logger.New("client", message.Parsed.Client, "port", message.Parsed.LocalPort, "path", message.Parsed.UnixSocketPath)
+		logger = s.Logger
 		e, haveEnv = envs[message.ConfId]
 		if !haveEnv {
 			config, haveEnv = s.configs[message.ConfId]
 			if !haveEnv {
 				s.Logger.Warn("Could not find the configuration for a message", "confId", message.ConfId, "txnr", message.Txnr)
+				model.Free(message.Fields)
 				continue ForParsedChan
 			}
 			envs[message.ConfId] = javascript.NewFilterEnvironment(
@@ -578,49 +578,54 @@ ForParsedChan:
 			e = envs[message.ConfId]
 		}
 
-		topic, errs = e.Topic(message.Parsed.Fields)
+		topic, errs = e.Topic(message.Fields)
 		for _, err = range errs {
 			logger.Info("Error calculating topic", "error", err, "txnr", message.Txnr)
 		}
 		if len(topic) == 0 {
 			logger.Warn("Topic or PartitionKey could not be calculated", "txnr", message.Txnr)
 			s.forwarder.ForwardFail(message.ConnId, message.Txnr)
+			model.Free(message.Fields)
 			continue ForParsedChan
 		}
-		partitionKey, errs = e.PartitionKey(message.Parsed.Fields)
+		partitionKey, errs = e.PartitionKey(message.Fields)
 		for _, err = range errs {
 			logger.Info("Error calculating the partition key", "error", err, "txnr", message.Txnr)
 		}
-		partitionNumber, errs = e.PartitionNumber(message.Parsed.Fields)
+		partitionNumber, errs = e.PartitionNumber(message.Fields)
 		for _, err = range errs {
 			logger.Info("Error calculating the partition number", "error", err, "txnr", message.Txnr)
 		}
 
-		filterResult, err = e.FilterMessage(&message.Parsed.Fields)
+		filterResult, err = e.FilterMessage(message.Fields)
 
 		switch filterResult {
 		case javascript.DROPPED:
 			s.forwarder.ForwardFail(message.ConnId, message.Txnr)
-			base.MessageFilteringCounter.WithLabelValues("dropped", message.Parsed.Client).Inc()
+			base.MessageFilteringCounter.WithLabelValues("dropped", message.Fields.GetProperty("skewer", "client")).Inc()
+			model.Free(message.Fields)
 			continue ForParsedChan
 		case javascript.REJECTED:
 			s.forwarder.ForwardFail(message.ConnId, message.Txnr)
-			base.MessageFilteringCounter.WithLabelValues("rejected", message.Parsed.Client).Inc()
+			base.MessageFilteringCounter.WithLabelValues("rejected", message.Fields.GetProperty("skewer", "client")).Inc()
+			model.Free(message.Fields)
 			continue ForParsedChan
 		case javascript.PASS:
-			base.MessageFilteringCounter.WithLabelValues("passing", message.Parsed.Client).Inc()
+			base.MessageFilteringCounter.WithLabelValues("passing", message.Fields.GetProperty("skewer", "client")).Inc()
 		default:
 			s.forwarder.ForwardFail(message.ConnId, message.Txnr)
-			base.MessageFilteringCounter.WithLabelValues("unknown", message.Parsed.Client).Inc()
+			base.MessageFilteringCounter.WithLabelValues("unknown", message.Fields.GetProperty("skewer", "client")).Inc()
 			logger.Warn("Error happened processing message", "txnr", message.Txnr, "error", err)
+			model.Free(message.Fields)
 			continue ForParsedChan
 		}
 
-		serialized, err = message.Parsed.RegularJson()
+		serialized, err = message.Fields.RegularJson()
 
 		if err != nil {
 			logger.Warn("Error generating Kafka message", "error", err, "txnr", message.Txnr)
 			s.forwarder.ForwardFail(message.ConnId, message.Txnr)
+			model.Free(message.Fields)
 			continue ForParsedChan
 		}
 
@@ -634,6 +639,7 @@ ForParsedChan:
 		}
 
 		s.producer.Input() <- kafkaMsg
+		model.Free(message.Fields)
 	}
 
 }

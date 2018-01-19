@@ -7,7 +7,7 @@ import (
 
 func pProtobuf(m []byte, decoder *encoding.Decoder) (msg *model.SyslogMessage, err error) {
 	// binary format: we ignore decoder
-	msg = &model.SyslogMessage{}
+	msg = model.Factory()
 	err = msg.Unmarshal(m)
 	if err != nil {
 		return nil, err

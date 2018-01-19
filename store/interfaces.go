@@ -10,7 +10,7 @@ import (
 )
 
 type Store interface {
-	Stash(m model.FullMessage) (error, error)
+	Stash(m *model.FullMessage) (error, error)
 	Outputs(dest conf.DestinationType) chan *model.FullMessage
 	ACK(uid utils.MyULID, dest conf.DestinationType)
 	NACK(uid utils.MyULID, dest conf.DestinationType)
@@ -20,7 +20,6 @@ type Store interface {
 	GetSyslogConfig(configID utils.MyULID) (*conf.FilterSubConfig, error)
 	StoreAllSyslogConfigs(c conf.BaseConfig) error
 	ReadAllBadgers() (map[string]string, map[string]string, map[string]string)
-	ReleaseMsg(msg *model.FullMessage)
 	Destinations() []conf.DestinationType
 	Confined() bool
 }

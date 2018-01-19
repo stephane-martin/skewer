@@ -1,56 +1,53 @@
 package queue
 
 import (
-	//"runtime"
-
 	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
 
-	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
 )
 
-type messageNode struct {
-	next *messageNode
-	msg  *model.FullMessage
+type bsliceNode struct {
+	next  *bsliceNode
+	slice []byte
 }
 
-type MessageQueue struct {
-	head     *messageNode
-	tail     *messageNode
+type BSliceQueue struct {
+	head     *bsliceNode
+	tail     *bsliceNode
 	disposed int32
 	pool     *sync.Pool
 }
 
-func NewMessageQueue() *MessageQueue {
-	stub := &messageNode{}
-	return &MessageQueue{
+func NewBSliceQueue() *BSliceQueue {
+	stub := &bsliceNode{}
+	return &BSliceQueue{
 		disposed: 0,
 		head:     stub,
 		tail:     stub,
 		pool: &sync.Pool{
 			New: func() interface{} {
-				return &messageNode{}
+				return &bsliceNode{}
 			},
 		},
 	}
 }
 
-func (q *MessageQueue) Disposed() bool {
+func (q *BSliceQueue) Disposed() bool {
 	return atomic.LoadInt32(&q.disposed) == 1
 }
 
-func (q *MessageQueue) Dispose() {
+func (q *BSliceQueue) Dispose() {
 	atomic.StoreInt32(&q.disposed, 1)
 }
 
-func (q *MessageQueue) Has() bool {
+func (q *BSliceQueue) Has() bool {
 	return q.tail.next != nil
 }
 
-func (q *MessageQueue) Wait(timeout time.Duration) bool {
+func (q *BSliceQueue) Wait(timeout time.Duration) bool {
 	start := time.Now()
 	var w utils.ExpWait
 	for {
@@ -67,16 +64,16 @@ func (q *MessageQueue) Wait(timeout time.Duration) bool {
 	}
 }
 
-func (q *MessageQueue) Get() (*model.FullMessage, error) {
+func (q *BSliceQueue) Get() ([]byte, error) {
 	tail := q.tail
 	next := tail.next
 	if next != nil {
 		//q.tail = next
 		//tail.msg = next.msg
 		//m = tail.msg
-		(*messageNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.tail)), unsafe.Pointer(next))).msg = next.msg
+		(*bsliceNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.tail)), unsafe.Pointer(next))).slice = next.slice
 		q.pool.Put(tail)
-		return next.msg, nil
+		return next.slice, nil
 	} else if q.Disposed() {
 		return nil, utils.ErrDisposed
 	} else {
@@ -84,21 +81,21 @@ func (q *MessageQueue) Get() (*model.FullMessage, error) {
 	}
 }
 
-func (q *MessageQueue) Put(m *model.FullMessage) error {
+func (q *BSliceQueue) Put(m []byte) error {
 	if q.Disposed() {
 		return utils.ErrDisposed
 	}
-	n := q.pool.Get().(*messageNode)
-	n.msg = m
+	n := q.pool.Get().(*bsliceNode)
+	n.slice = m
 	n.next = nil
-	(*messageNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.head)), unsafe.Pointer(n))).next = n
+	(*bsliceNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.head)), unsafe.Pointer(n))).next = n
 	return nil
 }
 
-func (q *MessageQueue) GetMany(max uint32) []*model.FullMessage {
-	var elt *model.FullMessage
+func (q *BSliceQueue) GetMany(max uint32) [][]byte {
+	var elt []byte
 	var err error
-	res := make([]*model.FullMessage, 0, max)
+	res := make([][]byte, 0, max)
 	var i uint32
 	for i = 0; i < max; i++ {
 		elt, err = q.Get()

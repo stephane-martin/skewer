@@ -123,7 +123,6 @@ func (fwder *fwderImpl) doForward(ctx context.Context) {
 			}
 			if message != nil {
 				err = fwder.fwdMsg(message, jsenvs, dest)
-				fwder.store.ReleaseMsg(message)
 				if err != nil {
 					fwder.logger.Warn("Error forwarding message", "error", err)
 				}
@@ -168,42 +167,42 @@ func (fwder *fwderImpl) fwdMsg(m *model.FullMessage, envs map[utils.MyULID]*java
 	_, ok2 := dest.(*dests.NATSDestination)
 	if ok1 || ok2 {
 		// only calculate proper Topic, PartitionKey and PartitionNumber if we are sending to Kafka or NATS
-		topic, errs = env.Topic(m.Parsed.Fields)
+		topic, errs = env.Topic(m.Fields)
 		for _, err = range errs {
 			fwder.logger.Info("Error calculating topic", "error", err, "uid", m.Uid)
 		}
 		if len(topic) == 0 {
 			topic = "default-topic"
 		}
-		partitionKey, errs = env.PartitionKey(m.Parsed.Fields)
+		partitionKey, errs = env.PartitionKey(m.Fields)
 		for _, err := range errs {
 			fwder.logger.Info("Error calculating the partition key", "error", err, "uid", m.Uid)
 		}
-		partitionNumber, errs = env.PartitionNumber(m.Parsed.Fields)
+		partitionNumber, errs = env.PartitionNumber(m.Fields)
 		for _, err := range errs {
 			fwder.logger.Info("Error calculating the partition number", "error", err, "uid", m.Uid)
 		}
 	}
 
-	filterResult, err = env.FilterMessage(&m.Parsed.Fields)
+	filterResult, err = env.FilterMessage(m.Fields)
 
 	switch filterResult {
 	case javascript.DROPPED:
 		fwder.store.ACK(m.Uid, fwder.desttype)
-		fwder.messageFilterCounter.WithLabelValues("dropped", m.Parsed.Client, conf.DestinationNames[fwder.desttype]).Inc()
+		fwder.messageFilterCounter.WithLabelValues("dropped", m.Fields.GetProperty("skewer", "client"), conf.DestinationNames[fwder.desttype]).Inc()
 		return
 	case javascript.REJECTED:
-		fwder.messageFilterCounter.WithLabelValues("rejected", m.Parsed.Client, conf.DestinationNames[fwder.desttype]).Inc()
+		fwder.messageFilterCounter.WithLabelValues("rejected", m.Fields.GetProperty("skewer", "client"), conf.DestinationNames[fwder.desttype]).Inc()
 		fwder.store.NACK(m.Uid, fwder.desttype)
 		return
 	case javascript.PASS:
-		fwder.messageFilterCounter.WithLabelValues("passing", m.Parsed.Client, conf.DestinationNames[fwder.desttype]).Inc()
+		fwder.messageFilterCounter.WithLabelValues("passing", m.Fields.GetProperty("skewer", "client"), conf.DestinationNames[fwder.desttype]).Inc()
 	default:
 		fwder.store.PermError(m.Uid, fwder.desttype)
 		fwder.logger.Warn("Error happened processing message", "uid", m.Uid, "error", err)
-		fwder.messageFilterCounter.WithLabelValues("unknown", m.Parsed.Client, conf.DestinationNames[fwder.desttype]).Inc()
+		fwder.messageFilterCounter.WithLabelValues("unknown", m.Fields.GetProperty("skewer", "client"), conf.DestinationNames[fwder.desttype]).Inc()
 		return err
 	}
 
-	return dest.Send(*m, partitionKey, partitionNumber, topic)
+	return dest.Send(m, partitionKey, partitionNumber, topic)
 }

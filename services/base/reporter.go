@@ -25,7 +25,7 @@ type Stasher interface {
 	Start()
 	SetSecret(secret *memguard.LockedBuffer)
 	Stop()
-	Stash(m model.FullMessage) (error, error)
+	Stash(m *model.FullMessage) (error, error)
 }
 
 type Reporter interface {
@@ -39,7 +39,7 @@ type ReporterImpl struct {
 	logger       log15.Logger
 	pipe         *os.File
 	bufferedPipe *bufio.Writer
-	queue        *queue.MessageQueue
+	queue        *queue.BSliceQueue
 	secret       *memguard.LockedBuffer
 	pipeWriter   *utils.EncryptWriter
 }
@@ -56,7 +56,7 @@ func NewReporter(name string, l log15.Logger, pipe *os.File) *ReporterImpl {
 }
 
 func (s *ReporterImpl) Start() {
-	s.queue = queue.NewMessageQueue()
+	s.queue = queue.NewBSliceQueue()
 	go s.pushqueue()
 }
 
@@ -70,21 +70,14 @@ func (s *ReporterImpl) pushqueue() {
 		_ = s.bufferedPipe.Flush()
 		_ = s.pipe.Close()
 	}()
-	var m *model.FullMessage
-	var b []byte
+	var m []byte
 	var err error
 
 	for s.queue.Wait(0) {
 		for s.queue.Wait(100 * time.Millisecond) {
 			m, err = s.queue.Get()
 			if m != nil && err == nil {
-				b, err = m.Marshal()
-				if err != nil {
-					// should not happen
-					s.logger.Warn("A syslog message could not be serialized", "type", s.name, "error", err)
-					return
-				}
-				_, err = s.pipeWriter.Write(b)
+				_, err = s.pipeWriter.Write(m)
 				if err != nil {
 					s.logger.Crit("Unexpected error when writing messages to the plugin pipe", "error", err)
 					return
@@ -105,8 +98,12 @@ func (s *ReporterImpl) Stop() {
 }
 
 // Stash reports one syslog message to the controller.
-func (s *ReporterImpl) Stash(m model.FullMessage) (fatal, nonfatal error) {
-	fatal = s.queue.Put(m) // fatal is set when the queue has been disposed
+func (s *ReporterImpl) Stash(m *model.FullMessage) (fatal, nonfatal error) {
+	b, err := m.Marshal()
+	if err != nil {
+		return nil, err
+	}
+	fatal = s.queue.Put(b) // fatal is set when the queue has been disposed
 	return fatal, nil
 }
 

@@ -32,7 +32,7 @@ type reader struct {
 type Converter func(map[string]string) model.FullMessage
 
 func EntryToSyslog(entry map[string]string) model.ParsedMessage {
-	m := model.SyslogMessage{}
+	m = model.Factory()
 	properties := map[string]string{}
 	for k, v := range entry {
 		k = strings.ToLower(k)

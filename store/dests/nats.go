@@ -83,9 +83,9 @@ func (d *NATSDestination) Close() error {
 	return nil
 }
 
-func (d *NATSDestination) Send(msg model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *NATSDestination) Send(msg *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
 	buf := bytes.NewBuffer(nil)
-	err = d.encoder(&msg, buf)
+	err = d.encoder(msg, buf)
 	if err != nil {
 		d.permerr(msg.Uid)
 		return err

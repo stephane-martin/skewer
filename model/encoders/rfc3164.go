@@ -15,9 +15,7 @@ func encode3164(v interface{}, w io.Writer) error {
 	}
 	switch val := v.(type) {
 	case *model.FullMessage:
-		return encodeMsg3164(&val.Parsed.Fields, w)
-	case *model.ParsedMessage:
-		return encodeMsg3164(&val.Fields, w)
+		return encodeMsg3164(val.Fields, w)
 	case *model.SyslogMessage:
 		return encodeMsg3164(val, w)
 	default:

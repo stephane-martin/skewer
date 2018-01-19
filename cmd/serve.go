@@ -367,9 +367,30 @@ func (ch *serveChild) StartController(typ base.Types) error {
 		return ch.StartAccounting()
 	case base.KafkaSource:
 		return ch.StartKafkaSource()
+	case base.Filesystem:
+		return ch.StartFSPoll()
 	default:
 		return nil
 	}
+}
+
+func (ch *serveChild) StartFSPoll() error {
+	if len(ch.conf.FSSource) > 0 {
+		ch.logger.Info("FS polling is enabled")
+		err := ch.controllers[base.Filesystem].Create(
+			services.DumpableOpt(DumpableFlag),
+		)
+		if err != nil {
+			return fmt.Errorf("error creating the fspoll plugin: %s", err)
+		}
+		ch.controllers[base.Filesystem].SetConf(*ch.conf)
+		_, err = ch.controllers[base.Filesystem].Start()
+		if err != nil {
+			return fmt.Errorf("error starting fspoll plugin: %s", err)
+		}
+		ch.logger.Debug("fspoll plugin has been started")
+	}
+	return nil
 }
 
 func (ch *serveChild) StartKafkaSource() error {

@@ -207,6 +207,10 @@ func (c *KafkaSourceConfig) SetConfID() {
 	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
 }
 
+func (c *FilesystemSourceConfig) SetConfID() {
+	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
+}
+
 func (c *TCPSourceConfig) GetClientAuthType() tls.ClientAuthType {
 	return convertClientAuthType(c.ClientAuthType)
 }
@@ -328,7 +332,7 @@ func (c *BaseConfig) GetCertificatePaths() (res map[string]([]string)) {
 	return res
 }
 
-func (c *SyslogSourceBaseConfig) GetListenAddrs() (addrs map[int]string, err error) {
+func (c *ListenersConfig) GetListenAddrs() (addrs map[int]string, err error) {
 	addrs = map[int]string{}
 	if len(c.UnixSocketPath) > 0 {
 		return
@@ -967,85 +971,96 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 		}
 	}
 
-	syslogConfs := []SyslogSourceConfig{}
+	sources := []Source{}
+	for i := range c.FSSource {
+		sources = append(sources, &c.FSSource[i])
+	}
 	for i := range c.TCPSource {
-		syslogConfs = append(syslogConfs, &c.TCPSource[i])
+		sources = append(sources, &c.TCPSource[i])
 	}
 	for i := range c.UDPSource {
-		syslogConfs = append(syslogConfs, &c.UDPSource[i])
+		sources = append(sources, &c.UDPSource[i])
 	}
 	for i := range c.RELPSource {
-		syslogConfs = append(syslogConfs, &c.RELPSource[i])
+		sources = append(sources, &c.RELPSource[i])
 	}
 	for i := range c.DirectRELPSource {
-		syslogConfs = append(syslogConfs, &c.DirectRELPSource[i])
+		sources = append(sources, &c.DirectRELPSource[i])
 	}
 	for i := range c.GraylogSource {
-		syslogConfs = append(syslogConfs, &c.GraylogSource[i])
+		sources = append(sources, &c.GraylogSource[i])
 	}
+	for i := range c.KafkaSource {
+		sources = append(sources, &c.GraylogSource[i])
+	}
+	sources = append(sources, &c.Journald, &c.Accounting)
 
-	// set default values for TCP, UDP, Graylog and RELP sources.
 	for i := range c.TCPSource {
 		if len(c.TCPSource[i].FrameDelimiter) == 0 {
 			c.TCPSource[i].FrameDelimiter = "\n"
 		}
 	}
 
-	for _, syslogConf := range syslogConfs {
-		baseConf := syslogConf.GetSyslogConf()
-		filterConf := syslogConf.GetFilterConf()
-
-		if baseConf.UnixSocketPath == "" {
-			if baseConf.BindAddr == "" {
-				baseConf.BindAddr = "127.0.0.1"
+	// set default values for sources
+	for _, sourceConf := range sources {
+		listeners := sourceConf.ListenersConf()
+		filtering := sourceConf.FilterConf()
+		if listeners != nil {
+			if listeners.UnixSocketPath == "" {
+				if listeners.BindAddr == "" {
+					listeners.BindAddr = "127.0.0.1"
+				}
+				if len(listeners.Ports) == 0 {
+					listeners.Ports = []int{sourceConf.DefaultPort()}
+				}
 			}
-			if len(baseConf.Ports) == 0 {
-				baseConf.Ports = []int{syslogConf.DefaultPort()}
-			}
-		}
 
-		if baseConf.Format == "" {
-			baseConf.Format = "auto"
-		}
-		if filterConf.TopicTmpl == "" {
-			filterConf.TopicTmpl = "rsyslog-{{.Appname}}"
-		}
-		if filterConf.PartitionTmpl == "" {
-			filterConf.PartitionTmpl = "mypk-{{.Hostname}}"
-		}
-		if baseConf.KeepAlivePeriod <= 0 {
-			baseConf.KeepAlivePeriod = 75 * time.Second
-		}
-		if baseConf.Timeout <= 0 {
-			baseConf.Timeout = time.Minute
-		}
-		if baseConf.Encoding == "" {
-			baseConf.Encoding = "utf8"
-		}
-		if len(filterConf.TopicTmpl) > 0 {
-			_, err = template.New("topic").Parse(filterConf.TopicTmpl)
+			if listeners.Format == "" {
+				listeners.Format = "auto"
+			}
+			if listeners.Timeout <= 0 {
+				listeners.Timeout = time.Minute
+			}
+			if listeners.Encoding == "" {
+				listeners.Encoding = "utf8"
+			}
+			if listeners.KeepAlivePeriod <= 0 {
+				listeners.KeepAlivePeriod = 75 * time.Second
+			}
+			_, err = listeners.GetListenAddrs()
 			if err != nil {
-				return ConfigurationCheckError{ErrString: "Error compiling the topic template", Err: err}
+				return ConfigurationCheckError{Err: err}
+			}
+
+			if decoders.ParseFormat(listeners.Format) == -1 {
+				if _, ok := parsersNames[listeners.Format]; !ok {
+					return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown parser: '%s'", listeners.Format)}
+				}
 			}
 		}
-		if len(filterConf.PartitionTmpl) > 0 {
-			_, err = template.New("partition").Parse(filterConf.PartitionTmpl)
-			if err != nil {
-				return ConfigurationCheckError{ErrString: "Error compiling the partition key template", Err: err}
+		if filtering != nil {
+			if filtering.TopicTmpl == "" {
+				filtering.TopicTmpl = "topic-{{.Appname}}"
 			}
-		}
-		_, err = baseConf.GetListenAddrs()
-		if err != nil {
-			return ConfigurationCheckError{Err: err}
+			if filtering.PartitionTmpl == "" {
+				filtering.PartitionTmpl = "partition-{{.Hostname}}"
+			}
+
+			if len(filtering.TopicTmpl) > 0 {
+				_, err = template.New("topic").Parse(filtering.TopicTmpl)
+				if err != nil {
+					return ConfigurationCheckError{ErrString: "Error compiling the topic template", Err: err}
+				}
+			}
+			if len(filtering.PartitionTmpl) > 0 {
+				_, err = template.New("partition").Parse(filtering.PartitionTmpl)
+				if err != nil {
+					return ConfigurationCheckError{ErrString: "Error compiling the partition key template", Err: err}
+				}
+			}
+			sourceConf.SetConfID()
 		}
 
-		if decoders.ParseFormat(baseConf.Format) == -1 {
-			if _, ok := parsersNames[baseConf.Format]; !ok {
-				return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown parser: '%s'", baseConf.Format)}
-			}
-		}
-
-		syslogConf.SetConfID()
 	}
 
 	// set default paramaters for kafka sources
@@ -1133,45 +1148,9 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 				return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown parser: '%s'", conf.Format)}
 			}
 		}
-
-		if conf.TopicTmpl == "" {
-			conf.TopicTmpl = "rsyslog-{{.Appname}}"
-		}
-		if conf.PartitionTmpl == "" {
-			conf.PartitionTmpl = "mypk-{{.Hostname}}"
-		}
-		if len(conf.TopicTmpl) > 0 {
-			_, err = template.New("topic").Parse(conf.TopicTmpl)
-			if err != nil {
-				return ConfigurationCheckError{ErrString: "Error compiling the topic template", Err: err}
-			}
-		}
-		if len(conf.PartitionTmpl) > 0 {
-			_, err = template.New("partition").Parse(conf.PartitionTmpl)
-			if err != nil {
-				return ConfigurationCheckError{ErrString: "Error compiling the partition key template", Err: err}
-			}
-		}
-
 		conf.SetConfID()
 	}
 
-	if c.Journald.Enabled {
-		var err error
-
-		if len(c.Journald.TopicTmpl) > 0 {
-			_, err = template.New("journaldtopic").Parse(c.Journald.TopicTmpl)
-			if err != nil {
-				return ConfigurationCheckError{ErrString: "Error compiling the topic template", Err: err}
-			}
-		}
-		if len(c.Journald.PartitionTmpl) > 0 {
-			_, err = template.New("journaldpartition").Parse(c.Journald.PartitionTmpl)
-			if err != nil {
-				return ConfigurationCheckError{ErrString: "Error compiling the partition key template", Err: err}
-			}
-		}
-	}
 	if r != nil {
 		m, err := r.GetBoxSecret()
 		if err != nil {
@@ -1186,8 +1165,6 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 		c.Store.Secret = ""
 	}
 
-	c.Journald.SetConfID()
-	c.Accounting.SetConfID()
 	c.KafkaDest.Partitioner = strings.TrimSpace(strings.ToLower(c.KafkaDest.Partitioner))
 	c.KafkaDest.Partitioner = strings.Replace(c.KafkaDest.Partitioner, "-", "", -1)
 	c.KafkaDest.Partitioner = strings.Replace(c.KafkaDest.Partitioner, "_", "", -1)

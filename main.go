@@ -517,7 +517,8 @@ func runUnconfined(t base.Types) {
 		base.Journal,
 		base.Store,
 		base.Accounting,
-		base.KafkaSource:
+		base.KafkaSource,
+		base.Filesystem:
 
 		if t == base.Store {
 			runtime.GOMAXPROCS(128)
@@ -654,7 +655,8 @@ func runConfined(t base.Types) {
 		base.DirectRELP,
 		base.Store,
 		base.Configuration,
-		base.KafkaSource:
+		base.KafkaSource,
+		base.Filesystem:
 
 		path, err := osext.Executable()
 		if err != nil {

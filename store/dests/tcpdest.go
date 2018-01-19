@@ -80,8 +80,8 @@ func NewTCPDestination(ctx context.Context, e *Env) (Destination, error) {
 	return d, nil
 }
 
-func (d *TCPDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
-	err = d.clt.Send(&message)
+func (d *TCPDestination) Send(message *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+	err = d.clt.Send(message)
 	if err == nil {
 		if d.previousUid != utils.ZeroUid {
 			d.ack(d.previousUid)

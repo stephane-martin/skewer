@@ -286,11 +286,18 @@ func (s *GraylogSvcImpl) handleConnection(conn net.PacketConn, config conf.Grayl
 
 		full.Uid = gen.Uid()
 		full.ConfId = config.ConfID
-		full.Parsed.LocalPort = localPort
-		full.Parsed.UnixSocketPath = path
-		full.Parsed.Client = client
-		s.stasher.Stash(*full)
+		if localPortS != "" {
+			full.Fields.SetProperty("skewer", "localport", localPortS)
+		}
+		if path != "" {
+			full.Fields.SetProperty("skewer", "socketpath", path)
+		}
+		if client != "" {
+			full.Fields.SetProperty("skewer", "client", client)
+		}
+		s.stasher.Stash(full)
 		base.IncomingMsgsCounter.WithLabelValues("graylog", client, localPortS, path).Inc()
+		model.Free(full.Fields)
 	}
 }
 

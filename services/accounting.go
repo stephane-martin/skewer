@@ -29,7 +29,7 @@ func initAccountingRegistry() {
 type AccountingService struct {
 	stasher        base.Stasher
 	logger         log15.Logger
-	wgroup         *sync.WaitGroup
+	wgroup         sync.WaitGroup
 	Conf           conf.AccountingConfig
 	stopchan       chan struct{}
 	fatalErrorChan chan struct{}
@@ -42,7 +42,6 @@ func NewAccountingService(env *base.ProviderEnv) (base.Provider, error) {
 	s := AccountingService{
 		stasher:  env.Reporter,
 		logger:   env.Logger.New("class", "accounting"),
-		wgroup:   &sync.WaitGroup{},
 		confined: env.Confined,
 	}
 	return &s, nil
@@ -66,43 +65,38 @@ func readFileUntilEnd(f *os.File, size int) (err error) {
 			// we are at the end of the file
 			return nil
 		} else if err == io.ErrUnexpectedEOF {
-			// the file size is not a multiple of Ssize
-			return fmt.Errorf("Accounting file seems corrupted")
+			// the file size is not a multiple of Ssize...
+			return nil
 		} else if err != nil {
 			return fmt.Errorf("Unexpected error while reading the accounting file: %s", err)
 		}
 	}
 }
 
-func (s *AccountingService) makeMessage(buf []byte, tick int64, hostname string, gen *utils.Generator) model.FullMessage {
+func (s *AccountingService) makeMessage(buf []byte, tick int64, hostname string, gen *utils.Generator) *model.FullMessage {
 	acct := accounting.MakeAcct(buf, tick)
 	props := acct.Properties()
-	fields := model.SyslogMessage{
-		AppName:          "accounting",
-		Facility:         0,
-		HostName:         hostname,
-		MsgId:            "",
-		Priority:         0,
-		ProcId:           props["pid"],
-		Severity:         0,
-		Structured:       "",
-		TimeGeneratedNum: acct.Btime.UnixNano(),
-		TimeReportedNum:  time.Now().UnixNano(),
-		Version:          0,
-		Message:          fmt.Sprintf("Accounting: %s (%s/%s)", props["comm"], props["uid"], props["gid"]),
-	}
+	fields := model.Factory()
+	fields.AppName = "accounting"
+	fields.Facility = 0
+	fields.HostName = hostname
+	fields.MsgId = ""
+	fields.Priority = 0
+	fields.ProcId = props["pid"]
+	fields.Severity = 0
+	fields.Structured = ""
+	fields.TimeGeneratedNum = acct.Btime.UnixNano()
+	fields.TimeReportedNum = time.Now().UnixNano()
+	fields.Version = 0
+	fields.Message = fmt.Sprintf("Accounting: %s (%s/%s)", props["comm"], props["uid"], props["gid"])
 	fields.ClearDomain("acct")
 	fields.Properties.Map["acct"].Map = acct.Properties()
+	fields.SetProperty("skewer", "client", hostname)
 
-	return model.FullMessage{
+	return &model.FullMessage{
 		ConfId: s.Conf.ConfID,
 		Uid:    gen.Uid(),
-		Parsed: model.ParsedMessage{
-			Client:         hostname,
-			LocalPort:      0,
-			UnixSocketPath: "",
-			Fields:         fields,
-		},
+		Fields: fields,
 	}
 }
 
@@ -112,8 +106,10 @@ func (s *AccountingService) readFile(f *os.File, tick int64, hostname string, si
 	var offset int64
 	var fsize int64
 	var infos os.FileInfo
+	var full *model.FullMessage
 	buf := make([]byte, accounting.Ssize)
 	gen := utils.NewGenerator()
+
 	for {
 		_, err = io.ReadFull(f, buf)
 		if err == io.EOF || err == io.ErrUnexpectedEOF {
@@ -135,7 +131,9 @@ func (s *AccountingService) readFile(f *os.File, tick int64, hostname string, si
 		} else if err != nil {
 			return fmt.Errorf("Unexpected error while reading the accounting file: %s", err)
 		} else {
-			f, nf := s.stasher.Stash(s.makeMessage(buf, tick, hostname, gen))
+			full = s.makeMessage(buf, tick, hostname, gen)
+			f, nf := s.stasher.Stash(full)
+			model.Free(full.Fields)
 			if nf != nil {
 				s.logger.Warn("Non-fatal error stashing accounting message", "error", nf)
 			} else if f != nil {
@@ -285,11 +283,7 @@ func (s *AccountingService) Stop() {
 }
 
 func (s *AccountingService) Shutdown() {
-	if s.stopchan != nil {
-		close(s.stopchan)
-		s.stopchan = nil
-	}
-	s.wgroup.Wait()
+	s.Stop()
 }
 
 func (s *AccountingService) SetConf(c conf.BaseConfig) {

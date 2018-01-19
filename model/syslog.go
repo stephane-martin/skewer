@@ -20,6 +20,17 @@ type ListenerInfo struct {
 	Protocol       string `json:"protocol" msg:"protocol"`
 }
 
+type RawFileMessage struct {
+	Hostname  string
+	Encoding  string
+	Format    string
+	Directory string
+	Glob      string
+	Filename  string
+	Line      []byte
+	ConfID    utils.MyULID
+}
+
 type RawMessage struct {
 	Client         string
 	LocalPort      int32

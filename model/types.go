@@ -5,7 +5,7 @@ package model
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
+	"sync"
 	"time"
 
 	"github.com/awnumar/memguard"
@@ -41,11 +41,37 @@ var Facilities map[Facility]string = map[Facility]string{
 
 var RFacilities map[string]Facility
 
+var pool *sync.Pool
+
 func init() {
 	RFacilities = map[string]Facility{}
 	for k, v := range Facilities {
 		RFacilities[v] = k
 	}
+	pool = &sync.Pool{
+		New: func() interface{} {
+			return &SyslogMessage{}
+		},
+	}
+}
+
+func Factory() (msg *SyslogMessage) {
+	msg = pool.Get().(*SyslogMessage)
+	msg.Clear()
+	return
+}
+
+func FullFactory() (msg *FullMessage) {
+	msg = &FullMessage{}
+	msg.Fields = Factory()
+	return msg
+}
+
+func Free(msg *SyslogMessage) {
+	if msg == nil {
+		return
+	}
+	pool.Put(msg)
 }
 
 type Priority int32
@@ -84,20 +110,19 @@ type RegularSyslog struct {
 }
 
 func (m *RegularSyslog) Internal() (res *SyslogMessage) {
-	res = &SyslogMessage{
-		Priority:         m.Priority,
-		Facility:         m.Facility,
-		Severity:         m.Severity,
-		Version:          m.Version,
-		TimeReportedNum:  m.TimeReported.UnixNano(),
-		TimeGeneratedNum: m.TimeGenerated.UnixNano(),
-		HostName:         m.HostName,
-		AppName:          m.AppName,
-		ProcId:           m.ProcId,
-		MsgId:            m.MsgId,
-		Structured:       m.Structured,
-		Message:          m.Message,
-	}
+	res = Factory()
+	res.Priority = m.Priority
+	res.Facility = m.Facility
+	res.Severity = m.Severity
+	res.Version = m.Version
+	res.TimeReportedNum = m.TimeReported.UnixNano()
+	res.TimeGeneratedNum = m.TimeGenerated.UnixNano()
+	res.HostName = m.HostName
+	res.AppName = m.AppName
+	res.ProcId = m.ProcId
+	res.MsgId = m.MsgId
+	res.Structured = m.Structured
+	res.Message = m.Message
 	res.SetAllProperties(m.Properties)
 	return res
 }
@@ -121,21 +146,6 @@ func (m *SyslogMessage) Regular() (reg *RegularSyslog) {
 }
 
 func (m *SyslogMessage) RegularJson() ([]byte, error) {
-	return json.Marshal(m.Regular())
-}
-
-func (m *ParsedMessage) Regular() (reg *RegularSyslog) {
-	reg = m.Fields.Regular()
-	if _, ok := reg.Properties["skewer"]; !ok {
-		reg.Properties["skewer"] = map[string]string{}
-	}
-	reg.Properties["skewer"]["client"] = m.Client
-	reg.Properties["skewer"]["path"] = m.UnixSocketPath
-	reg.Properties["skewer"]["port"] = strconv.FormatInt(int64(m.LocalPort), 10)
-	return reg
-}
-
-func (m *ParsedMessage) RegularJson() ([]byte, error) {
 	return json.Marshal(m.Regular())
 }
 
@@ -172,9 +182,39 @@ func (m *SyslogMessage) Date() string {
 	return m.GetTimeReported().Format("2006-01-02")
 }
 
+func (m *SyslogMessage) Clear() {
+	if m == nil {
+		return
+	}
+	m.ClearProperties()
+	m.Priority = 0
+	m.Severity = 0
+	m.Facility = 0
+	m.Version = 0
+	m.TimeGeneratedNum = 0
+	m.TimeReportedNum = 0
+	m.HostName = ""
+	m.AppName = ""
+	m.ProcId = ""
+	m.MsgId = ""
+	m.Structured = ""
+	m.Message = ""
+}
+
 func (m *SyslogMessage) ClearProperties() {
-	m.Properties = Properties{
-		Map: map[string]*InnerProperties{},
+	if m == nil {
+		return
+	}
+	// only allocate a new map if needed
+	if m.Properties.Map == nil {
+		m.Properties.Map = make(map[string]*InnerProperties)
+	}
+	if len(m.Properties.Map) == 0 {
+		return
+	}
+	var k string
+	for k = range m.Properties.Map {
+		delete(m.Properties.Map, k)
 	}
 }
 

@@ -34,7 +34,7 @@ var testjsCmd = &cobra.Command{
 		tfunc := `function Topic(m) { return "topic-" + m.Appname; }`
 		pfunc := `function PartitionNumber(m) {return 4; }`
 		env := javascript.NewFilterEnvironment(ffunc, tfunc, "", "", "", pfunc, logger)
-		m := model.SyslogMessage{}
+		m := &model.SyslogMessage{}
 		m.TimeReportedNum = time.Now().UnixNano()
 		m.TimeGeneratedNum = time.Now().Add(time.Hour).UnixNano()
 		m.Facility = 5
@@ -48,11 +48,9 @@ var testjsCmd = &cobra.Command{
 		m.Message = "orig message"
 		m.SetProperty("foo", "zog", "zogzog")
 		m.SetProperty("bar", "zobi", "la mouche")
-		mparsed := model.ParsedMessage{Fields: m}
-		result, err := env.FilterMessage(&mparsed.Fields)
+		result, err := env.FilterMessage(m)
 		fmt.Println(err)
 		fmt.Println(result)
-		fmt.Println(mparsed)
 
 		topic, errs := env.Topic(m)
 		fmt.Println(errs)

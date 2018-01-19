@@ -10,26 +10,12 @@ import (
 )
 
 func FullToGelfMessage(m *model.FullMessage) *gelf.Message {
-	gm := ParsedToGelfMessage(&m.Parsed)
+	gm := SyslogToGelfMessage(m.Fields)
 	if m.Uid != utils.ZeroUid {
 		gm.Extra["skewer_uid"] = m.Uid.String()
 	}
 	if m.Txnr > 0 {
 		gm.Extra["txnr"] = m.Txnr
-	}
-	return gm
-}
-
-func ParsedToGelfMessage(m *model.ParsedMessage) *gelf.Message {
-	gm := SyslogToGelfMessage(&m.Fields)
-	if len(m.Client) > 0 {
-		gm.Extra["client"] = m.Client
-	}
-	if m.LocalPort > 0 {
-		gm.Extra["port"] = m.LocalPort
-	}
-	if len(m.UnixSocketPath) > 0 {
-		gm.Extra["socket_path"] = m.UnixSocketPath
 	}
 	return gm
 }
@@ -74,14 +60,6 @@ func encodeGELF(v interface{}, w io.Writer) (err error) {
 	case *model.FullMessage:
 		buf := bytes.NewBuffer(nil)
 		err = FullToGelfMessage(val).MarshalJSONBuf(buf)
-		if err != nil {
-			return err
-		}
-		_, err = w.Write(buf.Bytes())
-		return err
-	case *model.ParsedMessage:
-		buf := bytes.NewBuffer(nil)
-		err = ParsedToGelfMessage(val).MarshalJSONBuf(buf)
 		if err != nil {
 			return err
 		}

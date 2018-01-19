@@ -313,7 +313,7 @@ func (e *Environment) setFilterMessagesFunc(f string) error {
 	return nil
 }
 
-func (e *Environment) Topic(m model.SyslogMessage) (topic string, errs []error) {
+func (e *Environment) Topic(m *model.SyslogMessage) (topic string, errs []error) {
 	var err error
 	errs = []error{}
 
@@ -350,7 +350,7 @@ func (e *Environment) Topic(m model.SyslogMessage) (topic string, errs []error) 
 	return topic, errs
 }
 
-func (e *Environment) PartitionKey(m model.SyslogMessage) (partitionKey string, errs []error) {
+func (e *Environment) PartitionKey(m *model.SyslogMessage) (partitionKey string, errs []error) {
 	errs = []error{}
 	var err error
 	var jsMessage goja.Value
@@ -381,7 +381,7 @@ func (e *Environment) PartitionKey(m model.SyslogMessage) (partitionKey string, 
 	return partitionKey, errs
 }
 
-func (e *Environment) PartitionNumber(m model.SyslogMessage) (partitionNumber int32, errs []error) {
+func (e *Environment) PartitionNumber(m *model.SyslogMessage) (partitionNumber int32, errs []error) {
 	errs = []error{}
 	var err error
 	var jsMessage goja.Value
@@ -414,7 +414,7 @@ func (e *Environment) FilterMessage(m *model.SyslogMessage) (filterResult Filter
 	if m == nil {
 		return DROPPED, nil
 	}
-	jsMessage, err = e.toJsMessage(*m)
+	jsMessage, err = e.toJsMessage(m)
 	if err != nil {
 		return FILTER_ERROR, &ConversionGoJsError{ExecutingJSErrorFactory(err, "NewSyslogMessage")}
 	}
@@ -438,6 +438,7 @@ func (e *Environment) FilterMessage(m *model.SyslogMessage) (filterResult Filter
 		}
 		if result != nil {
 			*m = *result
+			model.Free(result)
 		}
 		return PASS, nil
 
@@ -447,7 +448,7 @@ func (e *Environment) FilterMessage(m *model.SyslogMessage) (filterResult Filter
 
 }
 
-func (e *Environment) toJsMessage(m model.SyslogMessage) (sm goja.Value, err error) {
+func (e *Environment) toJsMessage(m *model.SyslogMessage) (sm goja.Value, err error) {
 	p := e.runtime.ToValue(int(m.Priority))
 	f := e.runtime.ToValue(int(m.Facility))
 	s := e.runtime.ToValue(int(m.Severity))
@@ -483,21 +484,19 @@ func (e *Environment) fromJsMessage(sm goja.Value) (m *model.SyslogMessage, err 
 	if err != nil {
 		return m, err
 	}
-
-	res := model.SyslogMessage{
-		Priority:         model.Priority(imsg.Priority),
-		Facility:         model.Facility(imsg.Facility),
-		Severity:         model.Severity(imsg.Severity),
-		Version:          model.Version(imsg.Version),
-		TimeGeneratedNum: imsg.TimeGenerated * 1000000,
-		TimeReportedNum:  imsg.TimeReported * 1000000,
-		HostName:         imsg.Hostname,
-		AppName:          imsg.Appname,
-		ProcId:           imsg.Procid,
-		MsgId:            imsg.Msgid,
-		Structured:       imsg.Structured,
-		Message:          imsg.Message,
-	}
-	res.SetAllProperties(imsg.Properties)
-	return &res, nil
+	m = model.Factory()
+	m.Priority = model.Priority(imsg.Priority)
+	m.Facility = model.Facility(imsg.Facility)
+	m.Severity = model.Severity(imsg.Severity)
+	m.Version = model.Version(imsg.Version)
+	m.TimeGeneratedNum = imsg.TimeGenerated * 1000000
+	m.TimeReportedNum = imsg.TimeReported * 1000000
+	m.HostName = imsg.Hostname
+	m.AppName = imsg.Appname
+	m.ProcId = imsg.Procid
+	m.MsgId = imsg.Msgid
+	m.Structured = imsg.Structured
+	m.Message = imsg.Message
+	m.SetAllProperties(imsg.Properties)
+	return m, nil
 }

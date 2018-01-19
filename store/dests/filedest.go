@@ -331,12 +331,12 @@ func NewFileDestination(ctx context.Context, e *Env) (Destination, error) {
 	return dest, nil
 }
 
-func (d *FileDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
-	if len(message.Parsed.Fields.AppName) == 0 {
-		message.Parsed.Fields.AppName = "empty"
+func (d *FileDestination) Send(message *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+	if len(message.Fields.AppName) == 0 {
+		message.Fields.AppName = "unknown"
 	}
 	buf := bytes.NewBuffer(nil)
-	err = d.filenameTmpl.Execute(buf, message.Parsed)
+	err = d.filenameTmpl.Execute(buf, message.Fields)
 	if err != nil {
 		err = fmt.Errorf("Error calculating filename: %s", err)
 		d.permerr(message.Uid)
@@ -349,7 +349,7 @@ func (d *FileDestination) Send(message model.FullMessage, partitionKey string, p
 		d.nack(message.Uid)
 		return err
 	}
-	encoded, err := encoders.ChainEncode(d.encoder, &message, "\n")
+	encoded, err := encoders.ChainEncode(d.encoder, message, "\n")
 	if err != nil {
 		d.permerr(message.Uid)
 		return err

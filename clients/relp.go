@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"crypto/tls"
 	"fmt"
-	"io"
 	"math"
 	"net"
 	"strconv"
@@ -235,7 +234,6 @@ func (c *RELPClient) Connect() (err error) {
 			return err
 		}
 		tcpconn := conn.(*net.TCPConn)
-		_ = tcpconn.SetNoDelay(true)
 		if c.keepAlive {
 			_ = tcpconn.SetKeepAlive(true)
 			_ = tcpconn.SetKeepAlivePeriod(c.keepAlivePeriod)
@@ -280,7 +278,7 @@ func (c *RELPClient) Connect() (err error) {
 			for range c.ticker.C {
 				err = c.Flush()
 				if err != nil {
-					if utils.IsBrokenPipe(err) {
+					if utils.IsBrokenPipe(err) || utils.IsFileClosed(err) {
 						c.logger.Warn("Broken pipe detected when flushing buffers", "error", err)
 						_ = c.conn.Close()
 						c.sendQueue.Dispose()
@@ -423,7 +421,8 @@ func (c *RELPClient) handleRspAnswers() {
 			_ = c.conn.SetReadDeadline(time.Now().Add(c.relpTimeout))
 		}
 		txnr, retcode, _, err := c.scan()
-		if err == io.EOF {
+		_ = c.conn.SetReadDeadline(time.Time{})
+		if utils.IsFileClosed(err) {
 			// connection is closed
 			c.logger.Debug("Connection has been closed")
 			return

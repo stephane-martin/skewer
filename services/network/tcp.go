@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/inconshreveable/log15"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
@@ -87,7 +88,7 @@ func (s *TcpServiceImpl) Start() ([]model.ListenerInfo, error) {
 		cpus := runtime.NumCPU()
 		for i := 0; i < cpus; i++ {
 			s.wg.Add(1)
-			go s.Parse()
+			go s.parse()
 		}
 	} else {
 		s.Logger.Debug("TCP Server not started: no listener")
@@ -141,22 +142,23 @@ func (s *TcpServiceImpl) SetConf(c conf.BaseConfig) {
 	s.rawMessagesQueue = tcp.NewRing(c.Main.InputQueueSize)
 }
 
-func (s *TcpServiceImpl) ParseOne(raw *model.RawTcpMessage, env *ParsersEnv, gen *utils.Generator) {
-	// be sure to free the raw pointer
-	defer s.Pool.Put(raw)
-	logger := s.Logger.New(
+func makeLogger(logger log15.Logger, raw *model.RawTcpMessage) log15.Logger {
+	// used to avoid to call logger.New in the critical parseOne
+	return logger.New(
 		"protocol", "tcp",
 		"client", raw.Client,
 		"local_port", raw.LocalPort,
 		"unix_socket_path", raw.UnixSocketPath,
 		"format", raw.Format,
 	)
+}
 
+func (s *TcpServiceImpl) parseOne(raw *model.RawTcpMessage, env *base.ParsersEnv, gen *utils.Generator) {
 	decoder := utils.SelectDecoder(raw.Encoding)
 	parser, err := env.GetParser(raw.Format)
 
 	if parser == nil || err != nil {
-		logger.Error("Unknown parser")
+		makeLogger(s.Logger, raw).Error("Unknown parser")
 		return
 	}
 
@@ -164,37 +166,44 @@ func (s *TcpServiceImpl) ParseOne(raw *model.RawTcpMessage, env *ParsersEnv, gen
 	if err != nil {
 		base.ParsingErrorCounter.WithLabelValues("tcp", raw.Client, raw.Format).Inc()
 		//logger.Info("Parsing error", "message", string(raw.Message), "error", err)
-		logger.Info("Parsing error", "error", err)
+		makeLogger(s.Logger, raw).Info("Parsing error", "error", err)
 		return
 	}
 	if syslogMsg == nil {
-		logger.Debug("Empty message")
+		makeLogger(s.Logger, raw).Debug("Empty message")
 		return
 	}
-	fatal, nonfatal := s.reporter.Stash(model.FullMessage{
-		Parsed: model.ParsedMessage{
-			Fields:         *syslogMsg,
-			Client:         raw.Client,
-			LocalPort:      raw.LocalPort,
-			UnixSocketPath: raw.UnixSocketPath,
+	if raw.Client != "" {
+		syslogMsg.SetProperty("skewer", "client", raw.Client)
+	}
+	if raw.UnixSocketPath != "" {
+		syslogMsg.SetProperty("skewer", "socketpath", raw.UnixSocketPath)
+	}
+	if raw.LocalPort != 0 {
+		syslogMsg.SetProperty("skewer", "localport", strconv.FormatInt(int64(raw.LocalPort), 10))
+	}
+	fatal, nonfatal := s.reporter.Stash(
+		&model.FullMessage{
+			Fields: syslogMsg,
+			Uid:    gen.Uid(),
+			ConfId: raw.ConfID,
 		},
-		Uid:    gen.Uid(),
-		ConfId: raw.ConfID,
-	})
+	)
 
 	if fatal != nil {
-		logger.Error("Fatal error stashing TCP message", "error", fatal)
+		makeLogger(s.Logger, raw).Error("Fatal error stashing TCP message", "error", fatal)
 		s.dofatal()
 	} else if nonfatal != nil {
-		logger.Warn("Non-fatal error stashing TCP message", "error", nonfatal)
+		makeLogger(s.Logger, raw).Warn("Non-fatal error stashing TCP message", "error", nonfatal)
 	}
+	model.Free(syslogMsg)
 }
 
-// Parse fetch messages from the raw queue, parse them, and push them to be sent.
-func (s *TcpServiceImpl) Parse() {
+// parse fetch messages from the raw queue, parse them, and push them to be sent.
+func (s *TcpServiceImpl) parse() {
 	defer s.wg.Done()
 
-	env := NewParsersEnv(s.ParserConfigs, s.Logger)
+	env := base.NewParsersEnv(s.ParserConfigs, s.Logger)
 	gen := utils.NewGenerator()
 
 	for {
@@ -202,7 +211,8 @@ func (s *TcpServiceImpl) Parse() {
 		if raw == nil || err != nil {
 			return
 		}
-		s.ParseOne(raw, env, gen)
+		s.parseOne(raw, env, gen)
+		s.Pool.Put(raw)
 	}
 }
 

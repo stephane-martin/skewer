@@ -161,7 +161,7 @@ func (d *HTTPDestination) dosend(ctx context.Context) {
 			return
 		}
 		urlbuf := bytes.NewBuffer(nil)
-		err = d.url.Execute(urlbuf, msg.Parsed)
+		err = d.url.Execute(urlbuf, msg.Fields)
 		if err != nil {
 			d.permerr(msg.Uid)
 			d.logger.Warn("Error calculating target URL from template", "error", err)
@@ -227,8 +227,8 @@ func (d *HTTPDestination) dosend(ctx context.Context) {
 	}
 }
 
-func (d *HTTPDestination) Send(msg model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
-	err = d.sendQueue.Put(&msg)
+func (d *HTTPDestination) Send(msg *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+	err = d.sendQueue.Put(msg)
 	if err != nil {
 		// the client send queue has been disposed
 		d.nack(msg.Uid)

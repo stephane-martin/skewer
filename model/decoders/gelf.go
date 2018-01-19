@@ -9,25 +9,28 @@ import (
 )
 
 func FromGelfMessage(gelfm *gelf.Message) (msg *model.SyslogMessage) {
-	msg = &model.SyslogMessage{}
+	msg = model.Factory()
 	fromGelfMessage(msg, gelfm)
 	return msg
 }
 
 func FullFromGelfMessage(gelfm *gelf.Message) (msg *model.FullMessage) {
-	msg = &model.FullMessage{}
-	fromGelfMessage(&msg.Parsed.Fields, gelfm)
+	msg = model.FullFactory()
+	fromGelfMessage(msg.Fields, gelfm)
 	return msg
 }
 
 func fromGelfMessage(m *model.SyslogMessage, gelfm *gelf.Message) {
-	//m.TimeReported = ""
-	//m.TimeGenerated = ""
-	m.Structured = ""
-	if gelfm == nil {
-		m.Reset()
+	if m == nil {
 		return
 	}
+	//m.TimeReported = ""
+	//m.TimeGenerated = ""
+	if gelfm == nil {
+		m.Clear()
+		return
+	}
+	m.Structured = ""
 	m.Message = gelfm.Short
 	m.TimeReportedNum = int64(gelfm.TimeUnix * 1000000000)
 	m.TimeGeneratedNum = time.Now().UnixNano()

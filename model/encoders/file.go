@@ -30,7 +30,7 @@ func encodeFile(v interface{}, w io.Writer) error {
 		)
 		return err
 	case *model.FullMessage:
-		return encodeFile(&val.Parsed.Fields, w)
+		return encodeFile(&val.Fields, w)
 	default:
 		return defaultEncode(v, w)
 	}

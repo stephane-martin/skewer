@@ -181,3 +181,5 @@ func (base *baseDestination) dofatal() {
 		close(base.fatal)
 	})
 }
+
+// TODO: destinations should free the given syslog message when they are sure they dont need it anymore

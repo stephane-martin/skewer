@@ -12,6 +12,7 @@ import (
 
 // BaseConfig is the root of all configuration parameters.
 type BaseConfig struct {
+	FSSource         []FilesystemSourceConfig `mapstructure:"fs_source" toml:"fs_source" json:"fs_source"`
 	TCPSource        []TCPSourceConfig        `mapstructure:"tcp_source" toml:"tcp_source" json:"tcp_source"`
 	UDPSource        []UDPSourceConfig        `mapstructure:"udp_source" toml:"udp_source" json:"udp_source"`
 	RELPSource       []RELPSourceConfig       `mapstructure:"relp_source" toml:"relp_source" json:"relp_source"`
@@ -24,11 +25,11 @@ type BaseConfig struct {
 	Metrics          MetricsConfig            `mapstructure:"metrics" toml:"metrics" json:"metrics"`
 	Accounting       AccountingConfig         `mapstructure:"accounting" toml:"accounting" json:"accounting"`
 	Main             MainConfig               `mapstructure:"main" toml:"main" json:"main"`
-	KafkaDest        *KafkaDestConfig          `mapstructure:"kafka_destination" toml:"kafka_destination" json:"kafka_destination"`
+	KafkaDest        *KafkaDestConfig         `mapstructure:"kafka_destination" toml:"kafka_destination" json:"kafka_destination"`
 	UDPDest          UDPDestConfig            `mapstructure:"udp_destination" toml:"udp_destination" json:"udp_destination"`
 	TCPDest          TCPDestConfig            `mapstructure:"tcp_destination" toml:"tcp_destination" json:"tcp_destination"`
 	HTTPDest         HTTPDestConfig           `mapstructure:"http_destination" toml:"http_destination" json:"http_destination"`
-	NATSDest         *NATSDestConfig           `mapstructure:"nats_destination" toml:"nats_destination" json:"nats_destination"`
+	NATSDest         *NATSDestConfig          `mapstructure:"nats_destination" toml:"nats_destination" json:"nats_destination"`
 	RELPDest         RELPDestConfig           `mapstructure:"relp_destination" toml:"relp_destination" json:"relp_destination"`
 	FileDest         FileDestConfig           `mapstructure:"file_destination" toml:"file_destination" json:"file_destination"`
 	StderrDest       StderrDestConfig         `mapstructure:"stderr_destination" toml:"stderr_destination" json:"stderr_destination"`
@@ -303,6 +304,18 @@ type JournaldConfig struct {
 	Enabled         bool         `mapstructure:"enabled" toml:"enabled" json:"enabled"`
 }
 
+func (c *JournaldConfig) FilterConf() *FilterSubConfig {
+	return &c.FilterSubConfig
+}
+
+func (c *JournaldConfig) ListenersConf() *ListenersConfig {
+	return nil
+}
+
+func (c *JournaldConfig) DefaultPort() int {
+	return 0
+}
+
 type AccountingConfig struct {
 	FilterSubConfig `mapstructure:",squash"`
 	ConfID          utils.MyULID  `mapstructure:"-" toml:"-" json:"conf_id"`
@@ -311,40 +324,73 @@ type AccountingConfig struct {
 	Enabled         bool          `mapstructure:"enabled" toml:"enabled" json:"enabled"`
 }
 
-type TCPSourceConfig struct {
-	SyslogSourceBaseConfig `mapstructure:",squash"`
-	FilterSubConfig        `mapstructure:",squash"`
-	TlsBaseConfig          `mapstructure:",squash"`
-	ClientAuthType         string       `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
-	LineFraming            bool         `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
-	FrameDelimiter         string       `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
-	ConfID                 utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
-}
-
-func (c *TCPSourceConfig) GetFilterConf() *FilterSubConfig {
+func (c *AccountingConfig) FilterConf() *FilterSubConfig {
 	return &c.FilterSubConfig
 }
 
-func (c *TCPSourceConfig) GetSyslogConf() *SyslogSourceBaseConfig {
-	return &c.SyslogSourceBaseConfig
+func (c *AccountingConfig) ListenersConf() *ListenersConfig {
+	return nil
+}
+
+func (c *AccountingConfig) DefaultPort() int {
+	return 0
+}
+
+type FilesystemSourceConfig struct {
+	FilterSubConfig `mapstructure:",squash"`
+	BaseDirectory   string       `mapstructure:"base_directory" toml:"base_directory" json:"base_directory"`
+	Glob            string       `mapstructure:"glob" toml:"glob" json:"glob"`
+	Format          string       `mapstructure:"format" toml:"format" json:"format"`
+	Encoding        string       `mapstructure:"encoding" toml:"encoding" json:"encoding"`
+	ConfID          utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
+}
+
+type TCPSourceConfig struct {
+	ListenersConfig `mapstructure:",squash"`
+	FilterSubConfig `mapstructure:",squash"`
+	TlsBaseConfig   `mapstructure:",squash"`
+	ClientAuthType  string       `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
+	LineFraming     bool         `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
+	FrameDelimiter  string       `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
+	ConfID          utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
+}
+
+func (c *TCPSourceConfig) FilterConf() *FilterSubConfig {
+	return &c.FilterSubConfig
+}
+
+func (c *TCPSourceConfig) ListenersConf() *ListenersConfig {
+	return &c.ListenersConfig
 }
 
 func (c *TCPSourceConfig) DefaultPort() int {
 	return 1514
 }
 
-type UDPSourceConfig struct {
-	SyslogSourceBaseConfig `mapstructure:",squash"`
-	FilterSubConfig        `mapstructure:",squash"`
-	ConfID                 utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
-}
-
-func (c *UDPSourceConfig) GetFilterConf() *FilterSubConfig {
+func (c *FilesystemSourceConfig) FilterConf() *FilterSubConfig {
 	return &c.FilterSubConfig
 }
 
-func (c *UDPSourceConfig) GetSyslogConf() *SyslogSourceBaseConfig {
-	return &c.SyslogSourceBaseConfig
+func (c *FilesystemSourceConfig) ListenersConf() *ListenersConfig {
+	return nil
+}
+
+func (c *FilesystemSourceConfig) DefaultPort() int {
+	return 0
+}
+
+type UDPSourceConfig struct {
+	ListenersConfig `mapstructure:",squash"`
+	FilterSubConfig `mapstructure:",squash"`
+	ConfID          utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
+}
+
+func (c *UDPSourceConfig) FilterConf() *FilterSubConfig {
+	return &c.FilterSubConfig
+}
+
+func (c *UDPSourceConfig) ListenersConf() *ListenersConfig {
+	return &c.ListenersConfig
 }
 
 func (c *UDPSourceConfig) DefaultPort() int {
@@ -352,17 +398,17 @@ func (c *UDPSourceConfig) DefaultPort() int {
 }
 
 type GraylogSourceConfig struct {
-	SyslogSourceBaseConfig `mapstructure:",squash"`
-	FilterSubConfig        `mapstructure:",squash"`
-	ConfID                 utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
+	ListenersConfig `mapstructure:",squash"`
+	FilterSubConfig `mapstructure:",squash"`
+	ConfID          utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
 }
 
-func (c *GraylogSourceConfig) GetFilterConf() *FilterSubConfig {
+func (c *GraylogSourceConfig) FilterConf() *FilterSubConfig {
 	return &c.FilterSubConfig
 }
 
-func (c *GraylogSourceConfig) GetSyslogConf() *SyslogSourceBaseConfig {
-	return &c.SyslogSourceBaseConfig
+func (c *GraylogSourceConfig) ListenersConf() *ListenersConfig {
+	return &c.ListenersConfig
 }
 
 func (c *GraylogSourceConfig) DefaultPort() int {
@@ -370,21 +416,21 @@ func (c *GraylogSourceConfig) DefaultPort() int {
 }
 
 type RELPSourceConfig struct {
-	SyslogSourceBaseConfig `mapstructure:",squash"`
-	FilterSubConfig        `mapstructure:",squash"`
-	TlsBaseConfig          `mapstructure:",squash"`
-	ClientAuthType         string       `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
-	LineFraming            bool         `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
-	FrameDelimiter         string       `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
-	ConfID                 utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
+	ListenersConfig `mapstructure:",squash"`
+	FilterSubConfig `mapstructure:",squash"`
+	TlsBaseConfig   `mapstructure:",squash"`
+	ClientAuthType  string       `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
+	LineFraming     bool         `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
+	FrameDelimiter  string       `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
+	ConfID          utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
 }
 
-func (c *RELPSourceConfig) GetFilterConf() *FilterSubConfig {
+func (c *RELPSourceConfig) FilterConf() *FilterSubConfig {
 	return &c.FilterSubConfig
 }
 
-func (c *RELPSourceConfig) GetSyslogConf() *SyslogSourceBaseConfig {
-	return &c.SyslogSourceBaseConfig
+func (c *RELPSourceConfig) ListenersConf() *ListenersConfig {
+	return &c.ListenersConfig
 }
 
 func (c *RELPSourceConfig) DefaultPort() int {
@@ -392,35 +438,35 @@ func (c *RELPSourceConfig) DefaultPort() int {
 }
 
 type DirectRELPSourceConfig struct {
-	SyslogSourceBaseConfig `mapstructure:",squash"`
-	FilterSubConfig        `mapstructure:",squash"`
-	TlsBaseConfig          `mapstructure:",squash"`
-	ClientAuthType         string       `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
-	LineFraming            bool         `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
-	FrameDelimiter         string       `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
-	ConfID                 utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
+	ListenersConfig `mapstructure:",squash"`
+	FilterSubConfig `mapstructure:",squash"`
+	TlsBaseConfig   `mapstructure:",squash"`
+	ClientAuthType  string       `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
+	LineFraming     bool         `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
+	FrameDelimiter  string       `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
+	ConfID          utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
 }
 
-func (c *DirectRELPSourceConfig) GetFilterConf() *FilterSubConfig {
+func (c *DirectRELPSourceConfig) FilterConf() *FilterSubConfig {
 	return &c.FilterSubConfig
 }
 
-func (c *DirectRELPSourceConfig) GetSyslogConf() *SyslogSourceBaseConfig {
-	return &c.SyslogSourceBaseConfig
+func (c *DirectRELPSourceConfig) ListenersConf() *ListenersConfig {
+	return &c.ListenersConfig
 }
 
 func (c *DirectRELPSourceConfig) DefaultPort() int {
 	return 3514
 }
 
-type SyslogSourceConfig interface {
-	GetFilterConf() *FilterSubConfig
-	GetSyslogConf() *SyslogSourceBaseConfig
+type Source interface {
+	FilterConf() *FilterSubConfig
+	ListenersConf() *ListenersConfig
 	DefaultPort() int
 	SetConfID()
 }
 
-type SyslogSourceBaseConfig struct {
+type ListenersConfig struct {
 	Ports           []int         `mapstructure:"ports" toml:"ports" json:"ports"`
 	BindAddr        string        `mapstructure:"bind_addr" toml:"bind_addr" json:"bind_addr"`
 	UnixSocketPath  string        `mapstructure:"unix_socket_path" toml:"unix_socket_path" json:"unix_socket_path"`
@@ -445,6 +491,18 @@ type KafkaSourceConfig struct {
 	OffsetsMaxRetry         int           `mapstructure:"offsets_max_retry" toml:"offsets_max_retry" json:"offsets_max_retry"`
 	GroupID                 string        `mapstructure:"group_ip" toml:"group_id" json:"group_id"`
 	Topics                  []string      `mapstructure:"topics" toml:"topics" json:"topics"`
+}
+
+func (c *KafkaSourceConfig) FilterConf() *FilterSubConfig {
+	return &c.FilterSubConfig
+}
+
+func (c *KafkaSourceConfig) ListenersConf() *ListenersConfig {
+	return nil
+}
+
+func (c *KafkaSourceConfig) DefaultPort() int {
+	return 0
 }
 
 type TlsBaseConfig struct {

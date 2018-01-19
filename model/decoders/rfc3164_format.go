@@ -35,27 +35,28 @@ func p3164(m []byte, decoder *encoding.Decoder) (smsg *model.SyslogMessage, err 
 	}
 	m = bytes.TrimSpace(m)
 
-	defaultMsg := &model.SyslogMessage{
-		Message: string(m),
-	}
-	defaultMsg.ClearProperties()
-	smsg = &model.SyslogMessage{}
+	defaultMsg := model.Factory()
+	defaultMsg.Message = string(m)
+
+	smsg = model.Factory()
 	n := time.Now().UnixNano()
 	defaultMsg.TimeGeneratedNum = n
 	defaultMsg.TimeReportedNum = n
 	smsg.TimeGeneratedNum = n
-	smsg.ClearProperties()
 
 	if !bytes.HasPrefix(m, []byte("<")) {
+		model.Free(smsg)
 		return defaultMsg, nil
 	}
 	priEnd := bytes.Index(m, []byte(">"))
 	if priEnd <= 1 {
+		model.Free(smsg)
 		return defaultMsg, nil
 	}
 	priStr := m[1:priEnd]
 	priNum, err := strconv.Atoi(string(priStr))
 	if err != nil {
+		model.Free(smsg)
 		return defaultMsg, nil
 	}
 	smsg.Priority = model.Priority(priNum)
@@ -63,10 +64,12 @@ func p3164(m []byte, decoder *encoding.Decoder) (smsg *model.SyslogMessage, err 
 	smsg.Severity = model.Severity(priNum % 8)
 
 	if len(m) <= (priEnd + 1) {
+		model.Free(defaultMsg)
 		return smsg, nil
 	}
 	m = bytes.TrimSpace(m[priEnd+1:])
 	if len(m) == 0 {
+		model.Free(defaultMsg)
 		return smsg, nil
 	}
 
@@ -80,6 +83,7 @@ func p3164(m []byte, decoder *encoding.Decoder) (smsg *model.SyslogMessage, err 
 			if e != nil {
 				smsg.Message = string(m)
 				smsg.TimeReportedNum = defaultMsg.TimeReportedNum
+				model.Free(defaultMsg)
 				return smsg, nil
 			}
 			smsg.TimeReportedNum = t2.UnixNano()
@@ -87,6 +91,7 @@ func p3164(m []byte, decoder *encoding.Decoder) (smsg *model.SyslogMessage, err 
 			smsg.TimeReportedNum = t1.UnixNano()
 		}
 		if len(s) == 1 {
+			model.Free(defaultMsg)
 			return smsg, nil
 		}
 		s = s[1:]
@@ -95,6 +100,7 @@ func p3164(m []byte, decoder *encoding.Decoder) (smsg *model.SyslogMessage, err 
 		if len(s) < 3 {
 			smsg.Message = string(m)
 			smsg.TimeReportedNum = defaultMsg.TimeReportedNum
+			model.Free(defaultMsg)
 			return smsg, nil
 		}
 		timestampBytes := bytes.Join(s[0:3], SP)
@@ -102,11 +108,13 @@ func p3164(m []byte, decoder *encoding.Decoder) (smsg *model.SyslogMessage, err 
 		if e != nil {
 			smsg.Message = string(m)
 			smsg.TimeReportedNum = defaultMsg.TimeReportedNum
+			model.Free(defaultMsg)
 			return smsg, nil
 		}
 		t = t.AddDate(time.Now().Year(), 0, 0)
 		smsg.TimeReportedNum = t.UnixNano()
 		if len(s) == 3 {
+			model.Free(defaultMsg)
 			return smsg, nil
 		}
 		s = s[3:]
@@ -114,6 +122,7 @@ func p3164(m []byte, decoder *encoding.Decoder) (smsg *model.SyslogMessage, err 
 
 	if len(s) == 1 {
 		smsg.Message = string(s[0])
+		model.Free(defaultMsg)
 		return smsg, nil
 	}
 
@@ -128,20 +137,24 @@ func p3164(m []byte, decoder *encoding.Decoder) (smsg *model.SyslogMessage, err 
 			} else {
 				smsg.Message = string(s[1])
 			}
+			model.Free(defaultMsg)
 			return smsg, nil
 		}
 		if bytes.ContainsAny(s[0], "[]:") {
 			smsg.AppName, smsg.ProcId = pair2str(parseTag(s[0]))
 			smsg.Message = string(s[1])
+			model.Free(defaultMsg)
 			return smsg, nil
 		}
 		if bytes.ContainsAny(s[1], "[]:") {
 			smsg.HostName = string(s[0])
 			smsg.AppName, smsg.ProcId = pair2str(parseTag(s[0]))
+			model.Free(defaultMsg)
 			return smsg, nil
 		}
 		smsg.AppName = string(s[0])
 		smsg.Message = string(s[1])
+		model.Free(defaultMsg)
 		return smsg, nil
 	}
 
@@ -149,11 +162,13 @@ func p3164(m []byte, decoder *encoding.Decoder) (smsg *model.SyslogMessage, err 
 		// hostname is omitted
 		smsg.AppName, smsg.ProcId = pair2str(parseTag(s[0]))
 		smsg.Message = string(bytes.Join(s[1:], SP))
+		model.Free(defaultMsg)
 		return smsg, nil
 	}
 	smsg.HostName = string(s[0])
 	smsg.AppName, smsg.ProcId = pair2str(parseTag(s[1]))
 	smsg.Message = string(bytes.Join(s[2:], SP))
+	model.Free(defaultMsg)
 	return smsg, nil
 }
 

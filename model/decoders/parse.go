@@ -64,7 +64,7 @@ func Fuzz(m []byte) int {
 	if err != nil {
 		panic(err)
 	}
-	msg2 := &model.SyslogMessage{}
+	msg2 := model.Factory()
 	err = msg2.Unmarshal(b)
 	if err != nil {
 		panic("Unmarshaling failed")
@@ -72,6 +72,7 @@ func Fuzz(m []byte) int {
 	if !msg.Equal(msg2) {
 		panic("msg and msg2 are not equal")
 	}
+	model.Free(msg2)
 	return 1
 }
 

@@ -27,16 +27,15 @@ func pInflux(m []byte, decoder *encoding.Decoder) (msg *model.SyslogMessage, rer
 		return nil, nil
 	}
 	point := points[0]
-	msg = &model.SyslogMessage{
-		AppName:          "influxdb",
-		TimeReportedNum:  point.UnixNano(),
-		TimeGeneratedNum: time.Now().UnixNano(),
-		Facility:         16,
-		Severity:         6,
-		Version:          1,
-		Message:          string(point.Name()),
-		ProcId:           strconv.FormatUint(point.HashID(), 10),
-	}
+	msg = model.Factory()
+	msg.AppName = "influxdb"
+	msg.TimeReportedNum = point.UnixNano()
+	msg.TimeGeneratedNum = time.Now().UnixNano()
+	msg.Facility = 16
+	msg.Severity = 6
+	msg.Version = 1
+	msg.Message = string(point.Name())
+	msg.ProcId = strconv.FormatUint(point.HashID(), 10)
 	msg.SetPriority()
 	for _, tag := range point.Tags() {
 		key := string(tag.Key)

@@ -26,20 +26,23 @@ func NewStderrDestination(ctx context.Context, e *Env) (Destination, error) {
 	return d, nil
 }
 
-func (d *StderrDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *StderrDestination) Send(message *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
 	var buf []byte
-	buf, err = encoders.ChainEncode(d.encoder, &message, "\n")
+	buf, err = encoders.ChainEncode(d.encoder, message, "\n")
 	if err != nil {
 		d.permerr(message.Uid)
+		model.Free(message.Fields)
 		return err
 	}
 	_, err = os.Stderr.Write(buf)
 	if err != nil {
 		d.nack(message.Uid)
 		d.dofatal()
+		model.Free(message.Fields)
 		return err
 	}
 	d.ack(message.Uid)
+	model.Free(message.Fields)
 	return nil
 }
 

@@ -103,8 +103,8 @@ func NewRELPDestination(ctx context.Context, e *Env) (Destination, error) {
 	return d, nil
 }
 
-func (d *RELPDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
-	err = d.client.Send(&message)
+func (d *RELPDestination) Send(message *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+	err = d.client.Send(message)
 	if err != nil {
 		// the client send queue has been disposed
 		d.nack(message.Uid)

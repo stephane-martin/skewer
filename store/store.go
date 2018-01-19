@@ -131,7 +131,6 @@ type MessageStore struct {
 
 	wg    sync.WaitGroup
 	dests *Destinations
-	pool  *sync.Pool
 
 	ticker *time.Ticker
 	logger log15.Logger
@@ -199,10 +198,15 @@ func (s *MessageStore) cleanup(ctx context.Context) {
 func (s *MessageStore) consumeStashQueue() {
 	defer s.wg.Done()
 	var err error
+	var messages []*model.FullMessage
 	for s.toStashQueue.Wait(0) {
-		_, err = s.ingest(s.toStashQueue.GetMany(s.batchSize))
+		messages = s.toStashQueue.GetMany(s.batchSize)
+		_, err = s.ingest(messages)
 		if err != nil {
 			s.logger.Warn("Ingestion error", "error", err)
+		}
+		for _, m := range messages {
+			model.Free(m.Fields)
 		}
 	}
 }
@@ -347,11 +351,6 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 		OutputsChans:    make(map[conf.DestinationType](chan *model.FullMessage)),
 		addMissingMsgID: cfg.AddMissingMsgID,
 		generator:       utils.NewGenerator(),
-		pool: &sync.Pool{
-			New: func() interface{} {
-				return &model.FullMessage{}
-			},
-		},
 	}
 
 	store.dests.Store(dests)
@@ -742,7 +741,7 @@ func (s *MessageStore) PurgeBadger() {
 	}
 }
 
-func (s *MessageStore) Stash(m model.FullMessage) (fatal error, nonfatal error) {
+func (s *MessageStore) Stash(m *model.FullMessage) (fatal error, nonfatal error) {
 	fatal = s.toStashQueue.Put(m)
 	return fatal, nil
 }
@@ -773,8 +772,8 @@ func (s *MessageStore) ingest(queue []*model.FullMessage) (n int, err error) {
 
 	marshalledQueue := map[utils.MyULID][]byte{}
 	for _, m = range queue {
-		if s.addMissingMsgID && len(m.Parsed.Fields.MsgId) == 0 {
-			m.Parsed.Fields.MsgId = s.generator.Uid().String()
+		if s.addMissingMsgID && len(m.Fields.MsgId) == 0 {
+			m.Fields.MsgId = s.generator.Uid().String()
 		}
 		b, err = m.Marshal()
 		if err == nil {
@@ -821,10 +820,6 @@ func (s *MessageStore) ingest(queue []*model.FullMessage) (n int, err error) {
 
 }
 
-func (s *MessageStore) ReleaseMsg(msg *model.FullMessage) {
-	s.pool.Put(msg)
-}
-
 func (s *MessageStore) retrieve(n uint32, dest conf.DestinationType) (messages map[utils.MyULID]*model.FullMessage) {
 	txn := s.badger.NewTransaction(true)
 	defer txn.Discard()
@@ -844,7 +839,7 @@ func (s *MessageStore) retrieve(n uint32, dest conf.DestinationType) (messages m
 		message_b, err := messagesDB.Get(uid, txn)
 		if err == nil {
 			if len(message_b) > 0 {
-				message = s.pool.Get().(*model.FullMessage)
+				message = model.FullFactory()
 				err = message.Unmarshal(message_b)
 				if err == nil {
 					messages[uid] = message

@@ -43,8 +43,7 @@ func p5424(m []byte, decoder *encoding.Decoder) (smsg *model.SyslogMessage, err 
 	if len(splits) < 7 {
 		return nil, &NotEnoughPartsError{len(splits)}
 	}
-	smsg = &model.SyslogMessage{}
-	smsg.ClearProperties()
+	smsg = model.Factory()
 	smsg.Priority, smsg.Facility, smsg.Severity, smsg.Version, err = parsePriority(splits[0])
 	if err != nil {
 		return nil, err

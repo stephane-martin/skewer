@@ -16,12 +16,10 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
-	"golang.org/x/text/encoding"
 
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
-	"github.com/stephane-martin/skewer/model/decoders"
 	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/services/errors"
 	"github.com/stephane-martin/skewer/sys/binder"
@@ -472,19 +470,75 @@ func (s *RelpServiceImpl) SetConf(sc []conf.RELPSourceConfig, pc []conf.ParserCo
 	}}
 }
 
+func (s *RelpServiceImpl) parseOne(raw *model.RawTcpMessage, e *base.ParsersEnv, gen *utils.Generator) {
+
+	logger := s.Logger.New(
+		"protocol", "relp",
+		"client", raw.Client,
+		"local_port", raw.LocalPort,
+		"unix_socket_path", raw.UnixSocketPath,
+		"format", raw.Format,
+		"txnr", raw.Txnr,
+	)
+	parser, err := e.GetParser(raw.Format)
+	if parser == nil || err != nil {
+		s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
+		logger.Crit("Unknown parser")
+		return
+	}
+	decoder := utils.SelectDecoder(raw.Encoding)
+	syslogMsg, err := parser(raw.Message[:raw.Size], decoder)
+	if err != nil {
+		//logger.Warn("Parsing error", "message", string(raw.Message[:raw.Size]), "error", err)
+		logger.Warn("Parsing error", "error", err)
+		s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
+		base.ParsingErrorCounter.WithLabelValues("relp", raw.Client, raw.Format).Inc()
+		return
+	}
+	if syslogMsg == nil {
+		s.forwarder.ForwardSucc(raw.ConnID, raw.Txnr)
+		return
+	}
+	if raw.Client != "" {
+		syslogMsg.SetProperty("skewer", "client", raw.Client)
+	}
+	if raw.LocalPort != 0 {
+		syslogMsg.SetProperty("skewer", "localport", strconv.FormatInt(int64(raw.LocalPort), 10))
+	}
+	if raw.UnixSocketPath != "" {
+		syslogMsg.SetProperty("skewer", "socketpath", raw.UnixSocketPath)
+	}
+	parsedMsg := &model.FullMessage{
+		Fields: syslogMsg,
+		Txnr:   raw.Txnr,
+		ConfId: raw.ConfID,
+		ConnId: raw.ConnID,
+	}
+
+	// send message to the Store
+	parsedMsg.Uid = gen.Uid()
+	f, nonf := s.reporter.Stash(parsedMsg)
+	if f == nil && nonf == nil {
+		s.forwarder.ForwardSucc(parsedMsg.ConnId, parsedMsg.Txnr)
+	} else if f != nil {
+		s.forwarder.ForwardFail(parsedMsg.ConnId, parsedMsg.Txnr)
+		logger.Error("Fatal error pushing RELP message to the Store", "err", f)
+		s.StopAndWait()
+		return
+	} else {
+		s.forwarder.ForwardFail(parsedMsg.ConnId, parsedMsg.Txnr)
+		logger.Warn("Non fatal error pushing RELP message to the Store", "err", nonf)
+	}
+	model.Free(syslogMsg)
+}
+
 func (s *RelpServiceImpl) Parse() {
 	defer s.parsewg.Done()
 
-	e := NewParsersEnv(s.ParserConfigs, s.Logger)
+	e := base.NewParsersEnv(s.ParserConfigs, s.Logger)
 
 	var raw *model.RawTcpMessage
-	var parser decoders.Parser
-	var syslogMsg *model.SyslogMessage
-	var parsedMsg model.FullMessage
-	var err, f, nonf error
-	var decoder *encoding.Decoder
-	var logger log15.Logger
-
+	var err error
 	gen := utils.NewGenerator()
 
 	for {
@@ -496,65 +550,8 @@ func (s *RelpServiceImpl) Parse() {
 			s.Logger.Error("rawMessagesQueue returns nil, should not happen!")
 			return
 		}
-
-		logger = s.Logger.New(
-			"protocol", "relp",
-			"client", raw.Client,
-			"local_port", raw.LocalPort,
-			"unix_socket_path", raw.UnixSocketPath,
-			"format", raw.Format,
-			"txnr", raw.Txnr,
-		)
-		parser, err = e.GetParser(raw.Format)
-		if parser == nil || err != nil {
-			s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
-			logger.Crit("Unknown parser")
-			s.Pool.Put(raw)
-			return
-		}
-		decoder = utils.SelectDecoder(raw.Encoding)
-		syslogMsg, err = parser(raw.Message[:raw.Size], decoder)
-		if err != nil {
-			//logger.Warn("Parsing error", "message", string(raw.Message[:raw.Size]), "error", err)
-			logger.Warn("Parsing error", "error", err)
-			s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
-			base.ParsingErrorCounter.WithLabelValues("relp", raw.Client, raw.Format).Inc()
-			s.Pool.Put(raw)
-			continue
-		}
-		if syslogMsg == nil {
-			s.forwarder.ForwardSucc(raw.ConnID, raw.Txnr)
-			s.Pool.Put(raw)
-			continue
-		}
-
-		parsedMsg = model.FullMessage{
-			Parsed: model.ParsedMessage{
-				Fields:         *syslogMsg,
-				Client:         raw.Client,
-				LocalPort:      raw.LocalPort,
-				UnixSocketPath: raw.UnixSocketPath,
-			},
-			Txnr:   raw.Txnr,
-			ConfId: raw.ConfID,
-			ConnId: raw.ConnID,
-		}
+		s.parseOne(raw, e, gen)
 		s.Pool.Put(raw)
-
-		// send message to the Store
-		parsedMsg.Uid = gen.Uid()
-		f, nonf = s.reporter.Stash(parsedMsg)
-		if f == nil && nonf == nil {
-			s.forwarder.ForwardSucc(parsedMsg.ConnId, parsedMsg.Txnr)
-		} else if f != nil {
-			s.forwarder.ForwardFail(parsedMsg.ConnId, parsedMsg.Txnr)
-			logger.Error("Fatal error pushing RELP message to the Store", "err", f)
-			s.StopAndWait()
-			return
-		} else {
-			s.forwarder.ForwardFail(parsedMsg.ConnId, parsedMsg.Txnr)
-			logger.Warn("Non fatal error pushing RELP message to the Store", "err", nonf)
-		}
 	}
 
 }

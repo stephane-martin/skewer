@@ -11,6 +11,24 @@ func deriveCloneBaseConfig(src BaseConfig) BaseConfig {
 
 // deriveDeepCopy recursively copies the contents of src into dst.
 func deriveDeepCopy(dst, src *BaseConfig) {
+	if src.FSSource == nil {
+		dst.FSSource = nil
+	} else {
+		if dst.FSSource != nil {
+			if len(src.FSSource) > len(dst.FSSource) {
+				if cap(dst.FSSource) >= len(src.FSSource) {
+					dst.FSSource = (dst.FSSource)[:len(src.FSSource)]
+				} else {
+					dst.FSSource = make([]FilesystemSourceConfig, len(src.FSSource))
+				}
+			} else if len(src.FSSource) < len(dst.FSSource) {
+				dst.FSSource = (dst.FSSource)[:len(src.FSSource)]
+			}
+		} else {
+			dst.FSSource = make([]FilesystemSourceConfig, len(src.FSSource))
+		}
+		copy(dst.FSSource, src.FSSource)
+	}
 	if src.TCPSource == nil {
 		dst.TCPSource = nil
 	} else {
@@ -267,9 +285,9 @@ func deriveDeepCopy_7(dst, src *NATSDestConfig) {
 
 // deriveDeepCopy_8 recursively copies the contents of src into dst.
 func deriveDeepCopy_8(dst, src *TCPSourceConfig) {
-	field := new(SyslogSourceBaseConfig)
-	deriveDeepCopy_15(field, &src.SyslogSourceBaseConfig)
-	dst.SyslogSourceBaseConfig = *field
+	field := new(ListenersConfig)
+	deriveDeepCopy_15(field, &src.ListenersConfig)
+	dst.ListenersConfig = *field
 	dst.FilterSubConfig = src.FilterSubConfig
 	dst.TlsBaseConfig = src.TlsBaseConfig
 	dst.ClientAuthType = src.ClientAuthType
@@ -280,18 +298,18 @@ func deriveDeepCopy_8(dst, src *TCPSourceConfig) {
 
 // deriveDeepCopy_9 recursively copies the contents of src into dst.
 func deriveDeepCopy_9(dst, src *UDPSourceConfig) {
-	field := new(SyslogSourceBaseConfig)
-	deriveDeepCopy_15(field, &src.SyslogSourceBaseConfig)
-	dst.SyslogSourceBaseConfig = *field
+	field := new(ListenersConfig)
+	deriveDeepCopy_15(field, &src.ListenersConfig)
+	dst.ListenersConfig = *field
 	dst.FilterSubConfig = src.FilterSubConfig
 	dst.ConfID = src.ConfID
 }
 
 // deriveDeepCopy_10 recursively copies the contents of src into dst.
 func deriveDeepCopy_10(dst, src *RELPSourceConfig) {
-	field := new(SyslogSourceBaseConfig)
-	deriveDeepCopy_15(field, &src.SyslogSourceBaseConfig)
-	dst.SyslogSourceBaseConfig = *field
+	field := new(ListenersConfig)
+	deriveDeepCopy_15(field, &src.ListenersConfig)
+	dst.ListenersConfig = *field
 	dst.FilterSubConfig = src.FilterSubConfig
 	dst.TlsBaseConfig = src.TlsBaseConfig
 	dst.ClientAuthType = src.ClientAuthType
@@ -302,9 +320,9 @@ func deriveDeepCopy_10(dst, src *RELPSourceConfig) {
 
 // deriveDeepCopy_11 recursively copies the contents of src into dst.
 func deriveDeepCopy_11(dst, src *DirectRELPSourceConfig) {
-	field := new(SyslogSourceBaseConfig)
-	deriveDeepCopy_15(field, &src.SyslogSourceBaseConfig)
-	dst.SyslogSourceBaseConfig = *field
+	field := new(ListenersConfig)
+	deriveDeepCopy_15(field, &src.ListenersConfig)
+	dst.ListenersConfig = *field
 	dst.FilterSubConfig = src.FilterSubConfig
 	dst.TlsBaseConfig = src.TlsBaseConfig
 	dst.ClientAuthType = src.ClientAuthType
@@ -351,9 +369,9 @@ func deriveDeepCopy_12(dst, src *KafkaSourceConfig) {
 
 // deriveDeepCopy_13 recursively copies the contents of src into dst.
 func deriveDeepCopy_13(dst, src *GraylogSourceConfig) {
-	field := new(SyslogSourceBaseConfig)
-	deriveDeepCopy_15(field, &src.SyslogSourceBaseConfig)
-	dst.SyslogSourceBaseConfig = *field
+	field := new(ListenersConfig)
+	deriveDeepCopy_15(field, &src.ListenersConfig)
+	dst.ListenersConfig = *field
 	dst.FilterSubConfig = src.FilterSubConfig
 	dst.ConfID = src.ConfID
 }
@@ -392,7 +410,7 @@ func deriveDeepCopy_14(dst, src *KafkaBaseConfig) {
 }
 
 // deriveDeepCopy_15 recursively copies the contents of src into dst.
-func deriveDeepCopy_15(dst, src *SyslogSourceBaseConfig) {
+func deriveDeepCopy_15(dst, src *ListenersConfig) {
 	if src.Ports == nil {
 		dst.Ports = nil
 	} else {

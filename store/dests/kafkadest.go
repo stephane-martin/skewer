@@ -61,7 +61,7 @@ func NewKafkaDestination(ctx context.Context, e *Env) (Destination, error) {
 	return d, nil
 }
 
-func (d *KafkaDestination) Send(message model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *KafkaDestination) Send(message *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
 	buf := bytes.NewBuffer(nil)
 	err = d.encoder(message, buf)
 	if err != nil {
@@ -73,7 +73,7 @@ func (d *KafkaDestination) Send(message model.FullMessage, partitionKey string, 
 		Partition: partitionNumber,
 		Value:     sarama.ByteEncoder(buf.Bytes()),
 		Topic:     topic,
-		Timestamp: message.Parsed.Fields.GetTimeReported(),
+		Timestamp: message.Fields.GetTimeReported(),
 		Metadata:  message.Uid,
 	}
 	d.producer.Input() <- kafkaMsg

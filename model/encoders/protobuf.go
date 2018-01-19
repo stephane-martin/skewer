@@ -18,13 +18,6 @@ func encodePB(v interface{}, w io.Writer) error {
 		}
 		_, err = w.Write(buf)
 		return err
-	case *model.ParsedMessage:
-		buf, err := val.Marshal()
-		if err != nil {
-			return err
-		}
-		_, err = w.Write(buf)
-		return err
 	case *model.SyslogMessage:
 		buf, err := val.Marshal()
 		if err != nil {

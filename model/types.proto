@@ -32,18 +32,11 @@ message SyslogMessage {
 	Properties properties = 13 [(gogoproto.nullable) = false];
 }
 
-message ParsedMessage {
-	int32 local_port = 1;
-	string client = 2;
-	string unix_socket_path = 3;	
-	SyslogMessage fields = 4 [(gogoproto.nullable) = false];
-}
-
 message FullMessage {
 	int32 txnr = 1;
 	uint32 conn_id = 2;	
 	bytes conf_id = 3 [(gogoproto.customtype) = "github.com/stephane-martin/skewer/utils.MyULID",(gogoproto.nullable) = false];
 	bytes uid = 4 [(gogoproto.customtype) = "github.com/stephane-martin/skewer/utils.MyULID",(gogoproto.nullable) = false];
-	ParsedMessage parsed = 5 [(gogoproto.nullable) = false];
+	SyslogMessage fields = 5;
 }
 

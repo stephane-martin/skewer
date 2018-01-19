@@ -73,7 +73,7 @@ func (s *UdpServiceImpl) SetConf(c conf.BaseConfig) {
 func (s *UdpServiceImpl) Parse() {
 	defer s.wg.Done()
 
-	e := NewParsersEnv(s.ParserConfigs, s.Logger)
+	e := base.NewParsersEnv(s.ParserConfigs, s.Logger)
 	gen := utils.NewGenerator()
 
 	for {
@@ -85,7 +85,7 @@ func (s *UdpServiceImpl) Parse() {
 	}
 }
 
-func (s *UdpServiceImpl) ParseOne(raw *model.RawUdpMessage, e *ParsersEnv, gen *utils.Generator) {
+func (s *UdpServiceImpl) ParseOne(raw *model.RawUdpMessage, e *base.ParsersEnv, gen *utils.Generator) {
 	defer s.Pool.Put(raw)
 
 	logger := s.Logger.New(
@@ -113,17 +113,23 @@ func (s *UdpServiceImpl) ParseOne(raw *model.RawUdpMessage, e *ParsersEnv, gen *
 	if syslogMsg == nil {
 		return
 	}
+	if raw.Client != "" {
+		syslogMsg.SetProperty("skewer", "client", raw.Client)
+	}
+	if raw.LocalPort != 0 {
+		syslogMsg.SetProperty("skewer", "localport", strconv.FormatInt(int64(raw.LocalPort), 10))
+	}
+	if raw.UnixSocketPath != "" {
+		syslogMsg.SetProperty("skewer", "socketpath", raw.UnixSocketPath)
+	}
 
-	fatal, nonfatal := s.stasher.Stash(model.FullMessage{
-		Parsed: model.ParsedMessage{
-			Fields:         *syslogMsg,
-			Client:         raw.Client,
-			LocalPort:      raw.LocalPort,
-			UnixSocketPath: raw.UnixSocketPath,
+	fatal, nonfatal := s.stasher.Stash(
+		&model.FullMessage{
+			Fields: syslogMsg,
+			Uid:    gen.Uid(),
+			ConfId: raw.ConfID,
 		},
-		Uid:    gen.Uid(),
-		ConfId: raw.ConfID,
-	})
+	)
 
 	if fatal != nil {
 		logger.Error("Fatal error stashing UDP message", "error", fatal)
@@ -131,6 +137,7 @@ func (s *UdpServiceImpl) ParseOne(raw *model.RawUdpMessage, e *ParsersEnv, gen *
 	} else if nonfatal != nil {
 		logger.Warn("Non-fatal error stashing UDP message", "error", nonfatal)
 	}
+	model.Free(syslogMsg)
 }
 
 func (s *UdpServiceImpl) Gather() ([]*dto.MetricFamily, error) {

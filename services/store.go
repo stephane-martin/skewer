@@ -136,9 +136,10 @@ func (s *storeServiceImpl) create() error {
 			}
 		}()
 		var err error
+		var message *model.FullMessage
 
 		for scanner.Scan() {
-			message := model.FullMessage{}
+			message = model.FullFactory()
 			err = message.Unmarshal(scanner.Bytes())
 			if err == nil {
 				err, _ = s.store.Stash(message)

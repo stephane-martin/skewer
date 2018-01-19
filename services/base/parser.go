@@ -1,4 +1,4 @@
-package network
+package base
 
 import (
 	"github.com/inconshreveable/log15"

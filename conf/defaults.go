@@ -103,7 +103,7 @@ func SetFileDestDefaults(v *viper.Viper, prefixed bool) {
 	if prefixed {
 		prefix = "file_destination."
 	}
-	v.SetDefault(prefix+"filename", "/var/log/skewer/{{.Fields.Date}}/{{.Fields.Appname}}.log")
+	v.SetDefault(prefix+"filename", "/var/log/skewer/{{.Date}}/{{.Appname}}.log")
 	v.SetDefault(prefix+"sync", false)
 	v.SetDefault(prefix+"sync_period", "5s")
 	v.SetDefault(prefix+"flush_period", "1s")
@@ -168,8 +168,6 @@ func SetAccountingDefaults(v *viper.Viper, prefixed bool) {
 	v.SetDefault(prefix+"enabled", false)
 	v.SetDefault(prefix+"path", AccountingPath)
 	v.SetDefault(prefix+"period", "1s")
-	v.SetDefault(prefix+"topic_tmpl", "accounting")
-	v.SetDefault(prefix+"partition_key_tmpl", "pk-accounting")
 }
 
 func SetMetricsDefaults(v *viper.Viper, prefixed bool) {
@@ -187,8 +185,6 @@ func SetJournaldDefaults(v *viper.Viper, prefixed bool) {
 		prefix = "journald."
 	}
 	v.SetDefault(prefix+"enabled", os.Getenv("SKEWER_HAVE_SYSTEMCTL") == "TRUE")
-	v.SetDefault(prefix+"topic_tmpl", "journald-{{.Appname}}")
-	v.SetDefault(prefix+"partition_key_tmpl", "pk-{{.Hostname}}")
 	v.SetDefault(prefix+"encoding", "utf8")
 }
 

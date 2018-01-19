@@ -48,6 +48,9 @@ func Configure(t base.Types, c conf.BaseConfig) (res conf.BaseConfig) {
 		res.Accounting = c.Accounting
 	case base.Store:
 		res = c
+	case base.Filesystem:
+		res.FSSource = c.FSSource
+		res.Parsers = c.Parsers
 	}
 	return res
 }
@@ -116,6 +119,7 @@ var constructors map[base.Types]ProviderConstructor = map[base.Types]ProviderCon
 	base.Accounting:  NewAccountingService,
 	base.Store:       NewStoreService,
 	base.KafkaSource: network.NewKafkaService,
+	base.Filesystem:  NewFilePollingService,
 }
 
 type ProviderOpt func(e *base.ProviderEnv)
