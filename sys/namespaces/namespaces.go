@@ -556,7 +556,7 @@ func MakeChroot(targetExec string) (string, error) {
 	}
 
 	// mount SKEWER_CERT_FILES
-	certFiles = filepath.SplitList(os.Getenv("SKEWER_CERT_FILES"))
+	certFiles := filepath.SplitList(os.Getenv("SKEWER_CERT_FILES"))
 	if len(certFiles) > 0 {
 		for _, certFile := range certFiles {
 			if len(certFile) == 0 {
@@ -575,7 +575,7 @@ func MakeChroot(targetExec string) (string, error) {
 	}
 
 	// mount SKEWER_CERT_PATHS directories
-	certPaths = filepath.SplitList(os.Getenv("SKEWER_CERT_PATHS"))
+	certPaths := filepath.SplitList(os.Getenv("SKEWER_CERT_PATHS"))
 	if len(certPaths) > 0 {
 		for _, certPath := range certPaths {
 			if len(certPath) == 0 {
