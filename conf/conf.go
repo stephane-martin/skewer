@@ -991,7 +991,7 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 		sources = append(sources, &c.GraylogSource[i])
 	}
 	for i := range c.KafkaSource {
-		sources = append(sources, &c.GraylogSource[i])
+		sources = append(sources, &c.KafkaSource[i])
 	}
 	sources = append(sources, &c.Journald, &c.Accounting)
 

@@ -29,9 +29,9 @@ type reader struct {
 	logger       log15.Logger
 }
 
-type Converter func(map[string]string) model.FullMessage
+type Converter func(map[string]string) *model.FullMessage
 
-func EntryToSyslog(entry map[string]string) model.ParsedMessage {
+func EntryToSyslog(entry map[string]string) (m *model.SyslogMessage) {
 	m = model.Factory()
 	properties := map[string]string{}
 	for k, v := range entry {
@@ -82,19 +82,14 @@ func EntryToSyslog(entry map[string]string) model.ParsedMessage {
 	m.Priority = model.Priority(int(m.Facility)*8 + int(m.Severity))
 	m.ClearDomain("journald")
 	m.Properties.Map["journald"].Map = properties
-
-	return model.ParsedMessage{
-		Client:         "journald",
-		LocalPort:      0,
-		UnixSocketPath: "",
-		Fields:         m,
-	}
+	m.SetProperty("skewer", "client", m.HostName)
+	return m
 }
 
 func makeMapConverter(coding string) Converter {
 	decoder := utils.SelectDecoder(coding)
 	generator := utils.NewGenerator()
-	return func(m map[string]string) model.FullMessage {
+	return func(m map[string]string) *model.FullMessage {
 		dest := make(map[string]string)
 		var k, k2, v, v2 string
 		var err error
@@ -107,9 +102,9 @@ func makeMapConverter(coding string) Converter {
 				}
 			}
 		}
-		return model.FullMessage{
+		return &model.FullMessage{
 			Uid:    generator.Uid(),
-			Parsed: EntryToSyslog(dest),
+			Fields: EntryToSyslog(dest),
 		}
 	}
 }
