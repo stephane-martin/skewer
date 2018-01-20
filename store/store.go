@@ -330,7 +330,7 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 	badgerOpts.MaxTableSize = cfg.MaxTableSize
 	badgerOpts.SyncWrites = cfg.FSync
 	badgerOpts.TableLoadingMode = options.MemoryMap
-	// TODO: ValueLogLoadingMode
+	badgerOpts.ValueLogLoadingMode = options.MemoryMap
 	badgerOpts.ValueLogFileSize = cfg.ValueLogFileSize
 
 	err := os.MkdirAll(dirname, 0700)
