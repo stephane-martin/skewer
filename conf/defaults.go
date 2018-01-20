@@ -26,6 +26,7 @@ func SetDefaults(v *viper.Viper) {
 		SetStderrDestDefaults,
 		SetGraylogDestDefaults,
 		SetHTTPDestDefaults,
+		SetHTTPServerDestDefaults,
 		SetNatsDestDefaults,
 		SetMainDefaults,
 	}
@@ -50,6 +51,20 @@ func SetNatsDestDefaults(v *viper.Viper, prefixed bool) {
 	v.SetDefault(prefix+"allow_reconnect", true)
 	v.SetDefault(prefix+"no_randomize", false)
 	v.SetDefault(prefix+"flusher_timeout", 0)
+}
+
+func SetHTTPServerDestDefaults(v *viper.Viper, prefixed bool) {
+	prefix := ""
+	if prefixed {
+		prefix = "httpserver_destination."
+	}
+	v.SetDefault(prefix+"format", "fulljson")
+	v.SetDefault(prefix+"content_type", "auto")
+	v.SetDefault(prefix+"bind_addr", "127.0.0.1")
+	v.SetDefault(prefix+"port", "8514")
+	v.SetDefault(prefix+"delimiter", 10)
+	v.SetDefault(prefix+"line_framing", true)
+	v.SetDefault(prefix+"messages_number", 8*1024)
 }
 
 func SetHTTPDestDefaults(v *viper.Viper, prefixed bool) {

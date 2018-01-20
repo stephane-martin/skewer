@@ -5,7 +5,6 @@ import (
 	"context"
 	"io"
 	"io/ioutil"
-	"mime"
 	"net"
 	"net/http"
 	"net/url"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/model/encoders"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/queue/message"
 )
@@ -48,12 +48,11 @@ func NewHTTPDestination(ctx context.Context, e *Env) (Destination, error) {
 
 	config.ContentType = strings.TrimSpace(strings.ToLower(config.ContentType))
 	d.contentType = config.ContentType
-	if config.ContentType == "auto" {
-		switch config.Format {
-		case "json", "fulljson", "gelf":
-			d.contentType = "application/json"
-		default:
-			d.contentType = mime.FormatMediaType("text/plain", map[string]string{"charset": "utf-8"})
+	if config.ContentType == "auto" || config.ContentType == "" {
+		if encoders.MimeTypes[d.format] != "" {
+			d.contentType = encoders.MimeTypes[d.format]
+		} else {
+			d.contentType = "text/plain"
 		}
 	}
 
@@ -150,6 +149,7 @@ func NewHTTPDestination(ctx context.Context, e *Env) (Destination, error) {
 func (d *HTTPDestination) Close() error {
 	d.sendQueue.Dispose()
 	d.wg.Wait()
+	// TODO: nack remaining messages ?
 	return nil
 }
 

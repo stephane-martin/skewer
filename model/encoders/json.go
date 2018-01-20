@@ -23,6 +23,7 @@ func encodeJson(v interface{}, w io.Writer) error {
 }
 
 func encodeFullJson(v interface{}, w io.Writer) error {
+	// TODO: really full json...
 	if v == nil {
 		return nil
 	}

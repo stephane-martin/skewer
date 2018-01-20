@@ -29,6 +29,7 @@ type BaseConfig struct {
 	UDPDest          UDPDestConfig            `mapstructure:"udp_destination" toml:"udp_destination" json:"udp_destination"`
 	TCPDest          TCPDestConfig            `mapstructure:"tcp_destination" toml:"tcp_destination" json:"tcp_destination"`
 	HTTPDest         HTTPDestConfig           `mapstructure:"http_destination" toml:"http_destination" json:"http_destination"`
+	HTTPServerDest   HTTPServerDestConfig     `mapstructure:"httpserver_destination" toml:"httpserver_destination" json:"httpserver_destination"`
 	NATSDest         *NATSDestConfig          `mapstructure:"nats_destination" toml:"nats_destination" json:"nats_destination"`
 	RELPDest         RELPDestConfig           `mapstructure:"relp_destination" toml:"relp_destination" json:"relp_destination"`
 	FileDest         FileDestConfig           `mapstructure:"file_destination" toml:"file_destination" json:"file_destination"`
@@ -231,6 +232,16 @@ type TCPDestConfig struct {
 
 	LineFraming    bool  `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
 	FrameDelimiter uint8 `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
+}
+
+type HTTPServerDestConfig struct {
+	BindAddr       string `mapstructure:"bind_addr" toml:"bind_addr" json:"bind_addr"`
+	Port           int    `mapstructure:"port" toml:"port" json:"port"`
+	Format         string `mapstructure:"format" toml:"format" json:"format"`
+	ContentType    string `mapstructure:"content_type" toml:"content_type" json:"content_type"`
+	LineFraming    bool   `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
+	FrameDelimiter uint8  `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
+	NMessages      int32  `mapstructure:"messages_number" toml:"messages_number" json:"messages_number"`
 }
 
 type HTTPDestConfig struct {

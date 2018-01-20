@@ -24,51 +24,55 @@ func (dests DestinationType) Iterate() (res []DestinationType) {
 }
 
 const (
-	Kafka   DestinationType = 1
-	UDP                     = 2
-	TCP                     = 4
-	RELP                    = 8
-	File                    = 16
-	Stderr                  = 32
-	Graylog                 = 64
-	HTTP                    = 128
-	NATS                    = 256
+	Kafka      DestinationType = 1
+	UDP                        = 2
+	TCP                        = 4
+	RELP                       = 8
+	File                       = 16
+	Stderr                     = 32
+	Graylog                    = 64
+	HTTP                       = 128
+	NATS                       = 256
+	HTTPServer                 = 512
 )
 
 var Destinations = map[string]DestinationType{
-	"kafka":   Kafka,
-	"udp":     UDP,
-	"tcp":     TCP,
-	"relp":    RELP,
-	"file":    File,
-	"stderr":  Stderr,
-	"graylog": Graylog,
-	"http":    HTTP,
-	"nats":    NATS,
+	"kafka":      Kafka,
+	"udp":        UDP,
+	"tcp":        TCP,
+	"relp":       RELP,
+	"file":       File,
+	"stderr":     Stderr,
+	"graylog":    Graylog,
+	"http":       HTTP,
+	"httpserver": HTTPServer,
+	"nats":       NATS,
 }
 
 var DestinationNames = map[DestinationType]string{
-	Kafka:   "kafka",
-	UDP:     "udp",
-	TCP:     "tcp",
-	RELP:    "relp",
-	File:    "file",
-	Stderr:  "stderr",
-	Graylog: "graylog",
-	HTTP:    "http",
-	NATS:    "nats",
+	Kafka:      "kafka",
+	UDP:        "udp",
+	TCP:        "tcp",
+	RELP:       "relp",
+	File:       "file",
+	Stderr:     "stderr",
+	Graylog:    "graylog",
+	HTTP:       "http",
+	HTTPServer: "httpserver",
+	NATS:       "nats",
 }
 
 var RDestinations = map[DestinationType]byte{
-	Kafka:   'k',
-	UDP:     'u',
-	TCP:     't',
-	RELP:    'r',
-	File:    'f',
-	Stderr:  's',
-	Graylog: 'g',
-	HTTP:    'h',
-	NATS:    'n',
+	Kafka:      'k',
+	UDP:        'u',
+	TCP:        't',
+	RELP:       'r',
+	File:       'f',
+	Stderr:     's',
+	Graylog:    'g',
+	HTTP:       'h',
+	HTTPServer: 'e',
+	NATS:       'n',
 }
 
 func (m *MainConfig) GetDestinations() (dests DestinationType, err error) {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"strconv"
 	"strings"
 )
@@ -32,6 +33,16 @@ var Formats = map[string]Format{
 	"file":     File,
 	"gelf":     GELF,
 	"protobuf": Protobuf,
+}
+
+var MimeTypes = map[Format]string{
+	RFC5424:  mime.FormatMediaType("text/plain", map[string]string{"charset": "utf-8"}),
+	RFC3164:  mime.FormatMediaType("text/plain", map[string]string{"charset": "utf-8"}),
+	JSON:     "application/json",
+	FullJSON: "application/json",
+	File:     mime.FormatMediaType("text/plain", map[string]string{"charset": "utf-8"}),
+	GELF:     "application/json",
+	Protobuf: "application/protobuf",
 }
 
 var encoders = map[Format]Encoder{
