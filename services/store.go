@@ -17,6 +17,7 @@ import (
 	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/store"
 	"github.com/stephane-martin/skewer/store/dests"
+	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/sys/kring"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/httpserver"
@@ -26,6 +27,7 @@ type storeServiceImpl struct {
 	store            *store.MessageStore
 	config           conf.BaseConfig
 	logger           log15.Logger
+	binder           binder.Client
 	shutdownStore    context.CancelFunc
 	shutdownCtx      context.Context
 	cancelForwarders context.CancelFunc
@@ -57,6 +59,7 @@ func NewStoreService(env *base.ProviderEnv) (base.Provider, error) {
 		status:   false,
 		pipe:     env.Pipe,
 		logger:   env.Logger,
+		binder:   env.Binder,
 		ring:     env.Ring,
 		confined: env.Confined,
 	}
@@ -216,7 +219,7 @@ func (s *storeServiceImpl) startForwarder(gforwarderCtx context.Context, desttyp
 	s.fstatus[desttype] = true
 
 	ctx, cancel := context.WithCancel(gforwarderCtx)
-	forwarder := store.NewForwarder(desttype, s.store, s.config, s.logger)
+	forwarder := store.NewForwarder(desttype, s.store, s.config, s.logger, s.binder)
 	s.forwarders[desttype] = forwarder
 	s.fcancels[desttype] = cancel
 	s.fmu[desttype].Unlock()

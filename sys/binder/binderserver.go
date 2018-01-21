@@ -192,7 +192,7 @@ func binderOne(parentFD uintptr, logger log15.Logger) error {
 					if IsStream(lnet) {
 						l, err := BinderListen(ctx, logger, schan, addr)
 						if err == nil {
-							_, err := childConn.Write([]byte(fmt.Sprintf("confirmlisten %s", addr)))
+							_, err := childConn.Write([]byte(fmt.Sprintf("confirmlisten %s\n", addr)))
 							if err != nil {
 								logger.Warn("Failed to confirm listen to client", "error", err)
 								_ = l.Close()
@@ -201,7 +201,7 @@ func binderOne(parentFD uintptr, logger log15.Logger) error {
 							}
 						} else {
 							logger.Warn("Listen error", "error", err, "addr", addr)
-							_, _ = childConn.Write([]byte(fmt.Sprintf("error %s %s", addr, err.Error())))
+							_, _ = childConn.Write([]byte(fmt.Sprintf("error %s %s\n", addr, err.Error())))
 						}
 					} else {
 						c, err := BinderPacket(addr)
@@ -209,7 +209,7 @@ func binderOne(parentFD uintptr, logger log15.Logger) error {
 							pchan <- &ExternalPacketConn{Addr: addr, Conn: c, Uid: utils.NewUidString()}
 						} else {
 							logger.Warn("ListenPacket error", "error", err, "addr", addr)
-							_, _ = childConn.Write([]byte(fmt.Sprintf("error %s %s", addr, err.Error())))
+							_, _ = childConn.Write([]byte(fmt.Sprintf("error %s %s\n", addr, err.Error())))
 						}
 					}
 				}

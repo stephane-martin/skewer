@@ -11,12 +11,14 @@ import (
 	"github.com/stephane-martin/skewer/javascript"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/store/dests"
+	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/utils"
 )
 
 type fwderImpl struct {
 	messageFilterCounter *prometheus.CounterVec
 	logger               log15.Logger
+	binder               binder.Client
 	wg                   *sync.WaitGroup
 	registry             *prometheus.Registry
 	once                 sync.Once
@@ -26,9 +28,10 @@ type fwderImpl struct {
 	fatalChan            chan struct{}
 }
 
-func NewForwarder(desttype conf.DestinationType, st Store, bc conf.BaseConfig, logger log15.Logger) (fwder Forwarder) {
+func NewForwarder(desttype conf.DestinationType, st Store, bc conf.BaseConfig, logger log15.Logger, bindr binder.Client) (fwder Forwarder) {
 	f := fwderImpl{
 		logger:    logger.New("class", "forwarder"),
+		binder:    bindr,
 		registry:  prometheus.NewRegistry(),
 		store:     st,
 		conf:      bc,
@@ -80,7 +83,8 @@ func (fwder *fwderImpl) doForward(ctx context.Context) {
 		Callbacks(fwder.store.ACK, fwder.store.NACK, fwder.store.PermError).
 		Config(fwder.conf).
 		Confined(fwder.store.Confined()).
-		Logger(fwder.logger)
+		Logger(fwder.logger).
+		Binder(fwder.binder)
 
 	dest, err := dests.NewDestination(ctx, fwder.desttype, e)
 	if err != nil {

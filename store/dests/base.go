@@ -8,6 +8,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model/encoders"
+	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/utils"
 )
 
@@ -84,6 +85,7 @@ func InitRegistry() {
 
 type Env struct {
 	logger   log15.Logger
+	binder   binder.Client
 	ack      storeCallback
 	nack     storeCallback
 	permerr  storeCallback
@@ -93,6 +95,11 @@ type Env struct {
 
 func BuildEnv() *Env {
 	return &Env{}
+}
+
+func (e *Env) Binder(b binder.Client) *Env {
+	e.binder = b
+	return e
 }
 
 func (e *Env) Logger(l log15.Logger) *Env {
@@ -121,6 +128,7 @@ type callback func(uid utils.MyULID)
 
 type baseDestination struct {
 	logger   log15.Logger
+	binder   binder.Client
 	fatal    chan struct{}
 	once     *sync.Once
 	ack      callback
@@ -136,6 +144,7 @@ type baseDestination struct {
 func newBaseDestination(typ conf.DestinationType, codename string, e *Env) *baseDestination {
 	base := baseDestination{
 		logger:   e.logger,
+		binder:   e.binder,
 		fatal:    make(chan struct{}),
 		once:     &sync.Once{},
 		confined: e.confined,

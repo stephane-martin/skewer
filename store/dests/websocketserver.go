@@ -2,6 +2,7 @@ package dests
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"net"
@@ -33,7 +34,7 @@ type WebsocketServerDestination struct {
 	wg          sync.WaitGroup
 	mu          sync.Mutex
 	connections map[*websocket.Conn]bool
-	stopchan    chan struct{}
+	stopchan    <-chan struct{}
 }
 
 func NewWebsocketServerDestination(ctx context.Context, e *Env) (Destination, error) {
@@ -42,9 +43,8 @@ func NewWebsocketServerDestination(ctx context.Context, e *Env) (Destination, er
 	d := &WebsocketServerDestination{
 		baseDestination: newBaseDestination(conf.HTTPServer, "httpserver", e),
 		connections:     make(map[*websocket.Conn]bool),
-		stopchan:        make(chan struct{}),
+		stopchan:        ctx.Done(),
 	}
-
 	err := d.setFormat(config.Format)
 	if err != nil {
 		return nil, err
@@ -60,6 +60,10 @@ func NewWebsocketServerDestination(ctx context.Context, e *Env) (Destination, er
 	d.sendQueue = make(chan *model.FullMessage, 1024)
 
 	hostport := net.JoinHostPort(config.BindAddr, strconv.FormatInt(int64(config.Port), 10))
+	listener, err := d.binder.Listen("tcp", hostport)
+	if err != nil {
+		return nil, err
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc(config.WebEndPoint, d.serveRoot)
 	mux.HandleFunc(config.LogEndPoint, d.serveLogs)
@@ -68,7 +72,7 @@ func NewWebsocketServerDestination(ctx context.Context, e *Env) (Destination, er
 		Handler: mux,
 	}
 	d.wg.Add(1)
-	go d.serve()
+	go d.serve(listener)
 
 	return d, nil
 }
@@ -92,15 +96,19 @@ func reader(wsconn *websocket.Conn) {
 
 func (d *WebsocketServerDestination) serveLogs(w http.ResponseWriter, r *http.Request) {
 	// a new websocket client is connected
+	d.logger.Debug("New websocket connection for logs")
 	d.mu.Lock()
 	wsconn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		if _, ok := err.(websocket.HandshakeError); !ok {
 			d.logger.Error("Websocket handshake error", "error", err)
+		} else {
+			d.logger.Error("Websocket upgrade error", "error", err)
 		}
 		d.mu.Unlock()
 		return
 	}
+	d.logger.Debug("Connection upgraded to websocket")
 	d.connections[wsconn] = true
 	d.mu.Unlock()
 
@@ -196,14 +204,18 @@ func (d *WebsocketServerDestination) serveRoot(w http.ResponseWriter, r *http.Re
 	w.WriteHeader(http.StatusOK)
 }
 
-func (d *WebsocketServerDestination) serve() (err error) {
+func (d *WebsocketServerDestination) serve(listener net.Listener) (err error) {
 	defer func() {
 		d.dofatal()
+		if err != nil {
+			d.logger.Info("Websocket server has stopped", "error", err)
+		} else {
+			d.logger.Info("Websocket server has stopped")
+		}
+		listener.Close()
 		d.wg.Done()
 	}()
-	// TODO: use binder
-	err = d.server.ListenAndServe()
-	return err
+	return d.server.Serve(listener)
 }
 
 func (d *WebsocketServerDestination) Close() (err error) {
@@ -211,8 +223,6 @@ func (d *WebsocketServerDestination) Close() (err error) {
 	close(d.sendQueue)
 	// close the HTTP server
 	err = d.server.Close()
-	// ask the running websocket connections to cleanly close
-	close(d.stopchan)
 	// wait that the webserver and the websocket connections have finished
 	d.wg.Wait()
 	// disconnect everything
@@ -230,6 +240,10 @@ func (d *WebsocketServerDestination) Close() (err error) {
 }
 
 func (d *WebsocketServerDestination) Send(msg *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
-	d.sendQueue <- msg
-	return nil
+	select {
+	case d.sendQueue <- msg:
+		return nil
+	case <-d.stopchan:
+		return fmt.Errorf("Websocket server destination is shutting down")
+	}
 }

@@ -836,27 +836,26 @@ func (s *MessageStore) retrieve(n uint32, dest conf.DestinationType) (messages m
 
 	for iter.Rewind(); iter.Valid() && fetched < n; iter.Next() {
 		uid := iter.Key()
-		message_b, err := messagesDB.Get(uid, txn)
-		if err == nil {
-			if len(message_b) > 0 {
-				message = model.FullFactory()
-				err = message.Unmarshal(message_b)
-				if err == nil {
-					messages[uid] = message
-					fetched++
-				} else {
-					invalidEntries = append(invalidEntries, uid)
-					s.logger.Warn("retrieved invalid entry", "uid", uid, "message", string(message_b), "dest", dest, "error", err)
-				}
-			} else {
-				invalidEntries = append(invalidEntries, uid)
-				s.logger.Warn("retrieved empty entry", "uid", uid)
-			}
-		} else {
+		messageBytes, err := messagesDB.Get(uid, txn)
+		if err != nil {
+			invalidEntries = append(invalidEntries, uid)
 			s.logger.Warn("Error getting message content from message queue", "uid", uid, "dest", dest, "error", err)
-			iter.Close()
-			return map[utils.MyULID]*model.FullMessage{}
+			continue
 		}
+		if len(messageBytes) == 0 {
+			invalidEntries = append(invalidEntries, uid)
+			s.logger.Warn("retrieved empty entry", "uid", uid)
+			continue
+		}
+		message = model.FullFactory()
+		err = message.Unmarshal(messageBytes)
+		if err != nil {
+			invalidEntries = append(invalidEntries, uid)
+			s.logger.Warn("retrieved invalid entry", "uid", uid, "message", string(messageBytes), "dest", dest, "error", err)
+			continue
+		}
+		messages[uid] = message
+		fetched++
 	}
 	iter.Close()
 

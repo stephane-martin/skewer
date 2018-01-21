@@ -55,19 +55,21 @@ func NewExternalConns() *ExternalConns {
 
 func (c *ExternalConns) Close() {
 	c.Lock()
+	defer c.Unlock()
 	for _, conn := range c.conns {
 		close(conn)
 	}
 	c.conns = map[string](chan *FileConn){}
-	c.Unlock()
 }
 
 func (c *ExternalConns) Push(addr string, conn *FileConn) {
 	c.Lock()
+	defer c.Unlock()
 	if i, ok := c.conns[addr]; ok && i != nil {
 		i <- conn
+	} else {
+		fmt.Fprintln(os.Stderr, "Push failed: chan does not exist")
 	}
-	c.Unlock()
 }
 
 func (c *ExternalConns) Get(addr string, create bool) chan *FileConn {
@@ -77,22 +79,24 @@ func (c *ExternalConns) Get(addr string, create bool) chan *FileConn {
 		return i
 	}
 	if create {
-		c.conns[addr] = make(chan *FileConn)
+		c.conns[addr] = make(chan *FileConn, 16)
 		return c.conns[addr]
 	}
 	return nil
 }
 
-func (c *ExternalConns) Delete(addr string) {
+func (c *ExternalConns) Delete(addr string) bool {
 	c.Lock()
+	defer c.Unlock()
 	conn, ok := c.conns[addr]
 	if ok {
 		delete(c.conns, addr)
 		if conn != nil {
 			close(conn)
 		}
+		return true
 	}
-	c.Unlock()
+	return false
 }
 
 type ExternalPacketConns struct {
@@ -102,19 +106,21 @@ type ExternalPacketConns struct {
 
 func (c *ExternalPacketConns) Close() {
 	c.Lock()
+	defer c.Unlock()
 	for _, conn := range c.conns {
 		close(conn)
 	}
 	c.conns = map[string](chan *FilePacketConn){}
-	c.Unlock()
 }
 
 func (c *ExternalPacketConns) Push(addr string, conn *FilePacketConn) {
 	c.Lock()
+	defer c.Unlock()
 	if i, ok := c.conns[addr]; ok && i != nil {
 		i <- conn
+	} else {
+		fmt.Fprintln(os.Stderr, "Push failed: chan does not exist")
 	}
-	c.Unlock()
 }
 
 func (c *ExternalPacketConns) Get(addr string, create bool) chan *FilePacketConn {
@@ -124,22 +130,24 @@ func (c *ExternalPacketConns) Get(addr string, create bool) chan *FilePacketConn
 		return i
 	}
 	if create {
-		c.conns[addr] = make(chan *FilePacketConn)
+		c.conns[addr] = make(chan *FilePacketConn, 16)
 		return c.conns[addr]
 	}
 	return nil
 }
 
-func (c *ExternalPacketConns) Delete(addr string) {
+func (c *ExternalPacketConns) Delete(addr string) bool {
 	c.Lock()
+	defer c.Unlock()
 	conn, ok := c.conns[addr]
 	if ok {
 		delete(c.conns, addr)
 		if conn != nil {
 			close(conn)
 		}
+		return true
 	}
-	c.Unlock()
+	return false
 }
 
 func NewExternalPacketConns() *ExternalPacketConns {
@@ -182,58 +190,65 @@ func NewBinderClient(binderFile *os.File, logger log15.Logger) (*BinderClientImp
 				return
 			}
 			if n > 0 {
-				msg := strings.Trim(string(buf[:n]), " \r\n")
-				logger.Debug("received message from root parent", "message", msg)
-				if strings.HasPrefix(msg, "error ") {
-					parts := strings.SplitN(msg, " ", 3)
-					addr := parts[1]
-					lnet := strings.SplitN(addr, ":", 2)[0]
-					errorstr := parts[2]
+				msgs := strings.Split(strings.Trim(string(buf[:n]), " \r\n"), "\n")
+				logger.Debug("received messages from root parent", "messages", msgs)
+				for _, msg := range msgs {
+					msg = strings.Trim(msg, " \r\n")
+					if strings.HasPrefix(msg, "error ") {
+						parts := strings.SplitN(msg, " ", 3)
+						addr := parts[1]
+						lnet := strings.SplitN(addr, ":", 2)[0]
+						errorstr := parts[2]
 
-					if IsStream(lnet) {
-						c.NewStreamConns.Push(addr, &FileConn{err: errorstr})
-					} else {
-						c.NewPacketConns.Push(addr, &FilePacketConn{err: errorstr})
+						if IsStream(lnet) {
+							c.NewStreamConns.Push(addr, &FileConn{err: errorstr})
+						} else {
+							c.NewPacketConns.Push(addr, &FilePacketConn{err: errorstr})
+						}
 					}
-				}
 
-				if strings.HasPrefix(msg, "confirmlisten ") {
-					parts := strings.SplitN(msg, " ", 2)
-					addr := parts[1]
-					c.NewStreamConns.Push(addr, &FileConn{})
-				}
+					if strings.HasPrefix(msg, "confirmlisten ") {
+						parts := strings.SplitN(msg, " ", 2)
+						addr := parts[1]
+						c.NewStreamConns.Push(addr, &FileConn{})
+					}
 
-				if strings.HasPrefix(msg, "newconn ") && oobn > 0 {
-					parts := strings.SplitN(msg, " ", 3)
-					uid := parts[1]
-					addr := parts[2]
-					cmsgs, err := syscall.ParseSocketControlMessage(oob)
-					if err == nil {
-						fds, err := syscall.ParseUnixRights(&cmsgs[0])
+					if strings.HasPrefix(msg, "newconn ") && oobn > 0 {
+						parts := strings.SplitN(msg, " ", 3)
+						uid := parts[1]
+						addr := parts[2]
+						cmsgs, err := syscall.ParseSocketControlMessage(oob)
 						if err == nil {
-							for _, fd := range fds {
-								logger.Debug("Received a new connection from root parent", "uid", uid, "addr", addr)
-								lnet := strings.SplitN(addr, ":", 2)[0]
-								rf := os.NewFile(uintptr(fd), "newconn")
-								if IsStream(lnet) {
-									rc, err := net.FileConn(rf)
-									rf.Close()
-									if err == nil {
-										c.NewStreamConns.Push(addr, &FileConn{Conn: rc, uid: uid})
-									}
-								} else {
-									rc, err := net.FilePacketConn(rf)
-									rf.Close()
-									if err == nil {
-										c.NewPacketConns.Push(addr, &FilePacketConn{PacketConn: rc, uid: uid})
+							fds, err := syscall.ParseUnixRights(&cmsgs[0])
+							if err == nil {
+								for _, fd := range fds {
+									logger.Debug("Received a new connection from root parent", "uid", uid, "addr", addr)
+									lnet := strings.SplitN(addr, ":", 2)[0]
+									rf := os.NewFile(uintptr(fd), "newconn")
+									if IsStream(lnet) {
+										rc, err := net.FileConn(rf)
+										rf.Close()
+										if err == nil {
+											c.NewStreamConns.Push(addr, &FileConn{Conn: rc, uid: uid})
+										} else {
+											logger.Warn("Error getting connection from file handler", "error", err)
+										}
+									} else {
+										rc, err := net.FilePacketConn(rf)
+										rf.Close()
+										if err == nil {
+											c.NewPacketConns.Push(addr, &FilePacketConn{PacketConn: rc, uid: uid})
+										} else {
+											logger.Warn("Error getting connection from file handler", "error", err)
+										}
 									}
 								}
+							} else {
+								logger.Warn("ParseUnixRights() error", "error", err)
 							}
 						} else {
-							logger.Warn("ParseUnixRights() error", "error", err)
+							logger.Warn("ParseSocketControlMessage() error", "error", err)
 						}
-					} else {
-						logger.Warn("ParseSocketControlMessage() error", "error", err)
 					}
 				}
 			}
@@ -249,8 +264,7 @@ type BinderListener struct {
 }
 
 func (l *BinderListener) Close() error {
-	l.client.StopListen(l.addr)
-	return nil
+	return l.client.StopListen(l.addr)
 }
 
 func (l *BinderListener) Accept() (net.Conn, error) {
@@ -293,6 +307,7 @@ func (l *BinderListener) Addr() net.Addr {
 func (c *BinderClientImpl) Listen(lnet string, laddr string) (net.Listener, error) {
 	addr := fmt.Sprintf("%s:%s", lnet, laddr)
 	ichan := c.NewStreamConns.Get(addr, true)
+	// TODO: generate UID in the client instead of server
 	_, err := c.conn.Write([]byte(fmt.Sprintf("listen %s\n", addr)))
 	if err != nil {
 		return nil, err
@@ -326,9 +341,13 @@ func (c *BinderClientImpl) ListenPacket(lnet string, laddr string) (net.PacketCo
 	return conn, nil
 }
 
-func (c *BinderClientImpl) StopListen(addr string) {
-	c.NewStreamConns.Delete(addr)
-	_, _ = c.conn.Write([]byte(fmt.Sprintf("stoplisten %s\n", addr)))
+func (c *BinderClientImpl) StopListen(addr string) error {
+	ok := c.NewStreamConns.Delete(addr)
+	if ok {
+		_, _ = c.conn.Write([]byte(fmt.Sprintf("stoplisten %s\n", addr)))
+		return nil
+	}
+	return fmt.Errorf("Already closed")
 }
 
 func (c *BinderClientImpl) Quit() error {

@@ -85,26 +85,30 @@ func NewHTTPServerDestination(ctx context.Context, e *Env) (Destination, error) 
 	}
 
 	d.sendQueue = make(chan *model.FullMessage, d.nMessages)
-
 	hostport := net.JoinHostPort(config.BindAddr, strconv.FormatInt(int64(config.Port), 10))
+	listener, err := d.binder.Listen("tcp", hostport)
+	if err != nil {
+		return nil, err
+	}
 	d.server = &http.Server{
-		Addr:    hostport,
 		Handler: d,
 	}
 	d.wg.Add(1)
-	go d.serve()
+	go d.serve(listener)
 
 	return d, nil
 }
 
-func (d *HTTPServerDestination) serve() (err error) {
+func (d *HTTPServerDestination) serve(listener net.Listener) (err error) {
 	defer func() {
+		if err != nil {
+			d.logger.Info("HTTP server stopped", "error", err)
+		}
+		listener.Close()
 		d.dofatal()
 		d.wg.Done()
 	}()
-	// TODO: use binder
-	err = d.server.ListenAndServe()
-	return err
+	return d.server.Serve(listener)
 }
 
 func (d *HTTPServerDestination) nackall(messages []*model.FullMessage) {
@@ -116,7 +120,6 @@ func (d *HTTPServerDestination) nackall(messages []*model.FullMessage) {
 
 func (d *HTTPServerDestination) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	messages := make([]*model.FullMessage, 0, d.nMessages)
-	//fmt.Fprintln(os.Stderr, "serveHTTP")
 	io.Copy(ioutil.Discard, r.Body)
 	r.Body.Close()
 
