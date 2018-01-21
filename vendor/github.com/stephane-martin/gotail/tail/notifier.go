@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 
 	"github.com/fatih/set"
 	"github.com/fsnotify/fsnotify"
@@ -17,6 +18,7 @@ type notifier struct {
 	mu          sync.Mutex
 	watcher     *fsnotify.Watcher
 	cwd         string
+	nFiles      uint32
 }
 
 func newNotifier(errors chan error) (n *notifier, err error) {
@@ -60,6 +62,10 @@ func (n *notifier) Stop() (err error) {
 	return nil
 }
 
+func (n *notifier) NFiles() uint32 {
+	return atomic.LoadUint32(&n.nFiles)
+}
+
 func (n *notifier) addFile(fspec *fileSpec) {
 	// add fspec to fspecmap
 	absName := n.abs(fspec.name)
@@ -68,6 +74,7 @@ func (n *notifier) addFile(fspec *fileSpec) {
 		return
 	}
 	n.fspecsMap.Store(absName, fspec)
+	atomic.AddUint32(&n.nFiles, 1)
 	dirname := filepath.Dir(absName)
 	if !n.directories.Has(dirname) {
 		n.directories.Add(dirname)

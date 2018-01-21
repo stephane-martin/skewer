@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -18,18 +19,20 @@ import (
 // Tailor can be used to monitor whole directories and report new lines in files
 // that live inside the directories.
 type Tailor struct {
-	results       chan FileLineID
-	errors        chan error
-	n             *notifier
-	mu            sync.Mutex
-	watcher       *fsnotify.Watcher
-	directories   *dirSet
-	rdirectories  *dirSet
-	fspecs        sync.Map
-	prefixWg      sync.WaitGroup
-	cancelPolling chan struct{}
-	pollingWg     sync.WaitGroup
-	cwd           string
+	results             chan FileLineID
+	errors              chan error
+	n                   *notifier
+	mu                  sync.Mutex
+	watcher             *fsnotify.Watcher
+	directories         *dirSet
+	rdirectories        *dirSet
+	fspecs              sync.Map
+	prefixWg            sync.WaitGroup
+	cancelPolling       chan struct{}
+	pollingWg           sync.WaitGroup
+	cwd                 string
+	nPollFiles          uint32
+	nWatchedDirectories uint64
 }
 
 // NewTailor builds a *Tailor.
@@ -78,9 +81,11 @@ func NewTailor(results chan FileLineID, errors chan error) (t *Tailor, err error
 					// a new directory was created
 					if t.rdirectories.HasSubdir(absName) {
 						// it is a subdirectory of a directory we have to monitor recursively
-						t.logerror(
-							t.watcher.Add(absName),
-						)
+						err := t.watcher.Add(absName)
+						t.logerror(err)
+						if err == nil {
+							atomic.AddUint64(&t.nWatchedDirectories, 1)
+						}
 						//fmt.Fprintln(os.Stderr, "new watch", absName)
 					}
 				}
@@ -127,6 +132,14 @@ func (t *Tailor) abs(rel string) string {
 		return rel
 	}
 	return filepath.Join(t.cwd, rel)
+}
+
+func (t *Tailor) NFiles() uint64 {
+	return uint64(t.n.NFiles()) + uint64(atomic.LoadUint32(&t.nPollFiles))
+}
+
+func (t *Tailor) NDirectories() uint64 {
+	return atomic.LoadUint64(&t.nWatchedDirectories)
 }
 
 // Close stops the Tailor. New content will not be detected anymore. Eventually
@@ -235,6 +248,7 @@ func (t *Tailor) AddDirectory(dirname string, filter FilterFunc) (uid ulid.ULID,
 	if err != nil {
 		return uid, err
 	}
+	atomic.AddUint64(&t.nWatchedDirectories, 1)
 	uid, err = ulid.New(ulid.Now(), rand.Reader)
 	if err != nil {
 		return uid, err
@@ -288,6 +302,7 @@ func (t *Tailor) AddRecursiveDirectory(dirname string, filter FilterFunc) (uid u
 		}
 		watched = append(watched, dir)
 	}
+	atomic.AddUint64(&t.nWatchedDirectories, uint64(len(watched)))
 	t.rdirectories.Add(absName, filter, uid)
 
 	// tail the existing files
@@ -327,6 +342,7 @@ func (t *Tailor) addFile(filename string, uids []ulid.ULID, new bool, mu *sync.M
 	fspec.initTail(ctx, nil, nbLines)
 	if fspec.hasClassicalFollow() {
 		followClassical(t.cancelPolling, &t.pollingWg, fspec, time.Second)
+		atomic.AddUint32(&t.nPollFiles, 1)
 	} else {
 		t.n.AddFile(fspec)
 	}

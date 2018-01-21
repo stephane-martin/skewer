@@ -889,10 +889,10 @@
 			"revisionTime": "2018-01-19T12:49:12Z"
 		},
 		{
-			"checksumSHA1": "IHdFMmEpo0J5FPM53dr096lDkOc=",
+			"checksumSHA1": "LxlGi4UgOXYQOThGMFtc1fEaxt0=",
 			"path": "github.com/stephane-martin/gotail/tail",
-			"revision": "6584262773db8df63b0c1e6d03ff7b5b3d909e74",
-			"revisionTime": "2018-01-16T22:04:19Z"
+			"revision": "e45856a14bceb071d4ab0e5c01ff943d7d0da7f5",
+			"revisionTime": "2018-01-21T19:46:41Z"
 		},
 		{
 			"checksumSHA1": "G7MxSnBfyxidM5U3P6uyzsxP40E=",
