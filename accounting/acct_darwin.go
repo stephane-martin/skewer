@@ -119,7 +119,6 @@ func Comm(b *C.char) string {
 }
 
 func MakeAcct(buf []byte, tick int64) (dest Acct) {
-	// TODO: handle panic ?
 	p := (*C.struct_acct)(unsafe.Pointer(&buf[0]))
 	uid := strconv.FormatUint(uint64(p.ac_uid), 10)
 	gid := strconv.FormatUint(uint64(p.ac_gid), 10)

@@ -12,7 +12,6 @@ var Once sync.Once
 var IncomingMsgsCounter *prometheus.CounterVec
 var ClientConnectionCounter *prometheus.CounterVec
 var ParsingErrorCounter *prometheus.CounterVec
-var MessageFilteringCounter *prometheus.CounterVec
 
 func InitRegistry() {
 	IncomingMsgsCounter = prometheus.NewCounterVec(
@@ -39,19 +38,10 @@ func InitRegistry() {
 		[]string{"protocol", "client", "parser_name"},
 	)
 
-	MessageFilteringCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "skw_relp_messages_filtering_total",
-			Help: "number of filtered messages by status",
-		},
-		[]string{"status", "client"},
-	)
-
 	Registry = prometheus.NewRegistry()
 	Registry.MustRegister(
 		ClientConnectionCounter,
 		IncomingMsgsCounter,
-		MessageFilteringCounter,
 		ParsingErrorCounter,
 	)
 }

@@ -25,12 +25,12 @@ import (
 var Registry *prometheus.Registry
 var badgerGauge *prometheus.GaugeVec
 var ackCounter *prometheus.CounterVec
+var messageFilterCounter *prometheus.CounterVec
 var once sync.Once
-
-// TODO: gather badger metrics
 
 func InitRegistry() {
 	once.Do(func() {
+
 		badgerGauge = prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "skw_store_entries_gauge",
@@ -38,6 +38,7 @@ func InitRegistry() {
 			},
 			[]string{"queue", "destination"},
 		)
+
 		ackCounter = prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "skw_store_acks_total",
@@ -45,7 +46,20 @@ func InitRegistry() {
 			},
 			[]string{"status", "destination"},
 		)
+
+		messageFilterCounter = prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "skw_message_filtering_total",
+				Help: "number of filtered messages by status",
+			},
+			[]string{"status", "client", "destination"},
+		)
+
 		Registry = prometheus.NewRegistry()
+		Registry.MustRegister(badgerGauge, ackCounter, messageFilterCounter)
+
+		// TODO: gather badger metrics
+
 		/*
 			expvarCollector := prometheus.NewExpvarCollector(map[string]*prometheus.Desc{
 				"memstats": prometheus.NewDesc(
@@ -56,7 +70,6 @@ func InitRegistry() {
 			})
 		*/
 		//Registry.MustRegister(badgerGauge, ackCounter, expvarCollector)
-		Registry.MustRegister(badgerGauge, ackCounter)
 		//Registry.MustRegister(badgerGauge, ackCounter, prometheus.NewGoCollector())
 		//Registry.MustRegister(badgerGauge, ackCounter, prometheus.NewProcessCollector(os.Getpid(), "store"))
 	})
@@ -833,12 +846,14 @@ func (s *MessageStore) retrieve(n uint32, dest conf.DestinationType) (messages m
 	var fetched uint32
 	invalidEntries := []utils.MyULID{}
 	var message *model.FullMessage
+	var keysNotFound int
 
 	for iter.Rewind(); iter.Valid() && fetched < n; iter.Next() {
 		uid := iter.Key()
 		messageBytes, err := messagesDB.Get(uid, txn)
 		if err != nil {
 			invalidEntries = append(invalidEntries, uid)
+			keysNotFound++
 			s.logger.Warn("Error getting message content from message queue", "uid", uid, "dest", dest, "error", err)
 			continue
 		}
@@ -878,7 +893,7 @@ func (s *MessageStore) retrieve(n uint32, dest conf.DestinationType) (messages m
 			err := txn.Commit(nil)
 			if err == nil {
 				badgerGauge.WithLabelValues("ready", conf.DestinationNames[dest]).Sub(float64(len(invalidEntries)))
-				badgerGauge.WithLabelValues("messages", conf.DestinationNames[dest]).Sub(float64(len(invalidEntries)))
+				badgerGauge.WithLabelValues("messages", conf.DestinationNames[dest]).Sub(float64(len(invalidEntries) - keysNotFound))
 			}
 		}
 		return map[utils.MyULID]*model.FullMessage{}
@@ -906,7 +921,7 @@ func (s *MessageStore) retrieve(n uint32, dest conf.DestinationType) (messages m
 	err = txn.Commit(nil)
 	if err == nil {
 		badgerGauge.WithLabelValues("ready", conf.DestinationNames[dest]).Sub(float64(len(invalidEntries)))
-		badgerGauge.WithLabelValues("messages", conf.DestinationNames[dest]).Sub(float64(len(invalidEntries)))
+		badgerGauge.WithLabelValues("messages", conf.DestinationNames[dest]).Sub(float64(len(invalidEntries) - keysNotFound))
 		badgerGauge.WithLabelValues("sent", conf.DestinationNames[dest]).Add(float64(len(sentBatch)))
 		badgerGauge.WithLabelValues("ready", conf.DestinationNames[dest]).Sub(float64(len(readyBatch)))
 		return messages

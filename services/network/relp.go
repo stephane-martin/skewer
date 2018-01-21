@@ -34,10 +34,11 @@ var relpProtocolErrorsCounter *prometheus.CounterVec
 func initRelpRegistry() {
 	base.Once.Do(func() {
 		base.InitRegistry()
+
 		relpAnswersCounter = prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "skw_relp_answers_total",
-				Help: "number of RELP rsp answers",
+				Help: "number of RSP answers sent back to the RELP client",
 			},
 			[]string{"status", "client"},
 		)

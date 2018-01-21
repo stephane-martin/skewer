@@ -5,8 +5,6 @@ import (
 	"sync"
 
 	"github.com/inconshreveable/log15"
-	"github.com/prometheus/client_golang/prometheus"
-	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/javascript"
 	"github.com/stephane-martin/skewer/model"
@@ -16,47 +14,29 @@ import (
 )
 
 type fwderImpl struct {
-	messageFilterCounter *prometheus.CounterVec
-	logger               log15.Logger
-	binder               binder.Client
-	wg                   *sync.WaitGroup
-	registry             *prometheus.Registry
-	once                 sync.Once
-	store                Store
-	conf                 conf.BaseConfig
-	desttype             conf.DestinationType
-	fatalChan            chan struct{}
+	logger    log15.Logger
+	binder    binder.Client
+	wg        *sync.WaitGroup
+	once      sync.Once
+	store     Store
+	conf      conf.BaseConfig
+	desttype  conf.DestinationType
+	fatalChan chan struct{}
 }
 
 func NewForwarder(desttype conf.DestinationType, st Store, bc conf.BaseConfig, logger log15.Logger, bindr binder.Client) (fwder Forwarder) {
 	f := fwderImpl{
 		logger:    logger.New("class", "forwarder"),
 		binder:    bindr,
-		registry:  prometheus.NewRegistry(),
 		store:     st,
 		conf:      bc,
 		desttype:  desttype,
 		fatalChan: make(chan struct{}),
 	}
 
-	f.messageFilterCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "skw_fwder_messages_filtering_total",
-			Help: "number of filtered messages by status",
-		},
-		[]string{"status", "client", "destination"},
-	)
-
-	f.registry.MustRegister(
-		f.messageFilterCounter,
-	)
 	f.fatalChan = make(chan struct{})
 	f.wg = &sync.WaitGroup{}
 	return &f
-}
-
-func (fwder *fwderImpl) Gather() ([]*dto.MetricFamily, error) {
-	return dests.Registry.Gather()
 }
 
 func (fwder *fwderImpl) Fatal() chan struct{} {
@@ -193,18 +173,18 @@ func (fwder *fwderImpl) fwdMsg(m *model.FullMessage, envs map[utils.MyULID]*java
 	switch filterResult {
 	case javascript.DROPPED:
 		fwder.store.ACK(m.Uid, fwder.desttype)
-		fwder.messageFilterCounter.WithLabelValues("dropped", m.Fields.GetProperty("skewer", "client"), conf.DestinationNames[fwder.desttype]).Inc()
+		messageFilterCounter.WithLabelValues("dropped", m.Fields.GetProperty("skewer", "client"), conf.DestinationNames[fwder.desttype]).Inc()
 		return
 	case javascript.REJECTED:
-		fwder.messageFilterCounter.WithLabelValues("rejected", m.Fields.GetProperty("skewer", "client"), conf.DestinationNames[fwder.desttype]).Inc()
+		messageFilterCounter.WithLabelValues("rejected", m.Fields.GetProperty("skewer", "client"), conf.DestinationNames[fwder.desttype]).Inc()
 		fwder.store.NACK(m.Uid, fwder.desttype)
 		return
 	case javascript.PASS:
-		fwder.messageFilterCounter.WithLabelValues("passing", m.Fields.GetProperty("skewer", "client"), conf.DestinationNames[fwder.desttype]).Inc()
+		messageFilterCounter.WithLabelValues("passing", m.Fields.GetProperty("skewer", "client"), conf.DestinationNames[fwder.desttype]).Inc()
 	default:
 		fwder.store.PermError(m.Uid, fwder.desttype)
 		fwder.logger.Warn("Error happened processing message", "uid", m.Uid, "error", err)
-		fwder.messageFilterCounter.WithLabelValues("unknown", m.Fields.GetProperty("skewer", "client"), conf.DestinationNames[fwder.desttype]).Inc()
+		messageFilterCounter.WithLabelValues("unknown", m.Fields.GetProperty("skewer", "client"), conf.DestinationNames[fwder.desttype]).Inc()
 		return err
 	}
 

@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 
-	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
@@ -28,5 +27,4 @@ type Forwarder interface {
 	Forward(ctx context.Context)
 	Fatal() chan struct{}
 	WaitFinished()
-	Gather() ([]*dto.MetricFamily, error)
 }

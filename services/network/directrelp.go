@@ -28,25 +28,59 @@ import (
 	"github.com/stephane-martin/skewer/utils/queue/tcp"
 )
 
-/*
-	m.KafkaConnectionErrorCounter = prometheus.NewCounter(
-		prometheus.CounterOpts{
-			Name: "skw_relp_kafka_connection_errors_total",
-			Help: "number of kafka connection errors",
-		},
-	)
+var connCounter *prometheus.CounterVec
+var ackCounter *prometheus.CounterVec
+var messageFilterCounter *prometheus.CounterVec
 
-	m.KafkaAckNackCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "skw_relp_kafka_ack_total",
-			Help: "number of kafka acknowledgments",
-		},
-		[]string{"status", "topic"},
-	)
-*/
+func initDirectRelpRegistry() {
+	base.Once.Do(func() {
+		base.InitRegistry()
 
-var kafkaAckNackCounter *prometheus.CounterVec
-var kafkaConnectionErrorCounter *prometheus.CounterVec
+		// as a RELP service
+		relpAnswersCounter = prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "skw_relp_answers_total",
+				Help: "number of RSP answers sent back to the RELP client",
+			},
+			[]string{"status", "client"},
+		)
+
+		relpProtocolErrorsCounter = prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "skw_relp_protocol_errors_total",
+				Help: "Number of RELP protocol errors",
+			},
+			[]string{"client"},
+		)
+
+		// as a "directrelp destination"
+		ackCounter = prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "skw_dest_ack_total",
+				Help: "number of message acknowledgments",
+			},
+			[]string{"dest", "status"},
+		)
+
+		connCounter = prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "skw_dest_conn_total",
+				Help: "number of connections to remote service",
+			},
+			[]string{"dest", "status"},
+		)
+
+		messageFilterCounter = prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "skw_message_filtering_total",
+				Help: "number of filtered messages by status",
+			},
+			[]string{"status", "client", "destination"},
+		)
+
+		base.Registry.MustRegister(relpAnswersCounter, relpProtocolErrorsCounter, ackCounter, connCounter, messageFilterCounter)
+	})
+}
 
 type DirectRelpService struct {
 	impl           *DirectRelpServiceImpl
@@ -64,6 +98,7 @@ type DirectRelpService struct {
 }
 
 func NewDirectRelpService(env *base.ProviderEnv) (base.Provider, error) {
+	initDirectRelpRegistry()
 	s := DirectRelpService{
 		b:        env.Binder,
 		logger:   env.Logger,
@@ -91,8 +126,6 @@ func (s *DirectRelpService) Gather() ([]*dto.MetricFamily, error) {
 }
 
 func (s *DirectRelpService) Start() (infos []model.ListenerInfo, err error) {
-	// the Relp service manages registration in Consul by itself and
-	// therefore does not report infos
 	infos = []model.ListenerInfo{}
 	s.impl = NewDirectRelpServiceImpl(s.confined, s.reporter, s.b, s.logger)
 	s.fatalErrorChan = make(chan struct{})
@@ -105,16 +138,13 @@ func (s *DirectRelpService) Start() (infos []model.ListenerInfo, err error) {
 			state := <-s.impl.StatusChan
 			switch state {
 			case FinalStopped:
-				//s.impl.Logger.Debug("The RELP service has been definitely halted")
 				_ = s.reporter.Report([]model.ListenerInfo{})
 				return
 
 			case Stopped:
-				//s.impl.Logger.Debug("The RELP service is stopped")
 				s.impl.SetConf(s.sc, s.pc, s.kc, s.QueueSize)
 				infos, err := s.impl.Start()
 				if err == nil {
-					//fmt.Fprintln(os.Stderr, "STOPPED")
 					err = s.reporter.Report(infos)
 					if err != nil {
 						s.impl.Logger.Error("Failed to report infos. Fatal error.", "error", err)
@@ -138,7 +168,6 @@ func (s *DirectRelpService) Start() (infos []model.ListenerInfo, err error) {
 				}()
 
 			case Started:
-				//s.impl.Logger.Debug("The RELP service has been started")
 			}
 		}
 	}()
@@ -213,9 +242,11 @@ func (s *DirectRelpServiceImpl) Start() ([]model.ListenerInfo, error) {
 	var err error
 	s.producer, err = s.kafkaConf.GetAsyncProducer(s.confined)
 	if err != nil {
+		connCounter.WithLabelValues("directkafka", "fail").Inc()
 		s.resetTCPListeners()
 		return nil, err
 	}
+	connCounter.WithLabelValues("directkafka", "success").Inc()
 
 	s.Logger.Info("Listening on DirectRELP", "nb_services", len(infos))
 
@@ -423,7 +454,6 @@ func (s *DirectRelpServiceImpl) handleKafkaResponses() {
 			if more {
 				metad := succ.Metadata.(meta)
 				s.forwarder.ForwardSucc(metad.ConnID, metad.Txnr)
-				kafkaAckNackCounter.WithLabelValues("ack", succ.Topic).Inc()
 			} else {
 				kafkaSuccChan = nil
 			}
@@ -431,7 +461,6 @@ func (s *DirectRelpServiceImpl) handleKafkaResponses() {
 			if more {
 				metad := fail.Msg.Metadata.(meta)
 				s.forwarder.ForwardFail(metad.ConnID, metad.Txnr)
-				kafkaAckNackCounter.WithLabelValues("nack", fail.Msg.Topic).Inc()
 				s.Logger.Info("NACK from Kafka", "error", fail.Error(), "txnr", metad.Txnr, "topic", fail.Msg.Topic)
 				fatal = model.IsFatalKafkaError(fail.Err)
 			} else {
@@ -496,6 +525,7 @@ func (s *DirectRelpServiceImpl) handleResponses(conn net.Conn, connID uint32, cl
 					//logger.Debug("ACK to client", "connid", connID, "tnxr", next)
 					delete(successes, next)
 					relpAnswersCounter.WithLabelValues("200", client).Inc()
+					ackCounter.WithLabelValues("directrelp", "ack").Inc()
 				}
 			} else if failures[next] {
 				err = writeFailure(next)
@@ -503,6 +533,7 @@ func (s *DirectRelpServiceImpl) handleResponses(conn net.Conn, connID uint32, cl
 					//logger.Debug("NACK to client", "connid", connID, "txnr", next)
 					delete(failures, next)
 					relpAnswersCounter.WithLabelValues("500", client).Inc()
+					ackCounter.WithLabelValues("directrelp", "nack").Inc()
 				}
 			} else {
 				break Cooking
@@ -602,19 +633,19 @@ ForParsedChan:
 		switch filterResult {
 		case javascript.DROPPED:
 			s.forwarder.ForwardFail(message.ConnId, message.Txnr)
-			base.MessageFilteringCounter.WithLabelValues("dropped", message.Fields.GetProperty("skewer", "client")).Inc()
+			messageFilterCounter.WithLabelValues("dropped", message.Fields.GetProperty("skewer", "client"), "directkafka").Inc()
 			model.Free(message.Fields)
 			continue ForParsedChan
 		case javascript.REJECTED:
 			s.forwarder.ForwardFail(message.ConnId, message.Txnr)
-			base.MessageFilteringCounter.WithLabelValues("rejected", message.Fields.GetProperty("skewer", "client")).Inc()
+			messageFilterCounter.WithLabelValues("rejected", message.Fields.GetProperty("skewer", "client"), "directkafka").Inc()
 			model.Free(message.Fields)
 			continue ForParsedChan
 		case javascript.PASS:
-			base.MessageFilteringCounter.WithLabelValues("passing", message.Fields.GetProperty("skewer", "client")).Inc()
+			messageFilterCounter.WithLabelValues("passing", message.Fields.GetProperty("skewer", "client"), "directkafka").Inc()
 		default:
 			s.forwarder.ForwardFail(message.ConnId, message.Txnr)
-			base.MessageFilteringCounter.WithLabelValues("unknown", message.Fields.GetProperty("skewer", "client")).Inc()
+			messageFilterCounter.WithLabelValues("unknown", message.Fields.GetProperty("skewer", "client"), "directkafka").Inc()
 			logger.Warn("Error happened processing message", "txnr", message.Txnr, "error", err)
 			model.Free(message.Fields)
 			continue ForParsedChan

@@ -27,24 +27,24 @@ func InitRegistry() {
 	once.Do(func() {
 		ackCounter = prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Name: "skw_relpdest_ack_total",
-				Help: "number of RELP acknowledgments",
+				Name: "skw_dest_ack_total",
+				Help: "number of message acknowledgments",
 			},
 			[]string{"dest", "status"},
 		)
 
 		connCounter = prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Name: "skw_relpdest_conn_total",
-				Help: "number of RELP connections",
+				Name: "skw_dest_conn_total",
+				Help: "number of connections to remote service",
 			},
 			[]string{"dest", "status"},
 		)
 
 		fatalCounter = prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Name: "skw_kafka_fatal_total",
-				Help: "number of received kafka fatal errors",
+				Name: "skw_dest_fatal_total",
+				Help: "number of destination fatal errors",
 			},
 			[]string{"dest"},
 		)
@@ -59,14 +59,14 @@ func InitRegistry() {
 
 		kafkaInputsCounter = prometheus.NewCounter(
 			prometheus.CounterOpts{
-				Name: "skw_kafka_inputs_total",
+				Name: "skw_dest_kafka_sent_total",
 				Help: "number of sent messages to kafka",
 			},
 		)
 
 		openedFilesGauge = prometheus.NewGauge(
 			prometheus.GaugeOpts{
-				Name: "skw_file_opened_files_number",
+				Name: "skw_dest_opened_files_number",
 				Help: "number of opened files by the file destination",
 			},
 		)

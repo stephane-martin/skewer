@@ -42,7 +42,7 @@ func NewFilePollingService(env *base.ProviderEnv) (base.Provider, error) {
 	initPollingRegistry()
 	s := FilePollingService{
 		stasher:  env.Reporter,
-		logger:   env.Logger.New("class", "filepolling"),
+		logger:   env.Logger.New("class", "filepoll"),
 		confined: env.Confined,
 		pool: &sync.Pool{
 			New: func() interface{} {
@@ -221,6 +221,7 @@ func (s *FilePollingService) fetchLines(results chan tail.FileLineID) {
 		}
 		raw.Line = result.Line
 		raw.ConfID = config.ConfID
+		base.IncomingMsgsCounter.WithLabelValues("filepoll", hostname, "0", config.BaseDirectory)
 		s.rawQueue <- raw
 	}
 }
