@@ -9,6 +9,7 @@ import (
 	"github.com/gobwas/glob"
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
+	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/gotail/tail"
 	"github.com/stephane-martin/skewer/conf"
@@ -34,8 +35,11 @@ type FilePollingService struct {
 	rawQueue       chan *model.RawFileMessage
 	fatalErrorChan chan struct{}
 	fatalOnce      *sync.Once
+	registryOnce   sync.Once
 	confined       bool
 	wg             sync.WaitGroup
+	nWatchedFiles  prometheus.GaugeFunc
+	nWatchedDirs   prometheus.GaugeFunc
 }
 
 func NewFilePollingService(env *base.ProviderEnv) (base.Provider, error) {
@@ -50,6 +54,21 @@ func NewFilePollingService(env *base.ProviderEnv) (base.Provider, error) {
 			},
 		},
 	}
+	s.nWatchedFiles = prometheus.NewGaugeFunc(
+		prometheus.GaugeOpts{
+			Name: "skw_filepoll_nfiles",
+			Help: "number of watched files",
+		},
+		s.nFiles,
+	)
+
+	s.nWatchedDirs = prometheus.NewGaugeFunc(
+		prometheus.GaugeOpts{
+			Name: "skw_filepoll_ndirs",
+			Help: "number of watched directories",
+		},
+		s.nDirs,
+	)
 	return &s, nil
 }
 
@@ -69,6 +88,26 @@ func (s *FilePollingService) dofatal() {
 	s.fatalOnce.Do(func() { close(s.fatalErrorChan) })
 }
 
+func (s *FilePollingService) nFiles() float64 {
+	if s == nil {
+		return 0
+	}
+	if s.tailor == nil {
+		return 0
+	}
+	return float64(s.tailor.NFiles())
+}
+
+func (s *FilePollingService) nDirs() float64 {
+	if s == nil {
+		return 0
+	}
+	if s.tailor == nil {
+		return 0
+	}
+	return float64(s.tailor.NDirectories())
+}
+
 func (s *FilePollingService) Start() (infos []model.ListenerInfo, err error) {
 	infos = []model.ListenerInfo{}
 	s.fatalErrorChan = make(chan struct{})
@@ -82,6 +121,10 @@ func (s *FilePollingService) Start() (infos []model.ListenerInfo, err error) {
 		return infos, err
 	}
 	s.tailor = tailor
+
+	s.registryOnce.Do(func() {
+		base.Registry.MustRegister(s.nWatchedFiles, s.nWatchedDirs)
+	})
 
 	for _, config := range s.confs {
 		filter, err := MakeFilter(config.Glob)
