@@ -41,7 +41,7 @@ func NewWebsocketServerDestination(ctx context.Context, e *Env) (Destination, er
 	config := e.config.WebsocketServerDest
 
 	d := &WebsocketServerDestination{
-		baseDestination: newBaseDestination(conf.HTTPServer, "websocketserver", e),
+		baseDestination: newBaseDestination(conf.WebsocketServer, "websocketserver", e),
 		connections:     make(map[*websocket.Conn]bool),
 		stopchan:        ctx.Done(),
 	}
