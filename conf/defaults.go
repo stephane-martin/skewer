@@ -27,6 +27,7 @@ func SetDefaults(v *viper.Viper) {
 		SetGraylogDestDefaults,
 		SetHTTPDestDefaults,
 		SetHTTPServerDestDefaults,
+		SetWebsocketServerDestDefaults,
 		SetNatsDestDefaults,
 		SetMainDefaults,
 	}
@@ -65,6 +66,18 @@ func SetHTTPServerDestDefaults(v *viper.Viper, prefixed bool) {
 	v.SetDefault(prefix+"delimiter", 10)
 	v.SetDefault(prefix+"line_framing", true)
 	v.SetDefault(prefix+"messages_number", 8*1024)
+}
+
+func SetWebsocketServerDestDefaults(v *viper.Viper, prefixed bool) {
+	prefix := ""
+	if prefixed {
+		prefix = "websocketserver_destination."
+	}
+	v.SetDefault(prefix+"format", "fulljson")
+	v.SetDefault(prefix+"bind_addr", "127.0.0.1")
+	v.SetDefault(prefix+"port", "8515")
+	v.SetDefault(prefix+"log_endpoint", "/logs")
+	v.SetDefault(prefix+"web_endpoint", "/web")
 }
 
 func SetHTTPDestDefaults(v *viper.Viper, prefixed bool) {

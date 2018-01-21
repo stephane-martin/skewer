@@ -12,29 +12,30 @@ import (
 
 // BaseConfig is the root of all configuration parameters.
 type BaseConfig struct {
-	FSSource         []FilesystemSourceConfig `mapstructure:"fs_source" toml:"fs_source" json:"fs_source"`
-	TCPSource        []TCPSourceConfig        `mapstructure:"tcp_source" toml:"tcp_source" json:"tcp_source"`
-	UDPSource        []UDPSourceConfig        `mapstructure:"udp_source" toml:"udp_source" json:"udp_source"`
-	RELPSource       []RELPSourceConfig       `mapstructure:"relp_source" toml:"relp_source" json:"relp_source"`
-	DirectRELPSource []DirectRELPSourceConfig `mapstructure:"directrelp_source" toml:"directrelp_source" json:"directrelp_source"`
-	KafkaSource      []KafkaSourceConfig      `mapstructure:"kafka_source" toml:"kafka_source" json:"kafka_source"`
-	GraylogSource    []GraylogSourceConfig    `mapstructure:"graylog_source" toml:"graylog_source" json:"graylog_source"`
-	Store            StoreConfig              `mapstructure:"store" toml:"store" json:"store"`
-	Parsers          []ParserConfig           `mapstructure:"parser" toml:"parser" json:"parser"`
-	Journald         JournaldConfig           `mapstructure:"journald" toml:"journald" json:"journald"`
-	Metrics          MetricsConfig            `mapstructure:"metrics" toml:"metrics" json:"metrics"`
-	Accounting       AccountingConfig         `mapstructure:"accounting" toml:"accounting" json:"accounting"`
-	Main             MainConfig               `mapstructure:"main" toml:"main" json:"main"`
-	KafkaDest        *KafkaDestConfig         `mapstructure:"kafka_destination" toml:"kafka_destination" json:"kafka_destination"`
-	UDPDest          UDPDestConfig            `mapstructure:"udp_destination" toml:"udp_destination" json:"udp_destination"`
-	TCPDest          TCPDestConfig            `mapstructure:"tcp_destination" toml:"tcp_destination" json:"tcp_destination"`
-	HTTPDest         HTTPDestConfig           `mapstructure:"http_destination" toml:"http_destination" json:"http_destination"`
-	HTTPServerDest   HTTPServerDestConfig     `mapstructure:"httpserver_destination" toml:"httpserver_destination" json:"httpserver_destination"`
-	NATSDest         *NATSDestConfig          `mapstructure:"nats_destination" toml:"nats_destination" json:"nats_destination"`
-	RELPDest         RELPDestConfig           `mapstructure:"relp_destination" toml:"relp_destination" json:"relp_destination"`
-	FileDest         FileDestConfig           `mapstructure:"file_destination" toml:"file_destination" json:"file_destination"`
-	StderrDest       StderrDestConfig         `mapstructure:"stderr_destination" toml:"stderr_destination" json:"stderr_destination"`
-	GraylogDest      GraylogDestConfig        `mapstructure:"graylog_destination" toml:"graylog_destination" json:"graylog_destination"`
+	FSSource            []FilesystemSourceConfig  `mapstructure:"fs_source" toml:"fs_source" json:"fs_source"`
+	TCPSource           []TCPSourceConfig         `mapstructure:"tcp_source" toml:"tcp_source" json:"tcp_source"`
+	UDPSource           []UDPSourceConfig         `mapstructure:"udp_source" toml:"udp_source" json:"udp_source"`
+	RELPSource          []RELPSourceConfig        `mapstructure:"relp_source" toml:"relp_source" json:"relp_source"`
+	DirectRELPSource    []DirectRELPSourceConfig  `mapstructure:"directrelp_source" toml:"directrelp_source" json:"directrelp_source"`
+	KafkaSource         []KafkaSourceConfig       `mapstructure:"kafka_source" toml:"kafka_source" json:"kafka_source"`
+	GraylogSource       []GraylogSourceConfig     `mapstructure:"graylog_source" toml:"graylog_source" json:"graylog_source"`
+	Store               StoreConfig               `mapstructure:"store" toml:"store" json:"store"`
+	Parsers             []ParserConfig            `mapstructure:"parser" toml:"parser" json:"parser"`
+	Journald            JournaldConfig            `mapstructure:"journald" toml:"journald" json:"journald"`
+	Metrics             MetricsConfig             `mapstructure:"metrics" toml:"metrics" json:"metrics"`
+	Accounting          AccountingConfig          `mapstructure:"accounting" toml:"accounting" json:"accounting"`
+	Main                MainConfig                `mapstructure:"main" toml:"main" json:"main"`
+	KafkaDest           *KafkaDestConfig          `mapstructure:"kafka_destination" toml:"kafka_destination" json:"kafka_destination"`
+	UDPDest             UDPDestConfig             `mapstructure:"udp_destination" toml:"udp_destination" json:"udp_destination"`
+	TCPDest             TCPDestConfig             `mapstructure:"tcp_destination" toml:"tcp_destination" json:"tcp_destination"`
+	HTTPDest            HTTPDestConfig            `mapstructure:"http_destination" toml:"http_destination" json:"http_destination"`
+	HTTPServerDest      HTTPServerDestConfig      `mapstructure:"httpserver_destination" toml:"httpserver_destination" json:"httpserver_destination"`
+	WebsocketServerDest WebsocketServerDestConfig `mapstructure:"websocketserver_destination" toml:"websocketserver_destination" json:"websocketserver_destination"`
+	NATSDest            *NATSDestConfig           `mapstructure:"nats_destination" toml:"nats_destination" json:"nats_destination"`
+	RELPDest            RELPDestConfig            `mapstructure:"relp_destination" toml:"relp_destination" json:"relp_destination"`
+	FileDest            FileDestConfig            `mapstructure:"file_destination" toml:"file_destination" json:"file_destination"`
+	StderrDest          StderrDestConfig          `mapstructure:"stderr_destination" toml:"stderr_destination" json:"stderr_destination"`
+	GraylogDest         GraylogDestConfig         `mapstructure:"graylog_destination" toml:"graylog_destination" json:"graylog_destination"`
 }
 
 // MainConfig lists general/global parameters.
@@ -242,6 +243,14 @@ type HTTPServerDestConfig struct {
 	LineFraming    bool   `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
 	FrameDelimiter uint8  `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
 	NMessages      int32  `mapstructure:"messages_number" toml:"messages_number" json:"messages_number"`
+}
+
+type WebsocketServerDestConfig struct {
+	BindAddr    string `mapstructure:"bind_addr" toml:"bind_addr" json:"bind_addr"`
+	Port        int    `mapstructure:"port" toml:"port" json:"port"`
+	Format      string `mapstructure:"format" toml:"format" json:"format"`
+	LogEndPoint string `mapstructure:"log_endpoint" toml:"log_endpoint" json:"log_endpoint"`
+	WebEndPoint string `mapstructure:"web_endpoint" toml:"web_endpoint" json:"web_endpoint"`
 }
 
 type HTTPDestConfig struct {

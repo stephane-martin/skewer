@@ -170,6 +170,7 @@ func deriveDeepCopy(dst, src *BaseConfig) {
 	dst.TCPDest = src.TCPDest
 	dst.HTTPDest = src.HTTPDest
 	dst.HTTPServerDest = src.HTTPServerDest
+	dst.WebsocketServerDest = src.WebsocketServerDest
 	if src.NATSDest == nil {
 		dst.NATSDest = nil
 	} else {

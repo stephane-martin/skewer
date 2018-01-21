@@ -24,55 +24,59 @@ func (dests DestinationType) Iterate() (res []DestinationType) {
 }
 
 const (
-	Kafka      DestinationType = 1
-	UDP                        = 2
-	TCP                        = 4
-	RELP                       = 8
-	File                       = 16
-	Stderr                     = 32
-	Graylog                    = 64
-	HTTP                       = 128
-	NATS                       = 256
-	HTTPServer                 = 512
+	Kafka           DestinationType = 1
+	UDP                             = 2
+	TCP                             = 4
+	RELP                            = 8
+	File                            = 16
+	Stderr                          = 32
+	Graylog                         = 64
+	HTTP                            = 128
+	NATS                            = 256
+	HTTPServer                      = 512
+	WebsocketServer                 = 1024
 )
 
 var Destinations = map[string]DestinationType{
-	"kafka":      Kafka,
-	"udp":        UDP,
-	"tcp":        TCP,
-	"relp":       RELP,
-	"file":       File,
-	"stderr":     Stderr,
-	"graylog":    Graylog,
-	"http":       HTTP,
-	"httpserver": HTTPServer,
-	"nats":       NATS,
+	"kafka":           Kafka,
+	"udp":             UDP,
+	"tcp":             TCP,
+	"relp":            RELP,
+	"file":            File,
+	"stderr":          Stderr,
+	"graylog":         Graylog,
+	"http":            HTTP,
+	"httpserver":      HTTPServer,
+	"nats":            NATS,
+	"websocketserver": WebsocketServer,
 }
 
 var DestinationNames = map[DestinationType]string{
-	Kafka:      "kafka",
-	UDP:        "udp",
-	TCP:        "tcp",
-	RELP:       "relp",
-	File:       "file",
-	Stderr:     "stderr",
-	Graylog:    "graylog",
-	HTTP:       "http",
-	HTTPServer: "httpserver",
-	NATS:       "nats",
+	Kafka:           "kafka",
+	UDP:             "udp",
+	TCP:             "tcp",
+	RELP:            "relp",
+	File:            "file",
+	Stderr:          "stderr",
+	Graylog:         "graylog",
+	HTTP:            "http",
+	HTTPServer:      "httpserver",
+	NATS:            "nats",
+	WebsocketServer: "websocketserver",
 }
 
 var RDestinations = map[DestinationType]byte{
-	Kafka:      'k',
-	UDP:        'u',
-	TCP:        't',
-	RELP:       'r',
-	File:       'f',
-	Stderr:     's',
-	Graylog:    'g',
-	HTTP:       'h',
-	HTTPServer: 'e',
-	NATS:       'n',
+	Kafka:           'k',
+	UDP:             'u',
+	TCP:             't',
+	RELP:            'r',
+	File:            'f',
+	Stderr:          's',
+	Graylog:         'g',
+	HTTP:            'h',
+	HTTPServer:      'e',
+	NATS:            'n',
+	WebsocketServer: 'w',
 }
 
 func (m *MainConfig) GetDestinations() (dests DestinationType, err error) {
@@ -96,6 +100,8 @@ func (c *BaseConfig) CheckDestinations() error {
 	c.UDPDest.Format = strings.TrimSpace(strings.ToLower(c.UDPDest.Format))
 	c.TCPDest.Format = strings.TrimSpace(strings.ToLower(c.TCPDest.Format))
 	c.HTTPDest.Format = strings.TrimSpace(strings.ToLower(c.HTTPDest.Format))
+	c.HTTPServerDest.Format = strings.TrimSpace(strings.ToLower(c.HTTPServerDest.Format))
+	c.WebsocketServerDest.Format = strings.TrimSpace(strings.ToLower(c.WebsocketServerDest.Format))
 	c.RELPDest.Format = strings.TrimSpace(strings.ToLower(c.RELPDest.Format))
 	c.KafkaDest.Format = strings.TrimSpace(strings.ToLower(c.KafkaDest.Format))
 	c.FileDest.Format = strings.TrimSpace(strings.ToLower(c.FileDest.Format))
@@ -105,6 +111,8 @@ func (c *BaseConfig) CheckDestinations() error {
 		c.UDPDest.Format,
 		c.TCPDest.Format,
 		c.HTTPDest.Format,
+		c.HTTPServerDest.Format,
+		c.WebsocketServerDest.Format,
 		c.RELPDest.Format,
 		c.KafkaDest.Format,
 		c.FileDest.Format,

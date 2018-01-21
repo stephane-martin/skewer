@@ -17,16 +17,17 @@ type Destination interface {
 type constructor func(ctx context.Context, e *Env) (Destination, error)
 
 var destinations = map[conf.DestinationType]constructor{
-	conf.Kafka:      NewKafkaDestination,
-	conf.UDP:        NewUDPDestination,
-	conf.TCP:        NewTCPDestination,
-	conf.RELP:       NewRELPDestination,
-	conf.File:       NewFileDestination,
-	conf.Stderr:     NewStderrDestination,
-	conf.Graylog:    NewGraylogDestination,
-	conf.HTTP:       NewHTTPDestination,
-	conf.NATS:       NewNATSDestination,
-	conf.HTTPServer: NewHTTPServerDestination,
+	conf.Kafka:           NewKafkaDestination,
+	conf.UDP:             NewUDPDestination,
+	conf.TCP:             NewTCPDestination,
+	conf.RELP:            NewRELPDestination,
+	conf.File:            NewFileDestination,
+	conf.Stderr:          NewStderrDestination,
+	conf.Graylog:         NewGraylogDestination,
+	conf.HTTP:            NewHTTPDestination,
+	conf.NATS:            NewNATSDestination,
+	conf.HTTPServer:      NewHTTPServerDestination,
+	conf.WebsocketServer: NewWebsocketServerDestination,
 }
 
 func NewDestination(ctx context.Context, typ conf.DestinationType, e *Env) (Destination, error) {

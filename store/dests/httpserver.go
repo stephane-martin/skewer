@@ -107,7 +107,15 @@ func (d *HTTPServerDestination) serve() (err error) {
 	return err
 }
 
+func (d *HTTPServerDestination) nackall(messages []*model.FullMessage) {
+	var message *model.FullMessage
+	for _, message = range messages {
+		d.nack(message.Uid)
+	}
+}
+
 func (d *HTTPServerDestination) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	messages := make([]*model.FullMessage, 0, d.nMessages)
 	//fmt.Fprintln(os.Stderr, "serveHTTP")
 	io.Copy(ioutil.Discard, r.Body)
 	r.Body.Close()
@@ -118,43 +126,39 @@ func (d *HTTPServerDestination) ServeHTTP(w http.ResponseWriter, r *http.Request
 	}
 
 	// wait for first message
-	var firstMsg *model.FullMessage
+	var message *model.FullMessage
 	var ok bool
 	select {
-	case firstMsg, ok = <-d.sendQueue:
-		if !ok || firstMsg == nil {
+	case message, ok = <-d.sendQueue:
+		if !ok || message == nil {
 			// sendQueue has been closed
 			w.WriteHeader(http.StatusServiceUnavailable)
 			d.dofatal()
 			return
 		}
+		messages = append(messages, message)
 	case <-r.Context().Done():
 		// client is gone
 		return
 	}
-	messages := make([]*model.FullMessage, 0, d.nMessages)
-	messages = append(messages, firstMsg)
 
 	// gather additional messages
-	var message *model.FullMessage
-	ok = true
 Loop:
 	for len(messages) < d.nMessages {
 		select {
 		case <-r.Context().Done():
-			// client is gone
-			for _, message = range messages {
-				d.nack(message.Uid)
-			}
+			// client is gone, nack the messages we were supposed to send to it
+			d.nackall(messages)
 			return
 		case message, ok = <-d.sendQueue:
 			if !ok || message == nil {
 				// the sendQueue has been closed, definitely no more messages
+				defer d.dofatal()
 				break Loop
 			}
 			messages = append(messages, message)
 		case <-time.After(10 * time.Millisecond):
-			// no more messages are available in sendQueue
+			// no more messages are available in sendQueue for now
 			break Loop
 		}
 	}
@@ -162,9 +166,7 @@ Loop:
 	select {
 	case <-r.Context().Done():
 		// client is gone
-		for _, message = range messages {
-			d.nack(message.Uid)
-		}
+		d.nackall(messages)
 		return
 	default:
 	}
@@ -175,27 +177,26 @@ Loop:
 
 	var buf []byte
 	var err error
-	for _, message := range messages {
+	for len(messages) > 0 {
+		message = messages[0]
 		if d.lineFraming {
 			buf, err = encoders.ChainEncode(d.encoder, message, []byte{d.delimiter})
 		} else {
 			buf, err = encoders.TcpOctetEncode(d.encoder, message)
 		}
 		if err != nil {
+			// error encoding one message
 			d.permerr(message.Uid)
-			continue
+		} else {
+			_, err = w.Write(buf)
+			if err != nil {
+				// client is gone
+				d.nackall(messages)
+				return
+			}
+			d.ack(message.Uid)
 		}
-		_, err = w.Write(buf)
-		if err != nil {
-			d.nack(message.Uid)
-			break
-		}
-		d.ack(message.Uid)
-	}
-
-	if !ok {
-		// the sendQueue has been closed, no more messages
-		d.dofatal()
+		messages = messages[1:]
 	}
 }
 
