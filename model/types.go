@@ -170,7 +170,6 @@ type RegularSyslog struct {
 	AppName       string                       `json:"appname"`
 	ProcId        string                       `json:"procid"`
 	MsgId         string                       `json:"msgid"`
-	Structured    string                       `json:"structured"`
 	Message       string                       `json:"message"`
 	Properties    map[string]map[string]string `json:"properties"`
 }
@@ -186,7 +185,7 @@ func (m *RegularSyslog) Internal() (res *SyslogMessage) {
 	res.AppName = m.AppName
 	res.ProcId = m.ProcId
 	res.MsgId = m.MsgId
-	res.Structured = m.Structured
+	res.Structured = ""
 	res.Message = m.Message
 	res.SetAllProperties(m.Properties)
 	res.SetPriority()
@@ -203,7 +202,6 @@ func (m *SyslogMessage) Regular() (reg *RegularSyslog) {
 		AppName:       m.AppName,
 		ProcId:        m.ProcId,
 		MsgId:         m.MsgId,
-		Structured:    m.Structured,
 		Message:       m.Message,
 		Properties:    m.GetAllProperties(),
 	}

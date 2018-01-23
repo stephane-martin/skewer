@@ -766,8 +766,6 @@ func (j *RegularSyslog) MarshalJSONBuf(buf fflib.EncodingBuffer) error {
 	fflib.WriteJsonString(buf, string(j.ProcId))
 	buf.WriteString(`,"msgid":`)
 	fflib.WriteJsonString(buf, string(j.MsgId))
-	buf.WriteString(`,"structured":`)
-	fflib.WriteJsonString(buf, string(j.Structured))
 	buf.WriteString(`,"message":`)
 	fflib.WriteJsonString(buf, string(j.Message))
 	buf.WriteString(`,"properties":`)
@@ -800,8 +798,6 @@ const (
 
 	ffjtRegularSyslogMsgId
 
-	ffjtRegularSyslogStructured
-
 	ffjtRegularSyslogMessage
 
 	ffjtRegularSyslogProperties
@@ -822,8 +818,6 @@ var ffjKeyRegularSyslogAppName = []byte("appname")
 var ffjKeyRegularSyslogProcId = []byte("procid")
 
 var ffjKeyRegularSyslogMsgId = []byte("msgid")
-
-var ffjKeyRegularSyslogStructured = []byte("structured")
 
 var ffjKeyRegularSyslogMessage = []byte("message")
 
@@ -946,11 +940,6 @@ mainparse:
 						currentKey = ffjtRegularSyslogSeverity
 						state = fflib.FFParse_want_colon
 						goto mainparse
-
-					} else if bytes.Equal(ffjKeyRegularSyslogStructured, kn) {
-						currentKey = ffjtRegularSyslogStructured
-						state = fflib.FFParse_want_colon
-						goto mainparse
 					}
 
 				case 't':
@@ -976,12 +965,6 @@ mainparse:
 
 				if fflib.EqualFoldRight(ffjKeyRegularSyslogMessage, kn) {
 					currentKey = ffjtRegularSyslogMessage
-					state = fflib.FFParse_want_colon
-					goto mainparse
-				}
-
-				if fflib.EqualFoldRight(ffjKeyRegularSyslogStructured, kn) {
-					currentKey = ffjtRegularSyslogStructured
 					state = fflib.FFParse_want_colon
 					goto mainparse
 				}
@@ -1074,9 +1057,6 @@ mainparse:
 
 				case ffjtRegularSyslogMsgId:
 					goto handle_MsgId
-
-				case ffjtRegularSyslogStructured:
-					goto handle_Structured
 
 				case ffjtRegularSyslogMessage:
 					goto handle_Message
@@ -1299,32 +1279,6 @@ handle_MsgId:
 			outBuf := fs.Output.Bytes()
 
 			j.MsgId = string(string(outBuf))
-
-		}
-	}
-
-	state = fflib.FFParse_after_value
-	goto mainparse
-
-handle_Structured:
-
-	/* handler: j.Structured type=string kind=string quoted=false*/
-
-	{
-
-		{
-			if tok != fflib.FFTok_string && tok != fflib.FFTok_null {
-				return fs.WrapErr(fmt.Errorf("cannot unmarshal %s into Go value for string", tok))
-			}
-		}
-
-		if tok == fflib.FFTok_null {
-
-		} else {
-
-			outBuf := fs.Output.Bytes()
-
-			j.Structured = string(string(outBuf))
 
 		}
 	}
