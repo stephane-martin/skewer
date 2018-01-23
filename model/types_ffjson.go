@@ -732,14 +732,10 @@ func (j *RegularSyslog) MarshalJSONBuf(buf fflib.EncodingBuffer) error {
 	var obj []byte
 	_ = obj
 	_ = err
-	buf.WriteString(`{"priority":`)
-	fflib.FormatBits2(buf, uint64(j.Priority), 10, j.Priority < 0)
-	buf.WriteString(`,"facility":`)
-	fflib.FormatBits2(buf, uint64(j.Facility), 10, j.Facility < 0)
+	buf.WriteString(`{"facility":`)
+	fflib.WriteJsonString(buf, string(j.Facility))
 	buf.WriteString(`,"severity":`)
-	fflib.FormatBits2(buf, uint64(j.Severity), 10, j.Severity < 0)
-	buf.WriteString(`,"version":`)
-	fflib.FormatBits2(buf, uint64(j.Version), 10, j.Version < 0)
+	fflib.WriteJsonString(buf, string(j.Severity))
 	buf.WriteString(`,"timereported":`)
 
 	{
@@ -788,13 +784,9 @@ const (
 	ffjtRegularSyslogbase = iota
 	ffjtRegularSyslognosuchkey
 
-	ffjtRegularSyslogPriority
-
 	ffjtRegularSyslogFacility
 
 	ffjtRegularSyslogSeverity
-
-	ffjtRegularSyslogVersion
 
 	ffjtRegularSyslogTimeReported
 
@@ -815,13 +807,9 @@ const (
 	ffjtRegularSyslogProperties
 )
 
-var ffjKeyRegularSyslogPriority = []byte("priority")
-
 var ffjKeyRegularSyslogFacility = []byte("facility")
 
 var ffjKeyRegularSyslogSeverity = []byte("severity")
-
-var ffjKeyRegularSyslogVersion = []byte("version")
 
 var ffjKeyRegularSyslogTimeReported = []byte("timereported")
 
@@ -941,12 +929,7 @@ mainparse:
 
 				case 'p':
 
-					if bytes.Equal(ffjKeyRegularSyslogPriority, kn) {
-						currentKey = ffjtRegularSyslogPriority
-						state = fflib.FFParse_want_colon
-						goto mainparse
-
-					} else if bytes.Equal(ffjKeyRegularSyslogProcId, kn) {
+					if bytes.Equal(ffjKeyRegularSyslogProcId, kn) {
 						currentKey = ffjtRegularSyslogProcId
 						state = fflib.FFParse_want_colon
 						goto mainparse
@@ -979,14 +962,6 @@ mainparse:
 
 					} else if bytes.Equal(ffjKeyRegularSyslogTimeGenerated, kn) {
 						currentKey = ffjtRegularSyslogTimeGenerated
-						state = fflib.FFParse_want_colon
-						goto mainparse
-					}
-
-				case 'v':
-
-					if bytes.Equal(ffjKeyRegularSyslogVersion, kn) {
-						currentKey = ffjtRegularSyslogVersion
 						state = fflib.FFParse_want_colon
 						goto mainparse
 					}
@@ -1047,12 +1022,6 @@ mainparse:
 					goto mainparse
 				}
 
-				if fflib.EqualFoldRight(ffjKeyRegularSyslogVersion, kn) {
-					currentKey = ffjtRegularSyslogVersion
-					state = fflib.FFParse_want_colon
-					goto mainparse
-				}
-
 				if fflib.EqualFoldRight(ffjKeyRegularSyslogSeverity, kn) {
 					currentKey = ffjtRegularSyslogSeverity
 					state = fflib.FFParse_want_colon
@@ -1061,12 +1030,6 @@ mainparse:
 
 				if fflib.SimpleLetterEqualFold(ffjKeyRegularSyslogFacility, kn) {
 					currentKey = ffjtRegularSyslogFacility
-					state = fflib.FFParse_want_colon
-					goto mainparse
-				}
-
-				if fflib.SimpleLetterEqualFold(ffjKeyRegularSyslogPriority, kn) {
-					currentKey = ffjtRegularSyslogPriority
 					state = fflib.FFParse_want_colon
 					goto mainparse
 				}
@@ -1088,17 +1051,11 @@ mainparse:
 			if tok == fflib.FFTok_left_brace || tok == fflib.FFTok_left_bracket || tok == fflib.FFTok_integer || tok == fflib.FFTok_double || tok == fflib.FFTok_string || tok == fflib.FFTok_bool || tok == fflib.FFTok_null {
 				switch currentKey {
 
-				case ffjtRegularSyslogPriority:
-					goto handle_Priority
-
 				case ffjtRegularSyslogFacility:
 					goto handle_Facility
 
 				case ffjtRegularSyslogSeverity:
 					goto handle_Severity
-
-				case ffjtRegularSyslogVersion:
-					goto handle_Version
 
 				case ffjtRegularSyslogTimeReported:
 					goto handle_TimeReported
@@ -1141,59 +1098,25 @@ mainparse:
 		}
 	}
 
-handle_Priority:
-
-	/* handler: j.Priority type=model.Priority kind=int32 quoted=false*/
-
-	{
-		if tok != fflib.FFTok_integer && tok != fflib.FFTok_null {
-			return fs.WrapErr(fmt.Errorf("cannot unmarshal %s into Go value for Priority", tok))
-		}
-	}
-
-	{
-
-		if tok == fflib.FFTok_null {
-
-		} else {
-
-			tval, err := fflib.ParseInt(fs.Output.Bytes(), 10, 32)
-
-			if err != nil {
-				return fs.WrapErr(err)
-			}
-
-			j.Priority = Priority(tval)
-
-		}
-	}
-
-	state = fflib.FFParse_after_value
-	goto mainparse
-
 handle_Facility:
 
-	/* handler: j.Facility type=model.Facility kind=int32 quoted=false*/
+	/* handler: j.Facility type=string kind=string quoted=false*/
 
 	{
-		if tok != fflib.FFTok_integer && tok != fflib.FFTok_null {
-			return fs.WrapErr(fmt.Errorf("cannot unmarshal %s into Go value for Facility", tok))
+
+		{
+			if tok != fflib.FFTok_string && tok != fflib.FFTok_null {
+				return fs.WrapErr(fmt.Errorf("cannot unmarshal %s into Go value for string", tok))
+			}
 		}
-	}
-
-	{
 
 		if tok == fflib.FFTok_null {
 
 		} else {
 
-			tval, err := fflib.ParseInt(fs.Output.Bytes(), 10, 32)
+			outBuf := fs.Output.Bytes()
 
-			if err != nil {
-				return fs.WrapErr(err)
-			}
-
-			j.Facility = Facility(tval)
+			j.Facility = string(string(outBuf))
 
 		}
 	}
@@ -1203,57 +1126,23 @@ handle_Facility:
 
 handle_Severity:
 
-	/* handler: j.Severity type=model.Severity kind=int32 quoted=false*/
+	/* handler: j.Severity type=string kind=string quoted=false*/
 
 	{
-		if tok != fflib.FFTok_integer && tok != fflib.FFTok_null {
-			return fs.WrapErr(fmt.Errorf("cannot unmarshal %s into Go value for Severity", tok))
+
+		{
+			if tok != fflib.FFTok_string && tok != fflib.FFTok_null {
+				return fs.WrapErr(fmt.Errorf("cannot unmarshal %s into Go value for string", tok))
+			}
 		}
-	}
-
-	{
 
 		if tok == fflib.FFTok_null {
 
 		} else {
 
-			tval, err := fflib.ParseInt(fs.Output.Bytes(), 10, 32)
+			outBuf := fs.Output.Bytes()
 
-			if err != nil {
-				return fs.WrapErr(err)
-			}
-
-			j.Severity = Severity(tval)
-
-		}
-	}
-
-	state = fflib.FFParse_after_value
-	goto mainparse
-
-handle_Version:
-
-	/* handler: j.Version type=model.Version kind=int32 quoted=false*/
-
-	{
-		if tok != fflib.FFTok_integer && tok != fflib.FFTok_null {
-			return fs.WrapErr(fmt.Errorf("cannot unmarshal %s into Go value for Version", tok))
-		}
-	}
-
-	{
-
-		if tok == fflib.FFTok_null {
-
-		} else {
-
-			tval, err := fflib.ParseInt(fs.Output.Bytes(), 10, 32)
-
-			if err != nil {
-				return fs.WrapErr(err)
-			}
-
-			j.Version = Version(tval)
+			j.Severity = string(string(outBuf))
 
 		}
 	}

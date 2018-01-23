@@ -12,6 +12,33 @@ import (
 	"github.com/stephane-martin/skewer/utils/sbox"
 )
 
+const (
+	Fkern Facility = iota
+	Fuser
+	Fmail
+	Fdaemon
+	Fauth
+	Fsyslog
+	Flpr
+	Fnews
+	Fuucp
+	Fclock
+	Fauthpriv
+	Fftp
+	Fntp
+	Flogaudit
+	Flogalert
+	Fcron
+	Flocal0
+	Flocal1
+	Flocal2
+	Flocal3
+	Flocal4
+	Flocal5
+	Flocal6
+	Flocal7
+)
+
 var Facilities map[Facility]string = map[Facility]string{
 	0:  "kern",
 	1:  "user",
@@ -39,14 +66,41 @@ var Facilities map[Facility]string = map[Facility]string{
 	23: "local7",
 }
 
+var Severities map[Severity]string = map[Severity]string{
+	0: "emerg",
+	1: "alert",
+	2: "crit",
+	3: "err",
+	4: "warning",
+	5: "notice",
+	6: "info",
+	7: "debug",
+}
+
+const (
+	Semerg Severity = iota
+	Salert
+	Scrit
+	Serr
+	SWarning
+	Snotice
+	Sinfo
+	Sdebug
+)
+
 var RFacilities map[string]Facility
+var RSeverities map[string]Severity
 
 var pool *sync.Pool
 
 func init() {
 	RFacilities = map[string]Facility{}
+	RSeverities = map[string]Severity{}
 	for k, v := range Facilities {
 		RFacilities[v] = k
+	}
+	for k, v := range Severities {
+		RSeverities[v] = k
 	}
 	pool = &sync.Pool{
 		New: func() interface{} {
@@ -83,21 +137,33 @@ func (f Facility) String() string {
 	if s, ok := Facilities[f]; ok {
 		return s
 	}
-	return "user"
+	return Facilities[Fuser]
 }
 
 func FacilityFromString(s string) Facility {
 	if f, ok := RFacilities[s]; ok {
 		return f
 	}
-	return 1
+	return Fuser
+}
+
+func (s Severity) String() string {
+	if st, ok := Severities[s]; ok {
+		return st
+	}
+	return Severities[Sinfo]
+}
+
+func SeverityFromString(st string) Severity {
+	if s, ok := RSeverities[st]; ok {
+		return s
+	}
+	return Sinfo
 }
 
 type RegularSyslog struct {
-	Priority      Priority                     `json:"priority"`
-	Facility      Facility                     `json:"facility"`
-	Severity      Severity                     `json:"severity"`
-	Version       Version                      `json:"version"`
+	Facility      string                       `json:"facility"`
+	Severity      string                       `json:"severity"`
 	TimeReported  time.Time                    `json:"timereported"`
 	TimeGenerated time.Time                    `json:"timegenerated"`
 	HostName      string                       `json:"hostname"`
@@ -111,10 +177,9 @@ type RegularSyslog struct {
 
 func (m *RegularSyslog) Internal() (res *SyslogMessage) {
 	res = Factory()
-	res.Priority = m.Priority
-	res.Facility = m.Facility
-	res.Severity = m.Severity
-	res.Version = m.Version
+	res.Facility = FacilityFromString(m.Facility)
+	res.Severity = SeverityFromString(m.Severity)
+	res.Version = 1
 	res.TimeReportedNum = m.TimeReported.UnixNano()
 	res.TimeGeneratedNum = m.TimeGenerated.UnixNano()
 	res.HostName = m.HostName
@@ -124,15 +189,14 @@ func (m *RegularSyslog) Internal() (res *SyslogMessage) {
 	res.Structured = m.Structured
 	res.Message = m.Message
 	res.SetAllProperties(m.Properties)
+	res.SetPriority()
 	return res
 }
 
 func (m *SyslogMessage) Regular() (reg *RegularSyslog) {
 	return &RegularSyslog{
-		Priority:      m.Priority,
-		Facility:      m.Facility,
-		Severity:      m.Severity,
-		Version:       m.Version,
+		Facility:      m.Facility.String(),
+		Severity:      m.Severity.String(),
 		TimeReported:  time.Unix(0, m.TimeReportedNum),
 		TimeGenerated: time.Unix(0, m.TimeGeneratedNum),
 		HostName:      m.HostName,
