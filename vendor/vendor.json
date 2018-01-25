@@ -599,6 +599,30 @@
 			"revisionTime": "2017-03-21T09:30:39Z"
 		},
 		{
+			"checksumSHA1": "HIF2ZYMMr2kzt5oE7SRjKefOIOc=",
+			"path": "github.com/mailru/easyjson",
+			"revision": "32fa128f234d041f196a9f3e0fea5ac9772c08e1",
+			"revisionTime": "2017-11-20T08:03:33Z"
+		},
+		{
+			"checksumSHA1": "T8soMJArSZrYnhmdpAnq1bVxQ6Q=",
+			"path": "github.com/mailru/easyjson/buffer",
+			"revision": "32fa128f234d041f196a9f3e0fea5ac9772c08e1",
+			"revisionTime": "2017-11-20T08:03:33Z"
+		},
+		{
+			"checksumSHA1": "QA+9yav6Xzq7LmuZUREeOX1hfjk=",
+			"path": "github.com/mailru/easyjson/jlexer",
+			"revision": "32fa128f234d041f196a9f3e0fea5ac9772c08e1",
+			"revisionTime": "2017-11-20T08:03:33Z"
+		},
+		{
+			"checksumSHA1": "svJ32su8itWtutcMkP+RzoMsIfw=",
+			"path": "github.com/mailru/easyjson/jwriter",
+			"revision": "32fa128f234d041f196a9f3e0fea5ac9772c08e1",
+			"revisionTime": "2017-11-20T08:03:33Z"
+		},
+		{
 			"checksumSHA1": "uAVg4Tj5Fxi62z7/ScDEkHr6Ue8=",
 			"path": "github.com/mattn/go-colorable",
 			"revision": "ded68f7a9561c023e790de24279db7ebf473ea80",
@@ -660,6 +684,30 @@
 			"path": "github.com/oklog/ulid",
 			"revision": "66bb6560562feca7045b23db1ae85b01260f87c5",
 			"revisionTime": "2017-01-17T20:06:51Z"
+		},
+		{
+			"checksumSHA1": "3Dzb5mhNWhCNkiVyTeLYfbh1Bas=",
+			"path": "github.com/olivere/elastic",
+			"revision": "c51e74f9bcab8906a2f6cf5660dac396ba51b3d6",
+			"revisionTime": "2018-01-18T18:29:25Z",
+			"version": "v6.1.4",
+			"versionExact": "v6.1.4"
+		},
+		{
+			"checksumSHA1": "LkxLK7ff1eJbj6Wv9TlLDV96l58=",
+			"path": "github.com/olivere/elastic/config",
+			"revision": "c51e74f9bcab8906a2f6cf5660dac396ba51b3d6",
+			"revisionTime": "2018-01-18T18:29:25Z",
+			"version": "v6.1.4",
+			"versionExact": "v6.1.4"
+		},
+		{
+			"checksumSHA1": "AmcqvKDAUGvVsrf8NDCQ/B8cMj4=",
+			"path": "github.com/olivere/elastic/uritemplates",
+			"revision": "c51e74f9bcab8906a2f6cf5660dac396ba51b3d6",
+			"revisionTime": "2018-01-18T18:29:25Z",
+			"version": "v6.1.4",
+			"versionExact": "v6.1.4"
 		},
 		{
 			"checksumSHA1": "F1IYMLBLAZaTOWnmXsgaxTGvrWI=",
