@@ -98,8 +98,8 @@ type messageFields struct {
 	Procid     strField  `json:"procid"`
 	Msgid      strField  `json:"msgid"`
 	Message    strField  `json:"message"`
-	Treported  dateField `json:"time_reported"`
-	Tgenerated dateField `json:"time_generated"`
+	Treported  dateField `json:"timereported"`
+	Tgenerated dateField `json:"timegenerated"`
 }
 
 func newMessageFields() messageFields {
