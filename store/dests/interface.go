@@ -28,6 +28,7 @@ var destinations = map[conf.DestinationType]constructor{
 	conf.NATS:            NewNATSDestination,
 	conf.HTTPServer:      NewHTTPServerDestination,
 	conf.WebsocketServer: NewWebsocketServerDestination,
+	conf.Elasticsearch:   NewElasticDestination,
 }
 
 func NewDestination(ctx context.Context, typ conf.DestinationType, e *Env) (Destination, error) {

@@ -558,7 +558,7 @@ func (s *MessageStore) pruneOrphanedByDest(dest conf.DestinationType, txn *badge
 	uids := messagesDB.ListKeys(txn)
 
 	// check if the corresponding uid exists in "ready" or "failed" or "permerrors"
-	orphaned_uids := []utils.MyULID{}
+	orphanedUIDs := []utils.MyULID{}
 	for _, uid := range uids {
 		have, err = readyDB.Exists(uid, txn)
 		if err != nil {
@@ -581,11 +581,11 @@ func (s *MessageStore) pruneOrphanedByDest(dest conf.DestinationType, txn *badge
 		if have {
 			continue
 		}
-		orphaned_uids = append(orphaned_uids, uid)
+		orphanedUIDs = append(orphanedUIDs, uid)
 	}
 
 	// if no match, delete the message
-	for _, uid := range orphaned_uids {
+	for _, uid := range orphanedUIDs {
 		err = messagesDB.Delete(uid, txn)
 		if err != nil {
 			s.logger.Warn("Error deleting orphaned messages", "error", err)
@@ -710,14 +710,12 @@ func (s *MessageStore) resetFailuresByDest(dest conf.DestinationType) (err error
 			return nil
 		}
 
-		//lok.Lock()
 		readyBatch := map[utils.MyULID][]byte{}
 		for _, uid := range uids {
 			readyBatch[uid] = []byte("true")
 		}
 		err = readyDB.AddMany(readyBatch, txn)
 		if err != nil {
-			//lok.Unlock()
 			s.logger.Warn("Error pushing entries from failed queue to ready queue", "error", err)
 			txn.Discard()
 			return err

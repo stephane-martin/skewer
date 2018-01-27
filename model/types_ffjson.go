@@ -763,9 +763,9 @@ func (j *RegularSyslog) MarshalJSONBuf(buf fflib.EncodingBuffer) error {
 	buf.WriteString(`,"appname":`)
 	fflib.WriteJsonString(buf, string(j.AppName))
 	buf.WriteString(`,"procid":`)
-	fflib.WriteJsonString(buf, string(j.ProcId))
+	fflib.WriteJsonString(buf, string(j.ProcID))
 	buf.WriteString(`,"msgid":`)
-	fflib.WriteJsonString(buf, string(j.MsgId))
+	fflib.WriteJsonString(buf, string(j.MsgID))
 	buf.WriteString(`,"message":`)
 	fflib.WriteJsonString(buf, string(j.Message))
 	buf.WriteString(`,"properties":`)
@@ -794,9 +794,9 @@ const (
 
 	ffjtRegularSyslogAppName
 
-	ffjtRegularSyslogProcId
+	ffjtRegularSyslogProcID
 
-	ffjtRegularSyslogMsgId
+	ffjtRegularSyslogMsgID
 
 	ffjtRegularSyslogMessage
 
@@ -815,9 +815,9 @@ var ffjKeyRegularSyslogHostName = []byte("hostname")
 
 var ffjKeyRegularSyslogAppName = []byte("appname")
 
-var ffjKeyRegularSyslogProcId = []byte("procid")
+var ffjKeyRegularSyslogProcID = []byte("procid")
 
-var ffjKeyRegularSyslogMsgId = []byte("msgid")
+var ffjKeyRegularSyslogMsgID = []byte("msgid")
 
 var ffjKeyRegularSyslogMessage = []byte("message")
 
@@ -910,8 +910,8 @@ mainparse:
 
 				case 'm':
 
-					if bytes.Equal(ffjKeyRegularSyslogMsgId, kn) {
-						currentKey = ffjtRegularSyslogMsgId
+					if bytes.Equal(ffjKeyRegularSyslogMsgID, kn) {
+						currentKey = ffjtRegularSyslogMsgID
 						state = fflib.FFParse_want_colon
 						goto mainparse
 
@@ -923,8 +923,8 @@ mainparse:
 
 				case 'p':
 
-					if bytes.Equal(ffjKeyRegularSyslogProcId, kn) {
-						currentKey = ffjtRegularSyslogProcId
+					if bytes.Equal(ffjKeyRegularSyslogProcID, kn) {
+						currentKey = ffjtRegularSyslogProcID
 						state = fflib.FFParse_want_colon
 						goto mainparse
 
@@ -969,14 +969,14 @@ mainparse:
 					goto mainparse
 				}
 
-				if fflib.EqualFoldRight(ffjKeyRegularSyslogMsgId, kn) {
-					currentKey = ffjtRegularSyslogMsgId
+				if fflib.EqualFoldRight(ffjKeyRegularSyslogMsgID, kn) {
+					currentKey = ffjtRegularSyslogMsgID
 					state = fflib.FFParse_want_colon
 					goto mainparse
 				}
 
-				if fflib.SimpleLetterEqualFold(ffjKeyRegularSyslogProcId, kn) {
-					currentKey = ffjtRegularSyslogProcId
+				if fflib.SimpleLetterEqualFold(ffjKeyRegularSyslogProcID, kn) {
+					currentKey = ffjtRegularSyslogProcID
 					state = fflib.FFParse_want_colon
 					goto mainparse
 				}
@@ -1052,11 +1052,11 @@ mainparse:
 				case ffjtRegularSyslogAppName:
 					goto handle_AppName
 
-				case ffjtRegularSyslogProcId:
-					goto handle_ProcId
+				case ffjtRegularSyslogProcID:
+					goto handle_ProcID
 
-				case ffjtRegularSyslogMsgId:
-					goto handle_MsgId
+				case ffjtRegularSyslogMsgID:
+					goto handle_MsgID
 
 				case ffjtRegularSyslogMessage:
 					goto handle_Message
@@ -1234,9 +1234,9 @@ handle_AppName:
 	state = fflib.FFParse_after_value
 	goto mainparse
 
-handle_ProcId:
+handle_ProcID:
 
-	/* handler: j.ProcId type=string kind=string quoted=false*/
+	/* handler: j.ProcID type=string kind=string quoted=false*/
 
 	{
 
@@ -1252,7 +1252,7 @@ handle_ProcId:
 
 			outBuf := fs.Output.Bytes()
 
-			j.ProcId = string(string(outBuf))
+			j.ProcID = string(string(outBuf))
 
 		}
 	}
@@ -1260,9 +1260,9 @@ handle_ProcId:
 	state = fflib.FFParse_after_value
 	goto mainparse
 
-handle_MsgId:
+handle_MsgID:
 
-	/* handler: j.MsgId type=string kind=string quoted=false*/
+	/* handler: j.MsgID type=string kind=string quoted=false*/
 
 	{
 
@@ -1278,7 +1278,7 @@ handle_MsgId:
 
 			outBuf := fs.Output.Bytes()
 
-			j.MsgId = string(string(outBuf))
+			j.MsgID = string(string(outBuf))
 
 		}
 	}

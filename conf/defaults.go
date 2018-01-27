@@ -3,9 +3,11 @@ package conf
 import (
 	"compress/flate"
 	"os"
+	"strconv"
 
 	sarama "github.com/Shopify/sarama"
 	nats "github.com/nats-io/go-nats"
+	"github.com/olivere/elastic"
 	"github.com/spf13/viper"
 )
 
@@ -29,11 +31,33 @@ func SetDefaults(v *viper.Viper) {
 		SetHTTPServerDestDefaults,
 		SetWebsocketServerDestDefaults,
 		SetNatsDestDefaults,
+		SetElasticDestDefaults,
 		SetMainDefaults,
 	}
 	for _, f := range funcs {
 		f(v, true)
 	}
+}
+
+func SetElasticDestDefaults(v *viper.Viper, prefixed bool) {
+	prefix := ""
+	if prefixed {
+		prefix = "elasticsearch_destination."
+	}
+	v.SetDefault(prefix+"index_name_template", "skewer")
+	v.SetDefault(prefix+"urls", []string{"http://127.0.0.1:9200"})
+	v.SetDefault(prefix+"messages_type", "syslogmsg")
+	v.SetDefault(prefix+"sniffing", true)
+	v.SetDefault(prefix+"health_check", true)
+	v.SetDefault(prefix+"health_check_timeout", strconv.FormatFloat(elastic.DefaultHealthcheckTimeout.Seconds(), 'f', 0, 64)+"s")
+	v.SetDefault(prefix+"health_check_interval", strconv.FormatFloat(elastic.DefaultHealthcheckInterval.Seconds(), 'f', 0, 64)+"s")
+	v.SetDefault(prefix+"health_check_timeout_startup", strconv.FormatFloat(elastic.DefaultHealthcheckTimeoutStartup.Seconds(), 'f', 0, 64)+"s")
+	v.SetDefault(prefix+"batch_size", 5000)
+	v.SetDefault(prefix+"flush_period", "5s")
+	v.SetDefault(prefix+"connection_timeout", "10s")
+	v.SetDefault(prefix+"conn_keepalive", true)
+	v.SetDefault(prefix+"conn_keepalive_period", "30s")
+	v.SetDefault(prefix+"format", "json")
 }
 
 func SetNatsDestDefaults(v *viper.Viper, prefixed bool) {

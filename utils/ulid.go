@@ -70,6 +70,15 @@ func (uid MyULID) Compare(other MyULID) int {
 	return ulid.ULID(uid).Compare(ulid.ULID(other))
 }
 
+func Parse(uids string) (uid MyULID, err error) {
+	var id ulid.ULID
+	id, err = ulid.Parse(uids)
+	if err != nil {
+		return uid, err
+	}
+	return MyULID(id), nil
+}
+
 type Generator struct {
 	entropy *rand.Rand
 }

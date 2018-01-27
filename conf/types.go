@@ -36,6 +36,7 @@ type BaseConfig struct {
 	FileDest            FileDestConfig            `mapstructure:"file_destination" toml:"file_destination" json:"file_destination"`
 	StderrDest          StderrDestConfig          `mapstructure:"stderr_destination" toml:"stderr_destination" json:"stderr_destination"`
 	GraylogDest         GraylogDestConfig         `mapstructure:"graylog_destination" toml:"graylog_destination" json:"graylog_destination"`
+	ElasticDest         ElasticDestConfig         `mapstructure:"elasticsearch_destination" toml:"elasticsearch_destination" json:"elasticsearch_destination"`
 }
 
 // MainConfig lists general/global parameters.
@@ -251,6 +252,30 @@ type WebsocketServerDestConfig struct {
 	Format      string `mapstructure:"format" toml:"format" json:"format"`
 	LogEndPoint string `mapstructure:"log_endpoint" toml:"log_endpoint" json:"log_endpoint"`
 	WebEndPoint string `mapstructure:"web_endpoint" toml:"web_endpoint" json:"web_endpoint"`
+}
+
+type ElasticDestConfig struct {
+	TlsBaseConfig       `mapstructure:",squash"`
+	Insecure            bool          `mapstructure:"insecure" toml:"insecure" json:"insecure"`
+	ProxyURL            string        `mapstructure:"proxy_url" toml:"proxy_url" json:"proxy_url"`
+	ConnTimeout         time.Duration `mapstructure:"connection_timeout" toml:"connection_timeout" json:"connection_timeout"`
+	ConnKeepAlive       bool          `mapstructure:"conn_keepalive" toml:"conn_keepalive" json:"conn_keepalive"`
+	ConnKeepAlivePeriod time.Duration `mapstructure:"conn_keepalive_period" toml:"conn_keepalive_period" json:"conn_keepalive_period"`
+	Rebind              time.Duration `mapstructure:"rebind" toml:"rebind" json:"rebind"`
+	Format              string        `mapstructure:"format" toml:"format" json:"format"`
+
+	URLs                      []string      `mapstructure:"urls" toml:"urls" json:"urls"`
+	Username                  string        `mapstructure:"username" toml:"username" json:"username"`
+	Password                  string        `mapstructure:"password" toml:"password" json:"password"`
+	HealthCheckInterval       time.Duration `mapstructure:"health_check_interval" toml:"health_check_interval" json:"health_check_interval"`
+	HealthCheck               bool          `mapstructure:"health_check" toml:"health_check" toml:"health_check" json:"health_check"`
+	HealthCheckTimeout        time.Duration `mapstructure:"health_check_timeout" toml:"health_check_timeout" json:"health_check_timeout"`
+	HealthCheckTimeoutStartup time.Duration `mapstructure:"health_check_timeout_startup" toml:"health_check_timeout_startup" json:"health_check_timeout_startup"`
+	Sniffing                  bool          `mapstructure:"sniffing" toml:"sniffing" json:"sniffing"`
+	IndexNameTpl              string        `mapstructure:"index_name_template" toml:"index_name_template" json:"index_name_template"`
+	MessagesType              string        `mapstructure:"messages_type" toml:"messages_type" json:"messages_type"`
+	BatchSize                 int           `mapstructure:"batch_size" toml:"batch_size" json:"batch_size"`
+	FlushPeriod               time.Duration `mapstructure:"flush_period" toml:"flush_period" json:"flush_period"`
 }
 
 type HTTPDestConfig struct {

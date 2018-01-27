@@ -3,12 +3,12 @@ package model
 //go:generate ffjson $GOFILE
 
 import (
-	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/awnumar/memguard"
+	"github.com/pquerna/ffjson/ffjson"
 	"github.com/stephane-martin/skewer/utils/sbox"
 )
 
@@ -168,8 +168,8 @@ type RegularSyslog struct {
 	TimeGenerated time.Time                    `json:"timegenerated"`
 	HostName      string                       `json:"hostname"`
 	AppName       string                       `json:"appname"`
-	ProcId        string                       `json:"procid"`
-	MsgId         string                       `json:"msgid"`
+	ProcID        string                       `json:"procid"`
+	MsgID         string                       `json:"msgid"`
 	Message       string                       `json:"message"`
 	Properties    map[string]map[string]string `json:"properties"`
 }
@@ -183,8 +183,8 @@ func (m *RegularSyslog) Internal() (res *SyslogMessage) {
 	res.TimeGeneratedNum = m.TimeGenerated.UnixNano()
 	res.HostName = m.HostName
 	res.AppName = m.AppName
-	res.ProcId = m.ProcId
-	res.MsgId = m.MsgId
+	res.ProcId = m.ProcID
+	res.MsgId = m.MsgID
 	res.Structured = ""
 	res.Message = m.Message
 	res.SetAllProperties(m.Properties)
@@ -200,15 +200,15 @@ func (m *SyslogMessage) Regular() (reg *RegularSyslog) {
 		TimeGenerated: time.Unix(0, m.TimeGeneratedNum),
 		HostName:      m.HostName,
 		AppName:       m.AppName,
-		ProcId:        m.ProcId,
-		MsgId:         m.MsgId,
+		ProcID:        m.ProcId,
+		MsgID:         m.MsgId,
 		Message:       m.Message,
 		Properties:    m.GetAllProperties(),
 	}
 }
 
 func (m *SyslogMessage) RegularJson() ([]byte, error) {
-	return json.Marshal(m.Regular())
+	return ffjson.Marshal(m.Regular())
 }
 
 // ffjson: noencoder

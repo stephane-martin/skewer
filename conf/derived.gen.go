@@ -181,13 +181,16 @@ func deriveDeepCopy(dst, src *BaseConfig) {
 	dst.FileDest = src.FileDest
 	dst.StderrDest = src.StderrDest
 	dst.GraylogDest = src.GraylogDest
+	field := new(ElasticDestConfig)
+	deriveDeepCopy_8(field, &src.ElasticDest)
+	dst.ElasticDest = *field
 }
 
 // deriveDeepCopy_ recursively copies the contents of src into dst.
 func deriveDeepCopy_(dst, src []TCPSourceConfig) {
 	for src_i, src_value := range src {
 		field := new(TCPSourceConfig)
-		deriveDeepCopy_8(field, &src_value)
+		deriveDeepCopy_9(field, &src_value)
 		dst[src_i] = *field
 	}
 }
@@ -196,7 +199,7 @@ func deriveDeepCopy_(dst, src []TCPSourceConfig) {
 func deriveDeepCopy_1(dst, src []UDPSourceConfig) {
 	for src_i, src_value := range src {
 		field := new(UDPSourceConfig)
-		deriveDeepCopy_9(field, &src_value)
+		deriveDeepCopy_10(field, &src_value)
 		dst[src_i] = *field
 	}
 }
@@ -205,7 +208,7 @@ func deriveDeepCopy_1(dst, src []UDPSourceConfig) {
 func deriveDeepCopy_2(dst, src []RELPSourceConfig) {
 	for src_i, src_value := range src {
 		field := new(RELPSourceConfig)
-		deriveDeepCopy_10(field, &src_value)
+		deriveDeepCopy_11(field, &src_value)
 		dst[src_i] = *field
 	}
 }
@@ -214,7 +217,7 @@ func deriveDeepCopy_2(dst, src []RELPSourceConfig) {
 func deriveDeepCopy_3(dst, src []DirectRELPSourceConfig) {
 	for src_i, src_value := range src {
 		field := new(DirectRELPSourceConfig)
-		deriveDeepCopy_11(field, &src_value)
+		deriveDeepCopy_12(field, &src_value)
 		dst[src_i] = *field
 	}
 }
@@ -223,7 +226,7 @@ func deriveDeepCopy_3(dst, src []DirectRELPSourceConfig) {
 func deriveDeepCopy_4(dst, src []KafkaSourceConfig) {
 	for src_i, src_value := range src {
 		field := new(KafkaSourceConfig)
-		deriveDeepCopy_12(field, &src_value)
+		deriveDeepCopy_13(field, &src_value)
 		dst[src_i] = *field
 	}
 }
@@ -232,7 +235,7 @@ func deriveDeepCopy_4(dst, src []KafkaSourceConfig) {
 func deriveDeepCopy_5(dst, src []GraylogSourceConfig) {
 	for src_i, src_value := range src {
 		field := new(GraylogSourceConfig)
-		deriveDeepCopy_13(field, &src_value)
+		deriveDeepCopy_14(field, &src_value)
 		dst[src_i] = *field
 	}
 }
@@ -240,7 +243,7 @@ func deriveDeepCopy_5(dst, src []GraylogSourceConfig) {
 // deriveDeepCopy_6 recursively copies the contents of src into dst.
 func deriveDeepCopy_6(dst, src *KafkaDestConfig) {
 	field := new(KafkaBaseConfig)
-	deriveDeepCopy_14(field, &src.KafkaBaseConfig)
+	deriveDeepCopy_15(field, &src.KafkaBaseConfig)
 	dst.KafkaBaseConfig = *field
 	dst.KafkaProducerBaseConfig = src.KafkaProducerBaseConfig
 	dst.TlsBaseConfig = src.TlsBaseConfig
@@ -286,44 +289,72 @@ func deriveDeepCopy_7(dst, src *NATSDestConfig) {
 }
 
 // deriveDeepCopy_8 recursively copies the contents of src into dst.
-func deriveDeepCopy_8(dst, src *TCPSourceConfig) {
+func deriveDeepCopy_8(dst, src *ElasticDestConfig) {
+	dst.TlsBaseConfig = src.TlsBaseConfig
+	dst.Insecure = src.Insecure
+	dst.ProxyURL = src.ProxyURL
+	dst.ConnTimeout = src.ConnTimeout
+	dst.ConnKeepAlive = src.ConnKeepAlive
+	dst.ConnKeepAlivePeriod = src.ConnKeepAlivePeriod
+	dst.Rebind = src.Rebind
+	dst.Format = src.Format
+	if src.URLs == nil {
+		dst.URLs = nil
+	} else {
+		if dst.URLs != nil {
+			if len(src.URLs) > len(dst.URLs) {
+				if cap(dst.URLs) >= len(src.URLs) {
+					dst.URLs = (dst.URLs)[:len(src.URLs)]
+				} else {
+					dst.URLs = make([]string, len(src.URLs))
+				}
+			} else if len(src.URLs) < len(dst.URLs) {
+				dst.URLs = (dst.URLs)[:len(src.URLs)]
+			}
+		} else {
+			dst.URLs = make([]string, len(src.URLs))
+		}
+		copy(dst.URLs, src.URLs)
+	}
+	dst.Username = src.Username
+	dst.Password = src.Password
+	dst.HealthCheckInterval = src.HealthCheckInterval
+	dst.HealthCheck = src.HealthCheck
+	dst.HealthCheckTimeout = src.HealthCheckTimeout
+	dst.HealthCheckTimeoutStartup = src.HealthCheckTimeoutStartup
+	dst.Sniffing = src.Sniffing
+	dst.IndexNameTpl = src.IndexNameTpl
+	dst.MessagesType = src.MessagesType
+	dst.BatchSize = src.BatchSize
+	dst.FlushPeriod = src.FlushPeriod
+}
+
+// deriveDeepCopy_9 recursively copies the contents of src into dst.
+func deriveDeepCopy_9(dst, src *TCPSourceConfig) {
 	field := new(ListenersConfig)
-	deriveDeepCopy_15(field, &src.ListenersConfig)
+	deriveDeepCopy_16(field, &src.ListenersConfig)
 	dst.ListenersConfig = *field
 	dst.FilterSubConfig = src.FilterSubConfig
 	dst.TlsBaseConfig = src.TlsBaseConfig
 	dst.ClientAuthType = src.ClientAuthType
 	dst.LineFraming = src.LineFraming
 	dst.FrameDelimiter = src.FrameDelimiter
-	dst.ConfID = src.ConfID
-}
-
-// deriveDeepCopy_9 recursively copies the contents of src into dst.
-func deriveDeepCopy_9(dst, src *UDPSourceConfig) {
-	field := new(ListenersConfig)
-	deriveDeepCopy_15(field, &src.ListenersConfig)
-	dst.ListenersConfig = *field
-	dst.FilterSubConfig = src.FilterSubConfig
 	dst.ConfID = src.ConfID
 }
 
 // deriveDeepCopy_10 recursively copies the contents of src into dst.
-func deriveDeepCopy_10(dst, src *RELPSourceConfig) {
+func deriveDeepCopy_10(dst, src *UDPSourceConfig) {
 	field := new(ListenersConfig)
-	deriveDeepCopy_15(field, &src.ListenersConfig)
+	deriveDeepCopy_16(field, &src.ListenersConfig)
 	dst.ListenersConfig = *field
 	dst.FilterSubConfig = src.FilterSubConfig
-	dst.TlsBaseConfig = src.TlsBaseConfig
-	dst.ClientAuthType = src.ClientAuthType
-	dst.LineFraming = src.LineFraming
-	dst.FrameDelimiter = src.FrameDelimiter
 	dst.ConfID = src.ConfID
 }
 
 // deriveDeepCopy_11 recursively copies the contents of src into dst.
-func deriveDeepCopy_11(dst, src *DirectRELPSourceConfig) {
+func deriveDeepCopy_11(dst, src *RELPSourceConfig) {
 	field := new(ListenersConfig)
-	deriveDeepCopy_15(field, &src.ListenersConfig)
+	deriveDeepCopy_16(field, &src.ListenersConfig)
 	dst.ListenersConfig = *field
 	dst.FilterSubConfig = src.FilterSubConfig
 	dst.TlsBaseConfig = src.TlsBaseConfig
@@ -334,9 +365,22 @@ func deriveDeepCopy_11(dst, src *DirectRELPSourceConfig) {
 }
 
 // deriveDeepCopy_12 recursively copies the contents of src into dst.
-func deriveDeepCopy_12(dst, src *KafkaSourceConfig) {
+func deriveDeepCopy_12(dst, src *DirectRELPSourceConfig) {
+	field := new(ListenersConfig)
+	deriveDeepCopy_16(field, &src.ListenersConfig)
+	dst.ListenersConfig = *field
+	dst.FilterSubConfig = src.FilterSubConfig
+	dst.TlsBaseConfig = src.TlsBaseConfig
+	dst.ClientAuthType = src.ClientAuthType
+	dst.LineFraming = src.LineFraming
+	dst.FrameDelimiter = src.FrameDelimiter
+	dst.ConfID = src.ConfID
+}
+
+// deriveDeepCopy_13 recursively copies the contents of src into dst.
+func deriveDeepCopy_13(dst, src *KafkaSourceConfig) {
 	field := new(KafkaBaseConfig)
-	deriveDeepCopy_14(field, &src.KafkaBaseConfig)
+	deriveDeepCopy_15(field, &src.KafkaBaseConfig)
 	dst.KafkaBaseConfig = *field
 	dst.KafkaConsumerBaseConfig = src.KafkaConsumerBaseConfig
 	dst.FilterSubConfig = src.FilterSubConfig
@@ -369,17 +413,17 @@ func deriveDeepCopy_12(dst, src *KafkaSourceConfig) {
 	}
 }
 
-// deriveDeepCopy_13 recursively copies the contents of src into dst.
-func deriveDeepCopy_13(dst, src *GraylogSourceConfig) {
+// deriveDeepCopy_14 recursively copies the contents of src into dst.
+func deriveDeepCopy_14(dst, src *GraylogSourceConfig) {
 	field := new(ListenersConfig)
-	deriveDeepCopy_15(field, &src.ListenersConfig)
+	deriveDeepCopy_16(field, &src.ListenersConfig)
 	dst.ListenersConfig = *field
 	dst.FilterSubConfig = src.FilterSubConfig
 	dst.ConfID = src.ConfID
 }
 
-// deriveDeepCopy_14 recursively copies the contents of src into dst.
-func deriveDeepCopy_14(dst, src *KafkaBaseConfig) {
+// deriveDeepCopy_15 recursively copies the contents of src into dst.
+func deriveDeepCopy_15(dst, src *KafkaBaseConfig) {
 	if src.Brokers == nil {
 		dst.Brokers = nil
 	} else {
@@ -411,8 +455,8 @@ func deriveDeepCopy_14(dst, src *KafkaBaseConfig) {
 	dst.MetadataRefreshFrequency = src.MetadataRefreshFrequency
 }
 
-// deriveDeepCopy_15 recursively copies the contents of src into dst.
-func deriveDeepCopy_15(dst, src *ListenersConfig) {
+// deriveDeepCopy_16 recursively copies the contents of src into dst.
+func deriveDeepCopy_16(dst, src *ListenersConfig) {
 	if src.Ports == nil {
 		dst.Ports = nil
 	} else {

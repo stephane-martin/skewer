@@ -35,6 +35,7 @@ const (
 	NATS                            = 256
 	HTTPServer                      = 512
 	WebsocketServer                 = 1024
+	Elasticsearch                   = 2048
 )
 
 var Destinations = map[string]DestinationType{
@@ -49,6 +50,7 @@ var Destinations = map[string]DestinationType{
 	"httpserver":      HTTPServer,
 	"nats":            NATS,
 	"websocketserver": WebsocketServer,
+	"elasticsearch":   Elasticsearch,
 }
 
 var DestinationNames = map[DestinationType]string{
@@ -63,6 +65,7 @@ var DestinationNames = map[DestinationType]string{
 	HTTPServer:      "httpserver",
 	NATS:            "nats",
 	WebsocketServer: "websocketserver",
+	Elasticsearch:   "elasticsearch",
 }
 
 var RDestinations = map[DestinationType]byte{
@@ -77,6 +80,7 @@ var RDestinations = map[DestinationType]byte{
 	HTTPServer:      'e',
 	NATS:            'n',
 	WebsocketServer: 'w',
+	Elasticsearch:   'l',
 }
 
 func (m *MainConfig) GetDestinations() (dests DestinationType, err error) {
@@ -106,6 +110,7 @@ func (c *BaseConfig) CheckDestinations() error {
 	c.KafkaDest.Format = strings.TrimSpace(strings.ToLower(c.KafkaDest.Format))
 	c.FileDest.Format = strings.TrimSpace(strings.ToLower(c.FileDest.Format))
 	c.StderrDest.Format = strings.TrimSpace(strings.ToLower(c.StderrDest.Format))
+	c.ElasticDest.Format = strings.TrimSpace(strings.ToLower(c.ElasticDest.Format))
 
 	for _, frmt := range []string{
 		c.UDPDest.Format,
@@ -117,6 +122,7 @@ func (c *BaseConfig) CheckDestinations() error {
 		c.KafkaDest.Format,
 		c.FileDest.Format,
 		c.StderrDest.Format,
+		c.ElasticDest.Format,
 	} {
 		if encoders.ParseFormat(frmt) == -1 {
 			return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown destination format: '%s'", frmt)}
