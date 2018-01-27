@@ -1,6 +1,7 @@
 package services
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -139,8 +140,12 @@ func (s *FilePollingService) Start() (infos []model.ListenerInfo, err error) {
 		if err == nil {
 			s.confsMap[dirUID] = config.ConfID
 		} else {
-			// TODO: log
+			s.logger.Warn("Error adding directory to watch", "error", err, "directory", config.BaseDirectory)
 		}
+	}
+
+	if len(s.confsMap) == 0 {
+		return infos, fmt.Errorf("filepoll does not watch any directory")
 	}
 
 	s.wg.Add(1)
@@ -226,11 +231,13 @@ func (s *FilePollingService) fetchErrors(errors chan error) {
 	defer s.wg.Done()
 	var err error
 	for err = range errors {
-		// TODO: logs
-		switch err.(type) {
+		switch e := err.(type) {
 		case *tail.FileErrorID:
+			s.logger.Warn("Error watching file", "error", e.Err, "filename", e.Filename)
 		case *tail.FileError:
+			s.logger.Warn("Error watching file", "error", e.Err, "filename", e.Filename)
 		default:
+			s.logger.Warn("Error watching file", "error", err)
 		}
 	}
 }
