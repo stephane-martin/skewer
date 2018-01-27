@@ -56,7 +56,7 @@ func NewHTTPServerDestination(ctx context.Context, e *Env) (Destination, error) 
 			d.contentType = encoders.MimeTypes[d.format]
 			if d.contentType == "" {
 				// should not happen ??
-				// TODO: log
+				d.logger.Warn("Unknown mimetype for that format", "format", d.format)
 				d.contentType = "application/octet-stream"
 			}
 		} else {
