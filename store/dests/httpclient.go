@@ -149,7 +149,14 @@ func NewHTTPDestination(ctx context.Context, e *Env) (Destination, error) {
 func (d *HTTPDestination) Close() error {
 	d.sendQueue.Dispose()
 	d.wg.Wait()
-	// TODO: nack remaining messages ?
+	// nack remaining messages
+	for {
+		msg, err := d.sendQueue.Get()
+		if err != nil || msg == nil {
+			break
+		}
+		d.nack(msg.Uid)
+	}
 	return nil
 }
 
@@ -157,7 +164,7 @@ func (d *HTTPDestination) dosend(ctx context.Context) {
 	defer d.wg.Done()
 	for {
 		msg, err := d.sendQueue.Get()
-		if err != nil {
+		if err != nil || msg == nil {
 			return
 		}
 		urlbuf := bytes.NewBuffer(nil)
