@@ -80,19 +80,19 @@ type Acct struct {
 
 func (a *Acct) Properties() (m map[string]string) {
 	m = map[string]string{
-		"comm":        a.Comm,
-		"uid":         a.Uid,
-		"gid":         a.Gid,
-		"systemtime":  strconv.FormatInt(a.Stime.Nanoseconds(), 10),
-		"elapsedtime": strconv.FormatInt(a.Etime.Nanoseconds(), 10),
-		"usertime":    strconv.FormatInt(a.Utime.Nanoseconds(), 10),
-		"started":     a.Btime.Format(time.RFC3339Nano),
-		"memory":      strconv.FormatUint(uint64(a.Mem), 10),
-		"io":          strconv.FormatInt(a.Io, 10),
-		"flags":       a.Flags.String(),
-		"pid":         strconv.FormatUint(uint64(a.Pid), 10),
-		"ppid":        strconv.FormatUint(uint64(a.Ppid), 10),
-		"exitcode":    strconv.FormatUint(uint64(a.ExitCode), 10),
+		"comm":             a.Comm,
+		"uid":              a.Uid,
+		"gid":              a.Gid,
+		"system_ns":        strconv.FormatInt(a.Stime.Nanoseconds(), 10),
+		"elapsed_ns":       strconv.FormatInt(a.Etime.Nanoseconds(), 10),
+		"user_ns":          strconv.FormatInt(a.Utime.Nanoseconds(), 10),
+		"started_datetime": a.Btime.Format(time.RFC3339Nano),
+		"memory_bytes":     strconv.FormatUint(uint64(a.Mem), 10),
+		"io_bytes":         strconv.FormatInt(a.Io, 10),
+		"flags":            a.Flags.String(),
+		"pid_pid":          strconv.FormatUint(uint64(a.Pid), 10),
+		"ppid_pid":         strconv.FormatUint(uint64(a.Ppid), 10),
+		"exitcode":         strconv.FormatUint(uint64(a.ExitCode), 10),
 	}
 	return
 }

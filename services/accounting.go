@@ -89,8 +89,8 @@ func (s *AccountingService) makeMessage(buf []byte, tick int64, hostname string,
 	fields.TimeReportedNum = time.Now().UnixNano()
 	fields.Version = 0
 	fields.Message = fmt.Sprintf("Accounting: %s (%s/%s)", props["comm"], props["uid"], props["gid"])
-	fields.ClearDomain("acct")
-	fields.Properties.Map["acct"].Map = acct.Properties()
+	fields.ClearDomain("accounting")
+	fields.Properties.Map["accounting"].Map = acct.Properties()
 	fields.SetProperty("skewer", "client", hostname)
 
 	return &model.FullMessage{
