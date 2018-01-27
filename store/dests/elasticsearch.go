@@ -128,7 +128,8 @@ func NewElasticDestination(ctx context.Context, e *Env) (Destination, error) {
 		BulkActions(config.BatchSize).
 		Stats(true).
 		FlushInterval(config.FlushPeriod).
-		After(d.after)
+		After(d.after).
+		Backoff(elastic.StopBackoff{})
 
 	d.processor, err = processor.Do(context.Background())
 	if err != nil {
@@ -151,6 +152,10 @@ func NewElasticDestination(ctx context.Context, e *Env) (Destination, error) {
 }
 
 func (d *ElasticDestination) after(executionId int64, requests []elastic.BulkableRequest, response *elastic.BulkResponse, err error) {
+	if response == nil {
+		d.dofatal()
+		return
+	}
 	successes := response.Succeeded()
 	failures := response.Failed()
 	var item *elastic.BulkResponseItem
@@ -166,6 +171,7 @@ func (d *ElasticDestination) after(executionId int64, requests []elastic.Bulkabl
 	if len(failures) == 0 {
 		return
 	}
+
 	for _, item = range failures {
 		uid, e = utils.Parse(item.Id)
 		if e != nil {
