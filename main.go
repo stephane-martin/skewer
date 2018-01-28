@@ -339,7 +339,12 @@ func execServeParent() (status int) {
 	}
 	if os.Getuid() != numuid {
 		// execute the child with the given uid, gid
-		childProcess.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uint32(numuid), Gid: uint32(numgid)}}
+		childProcess.SysProcAttr = &syscall.SysProcAttr{
+			Credential: &syscall.Credential{
+				Uid: uint32(numuid),
+				Gid: uint32(numgid),
+			},
+		}
 	}
 	err = childProcess.Start()
 	_ = rRingSecretPipe.Close()
