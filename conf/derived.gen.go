@@ -327,6 +327,11 @@ func deriveDeepCopy_8(dst, src *ElasticDestConfig) {
 	dst.MessagesType = src.MessagesType
 	dst.BatchSize = src.BatchSize
 	dst.FlushPeriod = src.FlushPeriod
+	dst.CreateIndices = src.CreateIndices
+	dst.RefreshInterval = src.RefreshInterval
+	dst.CheckStartup = src.CheckStartup
+	dst.NShards = src.NShards
+	dst.NReplicas = src.NReplicas
 }
 
 // deriveDeepCopy_9 recursively copies the contents of src into dst.

@@ -276,6 +276,12 @@ type ElasticDestConfig struct {
 	MessagesType              string        `mapstructure:"messages_type" toml:"messages_type" json:"messages_type"`
 	BatchSize                 int           `mapstructure:"batch_size" toml:"batch_size" json:"batch_size"`
 	FlushPeriod               time.Duration `mapstructure:"flush_period" toml:"flush_period" json:"flush_period"`
+	CreateIndices             bool          `mapstructure:"create_indices" toml:"create_indices" json:"create_indices"`
+
+	RefreshInterval time.Duration `mapstructure:"refresh_interval" toml:"refresh_interval" json:"refresh_interval"`
+	CheckStartup    bool          `mapstructure:"check_startup" toml:"check_startup" json:"check_startup"`
+	NShards         uint          `mapstructure:"shards" toml:"shards" json:"shards"`
+	NReplicas       uint          `mapstructure:"replicas" toml:"replicas" json:"replicas"`
 }
 
 type HTTPDestConfig struct {

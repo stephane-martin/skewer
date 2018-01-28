@@ -12,20 +12,58 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/fatih/set"
 	"github.com/inconshreveable/log15"
 	"github.com/olivere/elastic"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/model/encoders"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/es"
 )
+
+func getClient(config conf.ElasticDestConfig, httpClient *http.Client, logger log15.Logger) (c *elastic.Client, err error) {
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	elasticOpts := []elastic.ClientOptionFunc{}
+	elasticOpts = append(elasticOpts, elastic.SetURL(config.URLs...))
+	elasticOpts = append(elasticOpts, elastic.SetHttpClient(httpClient))
+	if logger != nil {
+		elasticOpts = append(elasticOpts, elastic.SetErrorLog(&es.ESLogger{Logger: logger}))
+	}
+	elasticOpts = append(elasticOpts, elastic.SetHealthcheck(config.HealthCheck))
+	elasticOpts = append(elasticOpts, elastic.SetSniff(config.Sniffing))
+	if config.HealthCheck {
+		elasticOpts = append(elasticOpts, elastic.SetHealthcheckTimeout(config.HealthCheckTimeout))
+		elasticOpts = append(elasticOpts, elastic.SetHealthcheckTimeoutStartup(config.HealthCheckTimeoutStartup))
+		elasticOpts = append(elasticOpts, elastic.SetHealthcheckInterval(config.HealthCheckInterval))
+	}
+
+	if config.TLSEnabled {
+		elasticOpts = append(elasticOpts, elastic.SetScheme("https"))
+	}
+	if len(config.Username) > 0 && len(config.Password) > 0 {
+		elasticOpts = append(elasticOpts, elastic.SetBasicAuth(config.Username, config.Password))
+	}
+
+	c, err = elastic.NewClient(elasticOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
+}
 
 type ElasticDestination struct {
 	*baseDestination
-	elasticlient *elastic.Client
-	processor    *elastic.BulkProcessor
-	indexNameTpl *template.Template
-	messagesType string
+	elasticClient     *elastic.Client
+	httpClient        *http.Client
+	processor         *elastic.BulkProcessor
+	indexNameTpl      *template.Template
+	messagesType      string
+	config            conf.ElasticDestConfig
+	knownIndexNames   set.Interface
+	createOptionsBody string
 }
 
 func NewElasticDestination(ctx context.Context, e *Env) (Destination, error) {
@@ -34,8 +72,10 @@ func NewElasticDestination(ctx context.Context, e *Env) (Destination, error) {
 		config.URLs = []string{"http://127.0.0.1:9200"}
 	}
 	d := &ElasticDestination{
-		baseDestination: newBaseDestination(conf.Elasticsearch, "elasticsearch", e),
-		messagesType:    config.MessagesType,
+		baseDestination:   newBaseDestination(conf.Elasticsearch, "elasticsearch", e),
+		messagesType:      config.MessagesType,
+		knownIndexNames:   set.New(set.ThreadSafe),
+		createOptionsBody: es.NewOpts(config.NShards, config.NReplicas, config.CheckStartup, config.RefreshInterval).Marshal(),
 	}
 	var err error
 	d.indexNameTpl, err = template.New("index").Parse(config.IndexNameTpl)
@@ -93,36 +133,27 @@ func NewElasticDestination(ctx context.Context, e *Env) (Destination, error) {
 		transport.Proxy = http.ProxyURL(url)
 	}
 
-	httpClient := &http.Client{
+	d.httpClient = &http.Client{
 		Transport: transport,
 		Jar:       nil,
 	}
 
-	elasticOpts := []elastic.ClientOptionFunc{}
-	elasticOpts = append(elasticOpts, elastic.SetURL(config.URLs...))
-	elasticOpts = append(elasticOpts, elastic.SetHttpClient(httpClient))
-	elasticOpts = append(elasticOpts, elastic.SetErrorLog(&myLogger{logger: d.logger}))
-	elasticOpts = append(elasticOpts, elastic.SetHealthcheck(config.HealthCheck))
-	elasticOpts = append(elasticOpts, elastic.SetSniff(config.Sniffing))
-	if config.HealthCheck {
-		elasticOpts = append(elasticOpts, elastic.SetHealthcheckTimeout(config.HealthCheckTimeout))
-		elasticOpts = append(elasticOpts, elastic.SetHealthcheckTimeoutStartup(config.HealthCheckTimeoutStartup))
-		elasticOpts = append(elasticOpts, elastic.SetHealthcheckInterval(config.HealthCheckInterval))
-	}
-
-	if config.TLSEnabled {
-		elasticOpts = append(elasticOpts, elastic.SetScheme("https"))
-	}
-	if len(config.Username) > 0 && len(config.Password) > 0 {
-		elasticOpts = append(elasticOpts, elastic.SetBasicAuth(config.Username, config.Password))
-	}
-
-	d.elasticlient, err = elastic.NewClient(elasticOpts...)
+	d.config = config
+	d.elasticClient, err = d.getClient()
 	if err != nil {
 		return nil, err
 	}
 
-	processor := d.elasticlient.BulkProcessor().
+	names, err := d.elasticClient.IndexNames()
+	if err != nil {
+		return nil, err
+	}
+	d.logger.Info("Existing indices in Elasticsearch", "names", strings.Join(names, ","))
+	for _, name := range names {
+		d.knownIndexNames.Add(name)
+	}
+
+	processor := d.elasticClient.BulkProcessor().
 		Name("SkewerWorker").
 		Workers(http.DefaultMaxIdleConnsPerHost).
 		BulkActions(config.BatchSize).
@@ -149,6 +180,10 @@ func NewElasticDestination(ctx context.Context, e *Env) (Destination, error) {
 	}
 
 	return d, nil
+}
+
+func (d *ElasticDestination) getClient() (*elastic.Client, error) {
+	return getClient(d.config, d.httpClient, d.logger)
 }
 
 func (d *ElasticDestination) after(executionId int64, requests []elastic.BulkableRequest, response *elastic.BulkResponse, err error) {
@@ -196,6 +231,43 @@ func (d *ElasticDestination) Send(msg *model.FullMessage, partitionKey string, p
 		d.permerr(msg.Uid)
 		return err
 	}
+	// create index in ES if needed
+	indexName := indexBuf.String()
+	if d.config.CreateIndices && !d.knownIndexNames.Has(indexName) {
+		d.logger.Info("Index does not exist yet in Elasticsearch", "name", indexName)
+		client, err := d.getClient()
+		if err != nil {
+			d.nack(msg.Uid)
+			d.dofatal()
+			return err
+		}
+		// refresh index names
+		names, err := client.IndexNames()
+		if err != nil {
+			d.nack(msg.Uid)
+			d.dofatal()
+			return err
+		}
+		d.knownIndexNames.Clear()
+		for _, name := range names {
+			d.knownIndexNames.Add(name)
+		}
+		if !d.knownIndexNames.Has(indexName) {
+			res, err := client.CreateIndex(indexName).BodyString(d.createOptionsBody).Do(context.Background())
+			if err != nil {
+				d.nack(msg.Uid)
+				return err
+			}
+			if !res.Acknowledged {
+				d.nack(msg.Uid)
+				return fmt.Errorf("Index creation not acknowledged")
+			}
+			d.knownIndexNames.Add(indexName)
+			d.logger.Info("Created new index in Elasticsearch", "name", indexName)
+		}
+	}
+
+	// add message to the bulk processor work list
 	var buf json.RawMessage
 	buf, err = encoders.ChainEncode(d.encoder, msg)
 	if err != nil {
@@ -203,15 +275,7 @@ func (d *ElasticDestination) Send(msg *model.FullMessage, partitionKey string, p
 		return err
 	}
 	d.processor.Add(
-		elastic.NewBulkIndexRequest().Index(indexBuf.String()).Type(d.messagesType).Id(msg.Uid.String()).Doc(buf),
+		elastic.NewBulkIndexRequest().Index(indexName).Type(d.messagesType).Id(msg.Uid.String()).Doc(buf),
 	)
 	return nil
-}
-
-type myLogger struct {
-	logger log15.Logger
-}
-
-func (l *myLogger) Printf(format string, v ...interface{}) {
-	l.logger.Warn(fmt.Sprintf(format, v...))
 }
