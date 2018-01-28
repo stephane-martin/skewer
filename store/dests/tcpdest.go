@@ -81,17 +81,19 @@ func NewTCPDestination(ctx context.Context, e *Env) (Destination, error) {
 }
 
 func (d *TCPDestination) Send(message *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+	uid := message.Uid
 	err = d.clt.Send(message)
+
 	if err == nil {
 		if d.previousUid != utils.ZeroUid {
 			d.ack(d.previousUid)
 		}
-		d.previousUid = message.Uid
+		d.previousUid = uid
 	} else if encoders.IsEncodingError(err) {
-		d.permerr(message.Uid)
+		d.permerr(uid)
 	} else {
 		// error writing to the TCP conn
-		d.nack(message.Uid)
+		d.nack(uid)
 		if d.previousUid != utils.ZeroUid {
 			d.nack(d.previousUid)
 			d.previousUid = utils.ZeroUid

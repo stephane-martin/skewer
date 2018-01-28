@@ -211,7 +211,6 @@ func (c *SyslogTCPClient) Connect() (err error) {
 }
 
 func (c *SyslogTCPClient) Send(msg *model.FullMessage) (err error) {
-	// may be called concurrently
 	if c.conn == nil {
 		return fmt.Errorf("SyslogTCPClient: not connected")
 	}
@@ -224,6 +223,7 @@ func (c *SyslogTCPClient) Send(msg *model.FullMessage) (err error) {
 	} else {
 		buf, err = encoders.TcpOctetEncode(c.encoder, msg)
 	}
+	model.Free(msg.Fields)
 	if err != nil {
 		return encoders.NonEncodableError
 	}

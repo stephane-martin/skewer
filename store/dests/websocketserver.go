@@ -159,39 +159,41 @@ func (d *WebsocketServerDestination) writeLogs(wsconn *websocket.Conn) (err erro
 			// server is shutting down
 			return nil
 		case message, ok = <-d.sendQueue:
-			if !ok {
+			if !ok || message == nil {
 				// no more messages to send
 				d.dofatal()
 				return nil
 			}
+			uid := message.Uid
 			if writer == nil {
 				writer, err = wsconn.NextWriter(d.messageType)
 				if err != nil {
 					// client is gone
-					d.nack(message.Uid)
+					d.nack(uid)
 					return err
 				}
 			}
 
 			wsconn.SetWriteDeadline(time.Now().Add(writeWait))
 			err = d.encoder(message, writer)
+			model.Free(message.Fields)
 			if err == nil {
 				// flush the ws buffer
 				err = writer.Close()
 				writer = nil
 				if err == nil {
-					d.ack(message.Uid)
+					d.ack(uid)
 				} else {
 					// error when flushing
-					d.nack(message.Uid)
+					d.nack(uid)
 					return err
 				}
 			} else if encoders.IsEncodingError(err) {
 				// message can not be encoded
-				d.permerr(message.Uid)
+				d.permerr(uid)
 			} else {
 				// error writing to client, must be gone
-				d.nack(message.Uid)
+				d.nack(uid)
 				return err
 			}
 		}

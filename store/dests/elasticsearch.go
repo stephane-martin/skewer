@@ -20,6 +20,7 @@ import (
 	"github.com/stephane-martin/skewer/model/encoders"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/es"
+	"github.com/zond/gotomic"
 )
 
 func getClient(config conf.ElasticDestConfig, httpClient *http.Client, logger log15.Logger) (c *elastic.Client, err error) {
@@ -64,6 +65,7 @@ type ElasticDestination struct {
 	config            conf.ElasticDestConfig
 	knownIndexNames   set.Interface
 	createOptionsBody string
+	sentMessagesUids  *gotomic.Hash
 }
 
 func NewElasticDestination(ctx context.Context, e *Env) (Destination, error) {
@@ -76,6 +78,7 @@ func NewElasticDestination(ctx context.Context, e *Env) (Destination, error) {
 		messagesType:      config.MessagesType,
 		knownIndexNames:   set.New(set.ThreadSafe),
 		createOptionsBody: es.NewOpts(config.NShards, config.NReplicas, config.CheckStartup, config.RefreshInterval).Marshal(),
+		sentMessagesUids:  gotomic.NewHash(),
 	}
 	var err error
 	d.indexNameTpl, err = template.New("index").Parse(config.IndexNameTpl)
@@ -197,10 +200,11 @@ func (d *ElasticDestination) after(executionId int64, requests []elastic.Bulkabl
 	var uid utils.MyULID
 	var e error
 	for _, item = range successes {
-		uid, e = utils.Parse(item.Id)
+		uid, e = utils.ParseMyULID(item.Id)
 		if e != nil {
 			continue
 		}
+		d.sentMessagesUids.Delete(uid)
 		d.ack(uid)
 	}
 	if len(failures) == 0 {
@@ -208,10 +212,11 @@ func (d *ElasticDestination) after(executionId int64, requests []elastic.Bulkabl
 	}
 
 	for _, item = range failures {
-		uid, e = utils.Parse(item.Id)
+		uid, e = utils.ParseMyULID(item.Id)
 		if e != nil {
 			continue
 		}
+		d.sentMessagesUids.Delete(uid)
 		d.nack(uid)
 		if item.Error != nil {
 			d.logger.Warn("Elasticsearch index error", "type", item.Error.Type, "reason", item.Error.Reason, "index", item.Error.Index)
@@ -221,10 +226,18 @@ func (d *ElasticDestination) after(executionId int64, requests []elastic.Bulkabl
 }
 
 func (d *ElasticDestination) Close() error {
+	d.sentMessagesUids.Each(func(k gotomic.Hashable, v gotomic.Thing) bool {
+		if uid, ok := k.(utils.MyULID); ok {
+			d.nack(uid)
+		}
+		return false
+	})
 	return d.processor.Close()
 }
 
 func (d *ElasticDestination) Send(msg *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+	defer model.Free(msg.Fields)
+
 	indexBuf := bytes.NewBuffer(nil)
 	err = d.indexNameTpl.Execute(indexBuf, msg.Fields)
 	if err != nil {
@@ -274,8 +287,10 @@ func (d *ElasticDestination) Send(msg *model.FullMessage, partitionKey string, p
 		d.permerr(msg.Uid)
 		return err
 	}
+	d.sentMessagesUids.Put(msg.Uid, true)
 	d.processor.Add(
 		elastic.NewBulkIndexRequest().Index(indexName).Type(d.messagesType).Id(msg.Uid.String()).Doc(buf),
 	)
+
 	return nil
 }

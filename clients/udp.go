@@ -127,6 +127,7 @@ func (c *SyslogUDPClient) Send(msg *model.FullMessage) (err error) {
 		return nil
 	}
 	buf, err := encoders.ChainEncode(c.encoder, msg)
+	model.Free(msg.Fields)
 	if err != nil {
 		return encoders.NonEncodableError
 	}

@@ -2,10 +2,12 @@ package utils
 
 import (
 	"encoding/json"
+	"hash/crc32"
 	"math/rand"
 	"time"
 
 	"github.com/oklog/ulid"
+	"github.com/zond/gotomic"
 )
 
 type MyULID ulid.ULID
@@ -66,13 +68,24 @@ func (uid MyULID) Equal(other MyULID) bool {
 	return uid == other
 }
 
+func (uid MyULID) Equals(other gotomic.Thing) bool {
+	if o, ok := other.(MyULID); ok {
+		return uid == o
+	}
+	return false
+}
+
+func (uid MyULID) HashCode() uint32 {
+	return crc32.ChecksumIEEE(uid[:])
+}
+
 func (uid MyULID) Compare(other MyULID) int {
 	return ulid.ULID(uid).Compare(ulid.ULID(other))
 }
 
-func Parse(uids string) (uid MyULID, err error) {
+func ParseMyULID(uidStr string) (uid MyULID, err error) {
 	var id ulid.ULID
-	id, err = ulid.Parse(uids)
+	id, err = ulid.Parse(uidStr)
 	if err != nil {
 		return uid, err
 	}

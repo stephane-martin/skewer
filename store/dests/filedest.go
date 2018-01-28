@@ -332,6 +332,8 @@ func NewFileDestination(ctx context.Context, e *Env) (Destination, error) {
 }
 
 func (d *FileDestination) Send(message *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+	defer model.Free(message.Fields)
+
 	if len(message.Fields.AppName) == 0 {
 		message.Fields.AppName = "unknown"
 	}

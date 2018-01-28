@@ -3,6 +3,7 @@ package dests
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"net"
@@ -160,77 +161,84 @@ func (d *HTTPDestination) Close() error {
 	return nil
 }
 
+func (d *HTTPDestination) dosendOne(ctx context.Context, msg *model.FullMessage) (err error) {
+	urlbuf := bytes.NewBuffer(nil)
+	err = d.url.Execute(urlbuf, msg.Fields)
+	if err != nil {
+		d.permerr(msg.Uid)
+		d.logger.Warn("Error calculating target URL from template", "error", err)
+		return nil
+	}
+	body := bytes.NewBuffer(nil)
+	err = d.encoder(msg, body)
+	if err != nil {
+		d.permerr(msg.Uid)
+		d.logger.Warn("Error encoding message", "error", err)
+		return nil
+	}
+	req, err := http.NewRequest(d.method, urlbuf.String(), body)
+	if err != nil {
+		d.permerr(msg.Uid)
+		d.logger.Warn("Error preparing HTTP request", "error", err)
+		return nil
+	}
+	req.Header.Set("Content-Type", d.contentType)
+	if len(d.useragent) > 0 {
+		req.Header.Set("User-Agent", d.useragent)
+	}
+	if len(d.username) > 0 && len(d.password) > 0 {
+		req.SetBasicAuth(d.username, d.password)
+	}
+	req = req.WithContext(ctx)
+	resp, err := d.clt.Do(req)
+	if err != nil {
+		// server down ?
+		d.nack(msg.Uid)
+		d.logger.Warn("Error sending HTTP request", "error", err)
+		return err
+	}
+	// not interested in response body
+	io.Copy(ioutil.Discard, resp.Body)
+	resp.Body.Close()
+
+	httpStatusCounter.WithLabelValues(req.Host, strconv.FormatInt(int64(resp.StatusCode), 10)).Inc()
+
+	if 200 <= resp.StatusCode && resp.StatusCode < 300 {
+		d.ack(msg.Uid)
+		return nil
+	}
+	if 400 <= resp.StatusCode && resp.StatusCode < 500 {
+		// client-side error ??!
+		d.nack(msg.Uid)
+		d.logger.Warn("Client side error sending HTTP request", "code", resp.StatusCode, "status", resp.Status)
+		return fmt.Errorf("HTTP error when sending message to server: code '%d', status '%s'", resp.StatusCode, resp.Status)
+	}
+	if 500 <= resp.StatusCode && resp.StatusCode < 600 {
+		// server side error
+		d.nack(msg.Uid)
+		d.logger.Warn("Server side error sending HTTP request", "code", resp.StatusCode, "status", resp.Status)
+		return fmt.Errorf("HTTP error when sending message to server: code '%d', status '%s'", resp.StatusCode, resp.Status)
+	}
+	d.nack(msg.Uid)
+	d.logger.Warn("Unexpected status code sending HTTP request", "code", resp.StatusCode, "status", resp.Status)
+	return fmt.Errorf("HTTP error when sending message to server: code '%d', status '%s'", resp.StatusCode, resp.Status)
+}
+
 func (d *HTTPDestination) dosend(ctx context.Context) {
 	defer d.wg.Done()
+	var msg *model.FullMessage
+	var err error
 	for {
-		msg, err := d.sendQueue.Get()
+		msg, err = d.sendQueue.Get()
 		if err != nil || msg == nil {
 			return
 		}
-		urlbuf := bytes.NewBuffer(nil)
-		err = d.url.Execute(urlbuf, msg.Fields)
+		err = d.dosendOne(ctx, msg)
+		model.Free(msg.Fields)
 		if err != nil {
-			d.permerr(msg.Uid)
-			d.logger.Warn("Error calculating target URL from template", "error", err)
-			continue
-		}
-		body := bytes.NewBuffer(nil)
-		err = d.encoder(msg, body)
-		if err != nil {
-			d.permerr(msg.Uid)
-			d.logger.Warn("Error encoding message", "error", err)
-			continue
-		}
-		req, err := http.NewRequest(d.method, urlbuf.String(), body)
-		if err != nil {
-			d.permerr(msg.Uid)
-			d.logger.Warn("Error preparing HTTP request", "error", err)
-			continue
-		}
-		req.Header.Set("Content-Type", d.contentType)
-		if len(d.useragent) > 0 {
-			req.Header.Set("User-Agent", d.useragent)
-		}
-		if len(d.username) > 0 && len(d.password) > 0 {
-			req.SetBasicAuth(d.username, d.password)
-		}
-		req = req.WithContext(ctx)
-		resp, err := d.clt.Do(req)
-		if err != nil {
-			// server down ?
-			d.nack(msg.Uid)
-			d.logger.Warn("Error sending HTTP request", "error", err)
 			d.dofatal()
 			return
 		}
-		// not interested in response body
-		io.Copy(ioutil.Discard, resp.Body)
-		resp.Body.Close()
-
-		httpStatusCounter.WithLabelValues(req.Host, strconv.FormatInt(int64(resp.StatusCode), 10)).Inc()
-
-		if 200 <= resp.StatusCode && resp.StatusCode < 300 {
-			d.ack(msg.Uid)
-			continue
-		}
-		if 400 <= resp.StatusCode && resp.StatusCode < 500 {
-			// client-side error ??!
-			d.nack(msg.Uid)
-			d.logger.Warn("Client side error sending HTTP request", "code", resp.StatusCode, "status", resp.Status)
-			d.dofatal()
-			return
-		}
-		if 500 <= resp.StatusCode && resp.StatusCode < 600 {
-			// server side error
-			d.nack(msg.Uid)
-			d.logger.Warn("Server side error sending HTTP request", "code", resp.StatusCode, "status", resp.Status)
-			d.dofatal()
-			return
-		}
-		d.nack(msg.Uid)
-		d.logger.Warn("Unexpected status code sending HTTP request", "code", resp.StatusCode, "status", resp.Status)
-		d.dofatal()
-		return
 	}
 }
 

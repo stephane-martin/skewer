@@ -54,16 +54,19 @@ func NewUDPDestination(ctx context.Context, e *Env) (Destination, error) {
 }
 
 func (d *UDPDestination) Send(message *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+	uid := message.Uid
 	err = d.client.Send(message)
+
+	// careful not to use message afterwards
 	if err == nil {
-		d.ack(message.Uid)
+		d.ack(uid)
 		return nil
 	} else if encoders.IsEncodingError(err) {
-		d.permerr(message.Uid)
+		d.permerr(uid)
 		return err
 	} else {
 		// error writing to the UDP conn
-		d.nack(message.Uid)
+		d.nack(uid)
 		d.dofatal()
 		return err
 	}

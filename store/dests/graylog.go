@@ -70,5 +70,6 @@ func (d *GraylogDestination) Send(message *model.FullMessage, partitionKey strin
 		d.nack(message.Uid)
 		d.dofatal()
 	}
+	model.Free(message.Fields)
 	return err
 }

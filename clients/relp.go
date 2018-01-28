@@ -498,12 +498,15 @@ func (c *RELPClient) doSend() {
 			c.logger.Info("unexpected error getting message from queue", "error", err)
 			return
 		}
+
 		err = c.doSendOne(msg)
+		model.Free(msg.Fields) // msg can be reused from here
+
 		if err == utils.ErrDisposed {
 			c.logger.Debug("the queue has been disposed")
 			return
 		} else if encoders.IsEncodingError(err) {
-			c.logger.Warn("dropped non-encodable message", "uid", utils.MyULID(msg.Uid).String())
+			c.logger.Warn("dropped non-encodable message")
 			continue
 		} else if err != nil {
 			if utils.IsBrokenPipe(err) {

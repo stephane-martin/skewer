@@ -102,14 +102,12 @@ func (fwder *fwderImpl) doForward(ctx context.Context) {
 		case <-done:
 			return
 		case message, more = <-outputs:
-			if !more {
+			if !more || message == nil {
 				return
 			}
-			if message != nil {
-				err = fwder.fwdMsg(message, jsenvs, dest)
-				if err != nil {
-					fwder.logger.Warn("Error forwarding message", "error", err)
-				}
+			err = fwder.fwdMsg(message, jsenvs, dest)
+			if err != nil {
+				fwder.logger.Warn("Error forwarding message", "error", err)
 			}
 		}
 	}

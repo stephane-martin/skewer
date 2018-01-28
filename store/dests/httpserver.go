@@ -115,6 +115,7 @@ func (d *HTTPServerDestination) nackall(messages []*model.FullMessage) {
 	var message *model.FullMessage
 	for _, message = range messages {
 		d.nack(message.Uid)
+		model.Free(message.Fields)
 	}
 }
 
@@ -200,6 +201,7 @@ Loop:
 			d.ack(message.Uid)
 		}
 		messages = messages[1:]
+		model.Free(message.Fields)
 	}
 }
 
