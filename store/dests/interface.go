@@ -29,6 +29,7 @@ var destinations = map[conf.DestinationType]constructor{
 	conf.HTTPServer:      NewHTTPServerDestination,
 	conf.WebsocketServer: NewWebsocketServerDestination,
 	conf.Elasticsearch:   NewElasticDestination,
+	conf.Redis:           NewRedisDestination,
 }
 
 func NewDestination(ctx context.Context, typ conf.DestinationType, e *Env) (Destination, error) {

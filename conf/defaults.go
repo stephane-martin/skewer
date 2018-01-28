@@ -32,11 +32,25 @@ func SetDefaults(v *viper.Viper) {
 		SetWebsocketServerDestDefaults,
 		SetNatsDestDefaults,
 		SetElasticDestDefaults,
+		SetRedisDestDefaults,
 		SetMainDefaults,
 	}
 	for _, f := range funcs {
 		f(v, true)
 	}
+}
+
+func SetRedisDestDefaults(v *viper.Viper, prefixed bool) {
+	prefix := ""
+	if prefixed {
+		prefix = "redis_destination."
+	}
+	v.SetDefault(prefix+"host", "127.0.0.1")
+	v.SetDefault(prefix+"port", 6379)
+	v.SetDefault(prefix+"format", "json")
+	v.SetDefault(prefix+"dial_timeout", "5s")
+	v.SetDefault(prefix+"read_timeout", "3s")
+	v.SetDefault(prefix+"write_timeout", "3s")
 }
 
 func SetElasticDestDefaults(v *viper.Viper, prefixed bool) {
@@ -160,7 +174,7 @@ func SetFileDestDefaults(v *viper.Viper, prefixed bool) {
 	if prefixed {
 		prefix = "file_destination."
 	}
-	v.SetDefault(prefix+"filename", "/var/log/skewer/{{.Date}}/{{.Appname}}.log")
+	v.SetDefault(prefix+"filename", "/var/log/skewer/{{.Date}}/{{.AppName}}.log")
 	v.SetDefault(prefix+"sync", false)
 	v.SetDefault(prefix+"sync_period", "5s")
 	v.SetDefault(prefix+"flush_period", "1s")

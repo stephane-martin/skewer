@@ -1040,10 +1040,10 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 		}
 		if filtering != nil {
 			if filtering.TopicTmpl == "" {
-				filtering.TopicTmpl = "topic-{{.Appname}}"
+				filtering.TopicTmpl = "topic-{{.AppName}}"
 			}
 			if filtering.PartitionTmpl == "" {
-				filtering.PartitionTmpl = "partition-{{.Hostname}}"
+				filtering.PartitionTmpl = "partition-{{.HostName}}"
 			}
 
 			if len(filtering.TopicTmpl) > 0 {

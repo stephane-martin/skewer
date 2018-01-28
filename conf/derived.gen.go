@@ -184,6 +184,7 @@ func deriveDeepCopy(dst, src *BaseConfig) {
 	field := new(ElasticDestConfig)
 	deriveDeepCopy_8(field, &src.ElasticDest)
 	dst.ElasticDest = *field
+	dst.RedisDest = src.RedisDest
 }
 
 // deriveDeepCopy_ recursively copies the contents of src into dst.

@@ -147,7 +147,8 @@ func (fwder *fwderImpl) fwdMsg(m *model.FullMessage, envs map[utils.MyULID]*java
 
 	_, ok1 := dest.(*dests.KafkaDestination)
 	_, ok2 := dest.(*dests.NATSDestination)
-	if ok1 || ok2 {
+	_, ok3 := dest.(*dests.RedisDestination)
+	if ok1 || ok2 || ok3 {
 		// only calculate proper Topic, PartitionKey and PartitionNumber if we are sending to Kafka or NATS
 		topic, errs = env.Topic(m.Fields)
 		for _, err = range errs {

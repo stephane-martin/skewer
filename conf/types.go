@@ -37,6 +37,7 @@ type BaseConfig struct {
 	StderrDest          StderrDestConfig          `mapstructure:"stderr_destination" toml:"stderr_destination" json:"stderr_destination"`
 	GraylogDest         GraylogDestConfig         `mapstructure:"graylog_destination" toml:"graylog_destination" json:"graylog_destination"`
 	ElasticDest         ElasticDestConfig         `mapstructure:"elasticsearch_destination" toml:"elasticsearch_destination" json:"elasticsearch_destination"`
+	RedisDest           RedisDestConfig           `mapstructure:"redis_destination" toml:"redis_destination" json:"redis_destination"`
 }
 
 // MainConfig lists general/global parameters.
@@ -282,6 +283,20 @@ type ElasticDestConfig struct {
 	CheckStartup    bool          `mapstructure:"check_startup" toml:"check_startup" json:"check_startup"`
 	NShards         uint          `mapstructure:"shards" toml:"shards" json:"shards"`
 	NReplicas       uint          `mapstructure:"replicas" toml:"replicas" json:"replicas"`
+}
+
+type RedisDestConfig struct {
+	TlsBaseConfig `mapstructure:",squash"`
+	Insecure      bool          `mapstructure:"insecure" toml:"insecure" json:"insecure"`
+	Host          string        `mapstructure:"host" toml:"host" json:"host"`
+	Port          int           `mapstructure:"port" toml:"port" json:"port"`
+	Password      string        `mapstructure:"password" toml:"password" json:"password"`
+	Rebind        time.Duration `mapstructure:"rebind" toml:"rebind" json:"rebind"`
+	Format        string        `mapstructure:"format" toml:"format" json:"format"`
+	Database      int           `mapstructure:"database" toml:"database" json:"database"`
+	DialTimeout   time.Duration `mapstructure:"dial_timeout" toml:"dial_timeout" json:"dial_timeout"`
+	ReadTimeout   time.Duration `mapstructure:"read_timeout" toml:"read_timeout" json:"read_timeout"`
+	WriteTimeout  time.Duration `mapstructure:"write_timeout" toml:"write_timeout" json:"write_timeout"`
 }
 
 type HTTPDestConfig struct {
