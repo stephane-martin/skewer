@@ -102,8 +102,7 @@ func SetHTTPServerDestDefaults(v *viper.Viper, prefixed bool) {
 	if prefixed {
 		prefix = "httpserver_destination."
 	}
-	v.SetDefault(prefix+"format", "fulljson")
-	v.SetDefault(prefix+"content_type", "auto")
+	v.SetDefault(prefix+"format", "")
 	v.SetDefault(prefix+"bind_addr", "127.0.0.1")
 	v.SetDefault(prefix+"port", "8514")
 	v.SetDefault(prefix+"delimiter", 10)

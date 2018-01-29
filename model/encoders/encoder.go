@@ -16,7 +16,7 @@ var endl = []byte("\n")
 type Format int
 
 const (
-	RFC5424 Format = iota
+	RFC5424 Format = 1 + iota
 	RFC3164
 	JSON
 	FullJSON
@@ -33,16 +33,40 @@ var Formats = map[string]Format{
 	"file":     File,
 	"gelf":     GELF,
 	"protobuf": Protobuf,
+	"":         JSON,
+}
+
+var JsonMimetype = "application/json"
+var NDJsonMimetype = "application/x-ndjson"
+var ProtobufMimetype = "application/vnd.google.protobuf"
+var OctetStreamMimetype = "application/octet-stream"
+var PlainMimetype = mime.FormatMediaType("text/plain", map[string]string{"charset": "utf-8"})
+
+var AcceptedMimeTypes = []string{
+	JsonMimetype,
+	NDJsonMimetype,
+	ProtobufMimetype,
+	OctetStreamMimetype,
+	"text/plain",
+}
+
+var RMimeTypes = map[string]Encoder{
+	JsonMimetype:        encodeJson,
+	NDJsonMimetype:      encodeJson,
+	ProtobufMimetype:    encodePB,
+	OctetStreamMimetype: encodePB,
+	PlainMimetype:       encode5424,
+	"text/plain":        encode5424,
 }
 
 var MimeTypes = map[Format]string{
-	RFC5424:  mime.FormatMediaType("text/plain", map[string]string{"charset": "utf-8"}),
-	RFC3164:  mime.FormatMediaType("text/plain", map[string]string{"charset": "utf-8"}),
-	JSON:     "application/json",
-	FullJSON: "application/json",
-	File:     mime.FormatMediaType("text/plain", map[string]string{"charset": "utf-8"}),
-	GELF:     "application/json",
-	Protobuf: "application/protobuf",
+	RFC5424:  PlainMimetype,
+	RFC3164:  PlainMimetype,
+	JSON:     JsonMimetype,
+	FullJSON: JsonMimetype,
+	File:     PlainMimetype,
+	GELF:     JsonMimetype,
+	Protobuf: ProtobufMimetype,
 }
 
 var encoders = map[Format]Encoder{

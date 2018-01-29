@@ -166,12 +166,20 @@ func newBaseDestination(typ conf.DestinationType, codename string, e *Env) *base
 	return &base
 }
 
-func (base *baseDestination) setFormat(format string) error {
-	frmt := encoders.ParseFormat(format)
+func (base *baseDestination) getEncoder(format string) (frmt encoders.Format, encoder encoders.Encoder, err error) {
+	frmt = encoders.ParseFormat(format)
 	if frmt == -1 {
-		return fmt.Errorf("Unknown encoding format: %s", format)
+		return 0, nil, fmt.Errorf("Unknown encoding format: %s", format)
 	}
-	encoder, err := encoders.GetEncoder(frmt)
+	encoder, err = encoders.GetEncoder(frmt)
+	if err != nil {
+		return 0, nil, err
+	}
+	return frmt, encoder, nil
+}
+
+func (base *baseDestination) setFormat(format string) error {
+	frmt, encoder, err := base.getEncoder(format)
 	if err != nil {
 		return err
 	}

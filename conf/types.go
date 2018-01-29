@@ -241,7 +241,6 @@ type HTTPServerDestConfig struct {
 	BindAddr       string `mapstructure:"bind_addr" toml:"bind_addr" json:"bind_addr"`
 	Port           int    `mapstructure:"port" toml:"port" json:"port"`
 	Format         string `mapstructure:"format" toml:"format" json:"format"`
-	ContentType    string `mapstructure:"content_type" toml:"content_type" json:"content_type"`
 	LineFraming    bool   `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
 	FrameDelimiter uint8  `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
 	NMessages      int32  `mapstructure:"messages_number" toml:"messages_number" json:"messages_number"`

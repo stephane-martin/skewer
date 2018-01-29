@@ -2,18 +2,19 @@ package dests
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/model/encoders"
+	"github.com/stephane-martin/skewer/utils"
 )
 
 type HTTPServerDestination struct {
@@ -36,28 +37,22 @@ func NewHTTPServerDestination(ctx context.Context, e *Env) (Destination, error) 
 		delimiter:       config.FrameDelimiter,
 	}
 
+	d.nMessages = int(config.NMessages)
 	if config.NMessages <= 0 {
 		d.nMessages = 8 * 1024
-	} else {
-		d.nMessages = int(config.NMessages)
 	}
 
-	err := d.setFormat(config.Format)
-	if err != nil {
-		return nil, err
-	}
-
-	// set appropriate content type header
-	// TODO: follow what client says
-	config.ContentType = strings.TrimSpace(strings.ToLower(config.ContentType))
-	d.contentType = config.ContentType
-	if config.ContentType == "auto" || config.ContentType == "" {
+	if len(config.Format) > 0 {
+		// determine content-type from the fixed output format
+		err := d.setFormat(config.Format)
+		if err != nil {
+			return nil, err
+		}
 		if d.nMessages == 1 {
 			d.contentType = encoders.MimeTypes[d.format]
 			if d.contentType == "" {
 				// should not happen ??
-				d.logger.Warn("Unknown mimetype for that format", "format", d.format)
-				d.contentType = "application/octet-stream"
+				return nil, fmt.Errorf("Unknown mimetype for that format: '%d'", d.format)
 			}
 		} else {
 			switch d.format {
@@ -65,21 +60,23 @@ func NewHTTPServerDestination(ctx context.Context, e *Env) (Destination, error) 
 				if config.LineFraming {
 					if config.FrameDelimiter == 10 {
 						// Newline delimited JSON
-						d.contentType = "application/x-ndjson"
+						d.contentType = encoders.NDJsonMimetype
 					} else {
 						// custom delimiter => text/plain
-						d.contentType = encoders.MimeTypes[encoders.RFC5424]
+						d.contentType = encoders.PlainMimetype
 					}
 				} else {
 					// octet counting frames => text/plain
-					d.contentType = encoders.MimeTypes[encoders.RFC5424]
+					d.contentType = encoders.PlainMimetype
 				}
 			case encoders.Protobuf:
-				// protobuf is not natively self delimited
-				d.contentType = "application/octet-stream"
+				// protobuf is not natively self delimited, so we use octet counting framing
+				d.contentType = encoders.OctetStreamMimetype
+				d.lineFraming = false
+			case encoders.RFC5424, encoders.RFC3164, encoders.File:
+				d.contentType = encoders.PlainMimetype
 			default:
-				// text/plain and charset utf-8
-				d.contentType = encoders.MimeTypes[encoders.RFC5424]
+				return nil, fmt.Errorf("Unknown format: '%d'", d.format)
 			}
 		}
 	}
@@ -97,6 +94,24 @@ func NewHTTPServerDestination(ctx context.Context, e *Env) (Destination, error) 
 	go d.serve(listener)
 
 	return d, nil
+}
+
+func (d *HTTPServerDestination) getContentType(r *http.Request) (ctype string) {
+	if d.contentType != "" {
+		return d.contentType
+	}
+	ctype = utils.NegotiateContentType(r, encoders.AcceptedMimeTypes, encoders.NDJsonMimetype)
+	if ctype == "text/plain" {
+		ctype = encoders.PlainMimetype
+	}
+	return ctype
+}
+
+func (d *HTTPServerDestination) getEncoder(ctype string) encoders.Encoder {
+	if d.encoder != nil {
+		return d.encoder
+	}
+	return encoders.RMimeTypes[ctype]
 }
 
 func (d *HTTPServerDestination) serve(listener net.Listener) (err error) {
@@ -129,6 +144,29 @@ func (d *HTTPServerDestination) ServeHTTP(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	lineFraming := d.lineFraming
+	nMessages := d.nMessages
+	delimiter := d.delimiter
+
+	contentType := d.getContentType(r)
+	if contentType == encoders.JsonMimetype || contentType == encoders.ProtobufMimetype {
+		nMessages = 1
+		lineFraming = true
+	} else if contentType == encoders.NDJsonMimetype {
+		delimiter = 10
+		lineFraming = true
+	} else if contentType == encoders.OctetStreamMimetype {
+		lineFraming = false
+	}
+
+	encodr := d.getEncoder(contentType)
+	if encodr == nil {
+		d.logger.Error("getEncoder returned nil", "content-type", contentType)
+		w.WriteHeader(http.StatusInternalServerError)
+		d.dofatal()
+		return
+	}
+
 	// wait for first message
 	var message *model.FullMessage
 	var ok bool
@@ -148,10 +186,10 @@ func (d *HTTPServerDestination) ServeHTTP(w http.ResponseWriter, r *http.Request
 
 	// gather additional messages
 Loop:
-	for len(messages) < d.nMessages {
+	for len(messages) < nMessages {
 		select {
 		case <-r.Context().Done():
-			// client is gone, nack the messages we were supposed to send to it
+			// client is gone, nack the messages we were supposed to send
 			d.nackall(messages)
 			return
 		case message, ok = <-d.sendQueue:
@@ -176,31 +214,47 @@ Loop:
 	}
 
 	// send the messages to the client
-	w.Header().Set("Content-Type", d.contentType)
+	w.Header().Set("Content-Type", contentType)
 	w.WriteHeader(http.StatusOK)
 
 	var buf []byte
 	var err error
-	for len(messages) > 0 {
-		message = messages[0]
-		if d.lineFraming {
-			buf, err = encoders.ChainEncode(d.encoder, message, []byte{d.delimiter})
+	var i int
+	last := len(messages) - 1
+	permerrors := make(map[utils.MyULID]bool)
+	ok = true
+
+	for i, message = range messages {
+		if lineFraming {
+			if i == last {
+				buf, err = encoders.ChainEncode(encodr, message)
+			} else {
+				buf, err = encoders.ChainEncode(encodr, message, []byte{delimiter})
+			}
 		} else {
-			buf, err = encoders.TcpOctetEncode(d.encoder, message)
+			buf, err = encoders.TcpOctetEncode(encodr, message)
 		}
 		if err != nil {
 			// error encoding one message
-			d.permerr(message.Uid)
+			permerrors[message.Uid] = true
 		} else {
 			_, err = w.Write(buf)
 			if err != nil {
 				// client is gone
-				d.nackall(messages)
-				return
+				ok = false
+				break
 			}
-			d.ack(message.Uid)
 		}
-		messages = messages[1:]
+	}
+
+	for _, message = range messages {
+		if permerrors[message.Uid] {
+			d.permerr(message.Uid)
+		} else if ok {
+			d.ack(message.Uid)
+		} else {
+			d.nack(message.Uid)
+		}
 		model.Free(message.Fields)
 	}
 }
