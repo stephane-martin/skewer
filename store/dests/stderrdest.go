@@ -26,7 +26,7 @@ func NewStderrDestination(ctx context.Context, e *Env) (Destination, error) {
 	return d, nil
 }
 
-func (d *StderrDestination) Send(message *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *StderrDestination) sendOne(message *model.FullMessage) (err error) {
 	defer model.Free(message.Fields)
 	var buf []byte
 	buf, err = encoders.ChainEncode(d.encoder, message, "\n")
@@ -46,4 +46,16 @@ func (d *StderrDestination) Send(message *model.FullMessage, partitionKey string
 
 func (d *StderrDestination) Close() error {
 	return nil
+}
+
+func (d *StderrDestination) Send(msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
+	var i int
+	var e error
+	for i = range msgs {
+		e = d.sendOne(msgs[i].Message)
+		if e != nil {
+			err = e
+		}
+	}
+	return err
 }

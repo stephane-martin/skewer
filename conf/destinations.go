@@ -16,11 +16,15 @@ func (dests DestinationType) Iterate() (res []DestinationType) {
 	}
 	res = make([]DestinationType, 0, len(Destinations))
 	for _, dtype := range Destinations {
-		if uint64(dests)&uint64(dtype) != 0 {
+		if dests.Has(dtype) {
 			res = append(res, dtype)
 		}
 	}
 	return res
+}
+
+func (dests DestinationType) Has(one DestinationType) bool {
+	return uint64(dests)&uint64(one) != 0
 }
 
 const (

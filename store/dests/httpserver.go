@@ -15,12 +15,13 @@ import (
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/model/encoders"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/queue/message"
 )
 
 type HTTPServerDestination struct {
 	*baseDestination
 	contentType string
-	sendQueue   chan *model.FullMessage
+	sendQueue   *message.Ring
 	server      *http.Server
 	wg          sync.WaitGroup
 	nMessages   int
@@ -80,8 +81,6 @@ func NewHTTPServerDestination(ctx context.Context, e *Env) (Destination, error) 
 			}
 		}
 	}
-
-	d.sendQueue = make(chan *model.FullMessage, d.nMessages)
 	hostport := net.JoinHostPort(config.BindAddr, strconv.FormatInt(int64(config.Port), 10))
 	listener, err := d.binder.Listen("tcp", hostport)
 	if err != nil {
@@ -90,6 +89,13 @@ func NewHTTPServerDestination(ctx context.Context, e *Env) (Destination, error) 
 	d.server = &http.Server{
 		Handler: d,
 	}
+	d.sendQueue = message.NewRing(uint64(d.nMessages))
+	d.wg.Add(1)
+	go func() {
+		<-ctx.Done()
+		d.sendQueue.Dispose()
+		d.wg.Done()
+	}()
 	d.wg.Add(1)
 	go d.serve(listener)
 
@@ -168,40 +174,27 @@ func (d *HTTPServerDestination) ServeHTTP(w http.ResponseWriter, r *http.Request
 	}
 
 	// wait for first message
-	var message *model.FullMessage
-	var ok bool
-	select {
-	case message, ok = <-d.sendQueue:
-		if !ok || message == nil {
-			// sendQueue has been closed
-			w.WriteHeader(http.StatusServiceUnavailable)
-			d.dofatal()
-			return
-		}
-		messages = append(messages, message)
-	case <-r.Context().Done():
-		// client is gone
+	message, err := d.sendQueue.Get()
+	if err != nil {
+		// sendQueue has been closed
+		w.WriteHeader(http.StatusServiceUnavailable)
+		d.dofatal()
 		return
 	}
+	messages = append(messages, message)
 
 	// gather additional messages
 Loop:
 	for len(messages) < nMessages {
-		select {
-		case <-r.Context().Done():
-			// client is gone, nack the messages we were supposed to send
-			d.nackall(messages)
-			return
-		case message, ok = <-d.sendQueue:
-			if !ok || message == nil {
-				// the sendQueue has been closed, definitely no more messages
-				defer d.dofatal()
-				break Loop
-			}
-			messages = append(messages, message)
-		case <-time.After(10 * time.Millisecond):
-			// no more messages are available in sendQueue for now
+		message, err = d.sendQueue.Poll(10 * time.Millisecond)
+		if err == utils.ErrTimeout {
 			break Loop
+		} else if err == utils.ErrDisposed || message == nil {
+			// the sendQueue has been closed, definitely no more messages
+			defer d.dofatal()
+			break Loop
+		} else {
+			messages = append(messages, message)
 		}
 	}
 
@@ -218,11 +211,10 @@ Loop:
 	w.WriteHeader(http.StatusOK)
 
 	var buf []byte
-	var err error
 	var i int
 	last := len(messages) - 1
 	permerrors := make(map[utils.MyULID]bool)
-	ok = true
+	ok := true
 
 	for i, message = range messages {
 		if lineFraming {
@@ -260,19 +252,35 @@ Loop:
 }
 
 func (d *HTTPServerDestination) Close() (err error) {
-	// Send will not be called again, we can close the sendQueue
-	close(d.sendQueue)
+	d.sendQueue.Dispose()
 	err = d.server.Close()
 	d.wg.Wait()
 	// nack remaining messages
-	for message := range d.sendQueue {
+	var message *model.FullMessage
+	var e error
+	for {
+		message, e = d.sendQueue.Get()
+		if e != nil || message == nil {
+			break
+		}
 		d.nack(message.Uid)
 		model.Free(message.Fields)
 	}
 	return err
 }
 
-func (d *HTTPServerDestination) Send(msg *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
-	d.sendQueue <- msg
+func (d *HTTPServerDestination) Send(msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
+	var i int
+	for len(msgs) > 0 {
+		err = d.sendQueue.Put(msgs[0].Message)
+		if err != nil {
+			for i = range msgs {
+				d.nack(msgs[i].Message.Uid)
+				model.Free(msgs[i].Message.Fields)
+			}
+			return err
+		}
+		msgs = msgs[1:]
+	}
 	return nil
 }

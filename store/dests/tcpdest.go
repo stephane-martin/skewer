@@ -80,7 +80,7 @@ func NewTCPDestination(ctx context.Context, e *Env) (Destination, error) {
 	return d, nil
 }
 
-func (d *TCPDestination) Send(message *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *TCPDestination) sendOne(message *model.FullMessage) (err error) {
 	uid := message.Uid
 	err = d.clt.Send(message)
 
@@ -105,4 +105,16 @@ func (d *TCPDestination) Send(message *model.FullMessage, partitionKey string, p
 
 func (d *TCPDestination) Close() error {
 	return d.clt.Close()
+}
+
+func (d *TCPDestination) Send(msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
+	var i int
+	var e error
+	for i = range msgs {
+		e = d.sendOne(msgs[i].Message)
+		if e != nil {
+			err = e
+		}
+	}
+	return err
 }

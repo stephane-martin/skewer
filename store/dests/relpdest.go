@@ -103,7 +103,7 @@ func NewRELPDestination(ctx context.Context, e *Env) (Destination, error) {
 	return d, nil
 }
 
-func (d *RELPDestination) Send(message *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *RELPDestination) sendOne(message *model.FullMessage) (err error) {
 	uid := message.Uid
 	err = d.client.Send(message)
 	if err != nil {
@@ -116,4 +116,16 @@ func (d *RELPDestination) Send(message *model.FullMessage, partitionKey string, 
 
 func (d *RELPDestination) Close() (err error) {
 	return d.client.Close()
+}
+
+func (d *RELPDestination) Send(msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
+	var i int
+	var e error
+	for i = range msgs {
+		e = d.sendOne(msgs[i].Message)
+		if e != nil {
+			err = e
+		}
+	}
+	return err
 }

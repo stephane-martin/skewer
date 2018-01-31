@@ -242,12 +242,24 @@ func (d *HTTPDestination) dosend(ctx context.Context) {
 	}
 }
 
-func (d *HTTPDestination) Send(msg *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *HTTPDestination) sendOne(msg *model.FullMessage) (err error) {
 	err = d.sendQueue.Put(msg)
 	if err != nil {
 		// the client send queue has been disposed
 		d.nack(msg.Uid)
 		d.dofatal()
+	}
+	return err
+}
+
+func (d *HTTPDestination) Send(msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
+	var i int
+	var e error
+	for i = range msgs {
+		e = d.sendOne(msgs[i].Message)
+		if e != nil {
+			err = e
+		}
 	}
 	return err
 }

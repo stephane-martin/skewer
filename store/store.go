@@ -87,6 +87,10 @@ func (dests *Destinations) Load() (res []conf.DestinationType) {
 	return conf.DestinationType(atomic.LoadUint64(&dests.d)).Iterate()
 }
 
+func (dests *Destinations) Has(one conf.DestinationType) bool {
+	return conf.DestinationType(atomic.LoadUint64(&dests.d)).Has(one)
+}
+
 type QueueType uint8
 
 const (
@@ -150,7 +154,7 @@ type MessageStore struct {
 
 	closedChan     chan struct{}
 	FatalErrorChan chan struct{}
-	OutputsChans   map[conf.DestinationType](chan *model.FullMessage)
+	OutputsChans   map[conf.DestinationType](chan []*model.FullMessage)
 
 	toStashQueue    *queue.MessageQueue
 	ackQueue        *queue.AckQueue
@@ -167,7 +171,7 @@ func (s *MessageStore) Confined() bool {
 	return s.confined
 }
 
-func (s *MessageStore) Outputs(dest conf.DestinationType) chan *model.FullMessage {
+func (s *MessageStore) Outputs(dest conf.DestinationType) chan []*model.FullMessage {
 	return s.OutputsChans[dest]
 }
 
@@ -262,7 +266,7 @@ func (s *MessageStore) forward(ctx context.Context, d conf.DestinationType) {
 		s.wg.Done()
 	}()
 
-	var messages map[utils.MyULID]*model.FullMessage
+	var messages []*model.FullMessage
 	for {
 	wait_messages:
 		for {
@@ -270,11 +274,16 @@ func (s *MessageStore) forward(ctx context.Context, d conf.DestinationType) {
 			case <-doneChan:
 				return
 			default:
-				messages = s.retrieve(s.batchSize, d)
-				if len(messages) > 0 {
-					break wait_messages
+				if s.dests.Has(d) {
+					messages = s.retrieve(s.batchSize, d)
+					if len(messages) > 0 {
+						break wait_messages
+					} else {
+						time.Sleep(time.Second)
+					}
 				} else {
-					time.Sleep(100 * time.Millisecond)
+					// if the current destination is not active, we avoid to query the badger database
+					time.Sleep(time.Second)
 				}
 			}
 		}
@@ -282,7 +291,7 @@ func (s *MessageStore) forward(ctx context.Context, d conf.DestinationType) {
 		wg.Wait() // ensure at most one outputMsgs is running
 		s.wg.Add(1)
 		wg.Add(1)
-		go func(msgs map[utils.MyULID]*model.FullMessage) {
+		go func(msgs []*model.FullMessage) {
 			s.outputMsgs(doneChan, msgs, d)
 			s.wg.Done()
 			wg.Done()
@@ -326,6 +335,7 @@ func (s *MessageStore) init(ctx context.Context) {
 	s.wg.Add(1)
 	go s.tickResetFailures(ctx)
 
+	// TODO: optimize. only active destinations should be forwarded to.
 	for _, dest := range conf.Destinations {
 		s.wg.Add(1)
 		go s.forward(ctx, dest)
@@ -361,7 +371,7 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 		nackQueue:       queue.NewAckQueue(),
 		permerrorsQueue: queue.NewAckQueue(),
 		closedChan:      make(chan struct{}),
-		OutputsChans:    make(map[conf.DestinationType](chan *model.FullMessage)),
+		OutputsChans:    make(map[conf.DestinationType](chan []*model.FullMessage)),
 		addMissingMsgID: cfg.AddMissingMsgID,
 		generator:       utils.NewGenerator(),
 	}
@@ -393,7 +403,7 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 	store.syslogConfigsDB = db.NewPartition(kv, []byte("configs"))
 
 	for _, dest := range conf.Destinations {
-		store.OutputsChans[dest] = make(chan *model.FullMessage)
+		store.OutputsChans[dest] = make(chan []*model.FullMessage)
 	}
 
 	store.wg.Add(1)
@@ -402,19 +412,15 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 	return store, nil
 }
 
-func (s *MessageStore) outputMsgs(doneChan <-chan struct{}, messages map[utils.MyULID]*model.FullMessage, dest conf.DestinationType) {
+func (s *MessageStore) outputMsgs(doneChan <-chan struct{}, messages []*model.FullMessage, dest conf.DestinationType) {
 	if len(messages) == 0 {
 		s.logger.Debug("WOT?! 0 message were given for output", "dest", dest, "nb")
 		return
 	}
-	output := s.Outputs(dest)
-	//s.logger.Debug("ABOUT to send messages to output channel", "dest", dest, "nb", len(messages))
-	for _, msg := range messages {
-		select {
-		case output <- msg:
-		case <-doneChan:
-			return
-		}
+	select {
+	case s.Outputs(dest) <- messages:
+	case <-doneChan:
+		return
 	}
 	//s.logger.Debug("DONE sending messages to output", "dest", dest)
 }
@@ -831,24 +837,27 @@ func (s *MessageStore) ingest(queue []*model.FullMessage) (n int, err error) {
 
 }
 
-func (s *MessageStore) retrieve(n uint32, dest conf.DestinationType) (messages map[utils.MyULID]*model.FullMessage) {
+func (s *MessageStore) retrieve(n uint32, dest conf.DestinationType) (messages []*model.FullMessage) {
 	txn := s.badger.NewTransaction(true)
 	defer txn.Discard()
 
 	readyDB := s.backend.GetPartition(Ready, dest)
 	messagesDB := s.backend.GetPartition(Messages, dest)
 	sentDB := s.backend.GetPartition(Sent, dest)
-	messages = map[utils.MyULID]*model.FullMessage{}
-
+	messages = make([]*model.FullMessage, 0, n)
+	uids := make([]utils.MyULID, 0, n)
 	iter := readyDB.KeyIterator(n, txn)
-	var fetched uint32
 	invalidEntries := []utils.MyULID{}
 	var message *model.FullMessage
 	var keysNotFound int
+	var uid utils.MyULID
+	var fetched uint32
+	var err error
+	var messageBytes []byte
 
 	for iter.Rewind(); iter.Valid() && fetched < n; iter.Next() {
-		uid := iter.Key()
-		messageBytes, err := messagesDB.Get(uid, txn)
+		uid = iter.Key()
+		messageBytes, err = messagesDB.Get(uid, txn)
 		if err != nil {
 			invalidEntries = append(invalidEntries, uid)
 			keysNotFound++
@@ -867,7 +876,8 @@ func (s *MessageStore) retrieve(n uint32, dest conf.DestinationType) (messages m
 			s.logger.Warn("retrieved invalid entry", "uid", uid, "message", string(messageBytes), "dest", dest, "error", err)
 			continue
 		}
-		messages[uid] = message
+		messages = append(messages, message)
+		uids = append(uids, uid)
 		fetched++
 	}
 	iter.Close()
@@ -877,12 +887,12 @@ func (s *MessageStore) retrieve(n uint32, dest conf.DestinationType) (messages m
 		err := readyDB.DeleteMany(invalidEntries, txn)
 		if err != nil {
 			s.logger.Warn("Error deleting invalid entries from 'ready' queue", "error", err)
-			return map[utils.MyULID]*model.FullMessage{}
+			return nil
 		}
 		err = messagesDB.DeleteMany(invalidEntries, txn)
 		if err != nil {
 			s.logger.Warn("Error deleting invalid entries from 'messages' queue", "error", err)
-			return map[utils.MyULID]*model.FullMessage{}
+			return nil
 		}
 	}
 
@@ -894,17 +904,17 @@ func (s *MessageStore) retrieve(n uint32, dest conf.DestinationType) (messages m
 				badgerGauge.WithLabelValues("messages", conf.DestinationNames[dest]).Sub(float64(len(invalidEntries) - keysNotFound))
 			}
 		}
-		return map[utils.MyULID]*model.FullMessage{}
+		return nil
 	}
 
 	sentBatch := map[utils.MyULID][]byte{}
-	for uid := range messages {
+	for _, uid = range uids {
 		sentBatch[uid] = []byte("true")
 	}
-	err := sentDB.AddMany(sentBatch, txn)
+	err = sentDB.AddMany(sentBatch, txn)
 	if err != nil {
 		s.logger.Warn("Error copying messages to the 'sent' queue", "error", err)
-		return map[utils.MyULID]*model.FullMessage{}
+		return nil
 	}
 	readyBatch := make([]utils.MyULID, 0, len(sentBatch))
 	for k := range sentBatch {
@@ -913,7 +923,7 @@ func (s *MessageStore) retrieve(n uint32, dest conf.DestinationType) (messages m
 	err = readyDB.DeleteMany(readyBatch, txn)
 	if err != nil {
 		s.logger.Warn("Error deleting messages from the 'ready' queue", "error", err)
-		return map[utils.MyULID]*model.FullMessage{}
+		return nil
 	}
 
 	err = txn.Commit(nil)
@@ -928,7 +938,7 @@ func (s *MessageStore) retrieve(n uint32, dest conf.DestinationType) (messages m
 		return s.retrieve(n, dest)
 	} else {
 		s.logger.Warn("Error committing to badger in retrieve", "error", err)
-		return map[utils.MyULID]*model.FullMessage{}
+		return nil
 	}
 
 }

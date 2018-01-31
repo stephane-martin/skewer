@@ -100,6 +100,10 @@ func (rb *Ring) Get() (*model.RawUdpMessage, error) {
 	return rb.Poll(0)
 }
 
+func (rb *Ring) PollDeadline(deadline time.Time) (*model.RawUdpMessage, error) {
+	return rb.Poll(deadline.Sub(time.Now()))
+}
+
 // Poll will return the next item in the queue.  This call will block
 // if the queue is empty.  This call will unblock when an item is added
 // to the queue, Dispose is called on the queue, or the timeout is reached. An

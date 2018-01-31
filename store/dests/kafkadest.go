@@ -61,7 +61,7 @@ func NewKafkaDestination(ctx context.Context, e *Env) (Destination, error) {
 	return d, nil
 }
 
-func (d *KafkaDestination) Send(message *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *KafkaDestination) sendOne(message *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
 	defer model.Free(message.Fields)
 
 	buf := bytes.NewBuffer(nil)
@@ -86,4 +86,16 @@ func (d *KafkaDestination) Send(message *model.FullMessage, partitionKey string,
 func (d *KafkaDestination) Close() error {
 	d.producer.AsyncClose()
 	return nil
+}
+
+func (d *KafkaDestination) Send(msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
+	var i int
+	var e error
+	for i = range msgs {
+		e = d.sendOne(msgs[i].Message, msgs[i].PartitionKey, msgs[i].PartitionNumber, msgs[i].Topic)
+		if e != nil {
+			err = e
+		}
+	}
+	return err
 }

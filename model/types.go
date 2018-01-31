@@ -121,6 +121,13 @@ func FullFactory() (msg *FullMessage) {
 	return msg
 }
 
+type OutputMsg struct {
+	Message         *FullMessage
+	PartitionKey    string
+	PartitionNumber int32
+	Topic           string
+}
+
 func Free(msg *SyslogMessage) {
 	if msg == nil {
 		return

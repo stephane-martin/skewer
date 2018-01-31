@@ -53,7 +53,7 @@ func NewUDPDestination(ctx context.Context, e *Env) (Destination, error) {
 	return d, nil
 }
 
-func (d *UDPDestination) Send(message *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *UDPDestination) sendOne(message *model.FullMessage) (err error) {
 	uid := message.Uid
 	err = d.client.Send(message)
 
@@ -74,4 +74,16 @@ func (d *UDPDestination) Send(message *model.FullMessage, partitionKey string, p
 
 func (d *UDPDestination) Close() error {
 	return d.client.Close()
+}
+
+func (d *UDPDestination) Send(msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
+	var i int
+	var e error
+	for i = range msgs {
+		e = d.sendOne(msgs[i].Message)
+		if e != nil {
+			err = e
+		}
+	}
+	return err
 }

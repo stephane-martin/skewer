@@ -10,7 +10,7 @@ import (
 
 type Store interface {
 	Stash(m *model.FullMessage) (error, error)
-	Outputs(dest conf.DestinationType) chan *model.FullMessage
+	Outputs(dest conf.DestinationType) chan []*model.FullMessage
 	ACK(uid utils.MyULID, dest conf.DestinationType)
 	NACK(uid utils.MyULID, dest conf.DestinationType)
 	PermError(uid utils.MyULID, dest conf.DestinationType)

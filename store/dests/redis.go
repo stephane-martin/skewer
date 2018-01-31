@@ -71,7 +71,7 @@ func (d *RedisDestination) Close() error {
 	return d.client.Close()
 }
 
-func (d *RedisDestination) Send(msg *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *RedisDestination) sendOne(msg *model.FullMessage, topic string) (err error) {
 	defer model.Free(msg.Fields)
 
 	uid := msg.Uid
@@ -90,4 +90,16 @@ func (d *RedisDestination) Send(msg *model.FullMessage, partitionKey string, par
 	d.ack(uid)
 
 	return nil
+}
+
+func (d *RedisDestination) Send(msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
+	var i int
+	var e error
+	for i = range msgs {
+		e = d.sendOne(msgs[i].Message, msgs[i].Topic)
+		if e != nil {
+			err = e
+		}
+	}
+	return err
 }

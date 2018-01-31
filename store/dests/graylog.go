@@ -62,7 +62,7 @@ func (d *GraylogDestination) Close() error {
 	return d.writer.Close()
 }
 
-func (d *GraylogDestination) Send(message *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *GraylogDestination) sendOne(message *model.FullMessage) (err error) {
 	err = d.writer.WriteMessage(encoders.FullToGelfMessage(message))
 	if err == nil {
 		d.ack(message.Uid)
@@ -71,5 +71,17 @@ func (d *GraylogDestination) Send(message *model.FullMessage, partitionKey strin
 		d.dofatal()
 	}
 	model.Free(message.Fields)
+	return err
+}
+
+func (d *GraylogDestination) Send(msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
+	var i int
+	var e error
+	for i = range msgs {
+		e = d.sendOne(msgs[i].Message)
+		if e != nil {
+			err = e
+		}
+	}
 	return err
 }

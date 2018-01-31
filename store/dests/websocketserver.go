@@ -2,7 +2,6 @@ package dests
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"net"
@@ -15,6 +14,8 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/model/encoders"
+	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/queue/message"
 )
 
 const writeWait = 10 * time.Second
@@ -28,7 +29,7 @@ var upgrader = websocket.Upgrader{
 
 type WebsocketServerDestination struct {
 	*baseDestination
-	sendQueue   chan *model.FullMessage
+	sendQueue   *message.Ring
 	server      *http.Server
 	messageType int
 	wg          sync.WaitGroup
@@ -57,13 +58,12 @@ func NewWebsocketServerDestination(ctx context.Context, e *Env) (Destination, er
 		d.messageType = websocket.TextMessage
 	}
 
-	d.sendQueue = make(chan *model.FullMessage, 1024)
-
 	hostport := net.JoinHostPort(config.BindAddr, strconv.FormatInt(int64(config.Port), 10))
 	listener, err := d.binder.Listen("tcp", hostport)
 	if err != nil {
 		return nil, err
 	}
+	d.sendQueue = message.NewRing(1024)
 	mux := http.NewServeMux()
 	mux.HandleFunc(config.WebEndPoint, d.serveRoot)
 	mux.HandleFunc(config.LogEndPoint, d.serveLogs)
@@ -71,6 +71,12 @@ func NewWebsocketServerDestination(ctx context.Context, e *Env) (Destination, er
 		Addr:    hostport,
 		Handler: mux,
 	}
+	d.wg.Add(1)
+	go func() {
+		<-ctx.Done()
+		d.sendQueue.Dispose()
+		d.wg.Done()
+	}()
 	d.wg.Add(1)
 	go d.serve(listener)
 
@@ -80,7 +86,7 @@ func NewWebsocketServerDestination(ctx context.Context, e *Env) (Destination, er
 func reader(wsconn *websocket.Conn) {
 	defer wsconn.Close() // client is gone
 
-	wsconn.SetReadLimit(512)
+	wsconn.SetReadLimit(1024)
 	wsconn.SetReadDeadline(time.Now().Add(pongWait))
 	wsconn.SetPongHandler(func(string) error {
 		wsconn.SetReadDeadline(time.Now().Add(pongWait))
@@ -124,9 +130,7 @@ func (d *WebsocketServerDestination) serveLogs(w http.ResponseWriter, r *http.Re
 }
 
 func (d *WebsocketServerDestination) writeLogs(wsconn *websocket.Conn) (err error) {
-	pingTicker := time.NewTicker(pingPeriod)
 	defer func() {
-		pingTicker.Stop()
 		if err == nil {
 			err = wsconn.WriteControl(
 				websocket.CloseMessage,
@@ -144,26 +148,33 @@ func (d *WebsocketServerDestination) writeLogs(wsconn *websocket.Conn) (err erro
 	}()
 
 	var message *model.FullMessage
-	var ok bool
 	var writer io.WriteCloser
+	now := time.Now()
+	remain := time.Duration(pingPeriod)
+	nextPing := now.Add(remain)
 
 	for {
-		select {
-		case <-pingTicker.C:
-			wsconn.SetWriteDeadline(time.Now().Add(writeWait))
-			err = wsconn.WriteMessage(websocket.PingMessage, []byte{})
-			if err != nil {
-				return err
+		now = time.Now()
+		remain = nextPing.Sub(now)
+		if remain <= 0 {
+			// send ping to client
+			wsconn.SetWriteDeadline(now.Add(writeWait))
+			e := wsconn.WriteMessage(websocket.PingMessage, []byte{})
+			if e != nil {
+				return e
 			}
-		case <-d.stopchan:
+			remain = time.Duration(pingPeriod)
+			nextPing = now.Add(remain)
+		}
+
+		message, err = d.sendQueue.Poll(remain)
+		if err == utils.ErrDisposed {
 			// server is shutting down
 			return nil
-		case message, ok = <-d.sendQueue:
-			if !ok || message == nil {
-				// no more messages to send
-				d.dofatal()
-				return nil
-			}
+		}
+
+		if err == nil && message != nil {
+
 			uid := message.Uid
 			if writer == nil {
 				writer, err = wsconn.NextWriter(d.messageType)
@@ -196,6 +207,7 @@ func (d *WebsocketServerDestination) writeLogs(wsconn *websocket.Conn) (err erro
 				d.nack(uid)
 				return err
 			}
+
 		}
 	}
 }
@@ -221,8 +233,7 @@ func (d *WebsocketServerDestination) serve(listener net.Listener) (err error) {
 }
 
 func (d *WebsocketServerDestination) Close() (err error) {
-	// Send will not be called again, we can close the sendQueue
-	close(d.sendQueue)
+	d.sendQueue.Dispose()
 	// close the HTTP server
 	err = d.server.Close()
 	// wait that the webserver and the websocket connections have finished
@@ -235,17 +246,31 @@ func (d *WebsocketServerDestination) Close() (err error) {
 	d.connections = make(map[*websocket.Conn]bool)
 	d.mu.Unlock()
 	// nack remaining messages
-	for message := range d.sendQueue {
+	var e error
+	var message *model.FullMessage
+	for {
+		message, e = d.sendQueue.Get()
+		if e != nil {
+			break
+		}
 		d.nack(message.Uid)
+		model.Free(message.Fields)
 	}
 	return err
 }
 
-func (d *WebsocketServerDestination) Send(msg *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
-	select {
-	case d.sendQueue <- msg:
-		return nil
-	case <-d.stopchan:
-		return fmt.Errorf("Websocket server destination is shutting down")
+func (d *WebsocketServerDestination) Send(msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
+	var i int
+	for len(msgs) > 0 {
+		err = d.sendQueue.Put(msgs[0].Message)
+		if err != nil {
+			for i = range msgs {
+				d.nack(msgs[i].Message.Uid)
+				model.Free(msgs[i].Message.Fields)
+			}
+			return err
+		}
+		msgs = msgs[1:]
 	}
+	return nil
 }

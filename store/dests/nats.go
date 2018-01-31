@@ -83,7 +83,7 @@ func (d *NATSDestination) Close() error {
 	return nil
 }
 
-func (d *NATSDestination) Send(msg *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *NATSDestination) sendOne(msg *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
 	defer model.Free(msg.Fields)
 
 	buf := bytes.NewBuffer(nil)
@@ -100,4 +100,16 @@ func (d *NATSDestination) Send(msg *model.FullMessage, partitionKey string, part
 	}
 	d.ack(msg.Uid)
 	return nil
+}
+
+func (d *NATSDestination) Send(msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
+	var i int
+	var e error
+	for i = range msgs {
+		e = d.sendOne(msgs[i].Message, msgs[i].PartitionKey, msgs[i].PartitionNumber, msgs[i].Topic)
+		if e != nil {
+			err = e
+		}
+	}
+	return err
 }

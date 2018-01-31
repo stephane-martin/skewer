@@ -331,7 +331,7 @@ func NewFileDestination(ctx context.Context, e *Env) (Destination, error) {
 	return dest, nil
 }
 
-func (d *FileDestination) Send(message *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *FileDestination) sendOne(message *model.FullMessage) (err error) {
 	defer model.Free(message.Fields)
 
 	if len(message.Fields.AppName) == 0 {
@@ -377,4 +377,16 @@ func (d *FileDestination) Send(message *model.FullMessage, partitionKey string, 
 func (d *FileDestination) Close() error {
 	d.files.closeall()
 	return nil
+}
+
+func (d *FileDestination) Send(msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
+	var i int
+	var e error
+	for i = range msgs {
+		e = d.sendOne(msgs[i].Message)
+		if e != nil {
+			err = e
+		}
+	}
+	return err
 }

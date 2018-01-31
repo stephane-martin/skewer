@@ -202,7 +202,19 @@ func (d *ElasticDestination) Close() error {
 	return d.processor.Close()
 }
 
-func (d *ElasticDestination) Send(msg *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *ElasticDestination) Send(msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
+	var e error
+	var i int
+	for i = range msgs {
+		e = d.sendOne(msgs[i].Message)
+		if e != nil {
+			err = e
+		}
+	}
+	return err
+}
+
+func (d *ElasticDestination) sendOne(msg *model.FullMessage) (err error) {
 	defer model.Free(msg.Fields)
 
 	indexBuf := bytes.NewBuffer(nil)
