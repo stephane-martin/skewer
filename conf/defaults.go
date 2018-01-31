@@ -84,7 +84,7 @@ func SetNatsDestDefaults(v *viper.Viper, prefixed bool) {
 	if prefixed {
 		prefix = "nats_destination."
 	}
-	v.SetDefault(prefix+"format", "fulljson")
+	v.SetDefault(prefix+"format", "json")
 	v.SetDefault(prefix+"name", "skewer")
 	v.SetDefault(prefix+"max_reconnect", nats.DefaultMaxReconnect)
 	v.SetDefault(prefix+"reconnect_wait", nats.DefaultReconnectWait)
@@ -115,7 +115,7 @@ func SetWebsocketServerDestDefaults(v *viper.Viper, prefixed bool) {
 	if prefixed {
 		prefix = "websocketserver_destination."
 	}
-	v.SetDefault(prefix+"format", "fulljson")
+	v.SetDefault(prefix+"format", "json")
 	v.SetDefault(prefix+"bind_addr", "127.0.0.1")
 	v.SetDefault(prefix+"port", "8515")
 	v.SetDefault(prefix+"log_endpoint", "/logs")
@@ -127,7 +127,7 @@ func SetHTTPDestDefaults(v *viper.Viper, prefixed bool) {
 	if prefixed {
 		prefix = "http_destination."
 	}
-	v.SetDefault(prefix+"format", "fulljson")
+	v.SetDefault(prefix+"format", "json")
 	v.SetDefault(prefix+"max_idle_conns_per_host", 2)
 	v.SetDefault(prefix+"idle_conn_timeout", "90s")
 	v.SetDefault(prefix+"connection_timeout", "10s")
@@ -190,7 +190,7 @@ func SetStderrDestDefaults(v *viper.Viper, prefixed bool) {
 	if prefixed {
 		prefix = "stderr_destination."
 	}
-	v.SetDefault(prefix+"format", "fulljson")
+	v.SetDefault(prefix+"format", "json")
 }
 
 func SetUdpDestDefaults(v *viper.Viper, prefixed bool) {
@@ -290,7 +290,7 @@ func SetKafkaDefaults(v *viper.Viper, prefixed bool) {
 	v.SetDefault(prefix+"compression", "snappy")
 	v.SetDefault(prefix+"partitioner", "hash")
 
-	v.SetDefault(prefix+"format", "fulljson")
+	v.SetDefault(prefix+"format", "json")
 }
 
 func SetStoreDefaults(v *viper.Viper, prefixed bool) {

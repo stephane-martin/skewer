@@ -56,7 +56,7 @@ func NewHTTPServerDestination(ctx context.Context, e *Env) (Destination, error) 
 			}
 		} else {
 			switch d.format {
-			case encoders.FullJSON, encoders.JSON, encoders.GELF:
+			case encoders.JSON, encoders.GELF:
 				if config.LineFraming {
 					if config.FrameDelimiter == 10 {
 						// Newline delimited JSON
@@ -267,6 +267,7 @@ func (d *HTTPServerDestination) Close() (err error) {
 	// nack remaining messages
 	for message := range d.sendQueue {
 		d.nack(message.Uid)
+		model.Free(message.Fields)
 	}
 	return err
 }

@@ -16,7 +16,7 @@ const (
 	RFC5424 Format = iota
 	RFC3164
 	JSON
-	FullJSON
+	RsyslogJSON
 	GELF
 	InfluxDB
 	Auto
@@ -24,25 +24,25 @@ const (
 )
 
 var Formats = map[string]Format{
-	"rfc5424":  RFC5424,
-	"rfc3164":  RFC3164,
-	"json":     JSON,
-	"fulljson": FullJSON,
-	"gelf":     GELF,
-	"influxdb": InfluxDB,
-	"auto":     Auto,
-	"protobuf": Protobuf,
+	"rfc5424":     RFC5424,
+	"rfc3164":     RFC3164,
+	"json":        JSON,
+	"rsyslogjson": RsyslogJSON,
+	"gelf":        GELF,
+	"influxdb":    InfluxDB,
+	"auto":        Auto,
+	"protobuf":    Protobuf,
 }
 
 var parsers = map[Format]Parser{
-	RFC5424:  p5424,
-	RFC3164:  p3164,
-	JSON:     pJson,
-	FullJSON: pFulljson,
-	GELF:     pGelf,
-	InfluxDB: pInflux,
-	Auto:     pAuto,
-	Protobuf: pProtobuf,
+	RFC5424:     p5424,
+	RFC3164:     p3164,
+	JSON:        pJSON,
+	RsyslogJSON: pRsyslogJSON,
+	GELF:        pGELF,
+	InfluxDB:    pInflux,
+	Auto:        pAuto,
+	Protobuf:    pProtobuf,
 }
 
 func ParseFormat(format string) Format {
@@ -88,9 +88,12 @@ func pAuto(m []byte, decoder *encoding.Decoder) (sm *model.SyslogMessage, err er
 		return sm, &EmptyMessageError{}
 	}
 	if m[0] == byte('{') {
-		sm, err = pJson(m, decoder)
+		sm, err = pJSON(m, decoder)
 		if err != nil {
-			sm, err = pFulljson(m, decoder)
+			sm, err = pRsyslogJSON(m, decoder)
+			if err != nil {
+				sm, err = pGELF(m, decoder)
+			}
 		}
 	} else if m[0] != byte('<') {
 		sm, err = p3164(m, decoder)

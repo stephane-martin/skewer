@@ -5,19 +5,11 @@ import (
 	"io"
 
 	"github.com/stephane-martin/skewer/model"
-	"github.com/stephane-martin/skewer/utils"
 	"gopkg.in/Graylog2/go-gelf.v2/gelf"
 )
 
 func FullToGelfMessage(m *model.FullMessage) *gelf.Message {
-	gm := SyslogToGelfMessage(m.Fields)
-	if m.Uid != utils.ZeroUid {
-		gm.Extra["skewer_uid"] = m.Uid.String()
-	}
-	if m.Txnr > 0 {
-		gm.Extra["txnr"] = m.Txnr
-	}
-	return gm
+	return SyslogToGelfMessage(m.Fields)
 }
 
 func SyslogToGelfMessage(m *model.SyslogMessage) *gelf.Message {

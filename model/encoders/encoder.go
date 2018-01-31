@@ -19,7 +19,6 @@ const (
 	RFC5424 Format = 1 + iota
 	RFC3164
 	JSON
-	FullJSON
 	File
 	GELF
 	Protobuf
@@ -29,7 +28,6 @@ var Formats = map[string]Format{
 	"rfc5424":  RFC5424,
 	"rfc3164":  RFC3164,
 	"json":     JSON,
-	"fulljson": FullJSON,
 	"file":     File,
 	"gelf":     GELF,
 	"protobuf": Protobuf,
@@ -51,8 +49,8 @@ var AcceptedMimeTypes = []string{
 }
 
 var RMimeTypes = map[string]Encoder{
-	JsonMimetype:        encodeJson,
-	NDJsonMimetype:      encodeJson,
+	JsonMimetype:        encodeJSON,
+	NDJsonMimetype:      encodeJSON,
 	ProtobufMimetype:    encodePB,
 	OctetStreamMimetype: encodePB,
 	PlainMimetype:       encode5424,
@@ -63,7 +61,6 @@ var MimeTypes = map[Format]string{
 	RFC5424:  PlainMimetype,
 	RFC3164:  PlainMimetype,
 	JSON:     JsonMimetype,
-	FullJSON: JsonMimetype,
 	File:     PlainMimetype,
 	GELF:     JsonMimetype,
 	Protobuf: ProtobufMimetype,
@@ -72,8 +69,7 @@ var MimeTypes = map[Format]string{
 var encoders = map[Format]Encoder{
 	RFC5424:  encode5424,
 	RFC3164:  encode3164,
-	JSON:     encodeJson,
-	FullJSON: encodeFullJson,
+	JSON:     encodeJSON,
 	File:     encodeFile,
 	GELF:     encodeGELF,
 	Protobuf: encodePB,

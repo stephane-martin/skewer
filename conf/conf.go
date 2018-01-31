@@ -1079,7 +1079,7 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 			conf.SessionTimeout = 30 * time.Second
 		}
 		if len(conf.Format) == 0 {
-			conf.Format = "fulljson"
+			conf.Format = "json"
 		}
 		if len(conf.Encoding) == 0 {
 			conf.Encoding = "utf8"
