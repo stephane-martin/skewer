@@ -12,7 +12,7 @@
 			"env":
 			{
 				"GOPATH": "/Users/stef/Documents/Seafile/dev/golang/skewer",
-				//"GOROOT": "/usr/local/Cellar/go/1.9.2"
+				//"GOROOT": "/usr/local/Cellar/go/1.9.3"
 			}
 		}
 	}
