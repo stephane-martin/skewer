@@ -76,7 +76,7 @@ func readFileUntilEnd(f *os.File, size int) (err error) {
 func (s *AccountingService) makeMessage(buf []byte, tick int64, hostname string, gen *utils.Generator) *model.FullMessage {
 	acct := accounting.MakeAcct(buf, tick)
 	props := acct.Properties()
-	fields := model.Factory()
+	fields := model.CleanFactory()
 	fields.AppName = "accounting"
 	fields.Facility = 0
 	fields.HostName = hostname
@@ -93,11 +93,10 @@ func (s *AccountingService) makeMessage(buf []byte, tick int64, hostname string,
 	fields.Properties.Map["accounting"].Map = acct.Properties()
 	fields.SetProperty("skewer", "client", hostname)
 
-	return &model.FullMessage{
-		ConfId: s.Conf.ConfID,
-		Uid:    gen.Uid(),
-		Fields: fields,
-	}
+	full := model.FullFactoryFrom(fields)
+	full.Uid = gen.Uid()
+	full.ConfId = s.Conf.ConfID
+	return full
 }
 
 var ErrTruncated error = errors.New("File has been truncated")

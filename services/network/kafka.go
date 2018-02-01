@@ -178,14 +178,10 @@ func (s *KafkaServiceImpl) ParseOne(env *base.ParsersEnv, raw *model.RawKafkaMes
 	if raw.Brokers != "" {
 		syslogMsg.SetProperty("skewer", "client", raw.Brokers)
 	}
-
-	fatal, nonfatal := s.reporter.Stash(
-		&model.FullMessage{
-			Fields: syslogMsg,
-			Uid:    raw.UID,
-			ConfId: raw.ConfID,
-		},
-	)
+	full := model.FullFactoryFrom(syslogMsg)
+	full.Uid = raw.UID
+	full.ConfId = raw.ConfID
+	fatal, nonfatal := s.reporter.Stash(full)
 
 	if fatal != nil {
 		logger.Error("Fatal error stashing Kafka message", "error", fatal)
@@ -195,7 +191,7 @@ func (s *KafkaServiceImpl) ParseOne(env *base.ParsersEnv, raw *model.RawKafkaMes
 	} else {
 		base.IncomingMsgsCounter.WithLabelValues("kafka", raw.Brokers, "", "").Inc()
 	}
-	model.Free(syslogMsg)
+	model.FullFree(full)
 
 }
 

@@ -122,14 +122,10 @@ func (s *UdpServiceImpl) ParseOne(raw *model.RawUdpMessage, e *base.ParsersEnv, 
 	if raw.UnixSocketPath != "" {
 		syslogMsg.SetProperty("skewer", "socketpath", raw.UnixSocketPath)
 	}
-
-	fatal, nonfatal := s.stasher.Stash(
-		&model.FullMessage{
-			Fields: syslogMsg,
-			Uid:    gen.Uid(),
-			ConfId: raw.ConfID,
-		},
-	)
+	full := model.FullFactoryFrom(syslogMsg)
+	full.Uid = gen.Uid()
+	full.ConfId = raw.ConfID
+	fatal, nonfatal := s.stasher.Stash(full)
 
 	if fatal != nil {
 		logger.Error("Fatal error stashing UDP message", "error", fatal)
@@ -137,7 +133,7 @@ func (s *UdpServiceImpl) ParseOne(raw *model.RawUdpMessage, e *base.ParsersEnv, 
 	} else if nonfatal != nil {
 		logger.Warn("Non-fatal error stashing UDP message", "error", nonfatal)
 	}
-	model.Free(syslogMsg)
+	model.FullFree(full)
 }
 
 func (s *UdpServiceImpl) Gather() ([]*dto.MetricFamily, error) {

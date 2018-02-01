@@ -9,13 +9,13 @@ import (
 )
 
 func FromGelfMessage(gelfm *gelf.Message) (msg *model.SyslogMessage) {
-	msg = model.Factory()
+	msg = model.CleanFactory()
 	fromGelfMessage(msg, gelfm)
 	return msg
 }
 
 func FullFromGelfMessage(gelfm *gelf.Message) (msg *model.FullMessage) {
-	msg = model.FullFactory()
+	msg = model.FullCleanFactory()
 	fromGelfMessage(msg.Fields, gelfm)
 	return msg
 }

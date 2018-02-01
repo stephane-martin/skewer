@@ -32,7 +32,7 @@ type reader struct {
 type Converter func(map[string]string) *model.FullMessage
 
 func EntryToSyslog(entry map[string]string) (m *model.SyslogMessage) {
-	m = model.Factory()
+	m = model.CleanFactory()
 	properties := map[string]string{}
 	for k, v := range entry {
 		k = strings.ToLower(k)
@@ -102,10 +102,9 @@ func makeMapConverter(coding string) Converter {
 				}
 			}
 		}
-		return &model.FullMessage{
-			Uid:    generator.Uid(),
-			Fields: EntryToSyslog(dest),
-		}
+		full := model.FullFactoryFrom(EntryToSyslog(dest))
+		full.Uid = generator.Uid()
+		return full
 	}
 }
 

@@ -35,10 +35,10 @@ func p3164(m []byte, decoder *encoding.Decoder) (smsg *model.SyslogMessage, err 
 	}
 	m = bytes.TrimSpace(m)
 
-	defaultMsg := model.Factory()
+	defaultMsg := model.CleanFactory()
 	defaultMsg.Message = string(m)
 
-	smsg = model.Factory()
+	smsg = model.CleanFactory()
 	n := time.Now().UnixNano()
 	defaultMsg.TimeGeneratedNum = n
 	defaultMsg.TimeReportedNum = n

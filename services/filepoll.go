@@ -184,6 +184,7 @@ func (s *FilePollingService) parseOne(raw *model.RawFileMessage, env *base.Parse
 	if err != nil {
 		base.ParsingErrorCounter.WithLabelValues("filepoll", raw.Hostname, raw.Format).Inc()
 		makeFLogger(s.logger, raw).Info("Parsing error", "error", err)
+		// TODO: are you sure we should return here ?
 		return
 	}
 	if syslogMsg == nil {
@@ -194,13 +195,11 @@ func (s *FilePollingService) parseOne(raw *model.RawFileMessage, env *base.Parse
 	syslogMsg.SetProperty("skewer", "filename", raw.Filename)
 	syslogMsg.SetProperty("skewer", "directory", raw.Directory)
 
-	fatal, nonfatal := s.stasher.Stash(
-		&model.FullMessage{
-			Fields: syslogMsg,
-			Uid:    gen.Uid(),
-			ConfId: raw.ConfID,
-		},
-	)
+	full := model.FullFactoryFrom(syslogMsg)
+	full.Uid = gen.Uid()
+	full.ConfId = raw.ConfID
+
+	fatal, nonfatal := s.stasher.Stash(full)
 
 	if fatal != nil {
 		makeFLogger(s.logger, raw).Error("Fatal error stashing filepoll message", "error", fatal)
@@ -208,7 +207,7 @@ func (s *FilePollingService) parseOne(raw *model.RawFileMessage, env *base.Parse
 	} else if nonfatal != nil {
 		makeFLogger(s.logger, raw).Warn("Non-fatal error stashing filepoll message", "error", nonfatal)
 	}
-	model.Free(syslogMsg)
+	model.FullFree(full)
 
 }
 

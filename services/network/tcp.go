@@ -182,13 +182,11 @@ func (s *TcpServiceImpl) parseOne(raw *model.RawTcpMessage, env *base.ParsersEnv
 	if raw.LocalPort != 0 {
 		syslogMsg.SetProperty("skewer", "localport", strconv.FormatInt(int64(raw.LocalPort), 10))
 	}
-	fatal, nonfatal := s.reporter.Stash(
-		&model.FullMessage{
-			Fields: syslogMsg,
-			Uid:    gen.Uid(),
-			ConfId: raw.ConfID,
-		},
-	)
+
+	full := model.FullFactoryFrom(syslogMsg)
+	full.Uid = gen.Uid()
+	full.ConfId = raw.ConfID
+	fatal, nonfatal := s.reporter.Stash(full)
 
 	if fatal != nil {
 		makeLogger(s.Logger, raw).Error("Fatal error stashing TCP message", "error", fatal)
@@ -196,7 +194,7 @@ func (s *TcpServiceImpl) parseOne(raw *model.RawTcpMessage, env *base.ParsersEnv
 	} else if nonfatal != nil {
 		makeLogger(s.Logger, raw).Warn("Non-fatal error stashing TCP message", "error", nonfatal)
 	}
-	model.Free(syslogMsg)
+	model.FullFree(full)
 }
 
 // parse fetch messages from the raw queue, parse them, and push them to be sent.

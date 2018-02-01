@@ -9,6 +9,7 @@ import (
 
 	"github.com/awnumar/memguard"
 	"github.com/pquerna/ffjson/ffjson"
+	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/sbox"
 )
 
@@ -128,6 +129,26 @@ func Factory() (msg *SyslogMessage) {
 func FullFactory() (msg *FullMessage) {
 	msg = fullMsgPool.Get().(*FullMessage)
 	msg.Fields = Factory()
+	return msg
+}
+
+func FullFactoryFrom(smsg *SyslogMessage) (msg *FullMessage) {
+	msg = fullMsgPool.Get().(*FullMessage)
+	msg.Fields = smsg
+	msg.Txnr = 0
+	msg.ConnId = 0
+	msg.ConfId = utils.ZeroUid
+	msg.Uid = utils.ZeroUid
+	return msg
+}
+
+func FullCleanFactory() (msg *FullMessage) {
+	msg = fullMsgPool.Get().(*FullMessage)
+	msg.Fields = CleanFactory()
+	msg.Txnr = 0
+	msg.ConnId = 0
+	msg.ConfId = utils.ZeroUid
+	msg.Uid = utils.ZeroUid
 	return msg
 }
 

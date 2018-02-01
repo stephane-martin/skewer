@@ -409,13 +409,11 @@ func (s *DirectRelpServiceImpl) parseOne(raw *model.RawTcpMessage, e *base.Parse
 		syslogMsg.SetProperty("skewer", "socketpath", raw.UnixSocketPath)
 	}
 
-	parsedMsg := &model.FullMessage{
-		Fields: syslogMsg,
-		Txnr:   raw.Txnr,
-		ConfId: raw.ConfID,
-		ConnId: raw.ConnID,
-	}
-	_ = s.parsedMessagesQueue.Put(parsedMsg)
+	full := model.FullFactoryFrom(syslogMsg)
+	full.Txnr = raw.Txnr
+	full.ConfId = raw.ConfID
+	full.ConnId = raw.ConnID
+	_ = s.parsedMessagesQueue.Put(full)
 }
 
 func (s *DirectRelpServiceImpl) parse() {

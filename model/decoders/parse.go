@@ -64,7 +64,7 @@ func Fuzz(m []byte) int {
 	if err != nil {
 		panic(err)
 	}
-	msg2 := model.Factory()
+	msg2 := model.CleanFactory()
 	err = msg2.Unmarshal(b)
 	if err != nil {
 		panic("Unmarshaling failed")

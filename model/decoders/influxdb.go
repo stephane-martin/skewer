@@ -27,7 +27,7 @@ func pInflux(m []byte, decoder *encoding.Decoder) (msg *model.SyslogMessage, rer
 		return nil, nil
 	}
 	point := points[0]
-	msg = model.Factory()
+	msg = model.CleanFactory()
 	msg.AppName = "influxdb"
 	msg.TimeReportedNum = point.UnixNano()
 	msg.TimeGeneratedNum = time.Now().UnixNano()

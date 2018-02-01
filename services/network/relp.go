@@ -509,28 +509,25 @@ func (s *RelpServiceImpl) parseOne(raw *model.RawTcpMessage, e *base.ParsersEnv,
 	if raw.UnixSocketPath != "" {
 		syslogMsg.SetProperty("skewer", "socketpath", raw.UnixSocketPath)
 	}
-	parsedMsg := &model.FullMessage{
-		Fields: syslogMsg,
-		Txnr:   raw.Txnr,
-		ConfId: raw.ConfID,
-		ConnId: raw.ConnID,
-	}
 
-	// send message to the Store
-	parsedMsg.Uid = gen.Uid()
-	f, nonf := s.reporter.Stash(parsedMsg)
+	full := model.FullFactoryFrom(syslogMsg)
+	full.Txnr = raw.Txnr
+	full.ConfId = raw.ConfID
+	full.ConnId = raw.ConnID
+	full.Uid = gen.Uid()
+	defer model.FullFree(full)
+	f, nonf := s.reporter.Stash(full)
 	if f == nil && nonf == nil {
-		s.forwarder.ForwardSucc(parsedMsg.ConnId, parsedMsg.Txnr)
+		s.forwarder.ForwardSucc(full.ConnId, full.Txnr)
 	} else if f != nil {
-		s.forwarder.ForwardFail(parsedMsg.ConnId, parsedMsg.Txnr)
+		s.forwarder.ForwardFail(full.ConnId, full.Txnr)
 		logger.Error("Fatal error pushing RELP message to the Store", "err", f)
 		s.StopAndWait()
 		return
 	} else {
-		s.forwarder.ForwardFail(parsedMsg.ConnId, parsedMsg.Txnr)
+		s.forwarder.ForwardFail(full.ConnId, full.Txnr)
 		logger.Warn("Non fatal error pushing RELP message to the Store", "err", nonf)
 	}
-	model.Free(syslogMsg)
 }
 
 func (s *RelpServiceImpl) Parse() {
