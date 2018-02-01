@@ -89,6 +89,30 @@ func (encDB *EncryptedDB) Set(key utils.MyULID, value []byte, txn *badger.Txn) e
 	return encDB.p.Set(key, encValue, txn)
 }
 
+func (encDB *EncryptedDB) AddManyTrueMap(m map[utils.MyULID]([]byte), txn *badger.Txn) (err error) {
+	encm := make(map[utils.MyULID]([]byte), len(m))
+	encValue, err := sbox.Encrypt(trueBytes, encDB.secret)
+	if err != nil {
+		return err
+	}
+	for uid := range m {
+		encm[uid] = encValue
+	}
+	return encDB.p.AddMany(encm, txn)
+}
+
+func (encDB *EncryptedDB) AddManySame(uids []utils.MyULID, v []byte, txn *badger.Txn) (err error) {
+	encm := make(map[utils.MyULID]([]byte), len(uids))
+	encValue, err := sbox.Encrypt(v, encDB.secret)
+	if err != nil {
+		return err
+	}
+	for _, uid := range uids {
+		encm[uid] = encValue
+	}
+	return encDB.p.AddMany(encm, txn)
+}
+
 func (encDB *EncryptedDB) AddMany(m map[utils.MyULID][]byte, txn *badger.Txn) (err error) {
 	var encValue []byte
 	encm := map[utils.MyULID][]byte{}

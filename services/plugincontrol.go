@@ -267,7 +267,7 @@ func (s *PluginController) listenpipe(secret *memguard.LockedBuffer) {
 			return
 		}
 		err = s.stasher.Stash(message) // send message to the Store controller
-		model.Free(message.Fields)
+		model.FullFree(message)
 		if err != nil {
 			s.logger.Error("Error stashing message", "error", err)
 			return
@@ -363,7 +363,7 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 					err := m.Decrypt(secret, parts[1])
 					if err == nil {
 						err = s.stasher.Stash(m)
-						model.Free(m.Fields)
+						model.FullFree(m)
 						if err != nil {
 							s.logger.Error("Error stashing message", "error", err)
 							kill = true
@@ -799,14 +799,13 @@ type StorePlugin struct {
 }
 
 func (s *StorePlugin) pushqueue(secret *memguard.LockedBuffer) {
-	var messages [][]byte
 	var message []byte
 	var err error
 	bufpipe := bufio.NewWriter(s.pipe)
 	writeToStore := utils.NewEncryptWriter(bufpipe, secret)
-
+	messages := make([]([]byte), 0, s.conf.Store.BatchSize)
 	for {
-		messages = s.BSliceQueue.GetMany(s.conf.Store.BatchSize)
+		s.BSliceQueue.GetManyInto(&messages)
 		if len(messages) == 0 {
 			return
 		}

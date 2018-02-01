@@ -234,7 +234,7 @@ func (d *HTTPDestination) dosend(ctx context.Context) {
 			return
 		}
 		err = d.dosendOne(ctx, msg)
-		model.Free(msg.Fields)
+		model.FullFree(msg)
 		if err != nil {
 			d.dofatal()
 			return

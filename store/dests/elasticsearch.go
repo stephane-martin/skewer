@@ -215,7 +215,7 @@ func (d *ElasticDestination) Send(msgs []model.OutputMsg, partitionKey string, p
 }
 
 func (d *ElasticDestination) sendOne(msg *model.FullMessage) (err error) {
-	defer model.Free(msg.Fields)
+	defer model.FullFree(msg)
 
 	indexBuf := bytes.NewBuffer(nil)
 	err = d.indexNameTpl.Execute(indexBuf, msg.Fields)

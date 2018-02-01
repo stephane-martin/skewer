@@ -136,7 +136,7 @@ func (d *HTTPServerDestination) nackall(messages []*model.FullMessage) {
 	var message *model.FullMessage
 	for _, message = range messages {
 		d.nack(message.Uid)
-		model.Free(message.Fields)
+		model.FullFree(message)
 	}
 }
 
@@ -247,7 +247,7 @@ Loop:
 		} else {
 			d.nack(message.Uid)
 		}
-		model.Free(message.Fields)
+		model.FullFree(message)
 	}
 }
 
@@ -264,7 +264,7 @@ func (d *HTTPServerDestination) Close() (err error) {
 			break
 		}
 		d.nack(message.Uid)
-		model.Free(message.Fields)
+		model.FullFree(message)
 	}
 	return err
 }
@@ -276,7 +276,7 @@ func (d *HTTPServerDestination) Send(msgs []model.OutputMsg, partitionKey string
 		if err != nil {
 			for i = range msgs {
 				d.nack(msgs[i].Message.Uid)
-				model.Free(msgs[i].Message.Fields)
+				model.FullFree(msgs[i].Message)
 			}
 			return err
 		}

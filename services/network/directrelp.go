@@ -577,6 +577,7 @@ func (s *DirectRelpServiceImpl) push2kafka() {
 
 ForParsedChan:
 	for s.parsedMessagesQueue.Wait(0) {
+		// TODO: extract loop -> func
 		message, err = s.parsedMessagesQueue.Get()
 		if err != nil {
 			// should not happen
@@ -594,7 +595,7 @@ ForParsedChan:
 			config, haveEnv = s.configs[message.ConfId]
 			if !haveEnv {
 				s.Logger.Warn("Could not find the configuration for a message", "confId", message.ConfId, "txnr", message.Txnr)
-				model.Free(message.Fields)
+				model.FullFree(message)
 				continue ForParsedChan
 			}
 			envs[message.ConfId] = javascript.NewFilterEnvironment(
@@ -616,7 +617,7 @@ ForParsedChan:
 		if len(topic) == 0 {
 			logger.Warn("Topic or PartitionKey could not be calculated", "txnr", message.Txnr)
 			s.forwarder.ForwardFail(message.ConnId, message.Txnr)
-			model.Free(message.Fields)
+			model.FullFree(message)
 			continue ForParsedChan
 		}
 		partitionKey, errs = e.PartitionKey(message.Fields)
@@ -634,12 +635,12 @@ ForParsedChan:
 		case javascript.DROPPED:
 			s.forwarder.ForwardFail(message.ConnId, message.Txnr)
 			messageFilterCounter.WithLabelValues("dropped", message.Fields.GetProperty("skewer", "client"), "directkafka").Inc()
-			model.Free(message.Fields)
+			model.FullFree(message)
 			continue ForParsedChan
 		case javascript.REJECTED:
 			s.forwarder.ForwardFail(message.ConnId, message.Txnr)
 			messageFilterCounter.WithLabelValues("rejected", message.Fields.GetProperty("skewer", "client"), "directkafka").Inc()
-			model.Free(message.Fields)
+			model.FullFree(message)
 			continue ForParsedChan
 		case javascript.PASS:
 			messageFilterCounter.WithLabelValues("passing", message.Fields.GetProperty("skewer", "client"), "directkafka").Inc()
@@ -647,7 +648,7 @@ ForParsedChan:
 			s.forwarder.ForwardFail(message.ConnId, message.Txnr)
 			messageFilterCounter.WithLabelValues("unknown", message.Fields.GetProperty("skewer", "client"), "directkafka").Inc()
 			logger.Warn("Error happened processing message", "txnr", message.Txnr, "error", err)
-			model.Free(message.Fields)
+			model.FullFree(message)
 			continue ForParsedChan
 		}
 
@@ -656,7 +657,7 @@ ForParsedChan:
 		if err != nil {
 			logger.Warn("Error generating Kafka message", "error", err, "txnr", message.Txnr)
 			s.forwarder.ForwardFail(message.ConnId, message.Txnr)
-			model.Free(message.Fields)
+			model.FullFree(message)
 			continue ForParsedChan
 		}
 
@@ -670,7 +671,7 @@ ForParsedChan:
 		}
 
 		s.producer.Input() <- kafkaMsg
-		model.Free(message.Fields)
+		model.FullFree(message)
 	}
 
 }

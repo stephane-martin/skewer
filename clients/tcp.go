@@ -223,7 +223,7 @@ func (c *SyslogTCPClient) Send(msg *model.FullMessage) (err error) {
 	} else {
 		buf, err = encoders.TcpOctetEncode(c.encoder, msg)
 	}
-	model.Free(msg.Fields)
+	model.FullFree(msg)
 	if err != nil {
 		return encoders.NonEncodableError
 	}

@@ -106,3 +106,19 @@ func (q *BSliceQueue) GetMany(max uint32) [][]byte {
 	}
 	return res
 }
+
+func (q *BSliceQueue) GetManyInto(s *[]([]byte)) {
+	var elt []byte
+	var err error
+	var i int
+	max := cap(*s)
+	*s = (*s)[:0]
+	for i < max {
+		elt, err = q.Get()
+		if elt == nil || err != nil {
+			break
+		}
+		*s = append(*s, elt)
+		i++
+	}
+}

@@ -72,7 +72,7 @@ func (d *RedisDestination) Close() error {
 }
 
 func (d *RedisDestination) sendOne(msg *model.FullMessage, topic string) (err error) {
-	defer model.Free(msg.Fields)
+	defer model.FullFree(msg)
 
 	uid := msg.Uid
 	var buf []byte

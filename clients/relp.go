@@ -500,7 +500,7 @@ func (c *RELPClient) doSend() {
 		}
 
 		err = c.doSendOne(msg)
-		model.Free(msg.Fields) // msg can be reused from here
+		model.FullFree(msg) // msg can be reused from here
 
 		if err == utils.ErrDisposed {
 			c.logger.Debug("the queue has been disposed")

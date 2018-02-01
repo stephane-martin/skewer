@@ -187,7 +187,7 @@ func (d *WebsocketServerDestination) writeLogs(wsconn *websocket.Conn) (err erro
 
 			wsconn.SetWriteDeadline(time.Now().Add(writeWait))
 			err = d.encoder(message, writer)
-			model.Free(message.Fields)
+			model.FullFree(message)
 			if err == nil {
 				// flush the ws buffer
 				err = writer.Close()
@@ -254,7 +254,7 @@ func (d *WebsocketServerDestination) Close() (err error) {
 			break
 		}
 		d.nack(message.Uid)
-		model.Free(message.Fields)
+		model.FullFree(message)
 	}
 	return err
 }
@@ -266,7 +266,7 @@ func (d *WebsocketServerDestination) Send(msgs []model.OutputMsg, partitionKey s
 		if err != nil {
 			for i = range msgs {
 				d.nack(msgs[i].Message.Uid)
-				model.Free(msgs[i].Message.Fields)
+				model.FullFree(msgs[i].Message)
 			}
 			return err
 		}

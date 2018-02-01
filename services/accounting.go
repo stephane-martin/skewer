@@ -133,7 +133,7 @@ func (s *AccountingService) readFile(f *os.File, tick int64, hostname string, si
 		} else {
 			full = s.makeMessage(buf, tick, hostname, gen)
 			f, nf := s.stasher.Stash(full)
-			model.Free(full.Fields)
+			model.FullFree(full)
 			if nf != nil {
 				s.logger.Warn("Non-fatal error stashing accounting message", "error", nf)
 			} else if f != nil {

@@ -332,7 +332,7 @@ func NewFileDestination(ctx context.Context, e *Env) (Destination, error) {
 }
 
 func (d *FileDestination) sendOne(message *model.FullMessage) (err error) {
-	defer model.Free(message.Fields)
+	defer model.FullFree(message)
 
 	if len(message.Fields.AppName) == 0 {
 		message.Fields.AppName = "unknown"

@@ -93,7 +93,7 @@ func (s *JournalService) Start() (infos []model.ListenerInfo, err error) {
 				} else {
 					base.IncomingMsgsCounter.WithLabelValues("journald", hostname, "", "").Inc()
 				}
-				model.Free(m.Fields)
+				model.FullFree(m)
 			}
 		}
 	}()

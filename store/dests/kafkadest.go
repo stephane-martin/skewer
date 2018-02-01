@@ -62,7 +62,7 @@ func NewKafkaDestination(ctx context.Context, e *Env) (Destination, error) {
 }
 
 func (d *KafkaDestination) sendOne(message *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
-	defer model.Free(message.Fields)
+	defer model.FullFree(message)
 
 	buf := bytes.NewBuffer(nil)
 	err = d.encoder(message, buf)

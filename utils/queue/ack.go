@@ -146,3 +146,20 @@ func (q *AckQueue) GetMany(max uint32) (res []UidDest) {
 	}
 	return res
 }
+
+func (q *AckQueue) GetManyInto(uids *[]UidDest) {
+	var uid utils.MyULID
+	var dest conf.DestinationType
+	var err error
+	max := cap(*uids)
+	*uids = (*uids)[:0]
+	var i int
+	for i < max {
+		uid, dest, err = q.Get()
+		if uid == utils.ZeroUid || err != nil {
+			break
+		}
+		*uids = append(*uids, UidDest{Uid: uid, Dest: dest})
+		i++
+	}
+}

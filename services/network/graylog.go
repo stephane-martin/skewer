@@ -297,7 +297,7 @@ func (s *GraylogSvcImpl) handleConnection(conn net.PacketConn, config conf.Grayl
 		}
 		s.stasher.Stash(full)
 		base.IncomingMsgsCounter.WithLabelValues("graylog", client, localPortS, path).Inc()
-		model.Free(full.Fields)
+		model.FullFree(full)
 	}
 }
 

@@ -91,7 +91,8 @@ const (
 var RFacilities map[string]Facility
 var RSeverities map[string]Severity
 
-var pool *sync.Pool
+var syslogMsgPool *sync.Pool
+var fullMsgPool *sync.Pool
 
 func init() {
 	RFacilities = map[string]Facility{}
@@ -102,21 +103,30 @@ func init() {
 	for k, v := range Severities {
 		RSeverities[v] = k
 	}
-	pool = &sync.Pool{
+	syslogMsgPool = &sync.Pool{
 		New: func() interface{} {
 			return &SyslogMessage{}
 		},
 	}
+	fullMsgPool = &sync.Pool{
+		New: func() interface{} {
+			return &FullMessage{}
+		},
+	}
 }
 
-func Factory() (msg *SyslogMessage) {
-	msg = pool.Get().(*SyslogMessage)
+func CleanFactory() (msg *SyslogMessage) {
+	msg = Factory()
 	msg.Clear()
 	return
 }
 
+func Factory() (msg *SyslogMessage) {
+	return syslogMsgPool.Get().(*SyslogMessage)
+}
+
 func FullFactory() (msg *FullMessage) {
-	msg = &FullMessage{}
+	msg = fullMsgPool.Get().(*FullMessage)
 	msg.Fields = Factory()
 	return msg
 }
@@ -128,11 +138,19 @@ type OutputMsg struct {
 	Topic           string
 }
 
+func FullFree(msg *FullMessage) {
+	if msg == nil {
+		return
+	}
+	Free(msg.Fields)
+	fullMsgPool.Put(msg)
+}
+
 func Free(msg *SyslogMessage) {
 	if msg == nil {
 		return
 	}
-	pool.Put(msg)
+	syslogMsgPool.Put(msg)
 }
 
 type Priority int32

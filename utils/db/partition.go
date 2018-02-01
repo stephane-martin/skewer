@@ -58,6 +58,66 @@ func (p *partitionImpl) Set(key utils.MyULID, value []byte, txn *badger.Txn) (er
 	return
 }
 
+var trueBytes = []byte("true")
+
+func (p *partitionImpl) AddManyTrueMap(m map[utils.MyULID]([]byte), txn *badger.Txn) (err error) {
+	if len(m) == 0 {
+		return
+	}
+	n := false
+	if txn == nil {
+		txn = p.parent.NewTransaction(true)
+		n = true
+		defer txn.Discard()
+	}
+	for uid := range m {
+		err = txn.Set(concat(p.prefix, uid), trueBytes)
+		if err != nil {
+			txn.Discard()
+			return
+		}
+	}
+	if n {
+		err = txn.Commit(nil)
+		if err == badger.ErrConflict {
+			// retry
+			return p.AddManyTrueMap(m, nil)
+		} else if err != nil {
+			return err
+		}
+	}
+	return
+}
+
+func (p *partitionImpl) AddManySame(uids []utils.MyULID, v []byte, txn *badger.Txn) (err error) {
+	if len(uids) == 0 {
+		return
+	}
+	n := false
+	if txn == nil {
+		txn = p.parent.NewTransaction(true)
+		n = true
+		defer txn.Discard()
+	}
+	for _, uid := range uids {
+		err = txn.Set(concat(p.prefix, uid), v)
+		if err != nil {
+			txn.Discard()
+			return
+		}
+	}
+	if n {
+		err = txn.Commit(nil)
+		if err == badger.ErrConflict {
+			// retry
+			return p.AddManySame(uids, v, nil)
+		} else if err != nil {
+			return err
+		}
+	}
+	return
+}
+
 func (p *partitionImpl) AddMany(m map[utils.MyULID]([]byte), txn *badger.Txn) (err error) {
 	if len(m) == 0 {
 		return

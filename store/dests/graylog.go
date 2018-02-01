@@ -70,7 +70,7 @@ func (d *GraylogDestination) sendOne(message *model.FullMessage) (err error) {
 		d.nack(message.Uid)
 		d.dofatal()
 	}
-	model.Free(message.Fields)
+	model.FullFree(message)
 	return err
 }
 

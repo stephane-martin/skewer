@@ -29,6 +29,8 @@ type Partition interface {
 	DeleteMany(keys []utils.MyULID, txn *badger.Txn) error
 	Set(key utils.MyULID, value []byte, txn *badger.Txn) error
 	AddMany(m map[utils.MyULID][]byte, txn *badger.Txn) error
+	AddManySame(uids []utils.MyULID, v []byte, txn *badger.Txn) error
+	AddManyTrueMap(m map[utils.MyULID]([]byte), txn *badger.Txn) error
 	Get(key utils.MyULID, txn *badger.Txn) ([]byte, error)
 	Exists(key utils.MyULID, txn *badger.Txn) (bool, error)
 	KeyIterator(prefetchSize uint32, txn *badger.Txn) PartitionKeyIterator

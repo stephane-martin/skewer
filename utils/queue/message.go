@@ -109,3 +109,19 @@ func (q *MessageQueue) GetMany(max uint32) []*model.FullMessage {
 	}
 	return res
 }
+
+func (q *MessageQueue) GetManyInto(msgs *[]*model.FullMessage) {
+	var elt *model.FullMessage
+	var err error
+	var i int
+	max := cap(*msgs)
+	*msgs = (*msgs)[:0]
+	for i < max {
+		elt, err = q.Get()
+		if elt == nil || err != nil {
+			break
+		}
+		*msgs = append(*msgs, elt)
+		i++
+	}
+}
