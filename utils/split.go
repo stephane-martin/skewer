@@ -143,12 +143,10 @@ func (s *EncryptWriter) Write(p []byte) (n int, err error) {
 			return 0, err
 		}
 	}
-	// TODO: make it atomic
-	err = ChainWrites(
-		s.dest,
-		[]byte(fmt.Sprintf("%010d ", len(enc))),
-		enc,
-	)
+	buf := make([]byte, 0, 11+len(enc))
+	buf = append(buf, fmt.Sprintf("%010d ", len(enc))...)
+	buf = append(buf, enc...)
+	_, err = s.dest.Write(buf)
 	if err == nil {
 		return len(p), nil
 	}
