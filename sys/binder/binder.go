@@ -14,8 +14,6 @@ import (
 	"github.com/stephane-martin/skewer/utils"
 )
 
-// TODO: encrypt streams
-
 func IsStream(lnet string) bool {
 	switch lnet {
 	case "tcp", "tcp4", "tcp6", "unix", "unixpacket":

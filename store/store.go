@@ -318,7 +318,13 @@ func (s *MessageStore) forward(ctx context.Context, d conf.DestinationType) {
 				oldMessages = messages
 			}
 		case <-doneChan:
-			// TODO: nack the messages?
+			// NACK the messages that were not delivered
+			if len(messages) > 0 {
+				for _, message := range messages {
+					s.NACK(message.Uid, d)
+					model.FullFree(message)
+				}
+			}
 			return
 		}
 
@@ -361,7 +367,6 @@ func (s *MessageStore) init(ctx context.Context) {
 	s.wg.Add(1)
 	go s.tickResetFailures(ctx)
 
-	// TODO: optimize. only active destinations should be forwarded to.
 	for _, dest := range conf.Destinations {
 		s.wg.Add(1)
 		go s.forward(ctx, dest)
@@ -956,76 +961,48 @@ func (s *MessageStore) retrieve(dest conf.DestinationType) (messages []*model.Fu
 
 }
 
-func sortAck(acks []queue.UidDest) (res map[conf.DestinationType]([]utils.MyULID)) {
-	// TODO: optimize
-	var ok bool
-	res = map[conf.DestinationType]([]utils.MyULID){}
-	for _, ack := range acks {
-		if _, ok = res[ack.Dest]; !ok {
-			res[ack.Dest] = make([]utils.MyULID, 0, len(acks))
-		}
-		res[ack.Dest] = append(res[ack.Dest], ack.Uid)
-	}
-	return res
-}
-
 func (s *MessageStore) ACK(uid utils.MyULID, dest conf.DestinationType) {
 	ackCounter.WithLabelValues("ack", conf.DestinationNames[dest]).Inc()
 	_ = s.ackQueue.Put(uid, dest)
 }
 
 func (s *MessageStore) doACK(acks []queue.UidDest) {
-	m := sortAck(acks)
-	for desttype := range m {
-		s.ackByDest(m[desttype], desttype)
-	}
-}
-
-func (s *MessageStore) doNACK(nacks []queue.UidDest) {
-	m := sortAck(nacks)
-	for desttype := range m {
-		s.nackByDest(m[desttype], desttype)
-	}
-}
-
-func (s *MessageStore) doPermanentError(permerrors []queue.UidDest) {
-	m := sortAck(permerrors)
-	for desttype := range m {
-		s.permErrorByDest(m[desttype], desttype)
-	}
-}
-
-func (s *MessageStore) ackByDest(uids []utils.MyULID, dtype conf.DestinationType) {
-	if len(uids) == 0 {
+	if len(acks) == 0 {
 		return
 	}
-
-	sentDB := s.backend.GetPartition(Sent, dtype)
-	messagesDB := s.backend.GetPartition(Messages, dtype)
 
 	txn := s.badger.NewTransaction(true)
-
 	defer txn.Discard()
 
-	err := sentDB.DeleteMany(uids, txn)
-	if err != nil {
-		s.logger.Warn("Error removing messages from the Sent DB", "error", err)
-		return
+	var ack queue.UidDest
+	var err error
+	count := make(map[conf.DestinationType]int)
+
+	for _, ack = range acks {
+		err = s.backend.GetPartition(Sent, ack.Dest).Delete(ack.Uid, txn)
+		if err != nil {
+			s.logger.Warn("Error removing messages from the Sent DB", "error", err)
+			return
+		}
+		err = s.backend.GetPartition(Messages, ack.Dest).Delete(ack.Uid, txn)
+		if err != nil {
+			s.logger.Warn("Error removing message content from DB", "error", err)
+			return
+		}
+		count[ack.Dest]++
 	}
-	err = messagesDB.DeleteMany(uids, txn)
-	if err != nil {
-		s.logger.Warn("Error removing message content from DB", "error", err)
-		return
-	}
+
 	err = txn.Commit(nil)
 	if err == nil {
-		badgerGauge.WithLabelValues("sent", conf.DestinationNames[dtype]).Sub(float64(len(uids)))
-		badgerGauge.WithLabelValues("messages", conf.DestinationNames[dtype]).Sub(float64(len(uids)))
+		for dtype, nb := range count {
+			badgerGauge.WithLabelValues("sent", conf.DestinationNames[dtype]).Sub(float64(nb))
+			badgerGauge.WithLabelValues("messages", conf.DestinationNames[dtype]).Sub(float64(nb))
+		}
 	} else if err == badger.ErrConflict {
 		// retry
-		s.ackByDest(uids, dtype)
+		s.doACK(acks)
 	} else {
-		s.logger.Warn("Error commiting ACKs", "error", err)
+		s.logger.Warn("error commiting ACKs", "error", err)
 	}
 }
 
@@ -1034,36 +1011,45 @@ func (s *MessageStore) NACK(uid utils.MyULID, dest conf.DestinationType) {
 	_ = s.nackQueue.Put(uid, dest)
 }
 
-func (s *MessageStore) nackByDest(uids []utils.MyULID, dest conf.DestinationType) {
-	if len(uids) == 0 {
+func (s *MessageStore) doNACK(nacks []queue.UidDest) {
+	if len(nacks) == 0 {
 		return
 	}
-
-	failedDB := s.backend.GetPartition(Failed, dest)
-	sentDB := s.backend.GetPartition(Sent, dest)
 
 	txn := s.badger.NewTransaction(true)
 	defer txn.Discard()
 
+	var nack queue.UidDest
+	var err error
+	count := make(map[conf.DestinationType]int)
 	times := []byte(time.Now().Format(time.RFC3339))
-	err := failedDB.AddManySame(uids, times, txn)
-	if err != nil {
-		s.logger.Warn("Error copying messages to the Failed DB", "error", err)
+
+	for _, nack = range nacks {
+		err = s.backend.GetPartition(Failed, nack.Dest).Set(nack.Uid, times, txn)
+		if err != nil {
+			s.logger.Warn("Error copying messages to the Failed DB", "error", err)
+
+			return
+		}
+		err = s.backend.GetPartition(Sent, nack.Dest).Delete(nack.Uid, txn)
+		if err != nil {
+			s.logger.Warn("Error removing messages from the Sent DB", "error", err)
+			return
+		}
+		count[nack.Dest]++
 	}
-	err = sentDB.DeleteMany(uids, txn)
-	if err != nil {
-		s.logger.Warn("Error removing messages from the Sent DB", "error", err)
-		return
-	}
+
 	err = txn.Commit(nil)
 	if err == nil {
-		badgerGauge.WithLabelValues("sent", conf.DestinationNames[dest]).Sub(float64(len(uids)))
-		badgerGauge.WithLabelValues("failed", conf.DestinationNames[dest]).Add(float64(len(uids)))
+		for dtype, nb := range count {
+			badgerGauge.WithLabelValues("failed", conf.DestinationNames[dtype]).Add(float64(nb))
+			badgerGauge.WithLabelValues("sent", conf.DestinationNames[dtype]).Sub(float64(nb))
+		}
 	} else if err == badger.ErrConflict {
 		// retry
-		s.nackByDest(uids, dest)
+		s.doNACK(nacks)
 	} else {
-		s.logger.Warn("Error commiting NACKs", "error", err)
+		s.logger.Warn("error commiting NACKs", "error", err)
 	}
 }
 
@@ -1072,35 +1058,45 @@ func (s *MessageStore) PermError(uid utils.MyULID, dest conf.DestinationType) {
 	_ = s.permerrorsQueue.Put(uid, dest)
 }
 
-func (s *MessageStore) permErrorByDest(uids []utils.MyULID, dest conf.DestinationType) {
-	if len(uids) == 0 {
+func (s *MessageStore) doPermanentError(pes []queue.UidDest) {
+	if len(pes) == 0 {
 		return
 	}
-	sentDB := s.backend.GetPartition(Sent, dest)
-	permDB := s.backend.GetPartition(PermErrors, dest)
-	txn := s.badger.NewTransaction(true)
 
+	txn := s.badger.NewTransaction(true)
 	defer txn.Discard()
+
+	var pe queue.UidDest
+	var err error
+	count := make(map[conf.DestinationType]int)
 	times := []byte(time.Now().Format(time.RFC3339))
 
-	err := permDB.AddManySame(uids, times, txn)
-	if err != nil {
-		s.logger.Warn("Error copying messages to the PermErrors DB", "error", err)
-		return
+	for _, pe = range pes {
+		err = s.backend.GetPartition(PermErrors, pe.Dest).Set(pe.Uid, times, txn)
+		if err != nil {
+			s.logger.Warn("Error copying messages to the PermErrors DB", "error", err)
+
+			return
+		}
+		err = s.backend.GetPartition(Sent, pe.Dest).Delete(pe.Uid, txn)
+		if err != nil {
+			s.logger.Warn("Error removing messages from the Sent DB", "error", err)
+			return
+		}
+		count[pe.Dest]++
 	}
-	err = sentDB.DeleteMany(uids, txn)
-	if err != nil {
-		s.logger.Warn("Error removing messages from the Sent DB", "error", err)
-		return
-	}
+
 	err = txn.Commit(nil)
 	if err == nil {
-		badgerGauge.WithLabelValues("permerrors", conf.DestinationNames[dest]).Add(float64(len(uids)))
-		badgerGauge.WithLabelValues("sent", conf.DestinationNames[dest]).Sub(float64(len(uids)))
+		for dtype, nb := range count {
+			badgerGauge.WithLabelValues("permerrors", conf.DestinationNames[dtype]).Add(float64(nb))
+			badgerGauge.WithLabelValues("sent", conf.DestinationNames[dtype]).Sub(float64(nb))
+		}
 	} else if err == badger.ErrConflict {
 		// retry
-		s.permErrorByDest(uids, dest)
+		s.doPermanentError(pes)
 	} else {
-		s.logger.Warn("Error commiting PermErrors", "error", err)
+		s.logger.Warn("error commiting PermErrs", "error", err)
 	}
+
 }
