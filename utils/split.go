@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"net"
 	"strconv"
 
 	"github.com/awnumar/memguard"
@@ -107,6 +108,28 @@ func NewEncryptWriter(dest io.Writer, encryptkey *memguard.LockedBuffer) *Encryp
 	return &EncryptWriter{dest: dest, key: encryptkey}
 }
 
+func (s *EncryptWriter) WriteMsgUnix(b []byte, oob []byte, addr *net.UnixAddr) (n int, oobn int, err error) {
+	if len(b) == 0 {
+		return 0, 0, nil
+	}
+	if conn, ok := s.dest.(*net.UnixConn); ok {
+		var enc []byte
+		if s.key == nil {
+			enc = b
+		} else {
+			enc, err = sbox.Encrypt(b, s.key)
+			if err != nil {
+				return 0, 0, err
+			}
+		}
+		buf := bytes.NewBuffer(nil)
+		buf.Write([]byte(fmt.Sprintf("%010d ", len(enc))))
+		buf.Write(enc)
+		return conn.WriteMsgUnix(buf.Bytes(), oob, addr)
+	}
+	return 0, 0, nil
+}
+
 func (s *EncryptWriter) Write(p []byte) (n int, err error) {
 	if len(p) == 0 {
 		return 0, nil
@@ -120,6 +143,7 @@ func (s *EncryptWriter) Write(p []byte) (n int, err error) {
 			return 0, err
 		}
 	}
+	// TODO: make it atomic
 	err = ChainWrites(
 		s.dest,
 		[]byte(fmt.Sprintf("%010d ", len(enc))),

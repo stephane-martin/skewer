@@ -7,8 +7,10 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"syscall"
 
+	"github.com/awnumar/memguard"
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/utils"
 )
@@ -25,7 +27,7 @@ type ExternalPacketConn struct {
 	Addr string
 }
 
-func BinderListen(ctx context.Context, logger log15.Logger, schan chan *ExternalConn, addr string) (net.Listener, error) {
+func listen(ctx context.Context, wg *sync.WaitGroup, logger log15.Logger, schan chan *ExternalConn, addr string) (net.Listener, error) {
 	parts := strings.SplitN(addr, ":", 2)
 	lnet := parts[0]
 	laddr := parts[1]
@@ -41,14 +43,18 @@ func BinderListen(ctx context.Context, logger log15.Logger, schan chan *External
 		l.(*net.UnixListener).SetUnlinkOnClose(true)
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
+	cctx, cancel := context.WithCancel(ctx)
 
+	wg.Add(1)
 	go func() {
-		<-ctx.Done()
+		<-cctx.Done()
 		_ = l.Close()
+		wg.Done()
 	}()
 
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		for {
 			c, err := l.Accept()
 			if err == nil {
@@ -66,7 +72,7 @@ func BinderListen(ctx context.Context, logger log15.Logger, schan chan *External
 	return l, nil
 }
 
-func BinderPacket(addr string) (conn net.PacketConn, err error) {
+func listenPacket(addr string) (conn net.PacketConn, err error) {
 	parts := strings.SplitN(addr, ":", 2)
 	lnet := parts[0]
 	laddr := parts[1]
@@ -89,17 +95,18 @@ func BinderPacket(addr string) (conn net.PacketConn, err error) {
 	return conn, nil
 }
 
-func Binder(parentsHandles []uintptr, logger log15.Logger) (err error) {
+func Server(ctx context.Context, parentsHandles []uintptr, secret *memguard.LockedBuffer, logger log15.Logger) (wg *sync.WaitGroup, err error) {
+	wg = &sync.WaitGroup{}
 	for _, handle := range parentsHandles {
-		err = binderOne(handle, logger)
+		err = serveOne(ctx, wg, handle, secret, logger)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return wg, nil
 }
 
-func binderOne(parentFD uintptr, logger log15.Logger) error {
+func serveOne(ctx context.Context, wg *sync.WaitGroup, parentFD uintptr, secret *memguard.LockedBuffer, logger log15.Logger) error {
 	logger = logger.New("class", "binder")
 	parentFile := os.NewFile(parentFD, "parent_file")
 
@@ -110,16 +117,27 @@ func binderOne(parentFD uintptr, logger log15.Logger) error {
 	}
 	childConn := c.(*net.UnixConn)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	cctx, cancel := context.WithCancel(ctx)
+	wg.Add(1)
+	go func() {
+		<-cctx.Done()
+		childConn.Close()
+		wg.Done()
+	}()
 
+	scanner := bufio.NewScanner(childConn)
+	scanner.Split(utils.MakeDecryptSplit(secret))
 	schan := make(chan *ExternalConn)
 	pchan := make(chan *ExternalPacketConn)
+	writer := utils.NewEncryptWriter(childConn, secret)
 
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		var smsg string
 		for {
 			select {
-			case <-ctx.Done():
+			case <-cctx.Done():
 				return
 			case bc := <-pchan:
 				lnet := strings.SplitN(bc.Addr, ":", 2)[0]
@@ -137,8 +155,9 @@ func binderOne(parentFD uintptr, logger log15.Logger) error {
 				if err == nil {
 					rights := syscall.UnixRights(int(connFile.Fd()))
 					logger.Debug("Sending new connection to child", "uid", bc.Uid, "addr", bc.Addr)
-					smsg = fmt.Sprintf("newconn %s %s\n", bc.Uid, bc.Addr)
-					_, _, err := childConn.WriteMsgUnix([]byte(smsg), rights, nil)
+					smsg = fmt.Sprintf("newconn %s %s", bc.Uid, bc.Addr)
+					_, _, err := writer.WriteMsgUnix([]byte(smsg), rights, nil)
+					//_, _, err := childConn.WriteMsgUnix([]byte(smsg), rights, nil)
 					if err != nil {
 						logger.Warn("Failed to send FD to binder client", "error", err)
 					}
@@ -159,8 +178,9 @@ func binderOne(parentFD uintptr, logger log15.Logger) error {
 				if err == nil {
 					rights := syscall.UnixRights(int(connFile.Fd()))
 					logger.Debug("Sending new connection to child", "uid", bc.Uid, "addr", bc.Addr)
-					smsg = fmt.Sprintf("newconn %s %s\n", bc.Uid, bc.Addr)
-					_, _, err := childConn.WriteMsgUnix([]byte(smsg), rights, nil)
+					smsg = fmt.Sprintf("newconn %s %s", bc.Uid, bc.Addr)
+					_, _, err := writer.WriteMsgUnix([]byte(smsg), rights, nil)
+					//_, _, err := childConn.WriteMsgUnix([]byte(smsg), rights, nil)
 					if err != nil {
 						logger.Warn("Failed to send FD to binder client", "error", err)
 					}
@@ -172,9 +192,12 @@ func binderOne(parentFD uintptr, logger log15.Logger) error {
 		}
 	}()
 
+	wg.Add(1)
 	go func() {
-		defer cancel()
-		scanner := bufio.NewScanner(childConn)
+		defer func() {
+			cancel()
+			wg.Done()
+		}()
 
 		listeners := map[string]net.Listener{}
 		var rmsg string
@@ -190,9 +213,9 @@ func binderOne(parentFD uintptr, logger log15.Logger) error {
 				for _, addr := range strings.Split(args, " ") {
 					lnet := strings.SplitN(addr, ":", 2)[0]
 					if IsStream(lnet) {
-						l, err := BinderListen(ctx, logger, schan, addr)
+						l, err := listen(cctx, wg, logger, schan, addr)
 						if err == nil {
-							_, err := childConn.Write([]byte(fmt.Sprintf("confirmlisten %s\n", addr)))
+							_, err := writer.Write([]byte(fmt.Sprintf("confirmlisten %s", addr)))
 							if err != nil {
 								logger.Warn("Failed to confirm listen to client", "error", err)
 								_ = l.Close()
@@ -201,15 +224,15 @@ func binderOne(parentFD uintptr, logger log15.Logger) error {
 							}
 						} else {
 							logger.Warn("Listen error", "error", err, "addr", addr)
-							_, _ = childConn.Write([]byte(fmt.Sprintf("error %s %s\n", addr, err.Error())))
+							_, _ = writer.Write([]byte(fmt.Sprintf("error %s %s", addr, err.Error())))
 						}
 					} else {
-						c, err := BinderPacket(addr)
+						c, err := listenPacket(addr)
 						if err == nil {
 							pchan <- &ExternalPacketConn{Addr: addr, Conn: c, Uid: utils.NewUidString()}
 						} else {
 							logger.Warn("ListenPacket error", "error", err, "addr", addr)
-							_, _ = childConn.Write([]byte(fmt.Sprintf("error %s %s\n", addr, err.Error())))
+							_, _ = writer.Write([]byte(fmt.Sprintf("error %s %s", addr, err.Error())))
 						}
 					}
 				}
@@ -221,7 +244,7 @@ func binderOne(parentFD uintptr, logger log15.Logger) error {
 					delete(listeners, args)
 				}
 				logger.Debug("Asked to stop listening", "addr", args)
-				_, _ = childConn.Write([]byte(fmt.Sprintf("stopped %s\n", args)))
+				_, _ = writer.Write([]byte(fmt.Sprintf("stopped %s", args)))
 
 			case "byebye":
 				return

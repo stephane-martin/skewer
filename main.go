@@ -96,13 +96,7 @@ func getLoggerConn(handle uintptr) (loggerConn *net.UnixConn) {
 	return conn
 }
 
-func getLogger(ctx context.Context, name string, ring kring.Ring, handle uintptr) (log15.Logger, error) {
-	secret, err := ring.GetBoxSecret()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "kring getboxsecret error", err)
-		return nil, err
-	}
-
+func getLogger(ctx context.Context, name string, secret *memguard.LockedBuffer, handle uintptr) (log15.Logger, error) {
 	conn, err := net.FileConn(os.NewFile(handle, "logger"))
 	if err != nil {
 		return nil, err
@@ -246,7 +240,7 @@ func execServeParent() (status int) {
 	}
 
 	defer func() {
-		boxsecret.Destroy()
+		//boxsecret.Destroy()
 		_ = ring.DeleteBoxSecret()
 		_ = ring.Destroy()
 	}()
@@ -284,10 +278,15 @@ func execServeParent() (status int) {
 	for _, s := range binderSockets {
 		binderParents = append(binderParents, s.parent)
 	}
-	err = binder.Binder(binderParents, logger) // returns immediately
+	binderCtx, binderCancel := context.WithCancel(context.Background())
+	binderWg, err := binder.Server(binderCtx, binderParents, boxsecret, logger) // returns immediately
 	if err != nil {
 		dopanic("Error setting the root binder", err, -1)
 	}
+	defer func() {
+		binderCancel()
+		binderWg.Wait()
+	}()
 
 	remoteLoggerConn := []*net.UnixConn{}
 	for _, s := range loggerSockets {
@@ -496,7 +495,13 @@ func runUnconfined(t base.Types) {
 		sessionID := utils.MyULID(ulid.MustParse(sid))
 		ring := kring.GetRing(kring.RingCreds{Secret: ringSecret, SessionID: sessionID})
 
-		logger, err := getLogger(loggerCtx, name, ring, loggerHandle)
+		boxsecret, err := ring.GetBoxSecret()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "kring getboxsecret error", err)
+			os.Exit(-1)
+		}
+
+		logger, err := getLogger(loggerCtx, name, boxsecret, loggerHandle)
 		if err != nil {
 			dopanic("Could not create a logger for the configuration service", err, -1)
 		}
@@ -532,7 +537,7 @@ func runUnconfined(t base.Types) {
 		dumpable.SetNonDumpable()
 		capabilities.NoNewPriv()
 
-		var binderClient *binder.BinderClientImpl
+		var binderClient binder.Client
 		logger := log15.New()
 		var pipe *os.File
 		var err error
@@ -574,15 +579,22 @@ func runUnconfined(t base.Types) {
 		_ = rPipe.Close()
 		sessionID := utils.MyULID(ulid.MustParse(sid))
 		ring := kring.GetRing(kring.RingCreds{Secret: ringSecret, SessionID: sessionID})
+
+		boxsecret, err := ring.GetBoxSecret()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "kring getboxsecret error", err)
+			os.Exit(-1)
+		}
+
 		if loggerHdl > 0 {
-			logger, err = getLogger(loggerCtx, name, ring, loggerHdl)
+			logger, err = getLogger(loggerCtx, name, boxsecret, loggerHdl)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Could not create logger for plugin:", err)
 				os.Exit(-1)
 			}
 		}
 		if binderHdl > 0 {
-			binderClient, _ = binder.NewBinderClient(os.NewFile(binderHdl, "bfile"), logger)
+			binderClient, _ = binder.NewClient(os.NewFile(binderHdl, "bfile"), boxsecret, logger)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Could not create binder for plugin:", err)
 				os.Exit(-1)

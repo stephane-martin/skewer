@@ -19,7 +19,6 @@ import (
 	"github.com/stephane-martin/skewer/model/decoders"
 	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/services/errors"
-	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/utils"
 	"gopkg.in/Graylog2/go-gelf.v2/gelf"
 )
@@ -133,7 +132,7 @@ func (s *GraylogSvcImpl) ListenPacket() []model.ListenerInfo {
 	s.UnixSocketPaths = []string{}
 	for _, syslogConf := range s.Configs {
 		if len(syslogConf.UnixSocketPath) > 0 {
-			conn, err := s.Binder.ListenPacket("unixgram", syslogConf.UnixSocketPath)
+			conn, err := s.Binder.ListenPacket("unixgram", syslogConf.UnixSocketPath, 65536)
 			if err != nil {
 				s.Logger.Warn("Listen unixgram error", "error", err)
 			} else {
@@ -148,15 +147,13 @@ func (s *GraylogSvcImpl) ListenPacket() []model.ListenerInfo {
 					Protocol:       "graylog",
 				})
 				s.UnixSocketPaths = append(s.UnixSocketPaths, syslogConf.UnixSocketPath)
-				_ = conn.(*binder.FilePacketConn).PacketConn.(*net.UnixConn).SetReadBuffer(65536)
-				_ = conn.(*binder.FilePacketConn).PacketConn.(*net.UnixConn).SetWriteBuffer(65536)
 				s.wg.Add(1)
 				go s.handleConnection(conn, syslogConf)
 			}
 		} else {
 			listenAddrs, _ := syslogConf.GetListenAddrs()
 			for port, listenAddr := range listenAddrs {
-				conn, err := s.Binder.ListenPacket("udp", listenAddr)
+				conn, err := s.Binder.ListenPacket("udp", listenAddr, 65536)
 				if err != nil {
 					s.Logger.Warn("Listen UDP error", "error", err)
 				} else {
@@ -172,8 +169,6 @@ func (s *GraylogSvcImpl) ListenPacket() []model.ListenerInfo {
 						Port:     port,
 						Protocol: "graylog",
 					})
-					_ = conn.(*binder.FilePacketConn).PacketConn.(*net.UDPConn).SetReadBuffer(65536)
-					_ = conn.(*binder.FilePacketConn).PacketConn.(*net.UDPConn).SetReadBuffer(65536)
 					s.wg.Add(1)
 					go s.handleConnection(conn, syslogConf)
 				}

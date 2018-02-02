@@ -1,6 +1,7 @@
 package binder
 
 import (
+	"bufio"
 	"fmt"
 	"net"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/awnumar/memguard"
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/utils"
 )
@@ -23,46 +25,66 @@ func IsStream(lnet string) bool {
 	}
 }
 
-type FileConn struct {
+type fileConn struct {
 	net.Conn
 	uid string
 	err string
 }
 
-func (c *FileConn) Close() error {
+func (c *fileConn) Close() error {
 	return c.Conn.Close()
 }
 
-type FilePacketConn struct {
+type filePConn struct {
 	net.PacketConn
 	uid string
 	err string
 }
 
-func (c *FilePacketConn) Close() error {
+func (c *filePConn) SetWriteBuffer(bytes int) error {
+	if uc, ok := c.PacketConn.(*net.UnixConn); ok {
+		return uc.SetWriteBuffer(bytes)
+	}
+	if uc, ok := c.PacketConn.(*net.UDPConn); ok {
+		return uc.SetWriteBuffer(bytes)
+	}
+	return nil
+}
+
+func (c *filePConn) SetReadBuffer(bytes int) error {
+	if uc, ok := c.PacketConn.(*net.UnixConn); ok {
+		return uc.SetReadBuffer(bytes)
+	}
+	if uc, ok := c.PacketConn.(*net.UDPConn); ok {
+		return uc.SetReadBuffer(bytes)
+	}
+	return nil
+}
+
+func (c *filePConn) Close() error {
 	return c.PacketConn.Close()
 }
 
-type ExternalConns struct {
-	conns map[string](chan *FileConn)
+type extConns struct {
+	conns map[string](chan *fileConn)
 	sync.Mutex
 }
 
-func NewExternalConns() *ExternalConns {
-	ext := ExternalConns{conns: map[string](chan *FileConn){}}
+func newExtConns() *extConns {
+	ext := extConns{conns: map[string](chan *fileConn){}}
 	return &ext
 }
 
-func (c *ExternalConns) Close() {
+func (c *extConns) close() {
 	c.Lock()
 	defer c.Unlock()
 	for _, conn := range c.conns {
 		close(conn)
 	}
-	c.conns = map[string](chan *FileConn){}
+	c.conns = map[string](chan *fileConn){}
 }
 
-func (c *ExternalConns) Push(addr string, conn *FileConn) {
+func (c *extConns) push(addr string, conn *fileConn) {
 	c.Lock()
 	defer c.Unlock()
 	if i, ok := c.conns[addr]; ok && i != nil {
@@ -72,20 +94,20 @@ func (c *ExternalConns) Push(addr string, conn *FileConn) {
 	}
 }
 
-func (c *ExternalConns) Get(addr string, create bool) chan *FileConn {
+func (c *extConns) get(addr string, create bool) chan *fileConn {
 	c.Lock()
 	defer c.Unlock()
 	if i, ok := c.conns[addr]; ok && i != nil {
 		return i
 	}
 	if create {
-		c.conns[addr] = make(chan *FileConn, 16)
+		c.conns[addr] = make(chan *fileConn, 16)
 		return c.conns[addr]
 	}
 	return nil
 }
 
-func (c *ExternalConns) Delete(addr string) bool {
+func (c *extConns) delete(addr string) bool {
 	c.Lock()
 	defer c.Unlock()
 	conn, ok := c.conns[addr]
@@ -99,21 +121,21 @@ func (c *ExternalConns) Delete(addr string) bool {
 	return false
 }
 
-type ExternalPacketConns struct {
-	conns map[string](chan *FilePacketConn)
+type extPConns struct {
+	conns map[string](chan *filePConn)
 	sync.Mutex
 }
 
-func (c *ExternalPacketConns) Close() {
+func (c *extPConns) close() {
 	c.Lock()
 	defer c.Unlock()
 	for _, conn := range c.conns {
 		close(conn)
 	}
-	c.conns = map[string](chan *FilePacketConn){}
+	c.conns = map[string](chan *filePConn){}
 }
 
-func (c *ExternalPacketConns) Push(addr string, conn *FilePacketConn) {
+func (c *extPConns) push(addr string, conn *filePConn) {
 	c.Lock()
 	defer c.Unlock()
 	if i, ok := c.conns[addr]; ok && i != nil {
@@ -123,20 +145,20 @@ func (c *ExternalPacketConns) Push(addr string, conn *FilePacketConn) {
 	}
 }
 
-func (c *ExternalPacketConns) Get(addr string, create bool) chan *FilePacketConn {
+func (c *extPConns) get(addr string, create bool) chan *filePConn {
 	c.Lock()
 	defer c.Unlock()
 	if i, ok := c.conns[addr]; ok && i != nil {
 		return i
 	}
 	if create {
-		c.conns[addr] = make(chan *FilePacketConn, 16)
+		c.conns[addr] = make(chan *filePConn, 16)
 		return c.conns[addr]
 	}
 	return nil
 }
 
-func (c *ExternalPacketConns) Delete(addr string) bool {
+func (c *extPConns) delete(addr string) bool {
 	c.Lock()
 	defer c.Unlock()
 	conn, ok := c.conns[addr]
@@ -150,38 +172,97 @@ func (c *ExternalPacketConns) Delete(addr string) bool {
 	return false
 }
 
-func NewExternalPacketConns() *ExternalPacketConns {
-	ext := ExternalPacketConns{conns: map[string](chan *FilePacketConn){}}
+func newExtPConns() *extPConns {
+	ext := extPConns{conns: map[string](chan *filePConn){}}
 	return &ext
 }
 
-type BinderClientImpl struct {
-	conn           *net.UnixConn
-	NewStreamConns *ExternalConns
-	NewPacketConns *ExternalPacketConns
+type clientImpl struct {
+	conn      *net.UnixConn
+	newConns  *extConns
+	newPConns *extPConns
+	writer    *utils.EncryptWriter
 }
 
-func NewBinderClient(binderFile *os.File, logger log15.Logger) (*BinderClientImpl, error) {
+type scannerOob struct {
+	conn   *net.UnixConn
+	buf    []byte
+	oobbuf []byte
+	split  bufio.SplitFunc
+}
+
+func newScannerOob(conn *net.UnixConn, secret *memguard.LockedBuffer) *scannerOob {
+	return &scannerOob{
+		conn:   conn,
+		buf:    make([]byte, 0, 2048),
+		oobbuf: make([]byte, 0, 2048),
+		split:  utils.MakeDecryptSplit(secret),
+	}
+}
+
+var oobSize = syscall.CmsgSpace(4)
+
+func (s *scannerOob) Read() (msg string, oob []byte, err error) {
+	var adv int
+	var token []byte
+
+	for {
+		adv, token, err = s.split(s.buf, false)
+		if err != nil {
+			return "", nil, err
+		}
+		if adv != 0 {
+			break
+		}
+		buf := make([]byte, 2048)
+		oobbuf := make([]byte, 2048)
+		n, oobn, _, _, err := s.conn.ReadMsgUnix(buf, oobbuf)
+		if err != nil {
+			return "", nil, err
+		}
+		if n > 0 {
+			s.buf = append(s.buf, buf[:n]...)
+		}
+		if oobn > 0 {
+			s.oobbuf = append(s.oobbuf, oobbuf[:oobn]...)
+		}
+	}
+
+	s.buf = s.buf[adv:]
+	msg = string(token)
+	if strings.HasPrefix(msg, "newconn ") {
+		if len(s.oobbuf) < oobSize {
+			return "", nil, fmt.Errorf("Not enough out of band data: %d < %d", len(s.oobbuf), oobSize)
+		}
+		oob = s.oobbuf[:oobSize]
+		s.oobbuf = s.oobbuf[oobSize:]
+	}
+	return msg, oob, nil
+}
+
+func NewClient(binderFile *os.File, secret *memguard.LockedBuffer, logger log15.Logger) (Client, error) {
 	conn, err := net.FileConn(binderFile)
 	if err != nil {
 		return nil, err
 	}
 	binderFile.Close()
-	c := BinderClientImpl{conn: conn.(*net.UnixConn)}
-	c.NewStreamConns = NewExternalConns()
-	c.NewPacketConns = NewExternalPacketConns()
+	c := clientImpl{
+		conn:   conn.(*net.UnixConn),
+		writer: utils.NewEncryptWriter(conn, secret),
+	}
+	c.newConns = newExtConns()
+	c.newPConns = newExtPConns()
+	scanner := newScannerOob(c.conn, secret)
 
 	go func() {
 		for {
-			buf := make([]byte, 1024)
-			oob := make([]byte, syscall.CmsgSpace(4))
-			n, oobn, _, _, err := c.conn.ReadMsgUnix(buf, oob)
+			msg, oob, err := scanner.Read()
 			if err != nil {
 				logger.Error("Error reading message from parent binder", "error", err)
-				c.NewStreamConns.Close()
-				c.NewPacketConns.Close()
+				c.newConns.close()
+				c.newPConns.close()
 				// the skewer parent process may be gone... for whatever reason
-				// we should stop before catastrophe happens
+				// we should stop before some catastrophe happens
 				pid := os.Getpid()
 				process, err := os.FindProcess(pid)
 				if err == nil {
@@ -189,66 +270,63 @@ func NewBinderClient(binderFile *os.File, logger log15.Logger) (*BinderClientImp
 				}
 				return
 			}
-			if n > 0 {
-				msgs := strings.Split(strings.Trim(string(buf[:n]), " \r\n"), "\n")
-				logger.Debug("received messages from root parent", "messages", msgs)
-				for _, msg := range msgs {
-					msg = strings.Trim(msg, " \r\n")
-					if strings.HasPrefix(msg, "error ") {
-						parts := strings.SplitN(msg, " ", 3)
-						addr := parts[1]
-						lnet := strings.SplitN(addr, ":", 2)[0]
-						errorstr := parts[2]
+			if len(msg) > 0 {
 
-						if IsStream(lnet) {
-							c.NewStreamConns.Push(addr, &FileConn{err: errorstr})
-						} else {
-							c.NewPacketConns.Push(addr, &FilePacketConn{err: errorstr})
-						}
+				logger.Debug("received message from root parent", "message", msg)
+				if strings.HasPrefix(msg, "error ") {
+					parts := strings.SplitN(msg, " ", 3)
+					addr := parts[1]
+					lnet := strings.SplitN(addr, ":", 2)[0]
+					errorstr := parts[2]
+
+					if IsStream(lnet) {
+						c.newConns.push(addr, &fileConn{err: errorstr})
+					} else {
+						c.newPConns.push(addr, &filePConn{err: errorstr})
 					}
+				}
 
-					if strings.HasPrefix(msg, "confirmlisten ") {
-						parts := strings.SplitN(msg, " ", 2)
-						addr := parts[1]
-						c.NewStreamConns.Push(addr, &FileConn{})
-					}
+				if strings.HasPrefix(msg, "confirmlisten ") {
+					parts := strings.SplitN(msg, " ", 2)
+					addr := parts[1]
+					c.newConns.push(addr, &fileConn{})
+				}
 
-					if strings.HasPrefix(msg, "newconn ") && oobn > 0 {
-						parts := strings.SplitN(msg, " ", 3)
-						uid := parts[1]
-						addr := parts[2]
-						cmsgs, err := syscall.ParseSocketControlMessage(oob)
+				if strings.HasPrefix(msg, "newconn ") && len(oob) > 0 {
+					parts := strings.SplitN(msg, " ", 3)
+					uid := parts[1]
+					addr := parts[2]
+					cmsgs, err := syscall.ParseSocketControlMessage(oob)
+					if err == nil {
+						fds, err := syscall.ParseUnixRights(&cmsgs[0])
 						if err == nil {
-							fds, err := syscall.ParseUnixRights(&cmsgs[0])
-							if err == nil {
-								for _, fd := range fds {
-									logger.Debug("Received a new connection from root parent", "uid", uid, "addr", addr)
-									lnet := strings.SplitN(addr, ":", 2)[0]
-									rf := os.NewFile(uintptr(fd), "newconn")
-									if IsStream(lnet) {
-										rc, err := net.FileConn(rf)
-										rf.Close()
-										if err == nil {
-											c.NewStreamConns.Push(addr, &FileConn{Conn: rc, uid: uid})
-										} else {
-											logger.Warn("Error getting connection from file handler", "error", err)
-										}
+							for _, fd := range fds {
+								logger.Debug("Received a new connection from root parent", "uid", uid, "addr", addr)
+								lnet := strings.SplitN(addr, ":", 2)[0]
+								rf := os.NewFile(uintptr(fd), "newconn")
+								if IsStream(lnet) {
+									rc, err := net.FileConn(rf)
+									rf.Close()
+									if err == nil {
+										c.newConns.push(addr, &fileConn{Conn: rc, uid: uid})
 									} else {
-										rc, err := net.FilePacketConn(rf)
-										rf.Close()
-										if err == nil {
-											c.NewPacketConns.Push(addr, &FilePacketConn{PacketConn: rc, uid: uid})
-										} else {
-											logger.Warn("Error getting connection from file handler", "error", err)
-										}
+										logger.Warn("Error getting connection from file handler", "error", err)
+									}
+								} else {
+									rc, err := net.FilePacketConn(rf)
+									rf.Close()
+									if err == nil {
+										c.newPConns.push(addr, &filePConn{PacketConn: rc, uid: uid})
+									} else {
+										logger.Warn("Error getting connection from file handler", "error", err)
 									}
 								}
-							} else {
-								logger.Warn("ParseUnixRights() error", "error", err)
 							}
 						} else {
-							logger.Warn("ParseSocketControlMessage() error", "error", err)
+							logger.Warn("ParseUnixRights() error", "error", err)
 						}
+					} else {
+						logger.Warn("ParseSocketControlMessage() error", "error", err)
 					}
 				}
 			}
@@ -258,17 +336,17 @@ func NewBinderClient(binderFile *os.File, logger log15.Logger) (*BinderClientImp
 	return &c, nil
 }
 
-type BinderListener struct {
+type Listener struct {
 	addr   string
-	client *BinderClientImpl
+	client *clientImpl
 }
 
-func (l *BinderListener) Close() error {
+func (l *Listener) Close() error {
 	return l.client.StopListen(l.addr)
 }
 
-func (l *BinderListener) Accept() (net.Conn, error) {
-	ichan := l.client.NewStreamConns.Get(l.addr, false)
+func (l *Listener) Accept() (net.Conn, error) {
+	ichan := l.client.newConns.get(l.addr, false)
 	notListenErr := &net.OpError{Err: fmt.Errorf("Not listening on that address"), Addr: l.Addr(), Op: "Accept"}
 	if ichan == nil {
 		return nil, notListenErr
@@ -283,11 +361,11 @@ func (l *BinderListener) Accept() (net.Conn, error) {
 	return conn, nil
 }
 
-type BinderAddr struct {
+type addrType struct {
 	addr string
 }
 
-func (a *BinderAddr) String() string {
+func (a *addrType) String() string {
 	parts := strings.SplitN(a.addr, ":", 2)
 	if len(parts) == 2 {
 		return parts[1]
@@ -296,19 +374,19 @@ func (a *BinderAddr) String() string {
 	}
 }
 
-func (a *BinderAddr) Network() string {
+func (a *addrType) Network() string {
 	return strings.SplitN(a.addr, ":", 2)[0]
 }
 
-func (l *BinderListener) Addr() net.Addr {
-	return &BinderAddr{addr: l.addr}
+func (l *Listener) Addr() net.Addr {
+	return &addrType{addr: l.addr}
 }
 
-func (c *BinderClientImpl) Listen(lnet string, laddr string) (net.Listener, error) {
+func (c *clientImpl) Listen(lnet string, laddr string) (net.Listener, error) {
 	addr := fmt.Sprintf("%s:%s", lnet, laddr)
-	ichan := c.NewStreamConns.Get(addr, true)
+	ichan := c.newConns.get(addr, true)
 	// TODO: generate UID in the client instead of server
-	_, err := c.conn.Write([]byte(fmt.Sprintf("listen %s\n", addr)))
+	_, err := c.writer.Write([]byte(fmt.Sprintf("listen %s", addr)))
 	if err != nil {
 		return nil, err
 	}
@@ -319,41 +397,45 @@ func (c *BinderClientImpl) Listen(lnet string, laddr string) (net.Listener, erro
 	} else if len(confirmation.err) > 0 {
 		return nil, &net.OpError{Err: fmt.Errorf(confirmation.err), Op: "Listen"}
 	} else {
-		return &BinderListener{addr: addr, client: c}, nil
+		return &Listener{addr: addr, client: c}, nil
 	}
 }
 
-func (c *BinderClientImpl) ListenPacket(lnet string, laddr string) (net.PacketConn, error) {
+func (c *clientImpl) ListenPacket(lnet string, laddr string, bytes int) (net.PacketConn, error) {
 	addr := fmt.Sprintf("%s:%s", lnet, laddr)
-	ichan := c.NewPacketConns.Get(addr, true)
-	_, err := c.conn.Write([]byte(fmt.Sprintf("listen %s\n", addr)))
+	ichan := c.newPConns.get(addr, true)
+	_, err := c.writer.Write([]byte(fmt.Sprintf("listen %s", addr)))
 	if err != nil {
 		return nil, err
 	}
 	conn, more := <-ichan
-	c.NewPacketConns.Delete(addr)
+	c.newPConns.delete(addr)
 	if !more {
 		return nil, fmt.Errorf("There was an error when asking the parent process for a packet connection")
 	}
 	if len(conn.err) > 0 {
 		return nil, fmt.Errorf(conn.err)
 	}
+	if bytes > 0 {
+		conn.SetReadBuffer(bytes)
+		conn.SetWriteBuffer(bytes)
+	}
 	return conn, nil
 }
 
-func (c *BinderClientImpl) StopListen(addr string) error {
-	ok := c.NewStreamConns.Delete(addr)
+func (c *clientImpl) StopListen(addr string) error {
+	ok := c.newConns.delete(addr)
 	if ok {
-		_, _ = c.conn.Write([]byte(fmt.Sprintf("stoplisten %s\n", addr)))
+		_, _ = c.writer.Write([]byte(fmt.Sprintf("stoplisten %s", addr)))
 		return nil
 	}
 	return fmt.Errorf("Already closed")
 }
 
-func (c *BinderClientImpl) Quit() error {
+func (c *clientImpl) Quit() error {
 	return utils.All(
 		func() (err error) {
-			_, err = c.conn.Write([]byte("byebye\n"))
+			_, err = c.writer.Write([]byte("byebye"))
 			return err
 		},
 		func() error {
