@@ -81,7 +81,7 @@ func (s *ReporterImpl) pushqueue() {
 
 	for s.queue.Wait(0) {
 		for s.queue.Wait(100 * time.Millisecond) {
-			m, err = s.queue.Get()
+			_, m, err = s.queue.Get()
 			if m != nil && err == nil {
 				_, err = s.pipeWriter.Write(m)
 				if cap(m) == 4096 {
@@ -120,7 +120,7 @@ func (s *ReporterImpl) Stash(m *model.FullMessage) (fatal, nonfatal error) {
 	if err != nil {
 		return nil, err
 	}
-	fatal = s.queue.Put(b) // fatal is set when the queue has been disposed
+	fatal = s.queue.PutSlice(b) // fatal is set when the queue has been disposed
 	return fatal, nil
 }
 

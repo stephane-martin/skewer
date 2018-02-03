@@ -812,7 +812,7 @@ func (s *StorePlugin) pushqueue(secret *memguard.LockedBuffer) {
 	bufpipe := bufio.NewWriter(s.pipe)
 	writeToStore := utils.NewEncryptWriter(bufpipe, secret)
 	for {
-		s.q.GetManyInto(&s.msgsBatch) // sets msgsBatch length to 0 before putting at most cap(msgsBatch) messages in it
+		s.q.GetManySlicesInto(&s.msgsBatch) // sets msgsBatch length to 0 before putting at most cap(msgsBatch) messages in it
 		if len(s.msgsBatch) == 0 {
 			return
 		}
@@ -875,7 +875,7 @@ func (s *StorePlugin) Stash(m *model.FullMessage) (err error) {
 	if err != nil {
 		return err
 	}
-	return s.q.Put(b)
+	return s.q.PutSlice(b)
 }
 
 func (s *StorePlugin) Start() (infos []model.ListenerInfo, err error) {

@@ -12,6 +12,7 @@ import (
 type bsliceNode struct {
 	next  *bsliceNode
 	slice []byte
+	uid   utils.MyULID
 }
 
 type BSliceQueue struct {
@@ -64,7 +65,7 @@ func (q *BSliceQueue) Wait(timeout time.Duration) bool {
 	}
 }
 
-func (q *BSliceQueue) Get() ([]byte, error) {
+func (q *BSliceQueue) Get() (utils.MyULID, []byte, error) {
 	tail := q.tail
 	next := tail.next
 	if next != nil {
@@ -73,52 +74,76 @@ func (q *BSliceQueue) Get() ([]byte, error) {
 		//m = tail.msg
 		(*bsliceNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.tail)), unsafe.Pointer(next))).slice = next.slice
 		q.pool.Put(tail)
-		return next.slice, nil
+		return next.uid, next.slice, nil
 	} else if q.Disposed() {
-		return nil, utils.ErrDisposed
+		return utils.ZeroUid, nil, utils.ErrDisposed
 	} else {
-		return nil, nil
+		return utils.ZeroUid, nil, nil
 	}
 }
 
-func (q *BSliceQueue) Put(m []byte) error {
+func (q *BSliceQueue) PutSlice(m []byte) error {
+	return q.Put(utils.ZeroUid, m)
+}
+
+func (q *BSliceQueue) Put(uid utils.MyULID, m []byte) error {
 	if q.Disposed() {
 		return utils.ErrDisposed
 	}
 	n := q.pool.Get().(*bsliceNode)
 	n.slice = m
+	n.uid = uid
 	n.next = nil
 	(*bsliceNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.head)), unsafe.Pointer(n))).next = n
 	return nil
 }
 
-func (q *BSliceQueue) GetMany(max uint32) [][]byte {
-	var elt []byte
+func (q *BSliceQueue) GetMany(max uint32) (slices [][]byte) {
+	var slice []byte
 	var err error
-	res := make([][]byte, 0, max)
+	slices = make([][]byte, 0, max)
 	var i uint32
 	for i = 0; i < max; i++ {
-		elt, err = q.Get()
-		if elt == nil || err != nil {
+		_, slice, err = q.Get()
+		if slice == nil || err != nil {
 			break
 		}
-		res = append(res, elt)
+		slices = append(slices, slice)
 	}
-	return res
+	return slices
 }
 
-func (q *BSliceQueue) GetManyInto(s *[]([]byte)) {
-	var elt []byte
+func (q *BSliceQueue) GetManyInto(slices *[]([]byte), uids *[]utils.MyULID) {
+	var slice []byte
 	var err error
 	var i int
-	max := cap(*s)
-	*s = (*s)[:0]
+	var uid utils.MyULID
+	max := cap(*slices)
+	*slices = (*slices)[:0]
+	*uids = (*uids)[:0]
 	for i < max {
-		elt, err = q.Get()
-		if elt == nil || err != nil {
+		uid, slice, err = q.Get()
+		if slice == nil || err != nil {
 			break
 		}
-		*s = append(*s, elt)
+		*slices = append(*slices, slice)
+		*uids = append(*uids, uid)
+		i++
+	}
+}
+
+func (q *BSliceQueue) GetManySlicesInto(slices *[]([]byte)) {
+	var slice []byte
+	var err error
+	var i int
+	max := cap(*slices)
+	*slices = (*slices)[:0]
+	for i < max {
+		_, slice, err = q.Get()
+		if slice == nil || err != nil {
+			break
+		}
+		*slices = append(*slices, slice)
 		i++
 	}
 }

@@ -157,7 +157,6 @@ type MessageStore struct {
 	OutputsChans   map[conf.DestinationType](chan []*model.FullMessage)
 
 	toStashQueue    *queue.BSliceQueue
-	toStashUids     *queue.AckQueue
 	ackQueue        *queue.AckQueue
 	nackQueue       *queue.AckQueue
 	permerrorsQueue *queue.AckQueue
@@ -210,7 +209,6 @@ func (s *MessageStore) receiveAcks() {
 func (s *MessageStore) cleanup(ctx context.Context) {
 	<-ctx.Done()
 	s.toStashQueue.Dispose()
-	s.toStashUids.Dispose()
 	s.ackQueue.Dispose()
 	s.nackQueue.Dispose()
 	s.permerrorsQueue.Dispose()
@@ -229,14 +227,9 @@ func (s *MessageStore) consumeStashQueue() {
 	uids := make([]utils.MyULID, 0, s.batchSize)
 	messagesMap := make(map[utils.MyULID]([]byte), s.batchSize)
 	for s.toStashQueue.Wait(0) {
-		s.toStashQueue.GetManyInto(&messages)
+		s.toStashQueue.GetManyInto(&messages, &uids)
 		if len(messages) == 0 {
 			continue
-		}
-		uids = uids[:len(messages)]
-		err = s.toStashUids.GetUidsExactlyInto(&uids)
-		if err != nil {
-			s.logger.Warn("Ingestion error", "error", err)
 		}
 		_, err = s.ingest(messages, uids, &messagesMap)
 		if err != nil {
@@ -404,7 +397,6 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 		dests:           &Destinations{},
 		batchSize:       cfg.BatchSize,
 		toStashQueue:    queue.NewBSliceQueue(),
-		toStashUids:     queue.NewAckQueue(),
 		ackQueue:        queue.NewAckQueue(),
 		nackQueue:       queue.NewAckQueue(),
 		permerrorsQueue: queue.NewAckQueue(),
@@ -790,11 +782,7 @@ func (s *MessageStore) PurgeBadger() {
 }
 
 func (s *MessageStore) Stash(uid utils.MyULID, b []byte) (fatal error, nonfatal error) {
-	fatal = s.toStashUids.Put(uid, 0)
-	if fatal != nil {
-		return fatal, nil
-	}
-	fatal = s.toStashQueue.Put(b)
+	fatal = s.toStashQueue.Put(uid, b)
 	return fatal, nil
 }
 

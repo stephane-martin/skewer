@@ -145,7 +145,7 @@ func (s *storeServiceImpl) create() error {
 
 		for scanner.Scan() {
 			msgBytes = scanner.Bytes()
-			message, err = model.FromBuf(msgBytes)
+			message, err = model.FromBuf(msgBytes) // we need to parse to get the message uid
 			if err == nil {
 				uid = message.Uid
 				model.FullFree(message)
