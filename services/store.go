@@ -140,17 +140,23 @@ func (s *storeServiceImpl) create() error {
 		}()
 		var err error
 		var message *model.FullMessage
+		var msgBytes []byte
+		var uid utils.MyULID
 
 		for scanner.Scan() {
-			message, err = model.FromBuf(scanner.Bytes())
+			msgBytes = scanner.Bytes()
+			message, err = model.FromBuf(msgBytes)
 			if err == nil {
-				err, _ = s.store.Stash(message)
+				uid = message.Uid
+				model.FullFree(message)
+				err, _ = s.store.Stash(uid, msgBytes)
 				if err != nil {
 					s.logger.Error("Error pushing message to the store queue", "error", err)
 					go func() { s.Shutdown() }()
 					return
 				}
 			} else {
+				model.FullFree(message)
 				s.logger.Error("Unexpected error decoding message from the Store pipe", "error", err)
 				go func() { s.Shutdown() }()
 				return

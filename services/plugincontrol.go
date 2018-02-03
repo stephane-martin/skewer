@@ -117,6 +117,7 @@ func (f *CFactory) NewStore(loggerHandle uintptr) *StorePlugin {
 				return make([]byte, 0, 4096)
 			},
 		},
+		gen: utils.NewGenerator(),
 	}
 	return s
 }
@@ -802,6 +803,7 @@ type StorePlugin struct {
 	pushwg    *sync.WaitGroup
 	msgsBatch [][]byte
 	pool      *sync.Pool
+	gen       *utils.Generator
 }
 
 func (s *StorePlugin) pushqueue(secret *memguard.LockedBuffer) {
@@ -859,6 +861,9 @@ func (s *StorePlugin) Shutdown(killTimeOut time.Duration) {
 func (s *StorePlugin) Stash(m *model.FullMessage) (err error) {
 	// this method is called very frequently, so we avoid to lock anything
 	// the BSliceQueue ensures that we write the messages sequentially to the store child
+	if s.conf.Store.AddMissingMsgID && len(m.Fields.MsgId) == 0 {
+		m.Fields.MsgId = s.gen.Uid().String()
+	}
 	var b []byte
 	size := m.Size()
 	if size > 4096 {

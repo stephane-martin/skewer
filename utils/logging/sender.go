@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/awnumar/memguard"
+	proto "github.com/gogo/protobuf/proto"
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/utils/sbox"
 )
@@ -60,7 +61,7 @@ func NewRemoteLogger(ctx context.Context, remote *net.UnixConn, secret *memguard
 					}
 
 				}
-				dec, err := rbis.Marshal()
+				dec, err := proto.Marshal(&rbis)
 				if err != nil {
 					continue Send
 				}

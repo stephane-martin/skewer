@@ -156,7 +156,8 @@ type MessageStore struct {
 	FatalErrorChan chan struct{}
 	OutputsChans   map[conf.DestinationType](chan []*model.FullMessage)
 
-	toStashQueue    *queue.MessageQueue
+	toStashQueue    *queue.BSliceQueue
+	toStashUids     *queue.AckQueue
 	ackQueue        *queue.AckQueue
 	nackQueue       *queue.AckQueue
 	permerrorsQueue *queue.AckQueue
@@ -209,6 +210,7 @@ func (s *MessageStore) receiveAcks() {
 func (s *MessageStore) cleanup(ctx context.Context) {
 	<-ctx.Done()
 	s.toStashQueue.Dispose()
+	s.toStashUids.Dispose()
 	s.ackQueue.Dispose()
 	s.nackQueue.Dispose()
 	s.permerrorsQueue.Dispose()
@@ -223,20 +225,24 @@ func (s *MessageStore) cleanup(ctx context.Context) {
 func (s *MessageStore) consumeStashQueue() {
 	defer s.wg.Done()
 	var err error
-	messages := make([]*model.FullMessage, 0, s.batchSize)
+	messages := make([][]byte, 0, s.batchSize)
+	uids := make([]utils.MyULID, 0, s.batchSize)
 	messagesMap := make(map[utils.MyULID]([]byte), s.batchSize)
 	for s.toStashQueue.Wait(0) {
 		s.toStashQueue.GetManyInto(&messages)
 		if len(messages) == 0 {
 			continue
 		}
-		_, err = s.ingest(messages, &messagesMap)
+		uids = uids[:len(messages)]
+		err = s.toStashUids.GetUidsExactlyInto(&uids)
 		if err != nil {
 			s.logger.Warn("Ingestion error", "error", err)
 		}
-		for _, m := range messages {
-			model.FullFree(m)
+		_, err = s.ingest(messages, uids, &messagesMap)
+		if err != nil {
+			s.logger.Warn("Ingestion error", "error", err)
 		}
+
 	}
 }
 
@@ -397,7 +403,8 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 		logger:          l.New("class", "MessageStore"),
 		dests:           &Destinations{},
 		batchSize:       cfg.BatchSize,
-		toStashQueue:    queue.NewMessageQueue(),
+		toStashQueue:    queue.NewBSliceQueue(),
+		toStashUids:     queue.NewAckQueue(),
 		ackQueue:        queue.NewAckQueue(),
 		nackQueue:       queue.NewAckQueue(),
 		permerrorsQueue: queue.NewAckQueue(),
@@ -782,9 +789,12 @@ func (s *MessageStore) PurgeBadger() {
 	}
 }
 
-func (s *MessageStore) Stash(m *model.FullMessage) (fatal error, nonfatal error) {
-	// TODO: marshal before?
-	fatal = s.toStashQueue.Put(m)
+func (s *MessageStore) Stash(uid utils.MyULID, b []byte) (fatal error, nonfatal error) {
+	fatal = s.toStashUids.Put(uid, 0)
+	if fatal != nil {
+		return fatal, nil
+	}
+	fatal = s.toStashQueue.Put(b)
 	return fatal, nil
 }
 
@@ -799,39 +809,20 @@ func (s *MessageStore) ingestByDest(queue map[utils.MyULID]([]byte), dest conf.D
 	return readyDB.AddManyTrueMap(queue, txn)
 }
 
-func (s *MessageStore) ingest(queue []*model.FullMessage, messagesMap *(map[utils.MyULID]([]byte))) (n int, err error) {
+func (s *MessageStore) ingest(queue [][]byte, uids []utils.MyULID, messagesMap *(map[utils.MyULID]([]byte))) (n int, err error) {
 	if len(queue) == 0 {
 		return 0, nil
 	}
-	var b []byte
-	var m *model.FullMessage
+	var i int
+	var uid utils.MyULID
 
 	// clear the map that will hold the marshalled bytes
-	var uid utils.MyULID
 	for uid = range *messagesMap {
 		delete(*messagesMap, uid)
 	}
 
-	for _, m = range queue {
-		if s.addMissingMsgID && len(m.Fields.MsgId) == 0 {
-			m.Fields.MsgId = s.generator.Uid().String()
-		}
-		// todo: reuse buffers
-		b, err = m.Marshal()
-		if err == nil {
-			if len(b) == 0 {
-				s.logger.Warn("Ingestion of empty message", "uid", m.Uid)
-			} else {
-				(*messagesMap)[m.Uid] = b
-			}
-		} else {
-			s.logger.Warn("Discarded a message that could not be marshaled", "error", err)
-		}
-	}
-
-	length := len(*messagesMap)
-	if length == 0 {
-		return 0, nil
+	for i = range queue {
+		(*messagesMap)[uids[i]] = queue[i]
 	}
 
 	dests := s.Destinations()
@@ -848,13 +839,14 @@ func (s *MessageStore) ingest(queue []*model.FullMessage, messagesMap *(map[util
 
 	err = txn.Commit(nil)
 	if err == nil {
+		length := len(*messagesMap)
 		for _, dest := range dests {
 			badgerGauge.WithLabelValues("messages", conf.DestinationNames[dest]).Add(float64(length))
 			badgerGauge.WithLabelValues("ready", conf.DestinationNames[dest]).Add(float64(length))
 		}
 		return length, nil
 	} else if err == badger.ErrConflict {
-		return s.ingest(queue, messagesMap)
+		return s.ingest(queue, uids, messagesMap)
 	} else {
 		return 0, err
 	}
@@ -896,8 +888,7 @@ func (s *MessageStore) retrieve(dest conf.DestinationType) (messages []*model.Fu
 			s.logger.Warn("retrieved empty entry", "uid", uid)
 			continue
 		}
-		message = model.FullFactory()
-		err = message.Unmarshal(messageBytes)
+		message, err = model.FromBuf(messageBytes)
 		if err != nil {
 			invalidEntries = append(invalidEntries, uid)
 			s.logger.Warn("retrieved invalid entry", "uid", uid, "message", string(messageBytes), "dest", dest, "error", err)

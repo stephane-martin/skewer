@@ -3,6 +3,7 @@ package encoders
 import (
 	"io"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/stephane-martin/skewer/model"
 )
 
@@ -12,14 +13,14 @@ func encodePB(v interface{}, w io.Writer) error {
 	}
 	switch val := v.(type) {
 	case *model.FullMessage:
-		buf, err := val.Marshal()
+		buf, err := proto.Marshal(val)
 		if err != nil {
 			return err
 		}
 		_, err = w.Write(buf)
 		return err
 	case *model.SyslogMessage:
-		buf, err := val.Marshal()
+		buf, err := proto.Marshal(val)
 		if err != nil {
 			return err
 		}

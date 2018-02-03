@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/awnumar/memguard"
+	"github.com/gogo/protobuf/proto"
 	"github.com/pquerna/ffjson/ffjson"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/sbox"
@@ -134,7 +135,7 @@ func FullFactory() (msg *FullMessage) {
 
 func FromBuf(buf []byte) (msg *FullMessage, err error) {
 	msg = FullFactory()
-	err = msg.Unmarshal(buf)
+	err = proto.Unmarshal(buf, msg)
 	if err != nil {
 		FullFree(msg)
 		return nil, err
@@ -405,23 +406,6 @@ func (m *SyslogMessage) GetAllProperties() (res map[string](map[string]string)) 
 	return res
 }
 
-/*
-func (m *FullMessage) Encrypt(secret *memguard.LockedBuffer) (enc []byte, err error) {
-	dec, err := m.MarshalMsg(nil)
-	if err != nil {
-		return nil, err
-	}
-	if secret == nil {
-		return dec, nil
-	}
-	enc, err = sbox.Encrypt(dec, secret)
-	if err != nil {
-		return nil, err
-	}
-	return enc, err
-}
-*/
-
 func (m *FullMessage) Decrypt(secret *memguard.LockedBuffer, enc []byte) (err error) {
 	if len(enc) == 0 {
 		return fmt.Errorf("Empty message")
@@ -435,6 +419,6 @@ func (m *FullMessage) Decrypt(secret *memguard.LockedBuffer, enc []byte) (err er
 	} else {
 		dec = enc
 	}
-	err = m.Unmarshal(dec)
+	err = proto.Unmarshal(dec, m)
 	return err
 }

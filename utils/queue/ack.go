@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"fmt"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -145,6 +146,22 @@ func (q *AckQueue) GetMany(max uint32) (res []UidDest) {
 		res = append(res, UidDest{Uid: uid, Dest: dest})
 	}
 	return res
+}
+
+func (q *AckQueue) GetUidsExactlyInto(uids *[]utils.MyULID) error {
+	var uid utils.MyULID
+	var err error
+	nb := len(*uids)
+	var i int
+	for i < nb {
+		uid, _, err = q.Get()
+		if uid == utils.ZeroUid || err != nil {
+			return fmt.Errorf("GetUidsExactlyInto: missing uid for some message")
+		}
+		(*uids)[i] = uid
+		i++
+	}
+	return nil
 }
 
 func (q *AckQueue) GetManyInto(uids *[]UidDest) {

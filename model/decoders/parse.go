@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/stephane-martin/skewer/model"
 	"golang.org/x/text/encoding"
 )
@@ -60,12 +61,12 @@ func Fuzz(m []byte) int {
 	if err != nil {
 		return 0
 	}
-	b, err := msg.Marshal()
+	b, err := proto.Marshal(msg)
 	if err != nil {
 		panic(err)
 	}
 	msg2 := model.CleanFactory()
-	err = msg2.Unmarshal(b)
+	err = proto.Unmarshal(b, msg2)
 	if err != nil {
 		panic("Unmarshaling failed")
 	}

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/awnumar/memguard"
+	"github.com/gogo/protobuf/proto"
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/utils/sbox"
 )
@@ -52,7 +53,7 @@ Listen:
 				l.Warn("Error decrypting logs", "error", err)
 				continue Listen
 			}
-			err = r.Unmarshal(dec)
+			err = proto.Unmarshal(dec, &r)
 			if err != nil {
 				l.Warn("Error decoding logs", "error", err)
 				continue Listen
