@@ -11,6 +11,7 @@ import (
 	"github.com/awnumar/memguard"
 	"github.com/stephane-martin/skewer/utils/sbox"
 	"golang.org/x/crypto/ed25519"
+	"golang.org/x/crypto/nacl/secretbox"
 )
 
 var NOW []byte = []byte("now")
@@ -134,18 +135,21 @@ func (s *EncryptWriter) Write(p []byte) (n int, err error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
-	var enc []byte
+	var buf []byte
 	if s.key == nil {
-		enc = p
+		encLength := len(p)
+		buf = make([]byte, 0, 11+encLength)
+		buf = append(buf, fmt.Sprintf("%010d ", encLength)...)
+		buf = append(buf, p...)
 	} else {
-		enc, err = sbox.Encrypt(p, s.key)
+		encLength := len(p) + 24 + secretbox.Overhead
+		buf = make([]byte, 11+encLength)
+		_, err = sbox.EncryptTo(p, s.key, buf[:11])
 		if err != nil {
 			return 0, err
 		}
+		copy(buf[:11], fmt.Sprintf("%010d ", encLength))
 	}
-	buf := make([]byte, 0, 11+len(enc))
-	buf = append(buf, fmt.Sprintf("%010d ", len(enc))...)
-	buf = append(buf, enc...)
 	_, err = s.dest.Write(buf)
 	if err == nil {
 		return len(p), nil

@@ -9,38 +9,40 @@ import (
 	"golang.org/x/crypto/nacl/secretbox"
 )
 
-func Encrypt(message []byte, secret *memguard.LockedBuffer) (encrypted []byte, err error) {
+func sliceForAppend(in []byte, n int) (head, tail []byte) {
+	if total := len(in) + n; cap(in) >= total {
+		head = in[:total]
+	} else {
+		head = make([]byte, total)
+		copy(head, in)
+	}
+	tail = head[len(in):]
+	return
+}
+
+func EncryptTo(message []byte, secret *memguard.LockedBuffer, out []byte) (encrypted []byte, err error) {
 	if secret == nil {
 		return nil, fmt.Errorf("Encrypt: nil secret")
 	}
-	buf := secret.Buffer()
-	if buf == nil {
-		return nil, fmt.Errorf("Encrypt: empty secret")
-	}
-	prenonce := make([]byte, 24)
-	_, err = rand.Read(prenonce)
+	encrypted, out = sliceForAppend(out, 24+secretbox.Overhead+len(message))
+	_, err = rand.Read(out[:24])
 	if err != nil {
 		return nil, err
 	}
-	var nonce [24]byte
-	copy(nonce[:], prenonce)
-
-	encrypted = secretbox.Seal(nonce[:], message, &nonce, (*[32]byte)(unsafe.Pointer(&(buf[0]))))
+	secretbox.Seal(out[:24], message, (*[24]byte)(unsafe.Pointer(&(out[0]))), (*[32]byte)(unsafe.Pointer(&(secret.Buffer()[0]))))
 	return encrypted, nil
+}
+
+func Encrypt(message []byte, secret *memguard.LockedBuffer) (encrypted []byte, err error) {
+	return EncryptTo(message, secret, nil)
 }
 
 func Decrypt(encrypted []byte, secret *memguard.LockedBuffer) (decrypted []byte, err error) {
 	if secret == nil {
 		return nil, fmt.Errorf("Decrypt: nil secret")
 	}
-	buf := secret.Buffer()
-	if buf == nil {
-		return nil, fmt.Errorf("Decrypt: empty secret")
-	}
-	var nonce [24]byte
 	var ok bool
-	copy(nonce[:], encrypted[:24])
-	decrypted, ok = secretbox.Open(nil, encrypted[24:], &nonce, (*[32]byte)(unsafe.Pointer(&(buf[0]))))
+	decrypted, ok = secretbox.Open(nil, encrypted[24:], (*[24]byte)(unsafe.Pointer(&(encrypted[0]))), (*[32]byte)(unsafe.Pointer(&(secret.Buffer()[0]))))
 	if !ok {
 		return nil, fmt.Errorf("Error decrypting value")
 	}
