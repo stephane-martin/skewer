@@ -184,7 +184,6 @@ func (s *FilePollingService) parseOne(raw *model.RawFileMessage, env *base.Parse
 	if err != nil {
 		base.ParsingErrorCounter.WithLabelValues("filepoll", raw.Hostname, raw.Format).Inc()
 		makeFLogger(s.logger, raw).Info("Parsing error", "error", err)
-		// TODO: are you sure we should return here ?
 		return
 	}
 	if syslogMsg == nil {

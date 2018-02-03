@@ -783,6 +783,7 @@ func (s *MessageStore) PurgeBadger() {
 }
 
 func (s *MessageStore) Stash(m *model.FullMessage) (fatal error, nonfatal error) {
+	// TODO: marshal before?
 	fatal = s.toStashQueue.Put(m)
 	return fatal, nil
 }
@@ -815,6 +816,7 @@ func (s *MessageStore) ingest(queue []*model.FullMessage, messagesMap *(map[util
 		if s.addMissingMsgID && len(m.Fields.MsgId) == 0 {
 			m.Fields.MsgId = s.generator.Uid().String()
 		}
+		// todo: reuse buffers
 		b, err = m.Marshal()
 		if err == nil {
 			if len(b) == 0 {

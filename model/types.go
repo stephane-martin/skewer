@@ -132,6 +132,16 @@ func FullFactory() (msg *FullMessage) {
 	return msg
 }
 
+func FromBuf(buf []byte) (msg *FullMessage, err error) {
+	msg = FullFactory()
+	err = msg.Unmarshal(buf)
+	if err != nil {
+		FullFree(msg)
+		return nil, err
+	}
+	return msg, nil
+}
+
 func FullFactoryFrom(smsg *SyslogMessage) (msg *FullMessage) {
 	msg = fullMsgPool.Get().(*FullMessage)
 	msg.Fields = smsg

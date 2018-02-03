@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"strconv"
+	"sync"
 
 	"github.com/awnumar/memguard"
 	"github.com/stephane-martin/skewer/utils/sbox"
@@ -103,10 +104,19 @@ func MakeSignSplit(signpubkey *memguard.LockedBuffer) (signSplit bufio.SplitFunc
 type EncryptWriter struct {
 	dest io.Writer
 	key  *memguard.LockedBuffer
+	pool *sync.Pool
 }
 
 func NewEncryptWriter(dest io.Writer, encryptkey *memguard.LockedBuffer) *EncryptWriter {
-	return &EncryptWriter{dest: dest, key: encryptkey}
+	return &EncryptWriter{
+		dest: dest,
+		key:  encryptkey,
+		pool: &sync.Pool{
+			New: func() interface{} {
+				return make([]byte, 4096)
+			},
+		},
+	}
 }
 
 func (s *EncryptWriter) WriteMsgUnix(b []byte, oob []byte, addr *net.UnixAddr) (n int, oobn int, err error) {
@@ -136,6 +146,7 @@ func (s *EncryptWriter) Write(p []byte) (n int, err error) {
 		return 0, nil
 	}
 	var buf []byte
+	var bufpooled []byte
 	if s.key == nil {
 		encLength := len(p)
 		buf = make([]byte, 0, 11+encLength)
@@ -143,7 +154,13 @@ func (s *EncryptWriter) Write(p []byte) (n int, err error) {
 		buf = append(buf, p...)
 	} else {
 		encLength := len(p) + 24 + secretbox.Overhead
-		buf = make([]byte, 11+encLength)
+		if encLength <= 4085 {
+			bufpooled = s.pool.Get().([]byte)
+			defer s.pool.Put(bufpooled)
+			buf = bufpooled[:11+encLength]
+		} else {
+			buf = make([]byte, 11+encLength)
+		}
 		_, err = sbox.EncryptTo(p, s.key, buf[:11])
 		if err != nil {
 			return 0, err

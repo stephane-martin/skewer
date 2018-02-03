@@ -108,9 +108,16 @@ func (f *CFactory) New(typ base.Types) (*PluginController, error) {
 
 func (f *CFactory) NewStore(loggerHandle uintptr) *StorePlugin {
 	st, _ := f.New(base.Store)
-	s := &StorePlugin{PluginController: st}
-	s.BSliceQueue = queue.NewBSliceQueue()
-	s.pushwg = &sync.WaitGroup{}
+	s := &StorePlugin{
+		PluginController: st,
+		q:                queue.NewBSliceQueue(),
+		pushwg:           &sync.WaitGroup{},
+		pool: &sync.Pool{
+			New: func() interface{} {
+				return make([]byte, 0, 4096)
+			},
+		},
+	}
 	return s
 }
 
@@ -255,13 +262,10 @@ func (s *PluginController) listenpipe(secret *memguard.LockedBuffer) {
 	scanner.Buffer(make([]byte, 0, 132000), 132000)
 
 	var err error
-	var buf []byte
 	var message *model.FullMessage
 
 	for scanner.Scan() {
-		buf = scanner.Bytes()
-		message = model.FullFactory()
-		err = message.Unmarshal(buf)
+		message, err = model.FromBuf(scanner.Bytes())
 		if err != nil {
 			s.logger.Error("Unexpected error decrypting message from the plugin pipe", "type", s.name, "error", err)
 			return
@@ -794,8 +798,10 @@ func (s *PluginController) Create(optsfuncs ...func(*PluginCreateOpts)) error {
 // StorePlugin is the specialized controller that takes care of the Store.
 type StorePlugin struct {
 	*PluginController
-	*queue.BSliceQueue
-	pushwg *sync.WaitGroup
+	q         *queue.BSliceQueue
+	pushwg    *sync.WaitGroup
+	msgsBatch [][]byte
+	pool      *sync.Pool
 }
 
 func (s *StorePlugin) pushqueue(secret *memguard.LockedBuffer) {
@@ -803,14 +809,16 @@ func (s *StorePlugin) pushqueue(secret *memguard.LockedBuffer) {
 	var err error
 	bufpipe := bufio.NewWriter(s.pipe)
 	writeToStore := utils.NewEncryptWriter(bufpipe, secret)
-	messages := make([]([]byte), 0, s.conf.Store.BatchSize)
 	for {
-		s.BSliceQueue.GetManyInto(&messages)
-		if len(messages) == 0 {
+		s.q.GetManyInto(&s.msgsBatch) // sets msgsBatch length to 0 before putting at most cap(msgsBatch) messages in it
+		if len(s.msgsBatch) == 0 {
 			return
 		}
-		for _, message = range messages {
+		for _, message = range s.msgsBatch {
 			_, err = writeToStore.Write(message)
+			if cap(message) == 4096 {
+				s.pool.Put(message)
+			}
 			if err != nil {
 				s.logger.Error("Unexpected error when writing messages to the Store pipe", "error", err)
 				return
@@ -825,7 +833,7 @@ func (s *StorePlugin) pushqueue(secret *memguard.LockedBuffer) {
 }
 
 func (s *StorePlugin) push(secret *memguard.LockedBuffer) {
-	for s.BSliceQueue.Wait(0) {
+	for s.q.Wait(0) {
 		s.pushqueue(secret)
 	}
 	s.pushwg.Done()
@@ -833,8 +841,8 @@ func (s *StorePlugin) push(secret *memguard.LockedBuffer) {
 
 // Shutdown stops definetely the Store.
 func (s *StorePlugin) Shutdown(killTimeOut time.Duration) {
-	s.BSliceQueue.Dispose() // will make push() return
-	s.pushwg.Wait()         // wait that push() returns
+	s.q.Dispose()   // will make push() return
+	s.pushwg.Wait() // wait that push() returns
 
 	if s.conf.Main.EncryptIPC {
 		secret, err := s.ring.GetBoxSecret()
@@ -852,11 +860,17 @@ func (s *StorePlugin) Stash(m *model.FullMessage) (err error) {
 	// this method is called very frequently, so we avoid to lock anything
 	// the BSliceQueue ensures that we write the messages sequentially to the store child
 	var b []byte
-	b, err = m.Marshal()
+	size := m.Size()
+	if size > 4096 {
+		b, err = m.Marshal()
+	} else {
+		b = s.pool.Get().([]byte)[:size]
+		_, err = m.MarshalTo(b)
+	}
 	if err != nil {
 		return err
 	}
-	return s.BSliceQueue.Put(b)
+	return s.q.Put(b)
 }
 
 func (s *StorePlugin) Start() (infos []model.ListenerInfo, err error) {
@@ -872,6 +886,7 @@ func (s *StorePlugin) Start() (infos []model.ListenerInfo, err error) {
 	if err != nil {
 		return nil, err
 	}
+	s.msgsBatch = make([]([]byte), 0, s.conf.Store.BatchSize)
 	s.pushwg.Add(1)
 	go s.push(secret)
 	return infos, nil

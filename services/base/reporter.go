@@ -42,6 +42,7 @@ type ReporterImpl struct {
 	queue        *queue.BSliceQueue
 	secret       *memguard.LockedBuffer
 	pipeWriter   *utils.EncryptWriter
+	pool         *sync.Pool
 }
 
 // NewReporter creates a reporter.
@@ -50,6 +51,11 @@ func NewReporter(name string, l log15.Logger, pipe *os.File) *ReporterImpl {
 		name:   name,
 		logger: l,
 		pipe:   pipe,
+		pool: &sync.Pool{
+			New: func() interface{} {
+				return make([]byte, 0, 4096)
+			},
+		},
 	}
 	rep.bufferedPipe = bufio.NewWriter(pipe)
 	return &rep
@@ -78,6 +84,9 @@ func (s *ReporterImpl) pushqueue() {
 			m, err = s.queue.Get()
 			if m != nil && err == nil {
 				_, err = s.pipeWriter.Write(m)
+				if cap(m) == 4096 {
+					s.pool.Put(m)
+				}
 				if err != nil {
 					s.logger.Crit("Unexpected error when writing messages to the plugin pipe", "error", err)
 					return
@@ -99,7 +108,15 @@ func (s *ReporterImpl) Stop() {
 
 // Stash reports one syslog message to the controller.
 func (s *ReporterImpl) Stash(m *model.FullMessage) (fatal, nonfatal error) {
-	b, err := m.Marshal()
+	var b []byte
+	var err error
+	size := m.Size()
+	if size > 4096 {
+		b, err = m.Marshal()
+	} else {
+		b = s.pool.Get().([]byte)[:size]
+		_, err = m.MarshalTo(b)
+	}
 	if err != nil {
 		return nil, err
 	}
