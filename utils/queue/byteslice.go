@@ -69,9 +69,6 @@ func (q *BSliceQueue) Get() (utils.MyULID, []byte, error) {
 	tail := q.tail
 	next := tail.next
 	if next != nil {
-		//q.tail = next
-		//tail.msg = next.msg
-		//m = tail.msg
 		(*bsliceNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.tail)), unsafe.Pointer(next))).slice = next.slice
 		q.pool.Put(tail)
 		return next.uid, next.slice, nil
@@ -91,7 +88,12 @@ func (q *BSliceQueue) Put(uid utils.MyULID, m []byte) error {
 		return utils.ErrDisposed
 	}
 	n := q.pool.Get().(*bsliceNode)
-	n.slice = m
+	if cap(n.slice) >= len(m) {
+		n.slice = n.slice[:len(m)]
+	} else {
+		n.slice = make([]byte, len(m))
+	}
+	copy(n.slice, m)
 	n.uid = uid
 	n.next = nil
 	(*bsliceNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.head)), unsafe.Pointer(n))).next = n

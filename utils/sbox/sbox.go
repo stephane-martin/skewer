@@ -20,16 +20,28 @@ func sliceForAppend(in []byte, n int) (head, tail []byte) {
 	return
 }
 
+func LenEncrypted(message []byte) int {
+	return len(message) + 24 + secretbox.Overhead
+}
+
+func LenDecrypted(encrypted []byte) int {
+	return len(encrypted) - 24 - secretbox.Overhead
+}
+
 func EncryptTo(message []byte, secret *memguard.LockedBuffer, out []byte) (encrypted []byte, err error) {
 	if secret == nil {
 		return nil, fmt.Errorf("Encrypt: nil secret")
 	}
-	encrypted, out = sliceForAppend(out, 24+secretbox.Overhead+len(message))
+	if len(message) == 0 {
+		return nil, fmt.Errorf("Encrypt: empty message")
+	}
+	encrypted, out = sliceForAppend(out, LenEncrypted(message))
 	_, err = rand.Read(out[:24])
 	if err != nil {
 		return nil, err
 	}
 	secretbox.Seal(out[:24], message, (*[24]byte)(unsafe.Pointer(&(out[0]))), (*[32]byte)(unsafe.Pointer(&(secret.Buffer()[0]))))
+	//fmt.Fprintln(os.Stderr, "ENC", len(message))
 	return encrypted, nil
 }
 
@@ -38,11 +50,32 @@ func Encrypt(message []byte, secret *memguard.LockedBuffer) (encrypted []byte, e
 }
 
 func Decrypt(encrypted []byte, secret *memguard.LockedBuffer) (decrypted []byte, err error) {
+	/*
+		if secret == nil {
+			return nil, fmt.Errorf("Decrypt: nil secret")
+		}
+		var ok bool
+		decrypted, ok = secretbox.Open(nil, encrypted[24:], (*[24]byte)(unsafe.Pointer(&(encrypted[0]))), (*[32]byte)(unsafe.Pointer(&(secret.Buffer()[0]))))
+		if !ok {
+			return nil, fmt.Errorf("Error decrypting value")
+		}
+		fmt.Fprintln(os.Stderr, "DEC", len(encrypted)-24-secretbox.Overhead, len(decrypted))
+		return decrypted, nil
+	*/
+	return DecrypTo(encrypted, secret, nil)
+}
+
+func DecrypTo(encrypted []byte, secret *memguard.LockedBuffer, out []byte) (decrypted []byte, err error) {
 	if secret == nil {
 		return nil, fmt.Errorf("Decrypt: nil secret")
 	}
+	length := LenDecrypted(encrypted)
+	if length <= 0 {
+		return nil, fmt.Errorf("Decrypt: encrypted message too short")
+	}
+	decrypted, _ = sliceForAppend(out, length)
 	var ok bool
-	decrypted, ok = secretbox.Open(nil, encrypted[24:], (*[24]byte)(unsafe.Pointer(&(encrypted[0]))), (*[32]byte)(unsafe.Pointer(&(secret.Buffer()[0]))))
+	_, ok = secretbox.Open(decrypted[:len(out)], encrypted[24:], (*[24]byte)(unsafe.Pointer(&(encrypted[0]))), (*[32]byte)(unsafe.Pointer(&(secret.Buffer()[0]))))
 	if !ok {
 		return nil, fmt.Errorf("Error decrypting value")
 	}

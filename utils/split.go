@@ -63,18 +63,18 @@ func MakeSignSplit(signpubkey *memguard.LockedBuffer) (signSplit bufio.SplitFunc
 		if len(data) < 22 {
 			return 0, nil, eoferr
 		}
-		if data[10] != byte(' ') || data[21] != byte(' ') {
+		if data[10] != sp || data[21] != sp {
 			return 0, nil, fmt.Errorf("Wrong sign format, 11th or 22th char is not space: '%s'", string(data))
 		}
 
 		var i int
 		for i = 0; i < 10; i++ {
-			if data[i] < byte('0') || data[i] > byte('9') {
+			if data[i] < zero || data[i] > nine {
 				return 0, nil, fmt.Errorf("Wrong sign format")
 			}
 		}
 		for i = 11; i < 21; i++ {
-			if data[i] < byte('0') || data[i] > byte('9') {
+			if data[i] < zero || data[i] > nine {
 				return 0, nil, fmt.Errorf("Wrong sign format")
 			}
 		}
@@ -154,7 +154,7 @@ func (s *EncryptWriter) Write(p []byte) (n int, err error) {
 		buf = append(buf, p...)
 	} else {
 		encLength := len(p) + 24 + secretbox.Overhead
-		if encLength <= 4085 {
+		if encLength <= (4096 - 11) {
 			bufpooled = s.pool.Get().([]byte)
 			defer s.pool.Put(bufpooled)
 			buf = bufpooled[:11+encLength]
@@ -185,12 +185,19 @@ func (s *EncryptWriter) WriteWithHeader(header []byte, message []byte) (err erro
 
 // MakeDecryptSplit returns a split function that extracts and decrypts messages.
 func MakeDecryptSplit(secret *memguard.LockedBuffer) bufio.SplitFunc {
-	spl := func(data []byte, atEOF bool) (int, []byte, error) {
-		adv, tok, err := PluginSplit(data, atEOF)
+	buf := make([]byte, 0, 4096)
+	// we assume that spl will be called by a single goroutine
+	spl := func(data []byte, atEOF bool) (adv int, dec []byte, err error) {
+		var tok []byte
+		adv, tok, err = PluginSplit(data, atEOF)
 		if err != nil || tok == nil || secret == nil {
 			return adv, tok, err
 		}
-		dec, err := sbox.Decrypt(tok, secret)
+		if sbox.LenDecrypted(tok) <= 4096 {
+			dec, err = sbox.DecrypTo(tok, secret, buf[:0])
+		} else {
+			dec, err = sbox.Decrypt(tok, secret)
+		}
 		if err != nil {
 			return 0, nil, err
 		}
@@ -198,6 +205,10 @@ func MakeDecryptSplit(secret *memguard.LockedBuffer) bufio.SplitFunc {
 	}
 	return spl
 }
+
+var sp = byte(' ')
+var zero = byte('0')
+var nine = byte('9')
 
 // PluginSplit is a split function used by plugins.
 func PluginSplit(data []byte, atEOF bool) (advance int, token []byte, eoferr error) {
@@ -207,12 +218,12 @@ func PluginSplit(data []byte, atEOF bool) (advance int, token []byte, eoferr err
 	if len(data) < 11 {
 		return 0, nil, eoferr
 	}
-	if data[10] != byte(' ') {
+	if data[10] != sp {
 		return 0, nil, fmt.Errorf("Wrong plugin format, 11th char is not space: '%s'", string(data))
 	}
 	var i int
 	for i = 0; i < 10; i++ {
-		if data[i] < byte('0') || data[i] > byte('9') {
+		if data[i] < zero || data[i] > nine {
 			return 0, nil, fmt.Errorf("Wrong plugin format")
 		}
 	}

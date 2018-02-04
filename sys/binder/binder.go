@@ -383,7 +383,6 @@ func (l *Listener) Addr() net.Addr {
 func (c *clientImpl) Listen(lnet string, laddr string) (net.Listener, error) {
 	addr := fmt.Sprintf("%s:%s", lnet, laddr)
 	ichan := c.newConns.get(addr, true)
-	// TODO: generate UID in the client instead of server
 	_, err := c.writer.Write([]byte(fmt.Sprintf("listen %s", addr)))
 	if err != nil {
 		return nil, err

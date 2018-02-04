@@ -258,6 +258,7 @@ func (s *PluginController) listenpipe(secret *memguard.LockedBuffer) {
 		return
 	default:
 	}
+	// TODO: scanner trigger a panic
 	scanner := bufio.NewScanner(s.pipe)
 	scanner.Split(utils.MakeDecryptSplit(secret))
 	scanner.Buffer(make([]byte, 0, 132000), 132000)

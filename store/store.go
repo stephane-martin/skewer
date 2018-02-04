@@ -782,6 +782,7 @@ func (s *MessageStore) PurgeBadger() {
 }
 
 func (s *MessageStore) Stash(uid utils.MyULID, b []byte) (fatal error, nonfatal error) {
+	// the stashQueue takes care to make a copy of b, in case the multiple instances of b use the same backing array
 	fatal = s.toStashQueue.Put(uid, b)
 	return fatal, nil
 }
