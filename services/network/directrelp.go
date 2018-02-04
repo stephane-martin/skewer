@@ -558,120 +558,104 @@ func (s *DirectRelpServiceImpl) push2kafka() {
 		s.wg.Done()
 	}()
 	envs := map[utils.MyULID]*javascript.Environment{}
-	var e *javascript.Environment
-	var haveEnv bool
 	var message *model.FullMessage
-	var topic string
-	var partitionKey string
-	var partitionNumber int32
-	var errs []error
 	var err error
-	var logger log15.Logger
-	var filterResult javascript.FilterResult
-	var kafkaMsg *sarama.ProducerMessage
-	var serialized []byte
-	var reported time.Time
-	var config conf.DirectRELPSourceConfig
 
-ForParsedChan:
 	for s.parsedMessagesQueue.Wait(0) {
-		// TODO: extract loop -> func
 		message, err = s.parsedMessagesQueue.Get()
-		if err != nil {
+		if message == nil || err != nil {
 			// should not happen
 			s.Logger.Error("Fatal error getting messages from the parsed messages queue", "error", err)
 			s.StopAndWait()
 			return
 		}
-		if message == nil {
-			// should not happen
-			continue ForParsedChan
-		}
-		logger = s.Logger
-		e, haveEnv = envs[message.ConfId]
-		if !haveEnv {
-			config, haveEnv = s.configs[message.ConfId]
-			if !haveEnv {
-				s.Logger.Warn("Could not find the configuration for a message", "confId", message.ConfId, "txnr", message.Txnr)
-				model.FullFree(message)
-				continue ForParsedChan
-			}
-			envs[message.ConfId] = javascript.NewFilterEnvironment(
-				config.FilterFunc,
-				config.TopicFunc,
-				config.TopicTmpl,
-				config.PartitionFunc,
-				config.PartitionTmpl,
-				config.PartitionNumberFunc,
-				s.Logger,
-			)
-			e = envs[message.ConfId]
-		}
+		s.pushOne(message, &envs)
+	}
+}
 
-		topic, errs = e.Topic(message.Fields)
-		for _, err = range errs {
-			logger.Info("Error calculating topic", "error", err, "txnr", message.Txnr)
-		}
-		if len(topic) == 0 {
-			logger.Warn("Topic or PartitionKey could not be calculated", "txnr", message.Txnr)
-			s.forwarder.ForwardFail(message.ConnId, message.Txnr)
-			model.FullFree(message)
-			continue ForParsedChan
-		}
-		partitionKey, errs = e.PartitionKey(message.Fields)
-		for _, err = range errs {
-			logger.Info("Error calculating the partition key", "error", err, "txnr", message.Txnr)
-		}
-		partitionNumber, errs = e.PartitionNumber(message.Fields)
-		for _, err = range errs {
-			logger.Info("Error calculating the partition number", "error", err, "txnr", message.Txnr)
-		}
+func (s *DirectRelpServiceImpl) pushOne(message *model.FullMessage, envs *map[utils.MyULID]*javascript.Environment) {
+	defer model.FullFree(message)
+	var err error
 
-		filterResult, err = e.FilterMessage(message.Fields)
-
-		switch filterResult {
-		case javascript.DROPPED:
-			s.forwarder.ForwardFail(message.ConnId, message.Txnr)
-			messageFilterCounter.WithLabelValues("dropped", message.Fields.GetProperty("skewer", "client"), "directkafka").Inc()
-			model.FullFree(message)
-			continue ForParsedChan
-		case javascript.REJECTED:
-			s.forwarder.ForwardFail(message.ConnId, message.Txnr)
-			messageFilterCounter.WithLabelValues("rejected", message.Fields.GetProperty("skewer", "client"), "directkafka").Inc()
-			model.FullFree(message)
-			continue ForParsedChan
-		case javascript.PASS:
-			messageFilterCounter.WithLabelValues("passing", message.Fields.GetProperty("skewer", "client"), "directkafka").Inc()
-		default:
-			s.forwarder.ForwardFail(message.ConnId, message.Txnr)
-			messageFilterCounter.WithLabelValues("unknown", message.Fields.GetProperty("skewer", "client"), "directkafka").Inc()
-			logger.Warn("Error happened processing message", "txnr", message.Txnr, "error", err)
-			model.FullFree(message)
-			continue ForParsedChan
+	e, haveEnv := (*envs)[message.ConfId]
+	if !haveEnv {
+		config, haveConfig := s.configs[message.ConfId]
+		if !haveConfig {
+			s.Logger.Warn("Could not find the configuration for a message", "confId", message.ConfId, "txnr", message.Txnr)
+			return
 		}
-
-		serialized, err = message.Fields.RegularJson()
-
-		if err != nil {
-			logger.Warn("Error generating Kafka message", "error", err, "txnr", message.Txnr)
-			s.forwarder.ForwardFail(message.ConnId, message.Txnr)
-			model.FullFree(message)
-			continue ForParsedChan
-		}
-
-		kafkaMsg = &sarama.ProducerMessage{
-			Key:       sarama.StringEncoder(partitionKey),
-			Partition: partitionNumber,
-			Value:     sarama.ByteEncoder(serialized),
-			Topic:     topic,
-			Timestamp: reported,
-			Metadata:  meta{Txnr: message.Txnr, ConnID: message.ConnId},
-		}
-
-		s.producer.Input() <- kafkaMsg
-		model.FullFree(message)
+		(*envs)[message.ConfId] = javascript.NewFilterEnvironment(
+			config.FilterFunc,
+			config.TopicFunc,
+			config.TopicTmpl,
+			config.PartitionFunc,
+			config.PartitionTmpl,
+			config.PartitionNumberFunc,
+			s.Logger,
+		)
+		e = (*envs)[message.ConfId]
 	}
 
+	topic, errs := e.Topic(message.Fields)
+	for _, err = range errs {
+		s.Logger.Info("Error calculating topic", "error", err, "txnr", message.Txnr)
+	}
+	if len(topic) == 0 {
+		s.Logger.Warn("Topic or PartitionKey could not be calculated", "txnr", message.Txnr)
+		s.forwarder.ForwardFail(message.ConnId, message.Txnr)
+		return
+	}
+	partitionKey, errs := e.PartitionKey(message.Fields)
+	for _, err = range errs {
+		s.Logger.Info("Error calculating the partition key", "error", err, "txnr", message.Txnr)
+	}
+	partitionNumber, errs := e.PartitionNumber(message.Fields)
+	for _, err = range errs {
+		s.Logger.Info("Error calculating the partition number", "error", err, "txnr", message.Txnr)
+	}
+
+	filterResult, err := e.FilterMessage(message.Fields)
+	if err != nil {
+		s.Logger.Warn("Error happened filtering message", "error", err)
+		return
+	}
+
+	switch filterResult {
+	case javascript.DROPPED:
+		s.forwarder.ForwardFail(message.ConnId, message.Txnr)
+		messageFilterCounter.WithLabelValues("dropped", message.Fields.GetProperty("skewer", "client"), "directkafka").Inc()
+		return
+	case javascript.REJECTED:
+		s.forwarder.ForwardFail(message.ConnId, message.Txnr)
+		messageFilterCounter.WithLabelValues("rejected", message.Fields.GetProperty("skewer", "client"), "directkafka").Inc()
+		return
+	case javascript.PASS:
+		messageFilterCounter.WithLabelValues("passing", message.Fields.GetProperty("skewer", "client"), "directkafka").Inc()
+	default:
+		s.forwarder.ForwardFail(message.ConnId, message.Txnr)
+		messageFilterCounter.WithLabelValues("unknown", message.Fields.GetProperty("skewer", "client"), "directkafka").Inc()
+		s.Logger.Warn("Error happened processing message", "txnr", message.Txnr, "error", err)
+		return
+	}
+
+	serialized, err := message.Fields.RegularJson()
+
+	if err != nil {
+		s.Logger.Warn("Error generating Kafka message", "error", err, "txnr", message.Txnr)
+		s.forwarder.ForwardFail(message.ConnId, message.Txnr)
+		return
+	}
+
+	kafkaMsg := &sarama.ProducerMessage{
+		Key:       sarama.StringEncoder(partitionKey),
+		Partition: partitionNumber,
+		Value:     sarama.ByteEncoder(serialized),
+		Topic:     topic,
+		Timestamp: message.Fields.GetTimeReported(),
+		Metadata:  meta{Txnr: message.Txnr, ConnID: message.ConnId},
+	}
+
+	s.producer.Input() <- kafkaMsg
 }
 
 type DirectRelpHandler struct {

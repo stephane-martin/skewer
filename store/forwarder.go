@@ -178,6 +178,10 @@ Loop:
 		}
 
 		filterResult, err = env.FilterMessage(m.Fields)
+		if err != nil {
+			fwder.logger.Warn("Error happened filtering message", "error", err)
+			continue Loop
+		}
 
 		switch filterResult {
 		case javascript.DROPPED:
