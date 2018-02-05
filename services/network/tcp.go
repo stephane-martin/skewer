@@ -287,7 +287,6 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TCPSourceConfig)
 		rawmsg.ConfID = config.ConfID
 		rawmsg.Encoding = config.Encoding
 		rawmsg.Format = config.Format
-		// TODO: what if len(buf) is too big ?
 		rawmsg.Message = rawmsg.Message[:len(buf)]
 		copy(rawmsg.Message, buf)
 		err := s.rawMessagesQueue.Put(rawmsg)

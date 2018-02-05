@@ -745,7 +745,7 @@ Loop:
 				continue Loop
 			}
 			if s.MaxMessageSize > 0 && len(data) > s.MaxMessageSize {
-				logger.Warn("Message too large", "max", s.MaxMessageSize, "length", len(buf))
+				logger.Warn("Message too large", "max", s.MaxMessageSize, "length", len(data))
 				relpProtocolErrorsCounter.WithLabelValues(client).Inc()
 				return
 			}
