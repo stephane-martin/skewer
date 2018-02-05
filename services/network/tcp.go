@@ -162,7 +162,7 @@ func (s *TcpServiceImpl) parseOne(raw *model.RawTcpMessage, env *base.ParsersEnv
 		return
 	}
 
-	syslogMsg, err := parser(raw.Message[:raw.Size], decoder)
+	syslogMsg, err := parser(raw.Message, decoder)
 	if err != nil {
 		base.ParsingErrorCounter.WithLabelValues("tcp", raw.Client, raw.Format).Inc()
 		//logger.Info("Parsing error", "message", string(raw.Message), "error", err)
@@ -276,14 +276,19 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TCPSourceConfig)
 		if len(buf) == 0 {
 			continue
 		}
+		if s.MaxMessageSize > 0 && len(buf) > s.MaxMessageSize {
+			logger.Warn("Message too large", "max", s.MaxMessageSize, "length", len(buf))
+			return
+		}
 		rawmsg = s.Pool.Get().(*model.RawTcpMessage)
 		rawmsg.Client = client
 		rawmsg.LocalPort = localPortInt
 		rawmsg.UnixSocketPath = path
-		rawmsg.Size = len(buf)
 		rawmsg.ConfID = config.ConfID
 		rawmsg.Encoding = config.Encoding
 		rawmsg.Format = config.Format
+		// TODO: what if len(buf) is too big ?
+		rawmsg.Message = rawmsg.Message[:len(buf)]
 		copy(rawmsg.Message, buf)
 		err := s.rawMessagesQueue.Put(rawmsg)
 		if err != nil {

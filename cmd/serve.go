@@ -369,9 +369,37 @@ func (ch *serveChild) StartController(typ base.Types) error {
 		return ch.StartKafkaSource()
 	case base.Filesystem:
 		return ch.StartFSPoll()
+	case base.HTTPServer:
+		return ch.StartHTTPServer()
 	default:
 		return nil
 	}
+}
+
+func (ch *serveChild) StartHTTPServer() error {
+	if len(ch.conf.HTTPServerSource) == 0 {
+		return nil
+	}
+	certfiles := ch.conf.GetCertificateFiles()["httpserversource"]
+	certpaths := ch.conf.GetCertificatePaths()["httpserversource"]
+
+	ctl := ch.controllers[base.HTTPServer]
+	err := ctl.Create(
+		services.DumpableOpt(DumpableFlag),
+		services.CertFilesOpt(certfiles),
+		services.CertPathsOpt(certpaths),
+	)
+
+	if err != nil {
+		return fmt.Errorf("error creating HTTP server plugin: %s", err)
+	}
+	ctl.SetConf(*ch.conf)
+	_, err = ctl.Start()
+	if err != nil {
+		return fmt.Errorf("error starting HTTP server plugin: %s", err)
+	}
+	ch.logger.Debug("HTTP server plugin has been started")
+	return nil
 }
 
 func (ch *serveChild) StartFSPoll() error {

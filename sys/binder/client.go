@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/awnumar/memguard"
 	"github.com/inconshreveable/log15"
@@ -27,6 +28,26 @@ type fileConn struct {
 	net.Conn
 	uid string
 	err string
+}
+
+func (c *fileConn) SetWriteBuffer(bytes int) error {
+	if uc, ok := c.Conn.(*net.UnixConn); ok {
+		return uc.SetWriteBuffer(bytes)
+	}
+	if uc, ok := c.Conn.(*net.TCPConn); ok {
+		return uc.SetWriteBuffer(bytes)
+	}
+	return nil
+}
+
+func (c *fileConn) SetReadBuffer(bytes int) error {
+	if uc, ok := c.Conn.(*net.UnixConn); ok {
+		return uc.SetReadBuffer(bytes)
+	}
+	if uc, ok := c.Conn.(*net.TCPConn); ok {
+		return uc.SetReadBuffer(bytes)
+	}
+	return nil
 }
 
 func (c *fileConn) Close() error {
@@ -335,8 +356,10 @@ func NewClient(binderFile *os.File, secret *memguard.LockedBuffer, logger log15.
 }
 
 type Listener struct {
-	addr   string
-	client *clientImpl
+	addr      string
+	client    *clientImpl
+	keepalive bool
+	period    time.Duration
 }
 
 func (l *Listener) Close() error {
@@ -355,6 +378,15 @@ func (l *Listener) Accept() (net.Conn, error) {
 	}
 	if len(conn.err) > 0 {
 		return nil, &net.OpError{Err: fmt.Errorf(conn.err), Addr: l.Addr(), Op: "Accept"}
+	}
+	if c, ok := conn.Conn.(*net.TCPConn); ok {
+		if l.keepalive {
+			// TODO: log errors
+			c.SetKeepAlive(true)
+			c.SetKeepAlivePeriod(l.period)
+		}
+		c.SetNoDelay(true)
+		c.SetLinger(-1)
 	}
 	return conn, nil
 }
@@ -381,6 +413,10 @@ func (l *Listener) Addr() net.Addr {
 }
 
 func (c *clientImpl) Listen(lnet string, laddr string) (net.Listener, error) {
+	return c.ListenKeepAlive(lnet, laddr, 0)
+}
+
+func (c *clientImpl) ListenKeepAlive(lnet string, laddr string, period time.Duration) (net.Listener, error) {
 	addr := fmt.Sprintf("%s:%s", lnet, laddr)
 	ichan := c.newConns.get(addr, true)
 	_, err := c.writer.Write([]byte(fmt.Sprintf("listen %s", addr)))
@@ -393,6 +429,8 @@ func (c *clientImpl) Listen(lnet string, laddr string) (net.Listener, error) {
 		return nil, &net.OpError{Err: fmt.Errorf("closed ichan"), Op: "Listen"}
 	} else if len(confirmation.err) > 0 {
 		return nil, &net.OpError{Err: fmt.Errorf(confirmation.err), Op: "Listen"}
+	} else if period != 0 {
+		return &Listener{addr: addr, client: c, keepalive: true, period: period}, nil
 	} else {
 		return &Listener{addr: addr, client: c}, nil
 	}

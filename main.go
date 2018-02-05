@@ -528,7 +528,8 @@ func runUnconfined(t base.Types) {
 		base.Store,
 		base.Accounting,
 		base.KafkaSource,
-		base.Filesystem:
+		base.Filesystem,
+		base.HTTPServer:
 
 		if t == base.Store {
 			runtime.GOMAXPROCS(128)
@@ -673,7 +674,8 @@ func runConfined(t base.Types) {
 		base.Store,
 		base.Configuration,
 		base.KafkaSource,
-		base.Filesystem:
+		base.Filesystem,
+		base.HTTPServer:
 
 		path, err := osext.Executable()
 		if err != nil {

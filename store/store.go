@@ -851,6 +851,7 @@ func (s *MessageStore) retrieve(dest conf.DestinationType) (messages []*model.Fu
 	sentDB := s.backend.GetPartition(Sent, dest)
 
 	messages = s.msgsSlicePool.Get().([]*model.FullMessage)[:0]
+	// TODO: pool is not so appropriate for uids
 	uids := s.uidsSlicePool.Get().([]utils.MyULID)[:0]
 	defer s.uidsSlicePool.Put(uids)
 

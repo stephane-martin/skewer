@@ -30,7 +30,7 @@ type AccountingService struct {
 	stasher        base.Stasher
 	logger         log15.Logger
 	wgroup         sync.WaitGroup
-	Conf           conf.AccountingConfig
+	Conf           conf.AccountingSourceConfig
 	stopchan       chan struct{}
 	fatalErrorChan chan struct{}
 	fatalOnce      *sync.Once

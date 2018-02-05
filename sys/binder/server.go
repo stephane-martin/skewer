@@ -144,11 +144,9 @@ func serveOne(ctx context.Context, wg *sync.WaitGroup, parentFD uintptr, secret 
 				var connFile *os.File
 				var err error
 				if lnet == "unixgram" {
-					conn := bc.Conn.(*net.UnixConn)
-					connFile, err = conn.File()
+					connFile, err = bc.Conn.(*net.UnixConn).File()
 				} else {
-					conn := bc.Conn.(*net.UDPConn)
-					connFile, err = conn.File()
+					connFile, err = bc.Conn.(*net.UDPConn).File()
 				}
 				bc.Conn.Close()
 
@@ -168,11 +166,9 @@ func serveOne(ctx context.Context, wg *sync.WaitGroup, parentFD uintptr, secret 
 				var connFile *os.File
 				var err error
 				if lnet == "unix" {
-					conn := bc.Conn.(*net.UnixConn)
-					connFile, err = conn.File()
+					connFile, err = bc.Conn.(*net.UnixConn).File()
 				} else {
-					conn := bc.Conn.(*net.TCPConn)
-					connFile, err = conn.File()
+					connFile, err = bc.Conn.(*net.TCPConn).File()
 				}
 				bc.Conn.Close()
 				if err == nil {

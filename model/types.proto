@@ -34,7 +34,7 @@ message SyslogMessage {
 
 message FullMessage {
 	int32 txnr = 1;
-	uint32 conn_id = 2;	
+	bytes conn_id = 2 [(gogoproto.customtype) = "github.com/stephane-martin/skewer/utils.MyULID",(gogoproto.nullable) = false];
 	bytes conf_id = 3 [(gogoproto.customtype) = "github.com/stephane-martin/skewer/utils.MyULID",(gogoproto.nullable) = false];
 	bytes uid = 4 [(gogoproto.customtype) = "github.com/stephane-martin/skewer/utils.MyULID",(gogoproto.nullable) = false];
 	SyslogMessage fields = 5;

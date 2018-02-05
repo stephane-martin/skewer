@@ -500,7 +500,7 @@ func applyFilter(filter *seccomp.ScmpFilter) (*seccomp.ScmpFilter, error) {
 func SetupSeccomp(t base.Types) (err error) {
 	switch t {
 
-	case base.TCP, base.UDP, base.RELP, base.Graylog, base.Journal, base.Filesystem:
+	case base.TCP, base.UDP, base.RELP, base.Graylog, base.Journal, base.Filesystem, base.HTTPServer:
 		_, err = deriveComposeA(buildSimpleFilter, applyFilter)(baseAllowed, nil)
 
 	case base.DirectRELP, base.Store, base.KafkaSource, base.Configuration:

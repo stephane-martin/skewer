@@ -1,10 +1,12 @@
 package dests
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"net"
 	"net/http"
 	"strconv"
@@ -31,6 +33,8 @@ type HTTPServerDestination struct {
 
 func NewHTTPServerDestination(ctx context.Context, e *Env) (Destination, error) {
 	config := e.config.HTTPServerDest
+	var err error
+	var listener net.Listener
 
 	d := &HTTPServerDestination{
 		baseDestination: newBaseDestination(conf.HTTPServer, "httpserver", e),
@@ -45,7 +49,7 @@ func NewHTTPServerDestination(ctx context.Context, e *Env) (Destination, error) 
 
 	if len(config.Format) > 0 {
 		// determine content-type from the fixed output format
-		err := d.setFormat(config.Format)
+		err = d.setFormat(config.Format)
 		if err != nil {
 			return nil, err
 		}
@@ -82,12 +86,31 @@ func NewHTTPServerDestination(ctx context.Context, e *Env) (Destination, error) 
 		}
 	}
 	hostport := net.JoinHostPort(config.BindAddr, strconv.FormatInt(int64(config.Port), 10))
-	listener, err := d.binder.Listen("tcp", hostport)
+	if config.DisableConnKeepAlive {
+		listener, err = d.binder.Listen("tcp", hostport)
+	} else {
+		listener, err = d.binder.ListenKeepAlive("tcp", hostport, config.ConnKeepAlivePeriod)
+	}
 	if err != nil {
 		return nil, err
 	}
 	d.server = &http.Server{
-		Handler: d,
+		Handler:           d,
+		ReadTimeout:       config.ReadTimeout,
+		ReadHeaderTimeout: config.ReadTimeout,
+		WriteTimeout:      config.WriteTimeout,
+		IdleTimeout:       config.IdleTimeout,
+		MaxHeaderBytes:    config.MaxHeaderBytes,
+		ErrorLog:          log.New(d, "", 0),
+	}
+	d.server.SetKeepAlivesEnabled(!config.DisableHTTPKeepAlive)
+	if config.TLSEnabled {
+		tlsConf, err := utils.NewTLSConfig("", config.CAFile, config.CAPath, config.CertFile, config.KeyFile, false, d.confined)
+		if err != nil {
+			return nil, err
+		}
+		tlsConf.ClientAuth = config.GetClientAuthType()
+		d.server.TLSConfig = tlsConf
 	}
 	d.sendQueue = message.NewRing(uint64(d.nMessages))
 	d.wg.Add(1)
@@ -100,6 +123,12 @@ func NewHTTPServerDestination(ctx context.Context, e *Env) (Destination, error) 
 	go d.serve(listener)
 
 	return d, nil
+}
+
+func (d *HTTPServerDestination) Write(p []byte) (n int, err error) {
+	// trick the http server to write logs to the destination logger
+	d.logger.Debug(string(bytes.TrimSpace(p)))
+	return len(p), nil
 }
 
 func (d *HTTPServerDestination) getContentType(r *http.Request) (ctype string) {
@@ -129,7 +158,10 @@ func (d *HTTPServerDestination) serve(listener net.Listener) (err error) {
 		d.dofatal()
 		d.wg.Done()
 	}()
-	return d.server.Serve(listener)
+	if d.server.TLSConfig == nil {
+		return d.server.Serve(listener)
+	}
+	return d.server.ServeTLS(listener, "", "")
 }
 
 func (d *HTTPServerDestination) nackall(messages []*model.FullMessage) {

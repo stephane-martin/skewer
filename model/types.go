@@ -147,7 +147,7 @@ func FullFactoryFrom(smsg *SyslogMessage) (msg *FullMessage) {
 	msg = fullMsgPool.Get().(*FullMessage)
 	msg.Fields = smsg
 	msg.Txnr = 0
-	msg.ConnId = 0
+	msg.ConnId = utils.ZeroUid
 	msg.ConfId = utils.ZeroUid
 	msg.Uid = utils.ZeroUid
 	return msg
@@ -157,7 +157,7 @@ func FullCleanFactory() (msg *FullMessage) {
 	msg = fullMsgPool.Get().(*FullMessage)
 	msg.Fields = CleanFactory()
 	msg.Txnr = 0
-	msg.ConnId = 0
+	msg.ConnId = utils.ZeroUid
 	msg.ConfId = utils.ZeroUid
 	msg.Uid = utils.ZeroUid
 	return msg

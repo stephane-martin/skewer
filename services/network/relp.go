@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -97,19 +96,19 @@ func bytes2txnr(b []byte) int32 {
 	return int32(x)
 }
 
-func (f *ackForwarder) Received(connID uint32, txnr int32) {
+func (f *ackForwarder) Received(connID utils.MyULID, txnr int32) {
 	if c, ok := f.comm.Load(connID); ok {
 		_ = c.(*queue.IntQueue).Put(txnr)
 	}
 }
 
-func (f *ackForwarder) Commit(connID uint32) {
+func (f *ackForwarder) Commit(connID utils.MyULID) {
 	if c, ok := f.comm.Load(connID); ok {
 		_, _ = c.(*queue.IntQueue).Get()
 	}
 }
 
-func (f *ackForwarder) NextToCommit(connID uint32) int32 {
+func (f *ackForwarder) NextToCommit(connID utils.MyULID) int32 {
 	if c, ok := f.comm.Load(connID); ok {
 		next, err := c.(*queue.IntQueue).Peek()
 		if err != nil {
@@ -120,13 +119,13 @@ func (f *ackForwarder) NextToCommit(connID uint32) int32 {
 	return -1
 }
 
-func (f *ackForwarder) ForwardSucc(connID uint32, txnr int32) {
+func (f *ackForwarder) ForwardSucc(connID utils.MyULID, txnr int32) {
 	if q, ok := f.succ.Load(connID); ok {
 		_ = q.(*queue.IntQueue).Put(txnr)
 	}
 }
 
-func (f *ackForwarder) GetSucc(connID uint32) int32 {
+func (f *ackForwarder) GetSucc(connID utils.MyULID) int32 {
 	if q, ok := f.succ.Load(connID); ok {
 		txnr, err := q.(*queue.IntQueue).Get()
 		if err != nil {
@@ -137,13 +136,13 @@ func (f *ackForwarder) GetSucc(connID uint32) int32 {
 	return -1
 }
 
-func (f *ackForwarder) ForwardFail(connID uint32, txnr int32) {
+func (f *ackForwarder) ForwardFail(connID utils.MyULID, txnr int32) {
 	if q, ok := f.fail.Load(connID); ok {
 		_ = q.(*queue.IntQueue).Put(txnr)
 	}
 }
 
-func (f *ackForwarder) GetFail(connID uint32) int32 {
+func (f *ackForwarder) GetFail(connID utils.MyULID) int32 {
 	if q, ok := f.fail.Load(connID); ok {
 		txnr, err := q.(*queue.IntQueue).Get()
 		if err != nil {
@@ -154,15 +153,15 @@ func (f *ackForwarder) GetFail(connID uint32) int32 {
 	return -1
 }
 
-func (f *ackForwarder) AddConn() uint32 {
-	connID := atomic.AddUint32(&f.next, 1)
+func (f *ackForwarder) AddConn() utils.MyULID {
+	connID := utils.NewUid()
 	f.succ.Store(connID, queue.NewIntQueue())
 	f.fail.Store(connID, queue.NewIntQueue())
 	f.comm.Store(connID, queue.NewIntQueue())
 	return connID
 }
 
-func (f *ackForwarder) RemoveConn(connID uint32) {
+func (f *ackForwarder) RemoveConn(connID utils.MyULID) {
 	if q, ok := f.succ.Load(connID); ok {
 		q.(*queue.IntQueue).Dispose()
 		f.succ.Delete(connID)
@@ -180,7 +179,7 @@ func (f *ackForwarder) RemoveAll() {
 	f.comm = sync.Map{}
 }
 
-func (f *ackForwarder) Wait(connID uint32) bool {
+func (f *ackForwarder) Wait(connID utils.MyULID) bool {
 	qsucc, ok := f.succ.Load(connID)
 	if !ok {
 		return false
@@ -194,7 +193,7 @@ func (f *ackForwarder) Wait(connID uint32) bool {
 
 type meta struct {
 	Txnr   int32
-	ConnID uint32
+	ConnID utils.MyULID
 }
 
 type RelpService struct {
@@ -488,7 +487,7 @@ func (s *RelpServiceImpl) parseOne(raw *model.RawTcpMessage, e *base.ParsersEnv,
 		return
 	}
 	decoder := utils.SelectDecoder(raw.Encoding)
-	syslogMsg, err := parser(raw.Message[:raw.Size], decoder)
+	syslogMsg, err := parser(raw.Message, decoder)
 	if err != nil {
 		//logger.Warn("Parsing error", "message", string(raw.Message[:raw.Size]), "error", err)
 		logger.Warn("Parsing error", "error", err)
@@ -554,7 +553,7 @@ func (s *RelpServiceImpl) Parse() {
 
 }
 
-func (s *RelpServiceImpl) handleResponses(conn net.Conn, connID uint32, client string, logger log15.Logger) {
+func (s *RelpServiceImpl) handleResponses(conn net.Conn, connID utils.MyULID, client string, logger log15.Logger) {
 	defer func() {
 		s.wg.Done()
 	}()
@@ -745,8 +744,12 @@ Loop:
 				s.forwarder.ForwardSucc(connID, txnr)
 				continue Loop
 			}
+			if s.MaxMessageSize > 0 && len(data) > s.MaxMessageSize {
+				logger.Warn("Message too large", "max", s.MaxMessageSize, "length", len(buf))
+				relpProtocolErrorsCounter.WithLabelValues(client).Inc()
+				return
+			}
 			rawmsg = s.Pool.Get().(*model.RawTcpMessage)
-			rawmsg.Size = len(data)
 			rawmsg.Txnr = txnr
 			rawmsg.Client = client
 			rawmsg.LocalPort = localPort
@@ -755,6 +758,7 @@ Loop:
 			rawmsg.Encoding = config.Encoding
 			rawmsg.Format = config.Format
 			rawmsg.ConnID = connID
+			rawmsg.Message = rawmsg.Message[:len(data)]
 			copy(rawmsg.Message, data)
 			err := s.rawMessagesQueue.Put(rawmsg)
 			if err != nil {

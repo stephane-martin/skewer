@@ -186,7 +186,8 @@ func (s *EncryptWriter) WriteWithHeader(header []byte, message []byte) (err erro
 // MakeDecryptSplit returns a split function that extracts and decrypts messages.
 func MakeDecryptSplit(secret *memguard.LockedBuffer) bufio.SplitFunc {
 	buf := make([]byte, 0, 4096)
-	// we assume that spl will be called by a single goroutine
+	// - we assume that spl will be called by a single goroutine
+	// - spl may return tokens that rely on the same backing array
 	spl := func(data []byte, atEOF bool) (adv int, dec []byte, err error) {
 		var tok []byte
 		adv, tok, err = PluginSplit(data, atEOF)

@@ -20,7 +20,8 @@ func SetupPledge(t base.Types) (err error) {
 		base.Configuration,
 		base.Accounting,
 		base.KafkaSource,
-		base.Filesystem:
+		base.Filesystem,
+		base.HTTPServer:
 
 		err = unix.Pledge("stdio rpath flock dns sendfd recvfd ps inet unix getpw", nil)
 

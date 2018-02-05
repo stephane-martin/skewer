@@ -2,6 +2,7 @@ package conf
 
 import (
 	"compress/flate"
+	"net/http"
 	"os"
 	"strconv"
 
@@ -102,12 +103,17 @@ func SetHTTPServerDestDefaults(v *viper.Viper, prefixed bool) {
 	if prefixed {
 		prefix = "httpserver_destination."
 	}
-	v.SetDefault(prefix+"format", "")
 	v.SetDefault(prefix+"bind_addr", "127.0.0.1")
 	v.SetDefault(prefix+"port", "8514")
 	v.SetDefault(prefix+"delimiter", 10)
 	v.SetDefault(prefix+"line_framing", true)
 	v.SetDefault(prefix+"messages_number", 8*1024)
+	v.SetDefault(prefix+"read_timeout", 0)
+	v.SetDefault(prefix+"read_header_timeout", "10s")
+	v.SetDefault(prefix+"write_timeout", 0)
+	v.SetDefault(prefix+"idle_timeout", "120s")
+	v.SetDefault(prefix+"max_header_bytes", http.DefaultMaxHeaderBytes)
+	v.SetDefault(prefix+"conn_keepalive_period", "180s")
 }
 
 func SetWebsocketServerDestDefaults(v *viper.Viper, prefixed bool) {

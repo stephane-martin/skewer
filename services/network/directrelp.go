@@ -387,9 +387,9 @@ func (s *DirectRelpServiceImpl) parseOne(raw *model.RawTcpMessage, e *base.Parse
 		return
 	}
 	decoder := utils.SelectDecoder(raw.Encoding)
-	syslogMsg, err := parser(raw.Message[:raw.Size], decoder)
+	syslogMsg, err := parser(raw.Message, decoder)
 	if err != nil {
-		makeDRELPLogger(s.Logger, raw).Warn("Parsing error", "message", string(raw.Message[:raw.Size]), "error", err)
+		makeDRELPLogger(s.Logger, raw).Warn("Parsing error", "error", err)
 		s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
 		base.ParsingErrorCounter.WithLabelValues("directrelp", raw.Client, raw.Format).Inc()
 		return
@@ -476,7 +476,7 @@ func (s *DirectRelpServiceImpl) handleKafkaResponses() {
 
 }
 
-func (s *DirectRelpServiceImpl) handleResponses(conn net.Conn, connID uint32, client string, logger log15.Logger) {
+func (s *DirectRelpServiceImpl) handleResponses(conn net.Conn, connID utils.MyULID, client string, logger log15.Logger) {
 	defer func() {
 		s.wg.Done()
 	}()
@@ -775,8 +775,12 @@ Loop:
 				s.forwarder.ForwardSucc(connID, txnr)
 				continue Loop
 			}
+			if s.MaxMessageSize > 0 && len(data) > s.MaxMessageSize {
+				logger.Warn("Message too large")
+				relpProtocolErrorsCounter.WithLabelValues(client).Inc()
+				return
+			}
 			rawmsg = s.Pool.Get().(*model.RawTcpMessage)
-			rawmsg.Size = len(data)
 			rawmsg.Txnr = txnr
 			rawmsg.Client = client
 			rawmsg.LocalPort = localPort
@@ -785,6 +789,7 @@ Loop:
 			rawmsg.Encoding = config.Encoding
 			rawmsg.Format = config.Format
 			rawmsg.ConnID = connID
+			rawmsg.Message = rawmsg.Message[:len(data)]
 			copy(rawmsg.Message, data)
 			err := s.rawMessagesQueue.Put(rawmsg)
 			if err != nil {

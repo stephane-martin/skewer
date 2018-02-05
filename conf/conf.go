@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"net"
+	"net/http"
 	"strconv"
 	"strings"
 	"text/template"
@@ -175,6 +176,10 @@ func (c *FilterSubConfig) CalculateID() []byte {
 	return fnv.New128a().Sum(c.Export())
 }
 
+func (c *HTTPServerSourceConfig) SetConfID() {
+	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
+}
+
 func (c *TCPSourceConfig) SetConfID() {
 	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
 }
@@ -199,7 +204,7 @@ func (c *JournaldConfig) SetConfID() {
 	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
 }
 
-func (c *AccountingConfig) SetConfID() {
+func (c *AccountingSourceConfig) SetConfID() {
 	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
 }
 
@@ -211,7 +216,15 @@ func (c *FilesystemSourceConfig) SetConfID() {
 	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
 }
 
+func (c *HTTPServerSourceConfig) GetClientAuthType() tls.ClientAuthType {
+	return convertClientAuthType(c.ClientAuthType)
+}
+
 func (c *TCPSourceConfig) GetClientAuthType() tls.ClientAuthType {
+	return convertClientAuthType(c.ClientAuthType)
+}
+
+func (c *HTTPServerDestConfig) GetClientAuthType() tls.ClientAuthType {
 	return convertClientAuthType(c.ClientAuthType)
 }
 
@@ -267,6 +280,7 @@ func (c *BaseConfig) GetCertificateFiles() (res map[string]([]string)) {
 	s.Add(c.KafkaDest.CAFile, c.KafkaDest.CertFile, c.KafkaDest.KeyFile)
 	s.Add(c.RELPDest.CAFile, c.RELPDest.CertFile, c.RELPDest.KeyFile)
 	s.Add(c.TCPDest.CAFile, c.TCPDest.CertFile, c.TCPDest.KeyFile)
+	s.Add(c.HTTPServerDest.CAFile, c.HTTPServerDest.CertFile, c.HTTPServerDest.KeyFile)
 	res["dests"] = cleanList(s)
 
 	s = set.New(set.ThreadSafe)
@@ -293,8 +307,13 @@ func (c *BaseConfig) GetCertificateFiles() (res map[string]([]string)) {
 	}
 	res["kafkasource"] = cleanList(s)
 
-	return res
+	s = set.New(set.ThreadSafe)
+	for _, src := range c.HTTPServerSource {
+		s.Add(src.CAFile, src.CertFile, src.KeyFile)
+	}
+	res["httpserversource"] = cleanList(s)
 
+	return res
 }
 
 func (c *BaseConfig) GetCertificatePaths() (res map[string]([]string)) {
@@ -871,7 +890,7 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 		c.Metrics = metricsConf
 	}
 
-	accountingConf := AccountingConfig{}
+	accountingConf := AccountingSourceConfig{}
 	if len(rawAccountingConf) > 0 {
 		vi = viper.New()
 		SetAccountingDefaults(vi, false)
@@ -993,11 +1012,49 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 	for i := range c.KafkaSource {
 		sources = append(sources, &c.KafkaSource[i])
 	}
+	for i := range c.HTTPServerSource {
+		sources = append(sources, &c.HTTPServerSource[i])
+	}
 	sources = append(sources, &c.Journald, &c.Accounting)
 
 	for i := range c.TCPSource {
 		if len(c.TCPSource[i].FrameDelimiter) == 0 {
 			c.TCPSource[i].FrameDelimiter = "\n"
+		}
+	}
+
+	// set default values for http server sources
+	for i := range c.HTTPServerSource {
+		hc := &c.HTTPServerSource[i]
+		if hc.BindAddr == "" {
+			hc.BindAddr = "127.0.0.1"
+		}
+		if hc.Port == 0 {
+			hc.Port = hc.DefaultPort()
+		}
+		if hc.ConnKeepAlivePeriod == 0 {
+			hc.ConnKeepAlivePeriod = 3 * time.Minute
+		}
+		if hc.MaxHeaderBytes == 0 {
+			hc.MaxHeaderBytes = http.DefaultMaxHeaderBytes
+		}
+		if hc.IdleTimeout == 0 {
+			hc.IdleTimeout = 2 * time.Minute
+		}
+		if len(hc.FrameDelimiter) == 0 {
+			hc.FrameDelimiter = "\n"
+		}
+		if hc.MaxBodySize == 0 {
+			hc.MaxBodySize = 10 * 1024 * 1024
+		}
+		if len(hc.Encoding) == 0 {
+			hc.Encoding = "utf8"
+		}
+		if len(hc.Format) == 0 {
+			hc.Format = "json"
+		}
+		if hc.MaxMessages == 0 {
+			hc.MaxMessages = 10000
 		}
 	}
 

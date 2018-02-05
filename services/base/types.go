@@ -19,6 +19,7 @@ const (
 	Configuration
 	Graylog
 	Filesystem
+	HTTPServer
 )
 
 var Names2Types map[string]Types = map[string]Types{
@@ -33,6 +34,7 @@ var Names2Types map[string]Types = map[string]Types{
 	"skewer-conf":        Configuration,
 	"skewer-graylog":     Graylog,
 	"skewer-files":       Filesystem,
+	"skewer-httpserver":  HTTPServer,
 }
 
 var ErrNotFound = errors.New("Not found")
@@ -96,6 +98,7 @@ func init() {
 		{Types2Names[DirectRELP], Binder},
 		{Types2Names[Store], Binder},
 		{Types2Names[Graylog], Binder},
+		{Types2Names[HTTPServer], Binder},
 		{"child", Logger},
 		{Types2Names[TCP], Logger},
 		{Types2Names[UDP], Logger},
@@ -108,6 +111,7 @@ func init() {
 		{Types2Names[KafkaSource], Logger},
 		{Types2Names[Graylog], Logger},
 		{Types2Names[Filesystem], Logger},
+		{Types2Names[HTTPServer], Logger},
 	}
 
 	HandlesMap = map[ServiceHandle]uintptr{}

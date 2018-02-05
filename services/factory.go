@@ -51,6 +51,11 @@ func Configure(t base.Types, c conf.BaseConfig) (res conf.BaseConfig) {
 	case base.Filesystem:
 		res.FSSource = c.FSSource
 		res.Parsers = c.Parsers
+	case base.HTTPServer:
+		res.HTTPServerSource = c.HTTPServerSource
+		res.Parsers = c.Parsers
+		res.Main.InputQueueSize = c.Main.InputQueueSize
+		res.Main.MaxInputMessageSize = c.Main.MaxInputMessageSize
 	}
 	return res
 }
@@ -120,6 +125,7 @@ var constructors map[base.Types]ProviderConstructor = map[base.Types]ProviderCon
 	base.Store:       NewStoreService,
 	base.KafkaSource: network.NewKafkaService,
 	base.Filesystem:  NewFilePollingService,
+	base.HTTPServer:  network.NewHTTPService,
 }
 
 type ProviderOpt func(e *base.ProviderEnv)

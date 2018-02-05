@@ -56,9 +56,8 @@ type RawKafkaMessage struct {
 type RawTcpMessage struct {
 	RawMessage
 	Message []byte
-	Size    int
 	Txnr    int32
-	ConnID  uint32
+	ConnID  utils.MyULID
 }
 
 type RawUdpMessage struct {

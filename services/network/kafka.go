@@ -1,6 +1,7 @@
 package network
 
 import (
+	"bytes"
 	"runtime"
 	"strings"
 	"sync"
@@ -185,7 +186,7 @@ func (s *KafkaServiceImpl) ParseOne(env *base.ParsersEnv, raw *model.RawKafkaMes
 
 	if fatal != nil {
 		logger.Error("Fatal error stashing Kafka message", "error", fatal)
-		close(s.fatalErrorChan)
+		s.dofatal()
 	} else if nonfatal != nil {
 		logger.Warn("Non-fatal error stashing Kafka message", "error", nonfatal)
 	} else {
@@ -246,6 +247,7 @@ func (s *KafkaServiceImpl) handleConsumer(config conf.KafkaSourceConfig, consume
 
 	gen := utils.NewGenerator()
 
+Loop:
 	for {
 		select {
 		case err := <-consumer.Errors():
@@ -255,6 +257,15 @@ func (s *KafkaServiceImpl) handleConsumer(config conf.KafkaSourceConfig, consume
 			}
 			s.logger.Info("Kafka consumer non fatal error", "error", err)
 		case msg := <-consumer.Messages():
+			value := bytes.TrimSpace(msg.Value)
+			if len(value) == 0 {
+				s.logger.Warn("Empty message")
+				continue Loop
+			}
+			if s.MaxMessageSize > 0 && len(value) > s.MaxMessageSize {
+				s.logger.Warn("Message too large")
+				continue Loop
+			}
 			raw := s.rawpool.Get().(*model.RawKafkaMessage)
 			raw.UID = gen.Uid()
 			raw.Brokers = brokers
@@ -262,7 +273,8 @@ func (s *KafkaServiceImpl) handleConsumer(config conf.KafkaSourceConfig, consume
 			raw.ConsumerID = ackQueue.ID()
 			raw.Encoding = config.Encoding
 			raw.Format = config.Format
-			raw.Message = msg.Value
+			raw.Message = raw.Message[:len(value)]
+			copy(raw.Message, value)
 			raw.Topic = msg.Topic
 			raw.Partition = msg.Partition
 			raw.Offset = msg.Offset

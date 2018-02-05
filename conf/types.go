@@ -16,6 +16,7 @@ type BaseConfig struct {
 	TCPSource           []TCPSourceConfig         `mapstructure:"tcp_source" toml:"tcp_source" json:"tcp_source"`
 	UDPSource           []UDPSourceConfig         `mapstructure:"udp_source" toml:"udp_source" json:"udp_source"`
 	RELPSource          []RELPSourceConfig        `mapstructure:"relp_source" toml:"relp_source" json:"relp_source"`
+	HTTPServerSource    []HTTPServerSourceConfig  `mapstructure:"httpserver_source" toml:"httpserver_source" json:"httpserver_source"`
 	DirectRELPSource    []DirectRELPSourceConfig  `mapstructure:"directrelp_source" toml:"directrelp_source" json:"directrelp_source"`
 	KafkaSource         []KafkaSourceConfig       `mapstructure:"kafka_source" toml:"kafka_source" json:"kafka_source"`
 	GraylogSource       []GraylogSourceConfig     `mapstructure:"graylog_source" toml:"graylog_source" json:"graylog_source"`
@@ -23,7 +24,7 @@ type BaseConfig struct {
 	Parsers             []ParserConfig            `mapstructure:"parser" toml:"parser" json:"parser"`
 	Journald            JournaldConfig            `mapstructure:"journald" toml:"journald" json:"journald"`
 	Metrics             MetricsConfig             `mapstructure:"metrics" toml:"metrics" json:"metrics"`
-	Accounting          AccountingConfig          `mapstructure:"accounting" toml:"accounting" json:"accounting"`
+	Accounting          AccountingSourceConfig    `mapstructure:"accounting" toml:"accounting" json:"accounting"`
 	Main                MainConfig                `mapstructure:"main" toml:"main" json:"main"`
 	KafkaDest           *KafkaDestConfig          `mapstructure:"kafka_destination" toml:"kafka_destination" json:"kafka_destination"`
 	UDPDest             UDPDestConfig             `mapstructure:"udp_destination" toml:"udp_destination" json:"udp_destination"`
@@ -238,8 +239,14 @@ type TCPDestConfig struct {
 }
 
 type HTTPServerDestConfig struct {
-	BindAddr       string `mapstructure:"bind_addr" toml:"bind_addr" json:"bind_addr"`
-	Port           int    `mapstructure:"port" toml:"port" json:"port"`
+	HTTPServerBaseConfig `mapstructure:",squash"`
+
+	TlsBaseConfig  `mapstructure:",squash"`
+	ClientAuthType string `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
+
+	Port int `mapstructure:"port" toml:"port" json:"port"`
+
+	// format can be empty if the format should be inferred by the accepted mimetypes sent by the client
 	Format         string `mapstructure:"format" toml:"format" json:"format"`
 	LineFraming    bool   `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
 	FrameDelimiter uint8  `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
@@ -381,7 +388,7 @@ func (c *JournaldConfig) DefaultPort() int {
 	return 0
 }
 
-type AccountingConfig struct {
+type AccountingSourceConfig struct {
 	FilterSubConfig `mapstructure:",squash"`
 	ConfID          utils.MyULID  `mapstructure:"-" toml:"-" json:"conf_id"`
 	Period          time.Duration `mapstructure:"period" toml:"period" json:"period"`
@@ -389,15 +396,15 @@ type AccountingConfig struct {
 	Enabled         bool          `mapstructure:"enabled" toml:"enabled" json:"enabled"`
 }
 
-func (c *AccountingConfig) FilterConf() *FilterSubConfig {
+func (c *AccountingSourceConfig) FilterConf() *FilterSubConfig {
 	return &c.FilterSubConfig
 }
 
-func (c *AccountingConfig) ListenersConf() *ListenersConfig {
+func (c *AccountingSourceConfig) ListenersConf() *ListenersConfig {
 	return nil
 }
 
-func (c *AccountingConfig) DefaultPort() int {
+func (c *AccountingSourceConfig) DefaultPort() int {
 	return 0
 }
 
@@ -408,6 +415,37 @@ type FilesystemSourceConfig struct {
 	Format          string       `mapstructure:"format" toml:"format" json:"format"`
 	Encoding        string       `mapstructure:"encoding" toml:"encoding" json:"encoding"`
 	ConfID          utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
+}
+
+type HTTPServerSourceConfig struct {
+	HTTPServerBaseConfig `mapstructure:",squash"`
+
+	FilterSubConfig `mapstructure:",squash"`
+	ConfID          utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
+
+	TlsBaseConfig  `mapstructure:",squash"`
+	ClientAuthType string `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
+
+	Port     int    `mapstructure:"port" toml:"port" json:"port"`
+	Format   string `mapstructure:"format" toml:"format" json:"format"`
+	Encoding string `mapstructure:"encoding" toml:"encoding" json:"encoding"`
+	// should the server accept multiple messages per request
+	DisableMultiple bool   `mapstructure:"disable_multiple" toml:"disable_multiple" json:"disable_multiple"`
+	FrameDelimiter  string `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
+	MaxBodySize     int64  `mapstructure:"max_body_size" toml:"max_body_size" json:"max_body_size"`
+	MaxMessages     int    `mapstructure:"max_messages" toml:"max_messages" json:"max_messages"`
+}
+
+func (c *HTTPServerSourceConfig) FilterConf() *FilterSubConfig {
+	return &c.FilterSubConfig
+}
+
+func (c *HTTPServerSourceConfig) ListenersConf() *ListenersConfig {
+	return nil
+}
+
+func (c *HTTPServerSourceConfig) DefaultPort() int {
+	return 8081
 }
 
 type TCPSourceConfig struct {
@@ -576,4 +614,16 @@ type TlsBaseConfig struct {
 	CAPath     string `mapstructure:"ca_path" toml:"ca_path" json:"ca_path"`
 	KeyFile    string `mapstructure:"key_file" toml:"key_file" json:"key_file"`
 	CertFile   string `mapstructure:"cert_file" toml:"cert_file" json:"cert_file"`
+}
+
+type HTTPServerBaseConfig struct {
+	BindAddr             string        `mapstructure:"bind_addr" toml:"bind_addr" json:"bind_addr"`
+	ReadTimeout          time.Duration `mapstructure:"read_timeout" toml:"read_timeout" json:"read_timeout"`
+	ReadHeaderTimeout    time.Duration `mapstructure:"read_header_timeout" toml:"read_header_timeout" json:"read_header_timeout"`
+	WriteTimeout         time.Duration `mapstructure:"write_timeout" toml:"write_timeout" json:"write_timeout"`
+	IdleTimeout          time.Duration `mapstructure:"idle_timeout" toml:"idle_timeout" json:"idle_timeout"`
+	MaxHeaderBytes       int           `mapstructure:"max_header_bytes" toml:"max_header_bytes" json:"max_header_bytes"`
+	DisableConnKeepAlive bool          `mapstructure:"disable_conn_keepalive" toml:"disable_conn_keepalive" json:"disable_conn_keepalive"`
+	ConnKeepAlivePeriod  time.Duration `mapstructure:"conn_keepalive_period" toml:"conn_keepalive_period" json:"conn_keepalive_period"`
+	DisableHTTPKeepAlive bool          `mapstructure:"disable_http_keepalive" toml:"disable_http_keepalive" json:"disable_http_keepalive"`
 }

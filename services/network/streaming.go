@@ -68,7 +68,13 @@ func (s *StreamingService) initTCPListeners() []model.ListenerInfo {
 		} else {
 			listenAddrs, _ := syslogConf.GetListenAddrs()
 			for port, listenAddr := range listenAddrs {
-				l, err := s.Binder.Listen("tcp", listenAddr)
+				var l net.Listener
+				var err error
+				if syslogConf.KeepAlive {
+					l, err = s.Binder.ListenKeepAlive("tcp", listenAddr, syslogConf.KeepAlivePeriod)
+				} else {
+					l, err = s.Binder.Listen("tcp", listenAddr)
+				}
 				if err != nil {
 					s.Logger.Warn("Error listening on stream (TCP or RELP)", "listen_addr", listenAddr, "error", err)
 				} else {
@@ -119,13 +125,13 @@ func (s *StreamingService) AcceptUnix(lc UnixListenerConf) {
 	defer s.wg.Done()
 	defer s.acceptsWg.Done()
 	for {
-		conn, accept_err := lc.Listener.Accept()
-		if accept_err != nil {
-			switch accept_err.(type) {
+		conn, err := lc.Listener.Accept()
+		if err != nil {
+			switch err.(type) {
 			case *net.OpError:
-				s.Logger.Info("AcceptUnix() OpError", "error", accept_err)
+				s.Logger.Info("AcceptUnix() OpError", "error", err)
 			default:
-				s.Logger.Warn("AcceptUnix() error", "error", accept_err)
+				s.Logger.Warn("AcceptUnix() error", "error", err)
 			}
 			return
 		} else if conn != nil {
@@ -140,58 +146,28 @@ func (s *StreamingService) AcceptTCP(lc TCPListenerConf) {
 	defer s.wg.Done()
 	defer s.acceptsWg.Done()
 	for {
-		c, accept_err := lc.Listener.Accept()
-		if accept_err != nil {
-			switch accept_err.(type) {
+		c, err := lc.Listener.Accept()
+		if err != nil {
+			switch err.(type) {
 			case *net.OpError:
-				s.Logger.Info("AcceptTCP() OpError", "error", accept_err)
+				s.Logger.Info("AcceptTCP() OpError", "error", err)
 			default:
-				s.Logger.Warn("AcceptTCP() error", "error", accept_err)
+				s.Logger.Warn("AcceptTCP() error", "error", err)
 			}
 			return
-		} else if c != nil {
-			if conn, ok := c.(*net.TCPConn); ok {
-				if lc.Conf.KeepAlive {
-					err := conn.SetKeepAlive(true)
-					if err == nil {
-						err := conn.SetKeepAlivePeriod(lc.Conf.KeepAlivePeriod)
-						if err != nil {
-							s.Logger.Warn("Error setting keepalive period", "addr", lc.Conf.BindAddr, "period", lc.Conf.KeepAlivePeriod)
-						}
-					} else {
-						s.Logger.Warn("Error setting keepalive", "addr", lc.Conf.BindAddr)
-					}
-
-				} else {
-					err := conn.SetKeepAlive(false)
-					if err != nil {
-						s.Logger.Warn("Error disabling keepalive", "addr", lc.Conf.BindAddr)
-					}
-				}
-				err := conn.SetNoDelay(true)
-				if err != nil {
-					s.Logger.Warn("Error setting TCP NODELAY", "addr", lc.Conf.BindAddr)
-				}
-				err = conn.SetLinger(-1)
-				if err != nil {
-					s.Logger.Warn("Error setting TCP LINGER", "addr", lc.Conf.BindAddr)
-				}
-			}
-			if lc.Conf.TLSEnabled {
-				tlsConf, err := utils.NewTLSConfig("", lc.Conf.CAFile, lc.Conf.CAPath, lc.Conf.CertFile, lc.Conf.KeyFile, false, s.confined)
-				if err != nil {
-					s.Logger.Warn("Error creating TLS configuration", "error", err)
-				} else {
-					tlsConf.ClientAuth = lc.Conf.GetClientAuthType()
-					s.wg.Add(1)
-					go s.handleConnection(tls.Server(c, tlsConf), lc.Conf)
-				}
-
-			} else {
-				s.wg.Add(1)
-				go s.handleConnection(c, lc.Conf)
-			}
 		}
+		if lc.Conf.TLSEnabled {
+			// upgrade connection to TLS
+			tlsConf, err := utils.NewTLSConfig("", lc.Conf.CAFile, lc.Conf.CAPath, lc.Conf.CertFile, lc.Conf.KeyFile, false, s.confined)
+			if err != nil {
+				s.Logger.Warn("Error creating TLS configuration", "error", err)
+				continue
+			}
+			tlsConf.ClientAuth = lc.Conf.GetClientAuthType()
+			c = tls.Server(c, tlsConf)
+		}
+		s.wg.Add(1)
+		go s.handleConnection(c, lc.Conf)
 	}
 }
 

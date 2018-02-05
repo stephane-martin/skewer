@@ -624,7 +624,7 @@ func (s *PluginController) Create(optsfuncs ...func(*PluginCreateOpts)) error {
 	var err error
 
 	switch s.typ {
-	case base.RELP, base.DirectRELP, base.TCP, base.UDP, base.Graylog, base.Accounting, base.Journal, base.KafkaSource, base.Filesystem:
+	case base.RELP, base.DirectRELP, base.TCP, base.UDP, base.Graylog, base.Accounting, base.Journal, base.KafkaSource, base.Filesystem, base.HTTPServer:
 		cname, _ := base.Name(s.typ, true)
 		// the plugin will use this pipe to report syslog messages
 		piper, pipew, err := os.Pipe()

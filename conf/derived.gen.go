@@ -83,6 +83,24 @@ func deriveDeepCopy(dst, src *BaseConfig) {
 		}
 		deriveDeepCopy_2(dst.RELPSource, src.RELPSource)
 	}
+	if src.HTTPServerSource == nil {
+		dst.HTTPServerSource = nil
+	} else {
+		if dst.HTTPServerSource != nil {
+			if len(src.HTTPServerSource) > len(dst.HTTPServerSource) {
+				if cap(dst.HTTPServerSource) >= len(src.HTTPServerSource) {
+					dst.HTTPServerSource = (dst.HTTPServerSource)[:len(src.HTTPServerSource)]
+				} else {
+					dst.HTTPServerSource = make([]HTTPServerSourceConfig, len(src.HTTPServerSource))
+				}
+			} else if len(src.HTTPServerSource) < len(dst.HTTPServerSource) {
+				dst.HTTPServerSource = (dst.HTTPServerSource)[:len(src.HTTPServerSource)]
+			}
+		} else {
+			dst.HTTPServerSource = make([]HTTPServerSourceConfig, len(src.HTTPServerSource))
+		}
+		copy(dst.HTTPServerSource, src.HTTPServerSource)
+	}
 	if src.DirectRELPSource == nil {
 		dst.DirectRELPSource = nil
 	} else {
