@@ -250,6 +250,12 @@ type infosAndError struct {
 
 // listen for the encrypted messages that the plugin produces
 func (s *PluginController) listenpipe(secret *memguard.LockedBuffer) {
+	defer func() {
+		if e := recover(); e != nil {
+			errString := fmt.Sprintf("%s", e)
+			s.logger.Error("scanner panicked", "error", errString)
+		}
+	}()
 	if s.pipe == nil {
 		return
 	}
@@ -258,7 +264,6 @@ func (s *PluginController) listenpipe(secret *memguard.LockedBuffer) {
 		return
 	default:
 	}
-	// TODO: scanner trigger a panic
 	scanner := bufio.NewScanner(s.pipe)
 	scanner.Split(utils.MakeDecryptSplit(secret))
 	scanner.Buffer(make([]byte, 0, 132000), 132000)
@@ -308,6 +313,11 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 		normalStop := false
 
 		defer func() {
+			if e := recover(); e != nil {
+				errString := fmt.Sprintf("%s", e)
+				s.logger.Error("Scanner panicked in plugin control", "error", errString)
+			}
+
 			s.logger.Debug("Plugin controller is stopping", "type", s.name)
 			startError(fmt.Errorf("Unexpected end of plugin before it was initialized"), nil)
 

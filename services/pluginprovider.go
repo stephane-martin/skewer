@@ -28,7 +28,13 @@ func Wout(header []byte, msg []byte) (err error) {
 	return err
 }
 
-func Launch(typ base.Types, opts ...ProviderOpt) error {
+func Launch(typ base.Types, opts ...ProviderOpt) (err error) {
+	defer func() {
+		if e := recover(); e != nil {
+			errString := fmt.Sprintf("%s", e)
+			err = fmt.Errorf("Scanner panicked in plugin provider: %s", errString)
+		}
+	}()
 	env := &base.ProviderEnv{}
 	for _, opt := range opts {
 		opt(env)

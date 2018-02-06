@@ -191,6 +191,10 @@ func serveOne(ctx context.Context, wg *sync.WaitGroup, parentFD uintptr, secret 
 	wg.Add(1)
 	go func() {
 		defer func() {
+			if e := recover(); e != nil {
+				errString := fmt.Sprintf("%s", e)
+				logger.Crit("scanner in binder server panicked", "err", errString)
+			}
 			cancel()
 			wg.Done()
 		}()

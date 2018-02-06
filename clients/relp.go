@@ -350,6 +350,12 @@ func (c *RELPClient) wclose() (err error) {
 }
 
 func (c *RELPClient) scan() (txnr int32, retcode int, data []byte, err error) {
+	defer func() {
+		if e := recover(); e != nil {
+			errString := fmt.Sprintf("%s", e)
+			err = fmt.Errorf(errString)
+		}
+	}()
 	if !c.scanner.Scan() {
 		err = c.scanner.Err()
 		return

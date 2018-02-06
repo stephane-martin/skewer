@@ -155,6 +155,10 @@ func (c *ConfigurationService) Start(r kring.Ring) error {
 		kill := false
 		once := &sync.Once{}
 		defer func() {
+			if e := recover(); e != nil {
+				errString := fmt.Sprintf("%s", e)
+				c.logger.Error("Scanner panicked in configuration controller", "error", errString)
+			}
 			c.logger.Debug("Configuration service is stopping")
 
 			once.Do(func() {
@@ -337,7 +341,13 @@ func start(confdir string, params consul.ConnParams, r kring.Ring, logger log15.
 	return cancel, nil
 }
 
-func LaunchConfProvider(r kring.Ring, confined bool, logger log15.Logger) error {
+func LaunchConfProvider(r kring.Ring, confined bool, logger log15.Logger) (err error) {
+	defer func() {
+		if e := recover(); e != nil {
+			errString := fmt.Sprintf("%s", e)
+			err = fmt.Errorf("Scanner panicked in configuration provider: %s", errString)
+		}
+	}()
 	if r == nil {
 		return fmt.Errorf("No ring")
 	}

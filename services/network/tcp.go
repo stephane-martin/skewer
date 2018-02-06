@@ -3,6 +3,7 @@ package network
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"io"
 	"net"
 	"runtime"
@@ -223,6 +224,10 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TCPSourceConfig)
 	s.AddConnection(conn)
 
 	defer func() {
+		if e := recover(); e != nil {
+			errString := fmt.Sprintf("%s", e)
+			s.Logger.Error("Scanner panicked in TCP service", "error", errString)
+		}
 		s.RemoveConnection(conn)
 		s.wg.Done()
 	}()

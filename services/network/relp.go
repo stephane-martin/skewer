@@ -641,6 +641,10 @@ func (h RelpHandler) HandleConnection(conn net.Conn, c conf.TCPSourceConfig) {
 	logger := s.Logger.New("ConnID", connID)
 
 	defer func() {
+		if e := recover(); e != nil {
+			errString := fmt.Sprintf("%s", e)
+			logger.Error("Scanner panicked in RELP service", "error", errString)
+		}
 		logger.Info("Scanning the RELP stream has ended", "error", scanner.Err())
 		s.forwarder.RemoveConn(connID)
 		s.RemoveConnection(conn)

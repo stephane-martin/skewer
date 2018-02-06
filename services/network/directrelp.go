@@ -672,6 +672,10 @@ func (h DirectRelpHandler) HandleConnection(conn net.Conn, c conf.TCPSourceConfi
 	logger := s.Logger.New("ConnID", connID)
 
 	defer func() {
+		if e := recover(); e != nil {
+			errString := fmt.Sprintf("%s", e)
+			logger.Error("Scanner panicked in DirectRELP service", "error", errString)
+		}
 		logger.Info("Scanning the DirectRELP stream has ended", "error", scanner.Err())
 		s.forwarder.RemoveConn(connID)
 		s.RemoveConnection(conn)

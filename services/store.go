@@ -129,15 +129,16 @@ func (s *storeServiceImpl) create() error {
 	// receive syslog messages on the pipe
 	s.ingestwg.Add(1)
 	go func() {
-		defer s.ingestwg.Done()
+		defer func() {
+			if e := recover(); e != nil {
+				errString := fmt.Sprintf("%s", e)
+				s.logger.Error("Scanner panicked in store service", "error", errString)
+			}
+			s.ingestwg.Done()
+		}()
 
 		scanner := bufio.NewScanner(s.pipe)
 		scanner.Split(utils.MakeDecryptSplit(s.secret))
-		defer func() {
-			if s.secret != nil {
-				//s.secret.Destroy()
-			}
-		}()
 		var err error
 		var message *model.FullMessage
 		var msgBytes []byte
