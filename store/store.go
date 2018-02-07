@@ -166,7 +166,7 @@ type MessageStore struct {
 	addMissingMsgID bool
 	generator       *utils.Generator
 	msgsSlicePool   *sync.Pool
-	uidsSlicePool   *sync.Pool
+	uidsTmpBuf      []utils.MyULID
 }
 
 func (s *MessageStore) Confined() bool {
@@ -225,13 +225,13 @@ func (s *MessageStore) consumeStashQueue() {
 	var err error
 	messages := make([][]byte, 0, s.batchSize)
 	uids := make([]utils.MyULID, 0, s.batchSize)
-	messagesMap := make(map[utils.MyULID]([]byte), s.batchSize)
+	tmpMap1 := make(map[utils.MyULID]([]byte), s.batchSize)
 	for s.toStashQueue.Wait(0) {
 		s.toStashQueue.GetManyInto(&messages, &uids)
 		if len(messages) == 0 {
 			continue
 		}
-		_, err = s.ingest(messages, uids, &messagesMap)
+		_, err = s.ingest(messages, uids, tmpMap1)
 		if err != nil {
 			s.logger.Warn("Ingestion error", "error", err)
 		}
@@ -349,10 +349,7 @@ func (s *MessageStore) init(ctx context.Context) {
 		s.logger.Warn("Error pruning orphaned messages", "error", err)
 	}
 
-	err = s.initGauge()
-	if err != nil {
-		s.logger.Warn("Error calculating initial store metrics", "error", err)
-	}
+	s.initGauge()
 
 	s.wg.Add(1)
 	go s.receiveAcks()
@@ -409,14 +406,10 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 				return make([]*model.FullMessage, 0, cfg.BatchSize)
 			},
 		},
-		uidsSlicePool: &sync.Pool{
-			New: func() interface{} {
-				return make([]utils.MyULID, 0, cfg.BatchSize)
-			},
-		},
+		uidsTmpBuf: make([]utils.MyULID, 0, cfg.BatchSize),
 	}
-
 	store.dests.Store(dests)
+	db.SetBatchSize(cfg.BatchSize)
 
 	kv, err := badger.Open(badgerOpts)
 	if err != nil {
@@ -505,24 +498,32 @@ func (s *MessageStore) StoreAllSyslogConfigs(c conf.BaseConfig) (err error) {
 	return utils.Chain(funcs...)
 }
 
-func (s *MessageStore) StoreSyslogConfig(confID utils.MyULID, config conf.FilterSubConfig) error {
-	data := config.Export()
-	exists, err := s.syslogConfigsDB.Exists(confID, nil)
+func (s *MessageStore) StoreSyslogConfig(confID utils.MyULID, config conf.FilterSubConfig) (err error) {
+	txn := db.NewNTransaction(s.badger, true)
+	defer txn.Discard()
+
+	exists, err := s.syslogConfigsDB.Exists(confID, txn)
 	if err != nil {
 		return err
 	}
 	if !exists {
-		err = s.syslogConfigsDB.Set(confID, data, nil)
+		err = s.syslogConfigsDB.Set(confID, config.Export(), txn)
 		if err != nil {
 			return err
 		}
-		badgerGauge.WithLabelValues("syslogconf", "").Inc()
+		err = txn.Commit(nil)
+		if err == nil {
+			badgerGauge.WithLabelValues("syslogconf", "").Inc()
+		}
 	}
-	return nil
+
+	return err
 }
 
 func (s *MessageStore) GetSyslogConfig(confID utils.MyULID) (*conf.FilterSubConfig, error) {
-	data, err := s.syslogConfigsDB.Get(confID, nil)
+	txn := db.NewNTransaction(s.badger, false)
+	defer txn.Discard()
+	data, err := s.syslogConfigsDB.Get(confID, nil, txn)
 	if err != nil {
 		return nil, err
 	}
@@ -536,18 +537,23 @@ func (s *MessageStore) GetSyslogConfig(confID utils.MyULID) (*conf.FilterSubConf
 	return c, nil
 }
 
-func (s *MessageStore) initGauge() error {
-	badgerGauge.WithLabelValues("syslogconf", "").Set(float64(s.syslogConfigsDB.Count(nil)))
-	return s.badger.View(func(txn *badger.Txn) error {
-		for dname, dtype := range conf.Destinations {
-			badgerGauge.WithLabelValues("messages", dname).Set(float64(s.backend.GetPartition(Messages, dtype).Count(txn)))
-			badgerGauge.WithLabelValues("ready", dname).Set(float64(s.backend.GetPartition(Ready, dtype).Count(txn)))
-			badgerGauge.WithLabelValues("sent", dname).Set(float64(s.backend.GetPartition(Sent, dtype).Count(txn)))
-			badgerGauge.WithLabelValues("failed", dname).Set(float64(s.backend.GetPartition(Failed, dtype).Count(txn)))
-			badgerGauge.WithLabelValues("permerrors", dname).Set(float64(s.backend.GetPartition(PermErrors, dtype).Count(txn)))
-		}
-		return nil
-	})
+func (s *MessageStore) initGauge() {
+	txn := db.NewNTransaction(s.badger, false)
+	defer txn.Discard()
+	badgerGauge.WithLabelValues("syslogconf", "").Set(float64(s.syslogConfigsDB.Count(txn)))
+	for dname, dtype := range conf.Destinations {
+		messagesDB := s.backend.GetPartition(Messages, dtype)
+		readyDB := s.backend.GetPartition(Ready, dtype)
+		sentDB := s.backend.GetPartition(Sent, dtype)
+		failedDB := s.backend.GetPartition(Failed, dtype)
+		peDB := s.backend.GetPartition(PermErrors, dtype)
+
+		badgerGauge.WithLabelValues("messages", dname).Set(float64(messagesDB.Count(txn)))
+		badgerGauge.WithLabelValues("ready", dname).Set(float64(readyDB.Count(txn)))
+		badgerGauge.WithLabelValues("sent", dname).Set(float64(sentDB.Count(txn)))
+		badgerGauge.WithLabelValues("failed", dname).Set(float64(failedDB.Count(txn)))
+		badgerGauge.WithLabelValues("permerrors", dname).Set(float64(peDB.Count(txn)))
+	}
 }
 
 func (s *MessageStore) closeBadgers() {
@@ -559,7 +565,7 @@ func (s *MessageStore) closeBadgers() {
 }
 
 func (s *MessageStore) pruneOrphaned() (err error) {
-	txn := s.badger.NewTransaction(true)
+	txn := db.NewNTransaction(s.badger, true)
 	defer txn.Discard()
 
 	for _, dest := range conf.Destinations {
@@ -580,7 +586,7 @@ func (s *MessageStore) pruneOrphaned() (err error) {
 	return
 }
 
-func (s *MessageStore) pruneOrphanedByDest(dest conf.DestinationType, txn *badger.Txn) (err error) {
+func (s *MessageStore) pruneOrphanedByDest(dest conf.DestinationType, txn db.Transaction) (err error) {
 	// find if we have some old full messages
 	var have bool
 	messagesDB := s.backend.GetPartition(Messages, dest)
@@ -632,7 +638,7 @@ func (s *MessageStore) pruneOrphanedByDest(dest conf.DestinationType, txn *badge
 func (s *MessageStore) resetStuckInSent() (err error) {
 	// push back to "Ready" the messages that were sent out of the Store in the
 	// last execution of skewer, but never were ACKed or NACKed
-	txn := s.badger.NewTransaction(true)
+	txn := db.NewNTransaction(s.badger, true)
 	defer txn.Discard()
 
 	for _, dest := range conf.Destinations {
@@ -655,7 +661,7 @@ func (s *MessageStore) resetStuckInSent() (err error) {
 
 }
 
-func (s *MessageStore) resetStuckInSentByDest(dest conf.DestinationType, txn *badger.Txn) (err error) {
+func (s *MessageStore) resetStuckInSentByDest(dest conf.DestinationType, txn db.Transaction) (err error) {
 	sentDB := s.backend.GetPartition(Sent, dest)
 	readyDB := s.backend.GetPartition(Ready, dest)
 
@@ -692,31 +698,38 @@ func (s *MessageStore) resetFailures() (err error) {
 }
 
 func (s *MessageStore) resetFailuresByDest(dest conf.DestinationType) (err error) {
-	var t time.Time
+	var t, now time.Time
+	var timeb []byte
+	var txn db.Transaction
+	var uid utils.MyULID
+
 	failedDB := s.backend.GetPartition(Failed, dest)
 	readyDB := s.backend.GetPartition(Ready, dest)
 
 	for {
-		//lok := s.readyMutexes[dest]
-		//cond := s.availConditions[dest]
-		txn := s.badger.NewTransaction(true)
-		now := time.Now()
+		txn = db.NewNTransaction(s.badger, true)
+		now = time.Now()
 		iter := failedDB.KeyValueIterator(s.batchSize/5, txn)
 		uids := []utils.MyULID{}
 		invalidUids := []utils.MyULID{}
 
 		for iter.Rewind(); iter.Valid(); iter.Next() {
-			uid := iter.Key()
-			time_s := string(iter.Value())
-			t, err = time.Parse(time.RFC3339, time_s)
-			if err == nil {
-				if now.Sub(t) >= time.Minute {
-					// messages that failed to be delivered to Kafka should be tried again after 1 minute
-					uids = append(uids, uid)
-				}
-			} else {
-				s.logger.Warn("Invalid entry in failed", "wrong_timestamp", time_s)
+			uid = iter.Key()
+			timeb, err = iter.Value()
+			if err != nil {
+				s.logger.Warn("Invalid entry in failed", "error", err)
 				invalidUids = append(invalidUids, uid)
+				continue
+			}
+			t, err = time.Parse(time.RFC3339, string(timeb))
+			if err != nil {
+				s.logger.Warn("Invalid entry in failed", "wrong_timestamp", string(timeb))
+				invalidUids = append(invalidUids, uid)
+				continue
+			}
+			if now.Sub(t) >= time.Minute {
+				// messages that failed to be delivered to Kafka should be tried again after 1 minute
+				uids = append(uids, uid)
 			}
 		}
 		iter.Close()
@@ -787,7 +800,7 @@ func (s *MessageStore) Stash(uid utils.MyULID, b []byte) (fatal error, nonfatal 
 	return fatal, nil
 }
 
-func (s *MessageStore) ingestByDest(queue map[utils.MyULID]([]byte), dest conf.DestinationType, txn *badger.Txn) (err error) {
+func (s *MessageStore) ingestByDest(queue map[utils.MyULID]([]byte), dest conf.DestinationType, txn db.Transaction) (err error) {
 	messagesDB := s.backend.GetPartition(Messages, dest)
 	readyDB := s.backend.GetPartition(Ready, dest)
 
@@ -798,7 +811,7 @@ func (s *MessageStore) ingestByDest(queue map[utils.MyULID]([]byte), dest conf.D
 	return readyDB.AddManyTrueMap(queue, txn)
 }
 
-func (s *MessageStore) ingest(queue [][]byte, uids []utils.MyULID, messagesMap *(map[utils.MyULID]([]byte))) (n int, err error) {
+func (s *MessageStore) ingest(queue [][]byte, uids []utils.MyULID, tmpMap1 map[utils.MyULID]([]byte)) (n int, err error) {
 	if len(queue) == 0 {
 		return 0, nil
 	}
@@ -806,21 +819,20 @@ func (s *MessageStore) ingest(queue [][]byte, uids []utils.MyULID, messagesMap *
 	var uid utils.MyULID
 
 	// clear the map that will hold the marshalled bytes
-	for uid = range *messagesMap {
-		delete(*messagesMap, uid)
+	for uid = range tmpMap1 {
+		delete(tmpMap1, uid)
 	}
 
 	for i = range queue {
-		(*messagesMap)[uids[i]] = queue[i]
+		tmpMap1[uids[i]] = queue[i]
 	}
 
 	dests := s.Destinations()
-
-	txn := s.badger.NewTransaction(true)
+	txn := db.NewNTransaction(s.badger, true)
 	defer txn.Discard()
 
 	for _, dest := range dests {
-		err = s.ingestByDest(*messagesMap, dest, txn)
+		err = s.ingestByDest(tmpMap1, dest, txn)
 		if err != nil {
 			return 0, err
 		}
@@ -828,14 +840,14 @@ func (s *MessageStore) ingest(queue [][]byte, uids []utils.MyULID, messagesMap *
 
 	err = txn.Commit(nil)
 	if err == nil {
-		length := len(*messagesMap)
+		length := len(tmpMap1)
 		for _, dest := range dests {
 			badgerGauge.WithLabelValues("messages", conf.DestinationNames[dest]).Add(float64(length))
 			badgerGauge.WithLabelValues("ready", conf.DestinationNames[dest]).Add(float64(length))
 		}
 		return length, nil
 	} else if err == badger.ErrConflict {
-		return s.ingest(queue, uids, messagesMap)
+		return s.ingest(queue, uids, tmpMap1)
 	} else {
 		return 0, err
 	}
@@ -843,7 +855,7 @@ func (s *MessageStore) ingest(queue [][]byte, uids []utils.MyULID, messagesMap *
 }
 
 func (s *MessageStore) retrieve(dest conf.DestinationType) (messages []*model.FullMessage) {
-	txn := s.badger.NewTransaction(true)
+	txn := db.NewNTransaction(s.badger, true)
 	defer txn.Discard()
 
 	readyDB := s.backend.GetPartition(Ready, dest)
@@ -851,9 +863,7 @@ func (s *MessageStore) retrieve(dest conf.DestinationType) (messages []*model.Fu
 	sentDB := s.backend.GetPartition(Sent, dest)
 
 	messages = s.msgsSlicePool.Get().([]*model.FullMessage)[:0]
-	// TODO: pool is not so appropriate for uids
-	uids := s.uidsSlicePool.Get().([]utils.MyULID)[:0]
-	defer s.uidsSlicePool.Put(uids)
+	uids := s.uidsTmpBuf[:0]
 
 	iter := readyDB.KeyIterator(s.batchSize, txn)
 	invalidEntries := make([]utils.MyULID, 0)
@@ -865,8 +875,10 @@ func (s *MessageStore) retrieve(dest conf.DestinationType) (messages []*model.Fu
 	var messageBytes []byte
 
 	for iter.Rewind(); iter.Valid() && fetched < s.batchSize; iter.Next() {
-		uid = iter.Key()
-		messageBytes, err = messagesDB.Get(uid, txn)
+		if !iter.KeyInto(&uid) {
+			continue
+		}
+		messageBytes, err = messagesDB.Get(uid, messageBytes, txn) // reuse or grow messageBytes at each step
 		if err != nil {
 			invalidEntries = append(invalidEntries, uid)
 			keysNotFound++
@@ -953,8 +965,7 @@ func (s *MessageStore) doACK(acks []queue.UidDest) {
 	if len(acks) == 0 {
 		return
 	}
-
-	txn := s.badger.NewTransaction(true)
+	txn := db.NewNTransaction(s.badger, true)
 	defer txn.Discard()
 
 	var ack queue.UidDest
@@ -998,8 +1009,7 @@ func (s *MessageStore) doNACK(nacks []queue.UidDest) {
 	if len(nacks) == 0 {
 		return
 	}
-
-	txn := s.badger.NewTransaction(true)
+	txn := db.NewNTransaction(s.badger, true)
 	defer txn.Discard()
 
 	var nack queue.UidDest
@@ -1045,8 +1055,7 @@ func (s *MessageStore) doPermanentError(pes []queue.UidDest) {
 	if len(pes) == 0 {
 		return
 	}
-
-	txn := s.badger.NewTransaction(true)
+	txn := db.NewNTransaction(s.badger, true)
 	defer txn.Discard()
 
 	var pe queue.UidDest
