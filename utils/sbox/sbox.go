@@ -50,18 +50,6 @@ func Encrypt(message []byte, secret *memguard.LockedBuffer) (encrypted []byte, e
 }
 
 func Decrypt(encrypted []byte, secret *memguard.LockedBuffer) (decrypted []byte, err error) {
-	/*
-		if secret == nil {
-			return nil, fmt.Errorf("Decrypt: nil secret")
-		}
-		var ok bool
-		decrypted, ok = secretbox.Open(nil, encrypted[24:], (*[24]byte)(unsafe.Pointer(&(encrypted[0]))), (*[32]byte)(unsafe.Pointer(&(secret.Buffer()[0]))))
-		if !ok {
-			return nil, fmt.Errorf("Error decrypting value")
-		}
-		fmt.Fprintln(os.Stderr, "DEC", len(encrypted)-24-secretbox.Overhead, len(decrypted))
-		return decrypted, nil
-	*/
 	return DecrypTo(encrypted, secret, nil)
 }
 
