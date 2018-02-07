@@ -91,7 +91,7 @@ func (q *BSliceQueue) Put(uid utils.MyULID, m []byte) error {
 	if cap(n.slice) >= len(m) {
 		n.slice = n.slice[:len(m)]
 	} else {
-		n.slice = make([]byte, len(m))
+		n.slice = make([]byte, len(m), len(m)+36)
 	}
 	copy(n.slice, m)
 	n.uid = uid
