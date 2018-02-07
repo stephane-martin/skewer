@@ -257,13 +257,26 @@ Loop:
 			}
 			s.logger.Info("Kafka consumer non fatal error", "error", err)
 		case msg := <-consumer.Messages():
+			ok := true
 			value := bytes.TrimSpace(msg.Value)
 			if len(value) == 0 {
 				s.logger.Warn("Empty message")
-				continue Loop
+				ok = false
 			}
 			if s.MaxMessageSize > 0 && len(value) > s.MaxMessageSize {
 				s.logger.Warn("Message too large")
+				ok = false
+			}
+			if !ok {
+				ackQueue.Put(
+					queue.KafkaProducerAck{
+						Offset: msg.Offset,
+						TopicPartition: queue.TopicPartition{
+							Partition: msg.Partition,
+							Topic:     msg.Topic,
+						},
+					},
+				)
 				continue Loop
 			}
 			raw := s.rawpool.Get().(*model.RawKafkaMessage)
