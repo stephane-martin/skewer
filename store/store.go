@@ -124,8 +124,8 @@ func (b *Backend) GetPartition(qtype QueueType, dtype conf.DestinationType) db.P
 	return (b.Partitions[qtype])[dtype]
 }
 
-func NewBackend(parent *badger.DB, storeSecret *memguard.LockedBuffer) *Backend {
-	b := Backend{}
+func NewBackend(parent *badger.DB, storeSecret *memguard.LockedBuffer) (b *Backend, err error) {
+	b = &Backend{}
 	b.Partitions = map[QueueType](map[conf.DestinationType]db.Partition){}
 	for qtype := range Queues {
 		b.Partitions[qtype] = map[conf.DestinationType]db.Partition{}
@@ -135,10 +135,13 @@ func NewBackend(parent *badger.DB, storeSecret *memguard.LockedBuffer) *Backend 
 	}
 	if storeSecret != nil {
 		for _, dtype := range conf.Destinations {
-			b.Partitions[Messages][dtype] = db.NewEncryptedPartition(b.Partitions[Messages][dtype], storeSecret)
+			b.Partitions[Messages][dtype], err = db.NewEncryptedPartition(b.Partitions[Messages][dtype], storeSecret)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
-	return &b
+	return b, nil
 }
 
 type MessageStore struct {
@@ -409,7 +412,6 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 		uidsTmpBuf: make([]utils.MyULID, 0, cfg.BatchSize),
 	}
 	store.dests.Store(dests)
-	db.SetBatchSize(cfg.BatchSize)
 
 	kv, err := badger.Open(badgerOpts)
 	if err != nil {
@@ -432,7 +434,10 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 			store.logger.Info("The badger store is encrypted")
 		}
 	}
-	store.backend = NewBackend(kv, storeSecret)
+	store.backend, err = NewBackend(kv, storeSecret)
+	if err != nil {
+		return nil, err
+	}
 	store.syslogConfigsDB = db.NewPartition(kv, []byte("configs"))
 
 	for _, dest := range conf.Destinations {
@@ -586,7 +591,7 @@ func (s *MessageStore) pruneOrphaned() (err error) {
 	return
 }
 
-func (s *MessageStore) pruneOrphanedByDest(dest conf.DestinationType, txn db.Transaction) (err error) {
+func (s *MessageStore) pruneOrphanedByDest(dest conf.DestinationType, txn *db.NTransaction) (err error) {
 	// find if we have some old full messages
 	var have bool
 	messagesDB := s.backend.GetPartition(Messages, dest)
@@ -661,7 +666,7 @@ func (s *MessageStore) resetStuckInSent() (err error) {
 
 }
 
-func (s *MessageStore) resetStuckInSentByDest(dest conf.DestinationType, txn db.Transaction) (err error) {
+func (s *MessageStore) resetStuckInSentByDest(dest conf.DestinationType, txn *db.NTransaction) (err error) {
 	sentDB := s.backend.GetPartition(Sent, dest)
 	readyDB := s.backend.GetPartition(Ready, dest)
 
@@ -700,7 +705,7 @@ func (s *MessageStore) resetFailures() (err error) {
 func (s *MessageStore) resetFailuresByDest(dest conf.DestinationType) (err error) {
 	var t, now time.Time
 	var timeb []byte
-	var txn db.Transaction
+	var txn *db.NTransaction
 	var uid utils.MyULID
 
 	failedDB := s.backend.GetPartition(Failed, dest)
@@ -800,7 +805,7 @@ func (s *MessageStore) Stash(uid utils.MyULID, b []byte) (fatal error, nonfatal 
 	return fatal, nil
 }
 
-func (s *MessageStore) ingestByDest(queue map[utils.MyULID]([]byte), dest conf.DestinationType, txn db.Transaction) (err error) {
+func (s *MessageStore) ingestByDest(queue map[utils.MyULID]([]byte), dest conf.DestinationType, txn *db.NTransaction) (err error) {
 	messagesDB := s.backend.GetPartition(Messages, dest)
 	readyDB := s.backend.GetPartition(Ready, dest)
 
