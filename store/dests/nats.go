@@ -1,7 +1,6 @@
 package dests
 
 import (
-	"bytes"
 	"context"
 	"strings"
 
@@ -9,6 +8,7 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/valyala/bytebufferpool"
 )
 
 type NATSDestination struct {
@@ -84,10 +84,13 @@ func (d *NATSDestination) Close() error {
 }
 
 func (d *NATSDestination) sendOne(msg *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
-	defer model.FullFree(msg)
-
-	buf := bytes.NewBuffer(nil)
+	buf := bytebufferpool.Get()
+	defer func() {
+		bytebufferpool.Put(buf)
+		model.FullFree(msg)
+	}()
 	err = d.encoder(msg, buf)
+
 	if err != nil {
 		d.permerr(msg.Uid)
 		return err

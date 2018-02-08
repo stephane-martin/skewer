@@ -20,6 +20,7 @@ import (
 	"github.com/stephane-martin/skewer/model/encoders"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/queue/message"
+	"github.com/valyala/bytebufferpool"
 )
 
 type HTTPDestination struct {
@@ -162,21 +163,26 @@ func (d *HTTPDestination) Close() error {
 }
 
 func (d *HTTPDestination) dosendOne(ctx context.Context, msg *model.FullMessage) (err error) {
-	urlbuf := bytes.NewBuffer(nil)
+	urlbuf := bytebufferpool.Get()
+	body := bytebufferpool.Get()
+	defer func() {
+		bytebufferpool.Put(body)
+		bytebufferpool.Put(urlbuf)
+	}()
 	err = d.url.Execute(urlbuf, msg.Fields)
 	if err != nil {
 		d.permerr(msg.Uid)
 		d.logger.Warn("Error calculating target URL from template", "error", err)
 		return nil
 	}
-	body := bytes.NewBuffer(nil)
 	err = d.encoder(msg, body)
+
 	if err != nil {
 		d.permerr(msg.Uid)
 		d.logger.Warn("Error encoding message", "error", err)
 		return nil
 	}
-	req, err := http.NewRequest(d.method, urlbuf.String(), body)
+	req, err := http.NewRequest(d.method, urlbuf.String(), bytes.NewReader(body.B))
 	if err != nil {
 		d.permerr(msg.Uid)
 		d.logger.Warn("Error preparing HTTP request", "error", err)

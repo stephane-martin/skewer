@@ -1,13 +1,14 @@
 package encoders
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"mime"
 	"strconv"
 	"strings"
+
+	"github.com/valyala/bytebufferpool"
 )
 
 var sp = []byte(" ")
@@ -140,31 +141,32 @@ func defaultEncode(v interface{}, w io.Writer) error {
 	}
 }
 
-func ChainEncode(e Encoder, objs ...interface{}) ([]byte, error) {
-	var err error
-	buf := bytes.NewBuffer(nil)
+func ChainEncode(e Encoder, objs ...interface{}) (ret []byte, err error) {
+	buf := bytebufferpool.Get()
 	for _, obj := range objs {
 		err = e(obj, buf)
 		if err != nil {
 			return nil, err
 		}
 	}
-	return buf.Bytes(), nil
+	ret = buf.Bytes()
+	bytebufferpool.Put(buf)
+	return ret, nil
 }
 
-func TcpOctetEncode(e Encoder, obj interface{}) ([]byte, error) {
+func TcpOctetEncode(e Encoder, obj interface{}) (ret []byte, err error) {
 	if obj == nil {
 		return []byte{}, nil
 	}
-	var err error
-	buf := bytes.NewBuffer(nil)
+	buf := bytebufferpool.Get()
 	err = e(obj, buf)
 	if err != nil {
 		return nil, err
 	}
 	data := buf.Bytes()
+	bytebufferpool.Put(buf)
 	if len(data) == 0 {
-		return []byte{}, nil
+		return nil, nil
 	}
 	return ChainEncode(e, len(data), sp, data)
 }
@@ -174,12 +176,13 @@ func RelpEncode(e Encoder, txnr int32, command string, obj interface{}) ([]byte,
 		return ChainEncode(e, txnr, sp, command, sp, int(0), endl)
 	}
 	var err error
-	buf := bytes.NewBuffer(nil)
+	buf := bytebufferpool.Get()
 	err = e(obj, buf)
 	if err != nil {
 		return nil, err
 	}
 	data := buf.Bytes()
+	bytebufferpool.Put(buf)
 	if len(data) == 0 {
 		return ChainEncode(e, txnr, sp, command, sp, int(0), endl)
 	}

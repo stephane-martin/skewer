@@ -1,7 +1,6 @@
 package dests
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"time"
@@ -10,6 +9,7 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/valyala/bytebufferpool"
 )
 
 type KafkaDestination struct {
@@ -62,9 +62,11 @@ func NewKafkaDestination(ctx context.Context, e *Env) (Destination, error) {
 }
 
 func (d *KafkaDestination) sendOne(message *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
-	defer model.FullFree(message)
-
-	buf := bytes.NewBuffer(nil)
+	buf := bytebufferpool.Get()
+	defer func() {
+		bytebufferpool.Put(buf)
+		model.FullFree(message)
+	}()
 	err = d.encoder(message, buf)
 	if err != nil {
 		d.permerr(message.Uid)
