@@ -208,6 +208,10 @@ func (c *AccountingSourceConfig) SetConfID() {
 	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
 }
 
+func (c *MacOSSourceConfig) SetConfID() {
+	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
+}
+
 func (c *KafkaSourceConfig) SetConfID() {
 	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
 }
@@ -774,7 +778,7 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 
 	var vi *viper.Viper
 
-	tcpSourceConfs := []TCPSourceConfig{}
+	tcpSourceConfs := make([]TCPSourceConfig, 0)
 	for _, syslogConf := range rawTcpSourceConf {
 		vi = viper.New()
 		for k, v := range syslogConf {
@@ -1015,7 +1019,7 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 	for i := range c.HTTPServerSource {
 		sources = append(sources, &c.HTTPServerSource[i])
 	}
-	sources = append(sources, &c.Journald, &c.Accounting)
+	sources = append(sources, &c.Journald, &c.Accounting, &c.MacOS)
 
 	for i := range c.TCPSource {
 		if len(c.TCPSource[i].FrameDelimiter) == 0 {

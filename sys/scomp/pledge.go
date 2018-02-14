@@ -11,11 +11,12 @@ var PledgeSupported bool = true
 
 //SetupPledge actually runs the pledge syscall based on the process name
 func SetupPledge(t base.Types) (err error) {
+	// journal and macos do not run under OpenBSD
 	switch t {
 	case base.TCP,
 		base.UDP,
-		base.Graylog,
 		base.RELP,
+		base.Graylog,
 		base.DirectRELP,
 		base.Configuration,
 		base.Accounting,

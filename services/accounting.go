@@ -68,7 +68,7 @@ func readFileUntilEnd(f *os.File, size int) (err error) {
 			// the file size is not a multiple of Ssize...
 			return nil
 		} else if err != nil {
-			return fmt.Errorf("Unexpected error while reading the accounting file: %s", err)
+			return fmt.Errorf("unexpected error while reading the accounting file: %s", err)
 		}
 	}
 }
@@ -99,7 +99,7 @@ func (s *AccountingService) makeMessage(buf []byte, tick int64, hostname string,
 	return full
 }
 
-var ErrTruncated error = errors.New("File has been truncated")
+var ErrTruncated = errors.New("file has been truncated")
 
 func (s *AccountingService) readFile(f *os.File, tick int64, hostname string, size int) (err error) {
 	var offset int64
@@ -128,7 +128,7 @@ func (s *AccountingService) readFile(f *os.File, tick int64, hostname string, si
 			}
 			return nil
 		} else if err != nil {
-			return fmt.Errorf("Unexpected error while reading the accounting file: %s", err)
+			return fmt.Errorf("unexpected error while reading the accounting file: %s", err)
 		} else {
 			full = s.makeMessage(buf, tick, hostname, gen)
 			f, nf := s.stasher.Stash(full)

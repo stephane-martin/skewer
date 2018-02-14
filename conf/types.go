@@ -25,6 +25,7 @@ type BaseConfig struct {
 	Journald            JournaldConfig            `mapstructure:"journald" toml:"journald" json:"journald"`
 	Metrics             MetricsConfig             `mapstructure:"metrics" toml:"metrics" json:"metrics"`
 	Accounting          AccountingSourceConfig    `mapstructure:"accounting" toml:"accounting" json:"accounting"`
+	MacOS               MacOSSourceConfig         `mapstructure:"macos" toml:"macos" json:"macos"`
 	Main                MainConfig                `mapstructure:"main" toml:"main" json:"main"`
 	KafkaDest           *KafkaDestConfig          `mapstructure:"kafka_destination" toml:"kafka_destination" json:"kafka_destination"`
 	UDPDest             UDPDestConfig             `mapstructure:"udp_destination" toml:"udp_destination" json:"udp_destination"`
@@ -145,8 +146,8 @@ type KafkaDestConfig struct {
 	KafkaBaseConfig         `mapstructure:",squash"`
 	KafkaProducerBaseConfig `mapstructure:",squash"`
 	TlsBaseConfig           `mapstructure:",squash"`
-	Insecure                bool   `mapstructure:"insecure" toml:"insecure" json:"insecure"`
-	Format                  string `mapstructure:"format" toml:"format" json:"format"`
+	Insecure bool           `mapstructure:"insecure" toml:"insecure" json:"insecure"`
+	Format   string         `mapstructure:"format" toml:"format" json:"format"`
 }
 
 type KafkaBaseConfig struct {
@@ -213,26 +214,26 @@ type UDPDestConfig struct {
 }
 
 type RELPDestConfig struct {
-	TcpUdpRelpDestBaseConfig `mapstructure:",squash"`
-	TlsBaseConfig            `mapstructure:",squash"`
-	Insecure                 bool          `mapstructure:"insecure" toml:"insecure" json:"insecure"`
-	KeepAlive                bool          `mapstructure:"keepalive" toml:"keepalive" json:"keepalive"`
-	KeepAlivePeriod          time.Duration `mapstructure:"keepalive_period" toml:"keepalive_period" json:"keepalive_period"`
-	ConnTimeout              time.Duration `mapstructure:"connection_timeout" toml:"connection_timeout" json:"connection_timeout"`
-	FlushPeriod              time.Duration `mapstructure:"flush_period" toml:"flush_period" json:"flush_period"`
+	TcpUdpRelpDestBaseConfig      `mapstructure:",squash"`
+	TlsBaseConfig                 `mapstructure:",squash"`
+	Insecure        bool          `mapstructure:"insecure" toml:"insecure" json:"insecure"`
+	KeepAlive       bool          `mapstructure:"keepalive" toml:"keepalive" json:"keepalive"`
+	KeepAlivePeriod time.Duration `mapstructure:"keepalive_period" toml:"keepalive_period" json:"keepalive_period"`
+	ConnTimeout     time.Duration `mapstructure:"connection_timeout" toml:"connection_timeout" json:"connection_timeout"`
+	FlushPeriod     time.Duration `mapstructure:"flush_period" toml:"flush_period" json:"flush_period"`
 
 	WindowSize  int32         `mapstructure:"window_size" toml:"window_size" json:"window_size"`
 	RelpTimeout time.Duration `mapstructure:"relp_timeout" toml:"relp_timeout" json:"relp_timeout"`
 }
 
 type TCPDestConfig struct {
-	TcpUdpRelpDestBaseConfig `mapstructure:",squash"`
-	TlsBaseConfig            `mapstructure:",squash"`
-	Insecure                 bool          `mapstructure:"insecure" toml:"insecure" json:"insecure"`
-	KeepAlive                bool          `mapstructure:"keepalive" toml:"keepalive" json:"keepalive"`
-	KeepAlivePeriod          time.Duration `mapstructure:"keepalive_period" toml:"keepalive_period" json:"keepalive_period"`
-	ConnTimeout              time.Duration `mapstructure:"connection_timeout" toml:"connection_timeout" json:"connection_timeout"`
-	FlushPeriod              time.Duration `mapstructure:"flush_period" toml:"flush_period" json:"flush_period"`
+	TcpUdpRelpDestBaseConfig      `mapstructure:",squash"`
+	TlsBaseConfig                 `mapstructure:",squash"`
+	Insecure        bool          `mapstructure:"insecure" toml:"insecure" json:"insecure"`
+	KeepAlive       bool          `mapstructure:"keepalive" toml:"keepalive" json:"keepalive"`
+	KeepAlivePeriod time.Duration `mapstructure:"keepalive_period" toml:"keepalive_period" json:"keepalive_period"`
+	ConnTimeout     time.Duration `mapstructure:"connection_timeout" toml:"connection_timeout" json:"connection_timeout"`
+	FlushPeriod     time.Duration `mapstructure:"flush_period" toml:"flush_period" json:"flush_period"`
 
 	LineFraming    bool  `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
 	FrameDelimiter uint8 `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
@@ -241,7 +242,7 @@ type TCPDestConfig struct {
 type HTTPServerDestConfig struct {
 	HTTPServerBaseConfig `mapstructure:",squash"`
 
-	TlsBaseConfig  `mapstructure:",squash"`
+	TlsBaseConfig         `mapstructure:",squash"`
 	ClientAuthType string `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
 
 	Port int `mapstructure:"port" toml:"port" json:"port"`
@@ -262,7 +263,7 @@ type WebsocketServerDestConfig struct {
 }
 
 type ElasticDestConfig struct {
-	TlsBaseConfig       `mapstructure:",squash"`
+	TlsBaseConfig                     `mapstructure:",squash"`
 	Insecure            bool          `mapstructure:"insecure" toml:"insecure" json:"insecure"`
 	ProxyURL            string        `mapstructure:"proxy_url" toml:"proxy_url" json:"proxy_url"`
 	ConnTimeout         time.Duration `mapstructure:"connection_timeout" toml:"connection_timeout" json:"connection_timeout"`
@@ -292,21 +293,21 @@ type ElasticDestConfig struct {
 }
 
 type RedisDestConfig struct {
-	TlsBaseConfig `mapstructure:",squash"`
-	Insecure      bool          `mapstructure:"insecure" toml:"insecure" json:"insecure"`
-	Host          string        `mapstructure:"host" toml:"host" json:"host"`
-	Port          int           `mapstructure:"port" toml:"port" json:"port"`
-	Password      string        `mapstructure:"password" toml:"password" json:"password"`
-	Rebind        time.Duration `mapstructure:"rebind" toml:"rebind" json:"rebind"`
-	Format        string        `mapstructure:"format" toml:"format" json:"format"`
-	Database      int           `mapstructure:"database" toml:"database" json:"database"`
-	DialTimeout   time.Duration `mapstructure:"dial_timeout" toml:"dial_timeout" json:"dial_timeout"`
-	ReadTimeout   time.Duration `mapstructure:"read_timeout" toml:"read_timeout" json:"read_timeout"`
-	WriteTimeout  time.Duration `mapstructure:"write_timeout" toml:"write_timeout" json:"write_timeout"`
+	TlsBaseConfig              `mapstructure:",squash"`
+	Insecure     bool          `mapstructure:"insecure" toml:"insecure" json:"insecure"`
+	Host         string        `mapstructure:"host" toml:"host" json:"host"`
+	Port         int           `mapstructure:"port" toml:"port" json:"port"`
+	Password     string        `mapstructure:"password" toml:"password" json:"password"`
+	Rebind       time.Duration `mapstructure:"rebind" toml:"rebind" json:"rebind"`
+	Format       string        `mapstructure:"format" toml:"format" json:"format"`
+	Database     int           `mapstructure:"database" toml:"database" json:"database"`
+	DialTimeout  time.Duration `mapstructure:"dial_timeout" toml:"dial_timeout" json:"dial_timeout"`
+	ReadTimeout  time.Duration `mapstructure:"read_timeout" toml:"read_timeout" json:"read_timeout"`
+	WriteTimeout time.Duration `mapstructure:"write_timeout" toml:"write_timeout" json:"write_timeout"`
 }
 
 type HTTPDestConfig struct {
-	TlsBaseConfig       `mapstructure:",squash"`
+	TlsBaseConfig                     `mapstructure:",squash"`
 	Insecure            bool          `mapstructure:"insecure" toml:"insecure" json:"insecure"`
 	URL                 string        `mapstructure:"url" toml:"url" json:"url"`
 	Method              string        `mapstructure:"method" toml:"method" json:"method"`
@@ -326,7 +327,7 @@ type HTTPDestConfig struct {
 }
 
 type NATSDestConfig struct {
-	TlsBaseConfig    `mapstructure:",squash"`
+	TlsBaseConfig                  `mapstructure:",squash"`
 	Insecure         bool          `mapstructure:"insecure" toml:"insecure" json:"insecure"`
 	NServers         []string      `mapstructure:"servers" toml:"servers" json:"servers"`
 	Format           string        `mapstructure:"format" toml:"format" json:"format"`
@@ -371,9 +372,9 @@ type FilterSubConfig struct {
 }
 
 type JournaldConfig struct {
-	FilterSubConfig `mapstructure:",squash"`
-	ConfID          utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
-	Enabled         bool         `mapstructure:"enabled" toml:"enabled" json:"enabled"`
+	FilterSubConfig      `mapstructure:",squash"`
+	ConfID  utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
+	Enabled bool         `mapstructure:"enabled" toml:"enabled" json:"enabled"`
 }
 
 func (c *JournaldConfig) FilterConf() *FilterSubConfig {
@@ -389,11 +390,11 @@ func (c *JournaldConfig) DefaultPort() int {
 }
 
 type AccountingSourceConfig struct {
-	FilterSubConfig `mapstructure:",squash"`
-	ConfID          utils.MyULID  `mapstructure:"-" toml:"-" json:"conf_id"`
-	Period          time.Duration `mapstructure:"period" toml:"period" json:"period"`
-	Path            string        `mapstructure:"path" toml:"path" json:"path"`
-	Enabled         bool          `mapstructure:"enabled" toml:"enabled" json:"enabled"`
+	FilterSubConfig       `mapstructure:",squash"`
+	ConfID  utils.MyULID  `mapstructure:"-" toml:"-" json:"conf_id"`
+	Period  time.Duration `mapstructure:"period" toml:"period" json:"period"`
+	Path    string        `mapstructure:"path" toml:"path" json:"path"`
+	Enabled bool          `mapstructure:"enabled" toml:"enabled" json:"enabled"`
 }
 
 func (c *AccountingSourceConfig) FilterConf() *FilterSubConfig {
@@ -408,22 +409,44 @@ func (c *AccountingSourceConfig) DefaultPort() int {
 	return 0
 }
 
+type MacOSSourceConfig struct {
+	FilterSubConfig        `mapstructure:",squash"`
+	ConfID    utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
+	Enabled   bool         `mapstructure:"enabled" toml:"enabled" json:"enabled"`
+	Level     string       `mapstructure:"level" toml:"level" json:"level"`
+	Process   string       `mapstructure:"process" toml:"process" json:"process"`
+	Predicate string       `mapstructure:"predicate" toml:"predicate" json:"predicate"`
+	Command   string       `mapstructure:"command" toml:"command" json:"command"`
+}
+
+func (c *MacOSSourceConfig) FilterConf() *FilterSubConfig {
+	return &c.FilterSubConfig
+}
+
+func (c *MacOSSourceConfig) ListenersConf() *ListenersConfig {
+	return nil
+}
+
+func (c *MacOSSourceConfig) DefaultPort() int {
+	return 0
+}
+
 type FilesystemSourceConfig struct {
-	FilterSubConfig `mapstructure:",squash"`
-	BaseDirectory   string       `mapstructure:"base_directory" toml:"base_directory" json:"base_directory"`
-	Glob            string       `mapstructure:"glob" toml:"glob" json:"glob"`
-	Format          string       `mapstructure:"format" toml:"format" json:"format"`
-	Encoding        string       `mapstructure:"encoding" toml:"encoding" json:"encoding"`
-	ConfID          utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
+	FilterSubConfig            `mapstructure:",squash"`
+	BaseDirectory string       `mapstructure:"base_directory" toml:"base_directory" json:"base_directory"`
+	Glob          string       `mapstructure:"glob" toml:"glob" json:"glob"`
+	Format        string       `mapstructure:"format" toml:"format" json:"format"`
+	Encoding      string       `mapstructure:"encoding" toml:"encoding" json:"encoding"`
+	ConfID        utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
 }
 
 type HTTPServerSourceConfig struct {
 	HTTPServerBaseConfig `mapstructure:",squash"`
 
-	FilterSubConfig `mapstructure:",squash"`
-	ConfID          utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
+	FilterSubConfig     `mapstructure:",squash"`
+	ConfID utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
 
-	TlsBaseConfig  `mapstructure:",squash"`
+	TlsBaseConfig         `mapstructure:",squash"`
 	ClientAuthType string `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
 
 	Port     int    `mapstructure:"port" toml:"port" json:"port"`
@@ -449,13 +472,13 @@ func (c *HTTPServerSourceConfig) DefaultPort() int {
 }
 
 type TCPSourceConfig struct {
-	ListenersConfig `mapstructure:",squash"`
-	FilterSubConfig `mapstructure:",squash"`
-	TlsBaseConfig   `mapstructure:",squash"`
-	ClientAuthType  string       `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
-	LineFraming     bool         `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
-	FrameDelimiter  string       `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
-	ConfID          utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
+	ListenersConfig             `mapstructure:",squash"`
+	FilterSubConfig             `mapstructure:",squash"`
+	TlsBaseConfig               `mapstructure:",squash"`
+	ClientAuthType string       `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
+	LineFraming    bool         `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
+	FrameDelimiter string       `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
+	ConfID         utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
 }
 
 func (c *TCPSourceConfig) FilterConf() *FilterSubConfig {
@@ -483,9 +506,9 @@ func (c *FilesystemSourceConfig) DefaultPort() int {
 }
 
 type UDPSourceConfig struct {
-	ListenersConfig `mapstructure:",squash"`
-	FilterSubConfig `mapstructure:",squash"`
-	ConfID          utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
+	ListenersConfig     `mapstructure:",squash"`
+	FilterSubConfig     `mapstructure:",squash"`
+	ConfID utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
 }
 
 func (c *UDPSourceConfig) FilterConf() *FilterSubConfig {
@@ -501,9 +524,9 @@ func (c *UDPSourceConfig) DefaultPort() int {
 }
 
 type GraylogSourceConfig struct {
-	ListenersConfig `mapstructure:",squash"`
-	FilterSubConfig `mapstructure:",squash"`
-	ConfID          utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
+	ListenersConfig     `mapstructure:",squash"`
+	FilterSubConfig     `mapstructure:",squash"`
+	ConfID utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
 }
 
 func (c *GraylogSourceConfig) FilterConf() *FilterSubConfig {
@@ -519,13 +542,13 @@ func (c *GraylogSourceConfig) DefaultPort() int {
 }
 
 type RELPSourceConfig struct {
-	ListenersConfig `mapstructure:",squash"`
-	FilterSubConfig `mapstructure:",squash"`
-	TlsBaseConfig   `mapstructure:",squash"`
-	ClientAuthType  string       `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
-	LineFraming     bool         `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
-	FrameDelimiter  string       `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
-	ConfID          utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
+	ListenersConfig             `mapstructure:",squash"`
+	FilterSubConfig             `mapstructure:",squash"`
+	TlsBaseConfig               `mapstructure:",squash"`
+	ClientAuthType string       `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
+	LineFraming    bool         `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
+	FrameDelimiter string       `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
+	ConfID         utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
 }
 
 func (c *RELPSourceConfig) FilterConf() *FilterSubConfig {
@@ -541,13 +564,13 @@ func (c *RELPSourceConfig) DefaultPort() int {
 }
 
 type DirectRELPSourceConfig struct {
-	ListenersConfig `mapstructure:",squash"`
-	FilterSubConfig `mapstructure:",squash"`
-	TlsBaseConfig   `mapstructure:",squash"`
-	ClientAuthType  string       `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
-	LineFraming     bool         `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
-	FrameDelimiter  string       `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
-	ConfID          utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
+	ListenersConfig             `mapstructure:",squash"`
+	FilterSubConfig             `mapstructure:",squash"`
+	TlsBaseConfig               `mapstructure:",squash"`
+	ClientAuthType string       `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
+	LineFraming    bool         `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
+	FrameDelimiter string       `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
+	ConfID         utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
 }
 
 func (c *DirectRELPSourceConfig) FilterConf() *FilterSubConfig {
@@ -581,19 +604,19 @@ type ListenersConfig struct {
 }
 
 type KafkaSourceConfig struct {
-	KafkaBaseConfig         `mapstructure:",squash"`
-	KafkaConsumerBaseConfig `mapstructure:",squash"`
-	FilterSubConfig         `mapstructure:",squash"`
-	TlsBaseConfig           `mapstructure:",squash"`
-	Insecure                bool          `mapstructure:"insecure" toml:"insecure" json:"insecure"`
-	Format                  string        `mapstructure:"format" toml:"format" json:"format"`
-	Encoding                string        `mapstructure:"encoding" toml:"encoding" json:"encoding"`
-	ConfID                  utils.MyULID  `mapstructure:"-" toml:"-" json:"conf_id"`
-	SessionTimeout          time.Duration `mapstructure:"session_timeout" toml:"session_timeout" json:"session_timeout"`
-	HeartbeatInterval       time.Duration `mapstructure:"heartbeat_interval" toml:"heartbeat_interval" json:"heartbeat_interval"`
-	OffsetsMaxRetry         int           `mapstructure:"offsets_max_retry" toml:"offsets_max_retry" json:"offsets_max_retry"`
-	GroupID                 string        `mapstructure:"group_ip" toml:"group_id" json:"group_id"`
-	Topics                  []string      `mapstructure:"topics" toml:"topics" json:"topics"`
+	KafkaBaseConfig                 `mapstructure:",squash"`
+	KafkaConsumerBaseConfig         `mapstructure:",squash"`
+	FilterSubConfig                 `mapstructure:",squash"`
+	TlsBaseConfig                   `mapstructure:",squash"`
+	Insecure          bool          `mapstructure:"insecure" toml:"insecure" json:"insecure"`
+	Format            string        `mapstructure:"format" toml:"format" json:"format"`
+	Encoding          string        `mapstructure:"encoding" toml:"encoding" json:"encoding"`
+	ConfID            utils.MyULID  `mapstructure:"-" toml:"-" json:"conf_id"`
+	SessionTimeout    time.Duration `mapstructure:"session_timeout" toml:"session_timeout" json:"session_timeout"`
+	HeartbeatInterval time.Duration `mapstructure:"heartbeat_interval" toml:"heartbeat_interval" json:"heartbeat_interval"`
+	OffsetsMaxRetry   int           `mapstructure:"offsets_max_retry" toml:"offsets_max_retry" json:"offsets_max_retry"`
+	GroupID           string        `mapstructure:"group_ip" toml:"group_id" json:"group_id"`
+	Topics            []string      `mapstructure:"topics" toml:"topics" json:"topics"`
 }
 
 func (c *KafkaSourceConfig) FilterConf() *FilterSubConfig {

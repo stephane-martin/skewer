@@ -569,6 +569,10 @@ func (s *MessageStore) StoreAllSyslogConfigs(c conf.BaseConfig) (err error) {
 		return s.StoreSyslogConfig(c.Accounting.ConfID, c.Accounting.FilterSubConfig)
 	})
 
+	funcs = append(funcs, func() error {
+		return s.StoreSyslogConfig(c.MacOS.ConfID, c.MacOS.FilterSubConfig)
+	})
+
 	return utils.Chain(funcs...)
 }
 

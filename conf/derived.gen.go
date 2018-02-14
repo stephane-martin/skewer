@@ -177,6 +177,7 @@ func deriveDeepCopy(dst, src *BaseConfig) {
 	dst.Journald = src.Journald
 	dst.Metrics = src.Metrics
 	dst.Accounting = src.Accounting
+	dst.MacOS = src.MacOS
 	dst.Main = src.Main
 	if src.KafkaDest == nil {
 		dst.KafkaDest = nil

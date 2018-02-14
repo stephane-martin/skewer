@@ -268,6 +268,49 @@ func (m *SyslogMessage) RegularJson() ([]byte, error) {
 	return ffjson.Marshal(m.Regular())
 }
 
+/*
+{
+  "category" : "policy",
+  "processImageUUID" : "12DB7DE7-29C0-329E-9FD7-555E7838BB7F",
+  "processUniqueID" : 288,
+  "threadID" : 6996578,
+  "timestamp" : "2018-02-14 21:33:12.356682+0100",
+  "traceID" : 1158816569950212,
+  "messageType" : "Default",
+  "activityID" : 7384009,
+  "processID" : 288,
+  "machTimestamp" : 1211974753480388,
+  "timezoneName" : "",
+  "subsystem" : "com.apple.securityd",
+  "senderProgramCounter" : 105038,
+  "eventMessage" : "cert[2]: AnchorTrusted =(leaf)[force]> 0",
+  "senderImageUUID" : "12DB7DE7-29C0-329E-9FD7-555E7838BB7F",
+  "processImagePath" : "\/usr\/libexec\/trustd",
+  "senderImagePath" : "\/usr\/libexec\/trustd"
+}
+*/
+
+// ffjson: noencoder
+type MacOSLogMessage struct {
+	Category             string `json:"category"`
+	ProcessImageUUID     string `json:"processImageUUID"`
+	ProcessUniqueID      uint64 `json:"processUniqueID"`
+	ThreadID             uint64 `json:"threadID"`
+	Timestamp            string `json:"timestamp"`
+	TraceID              uint64 `json:"traceID"`
+	MessageType          string `json:"messageType"`
+	ActivityID           uint64 `json:"activityID"`
+	ProcessID            uint64 `json:"processID"`
+	MachTimestamp        uint64 `json:"machTimestamp"`
+	TimezoneName         string `json:"timezoneName"`
+	Subsystem            string `json:"subsystem"`
+	SenderProgramCounter uint64 `json:"senderProgramCounter"`
+	EventMessage         string `json:"eventMessage"`
+	SenderImageUUID      string `json:"senderImageUUID"`
+	ProcessImagePath     string `json:"processImagePath"`
+	SenderImagePath      string `json:"senderImagePath"`
+}
+
 // ffjson: noencoder
 type JsonRsyslogMessage struct {
 	// used to parsed JSON input from rsyslog

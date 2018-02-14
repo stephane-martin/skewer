@@ -708,6 +708,920 @@ done:
 	return nil
 }
 
+const (
+	ffjtMacOSLogMessagebase = iota
+	ffjtMacOSLogMessagenosuchkey
+
+	ffjtMacOSLogMessageCategory
+
+	ffjtMacOSLogMessageProcessImageUUID
+
+	ffjtMacOSLogMessageProcessUniqueID
+
+	ffjtMacOSLogMessageThreadID
+
+	ffjtMacOSLogMessageTimestamp
+
+	ffjtMacOSLogMessageTraceID
+
+	ffjtMacOSLogMessageMessageType
+
+	ffjtMacOSLogMessageActivityID
+
+	ffjtMacOSLogMessageProcessID
+
+	ffjtMacOSLogMessageMachTimestamp
+
+	ffjtMacOSLogMessageTimezoneName
+
+	ffjtMacOSLogMessageSubsystem
+
+	ffjtMacOSLogMessageSenderProgramCounter
+
+	ffjtMacOSLogMessageEventMessage
+
+	ffjtMacOSLogMessageSenderImageUUID
+
+	ffjtMacOSLogMessageProcessImagePath
+
+	ffjtMacOSLogMessageSenderImagePath
+)
+
+var ffjKeyMacOSLogMessageCategory = []byte("category")
+
+var ffjKeyMacOSLogMessageProcessImageUUID = []byte("processImageUUID")
+
+var ffjKeyMacOSLogMessageProcessUniqueID = []byte("processUniqueID")
+
+var ffjKeyMacOSLogMessageThreadID = []byte("threadID")
+
+var ffjKeyMacOSLogMessageTimestamp = []byte("timestamp")
+
+var ffjKeyMacOSLogMessageTraceID = []byte("traceID")
+
+var ffjKeyMacOSLogMessageMessageType = []byte("messageType")
+
+var ffjKeyMacOSLogMessageActivityID = []byte("activityID")
+
+var ffjKeyMacOSLogMessageProcessID = []byte("processID")
+
+var ffjKeyMacOSLogMessageMachTimestamp = []byte("machTimestamp")
+
+var ffjKeyMacOSLogMessageTimezoneName = []byte("timezoneName")
+
+var ffjKeyMacOSLogMessageSubsystem = []byte("subsystem")
+
+var ffjKeyMacOSLogMessageSenderProgramCounter = []byte("senderProgramCounter")
+
+var ffjKeyMacOSLogMessageEventMessage = []byte("eventMessage")
+
+var ffjKeyMacOSLogMessageSenderImageUUID = []byte("senderImageUUID")
+
+var ffjKeyMacOSLogMessageProcessImagePath = []byte("processImagePath")
+
+var ffjKeyMacOSLogMessageSenderImagePath = []byte("senderImagePath")
+
+// UnmarshalJSON umarshall json - template of ffjson
+func (j *MacOSLogMessage) UnmarshalJSON(input []byte) error {
+	fs := fflib.NewFFLexer(input)
+	return j.UnmarshalJSONFFLexer(fs, fflib.FFParse_map_start)
+}
+
+// UnmarshalJSONFFLexer fast json unmarshall - template ffjson
+func (j *MacOSLogMessage) UnmarshalJSONFFLexer(fs *fflib.FFLexer, state fflib.FFParseState) error {
+	var err error
+	currentKey := ffjtMacOSLogMessagebase
+	_ = currentKey
+	tok := fflib.FFTok_init
+	wantedTok := fflib.FFTok_init
+
+mainparse:
+	for {
+		tok = fs.Scan()
+		//	println(fmt.Sprintf("debug: tok: %v  state: %v", tok, state))
+		if tok == fflib.FFTok_error {
+			goto tokerror
+		}
+
+		switch state {
+
+		case fflib.FFParse_map_start:
+			if tok != fflib.FFTok_left_bracket {
+				wantedTok = fflib.FFTok_left_bracket
+				goto wrongtokenerror
+			}
+			state = fflib.FFParse_want_key
+			continue
+
+		case fflib.FFParse_after_value:
+			if tok == fflib.FFTok_comma {
+				state = fflib.FFParse_want_key
+			} else if tok == fflib.FFTok_right_bracket {
+				goto done
+			} else {
+				wantedTok = fflib.FFTok_comma
+				goto wrongtokenerror
+			}
+
+		case fflib.FFParse_want_key:
+			// json {} ended. goto exit. woo.
+			if tok == fflib.FFTok_right_bracket {
+				goto done
+			}
+			if tok != fflib.FFTok_string {
+				wantedTok = fflib.FFTok_string
+				goto wrongtokenerror
+			}
+
+			kn := fs.Output.Bytes()
+			if len(kn) <= 0 {
+				// "" case. hrm.
+				currentKey = ffjtMacOSLogMessagenosuchkey
+				state = fflib.FFParse_want_colon
+				goto mainparse
+			} else {
+				switch kn[0] {
+
+				case 'a':
+
+					if bytes.Equal(ffjKeyMacOSLogMessageActivityID, kn) {
+						currentKey = ffjtMacOSLogMessageActivityID
+						state = fflib.FFParse_want_colon
+						goto mainparse
+					}
+
+				case 'c':
+
+					if bytes.Equal(ffjKeyMacOSLogMessageCategory, kn) {
+						currentKey = ffjtMacOSLogMessageCategory
+						state = fflib.FFParse_want_colon
+						goto mainparse
+					}
+
+				case 'e':
+
+					if bytes.Equal(ffjKeyMacOSLogMessageEventMessage, kn) {
+						currentKey = ffjtMacOSLogMessageEventMessage
+						state = fflib.FFParse_want_colon
+						goto mainparse
+					}
+
+				case 'm':
+
+					if bytes.Equal(ffjKeyMacOSLogMessageMessageType, kn) {
+						currentKey = ffjtMacOSLogMessageMessageType
+						state = fflib.FFParse_want_colon
+						goto mainparse
+
+					} else if bytes.Equal(ffjKeyMacOSLogMessageMachTimestamp, kn) {
+						currentKey = ffjtMacOSLogMessageMachTimestamp
+						state = fflib.FFParse_want_colon
+						goto mainparse
+					}
+
+				case 'p':
+
+					if bytes.Equal(ffjKeyMacOSLogMessageProcessImageUUID, kn) {
+						currentKey = ffjtMacOSLogMessageProcessImageUUID
+						state = fflib.FFParse_want_colon
+						goto mainparse
+
+					} else if bytes.Equal(ffjKeyMacOSLogMessageProcessUniqueID, kn) {
+						currentKey = ffjtMacOSLogMessageProcessUniqueID
+						state = fflib.FFParse_want_colon
+						goto mainparse
+
+					} else if bytes.Equal(ffjKeyMacOSLogMessageProcessID, kn) {
+						currentKey = ffjtMacOSLogMessageProcessID
+						state = fflib.FFParse_want_colon
+						goto mainparse
+
+					} else if bytes.Equal(ffjKeyMacOSLogMessageProcessImagePath, kn) {
+						currentKey = ffjtMacOSLogMessageProcessImagePath
+						state = fflib.FFParse_want_colon
+						goto mainparse
+					}
+
+				case 's':
+
+					if bytes.Equal(ffjKeyMacOSLogMessageSubsystem, kn) {
+						currentKey = ffjtMacOSLogMessageSubsystem
+						state = fflib.FFParse_want_colon
+						goto mainparse
+
+					} else if bytes.Equal(ffjKeyMacOSLogMessageSenderProgramCounter, kn) {
+						currentKey = ffjtMacOSLogMessageSenderProgramCounter
+						state = fflib.FFParse_want_colon
+						goto mainparse
+
+					} else if bytes.Equal(ffjKeyMacOSLogMessageSenderImageUUID, kn) {
+						currentKey = ffjtMacOSLogMessageSenderImageUUID
+						state = fflib.FFParse_want_colon
+						goto mainparse
+
+					} else if bytes.Equal(ffjKeyMacOSLogMessageSenderImagePath, kn) {
+						currentKey = ffjtMacOSLogMessageSenderImagePath
+						state = fflib.FFParse_want_colon
+						goto mainparse
+					}
+
+				case 't':
+
+					if bytes.Equal(ffjKeyMacOSLogMessageThreadID, kn) {
+						currentKey = ffjtMacOSLogMessageThreadID
+						state = fflib.FFParse_want_colon
+						goto mainparse
+
+					} else if bytes.Equal(ffjKeyMacOSLogMessageTimestamp, kn) {
+						currentKey = ffjtMacOSLogMessageTimestamp
+						state = fflib.FFParse_want_colon
+						goto mainparse
+
+					} else if bytes.Equal(ffjKeyMacOSLogMessageTraceID, kn) {
+						currentKey = ffjtMacOSLogMessageTraceID
+						state = fflib.FFParse_want_colon
+						goto mainparse
+
+					} else if bytes.Equal(ffjKeyMacOSLogMessageTimezoneName, kn) {
+						currentKey = ffjtMacOSLogMessageTimezoneName
+						state = fflib.FFParse_want_colon
+						goto mainparse
+					}
+
+				}
+
+				if fflib.EqualFoldRight(ffjKeyMacOSLogMessageSenderImagePath, kn) {
+					currentKey = ffjtMacOSLogMessageSenderImagePath
+					state = fflib.FFParse_want_colon
+					goto mainparse
+				}
+
+				if fflib.EqualFoldRight(ffjKeyMacOSLogMessageProcessImagePath, kn) {
+					currentKey = ffjtMacOSLogMessageProcessImagePath
+					state = fflib.FFParse_want_colon
+					goto mainparse
+				}
+
+				if fflib.EqualFoldRight(ffjKeyMacOSLogMessageSenderImageUUID, kn) {
+					currentKey = ffjtMacOSLogMessageSenderImageUUID
+					state = fflib.FFParse_want_colon
+					goto mainparse
+				}
+
+				if fflib.EqualFoldRight(ffjKeyMacOSLogMessageEventMessage, kn) {
+					currentKey = ffjtMacOSLogMessageEventMessage
+					state = fflib.FFParse_want_colon
+					goto mainparse
+				}
+
+				if fflib.EqualFoldRight(ffjKeyMacOSLogMessageSenderProgramCounter, kn) {
+					currentKey = ffjtMacOSLogMessageSenderProgramCounter
+					state = fflib.FFParse_want_colon
+					goto mainparse
+				}
+
+				if fflib.EqualFoldRight(ffjKeyMacOSLogMessageSubsystem, kn) {
+					currentKey = ffjtMacOSLogMessageSubsystem
+					state = fflib.FFParse_want_colon
+					goto mainparse
+				}
+
+				if fflib.SimpleLetterEqualFold(ffjKeyMacOSLogMessageTimezoneName, kn) {
+					currentKey = ffjtMacOSLogMessageTimezoneName
+					state = fflib.FFParse_want_colon
+					goto mainparse
+				}
+
+				if fflib.EqualFoldRight(ffjKeyMacOSLogMessageMachTimestamp, kn) {
+					currentKey = ffjtMacOSLogMessageMachTimestamp
+					state = fflib.FFParse_want_colon
+					goto mainparse
+				}
+
+				if fflib.EqualFoldRight(ffjKeyMacOSLogMessageProcessID, kn) {
+					currentKey = ffjtMacOSLogMessageProcessID
+					state = fflib.FFParse_want_colon
+					goto mainparse
+				}
+
+				if fflib.SimpleLetterEqualFold(ffjKeyMacOSLogMessageActivityID, kn) {
+					currentKey = ffjtMacOSLogMessageActivityID
+					state = fflib.FFParse_want_colon
+					goto mainparse
+				}
+
+				if fflib.EqualFoldRight(ffjKeyMacOSLogMessageMessageType, kn) {
+					currentKey = ffjtMacOSLogMessageMessageType
+					state = fflib.FFParse_want_colon
+					goto mainparse
+				}
+
+				if fflib.SimpleLetterEqualFold(ffjKeyMacOSLogMessageTraceID, kn) {
+					currentKey = ffjtMacOSLogMessageTraceID
+					state = fflib.FFParse_want_colon
+					goto mainparse
+				}
+
+				if fflib.EqualFoldRight(ffjKeyMacOSLogMessageTimestamp, kn) {
+					currentKey = ffjtMacOSLogMessageTimestamp
+					state = fflib.FFParse_want_colon
+					goto mainparse
+				}
+
+				if fflib.SimpleLetterEqualFold(ffjKeyMacOSLogMessageThreadID, kn) {
+					currentKey = ffjtMacOSLogMessageThreadID
+					state = fflib.FFParse_want_colon
+					goto mainparse
+				}
+
+				if fflib.EqualFoldRight(ffjKeyMacOSLogMessageProcessUniqueID, kn) {
+					currentKey = ffjtMacOSLogMessageProcessUniqueID
+					state = fflib.FFParse_want_colon
+					goto mainparse
+				}
+
+				if fflib.EqualFoldRight(ffjKeyMacOSLogMessageProcessImageUUID, kn) {
+					currentKey = ffjtMacOSLogMessageProcessImageUUID
+					state = fflib.FFParse_want_colon
+					goto mainparse
+				}
+
+				if fflib.SimpleLetterEqualFold(ffjKeyMacOSLogMessageCategory, kn) {
+					currentKey = ffjtMacOSLogMessageCategory
+					state = fflib.FFParse_want_colon
+					goto mainparse
+				}
+
+				currentKey = ffjtMacOSLogMessagenosuchkey
+				state = fflib.FFParse_want_colon
+				goto mainparse
+			}
+
+		case fflib.FFParse_want_colon:
+			if tok != fflib.FFTok_colon {
+				wantedTok = fflib.FFTok_colon
+				goto wrongtokenerror
+			}
+			state = fflib.FFParse_want_value
+			continue
+		case fflib.FFParse_want_value:
+
+			if tok == fflib.FFTok_left_brace || tok == fflib.FFTok_left_bracket || tok == fflib.FFTok_integer || tok == fflib.FFTok_double || tok == fflib.FFTok_string || tok == fflib.FFTok_bool || tok == fflib.FFTok_null {
+				switch currentKey {
+
+				case ffjtMacOSLogMessageCategory:
+					goto handle_Category
+
+				case ffjtMacOSLogMessageProcessImageUUID:
+					goto handle_ProcessImageUUID
+
+				case ffjtMacOSLogMessageProcessUniqueID:
+					goto handle_ProcessUniqueID
+
+				case ffjtMacOSLogMessageThreadID:
+					goto handle_ThreadID
+
+				case ffjtMacOSLogMessageTimestamp:
+					goto handle_Timestamp
+
+				case ffjtMacOSLogMessageTraceID:
+					goto handle_TraceID
+
+				case ffjtMacOSLogMessageMessageType:
+					goto handle_MessageType
+
+				case ffjtMacOSLogMessageActivityID:
+					goto handle_ActivityID
+
+				case ffjtMacOSLogMessageProcessID:
+					goto handle_ProcessID
+
+				case ffjtMacOSLogMessageMachTimestamp:
+					goto handle_MachTimestamp
+
+				case ffjtMacOSLogMessageTimezoneName:
+					goto handle_TimezoneName
+
+				case ffjtMacOSLogMessageSubsystem:
+					goto handle_Subsystem
+
+				case ffjtMacOSLogMessageSenderProgramCounter:
+					goto handle_SenderProgramCounter
+
+				case ffjtMacOSLogMessageEventMessage:
+					goto handle_EventMessage
+
+				case ffjtMacOSLogMessageSenderImageUUID:
+					goto handle_SenderImageUUID
+
+				case ffjtMacOSLogMessageProcessImagePath:
+					goto handle_ProcessImagePath
+
+				case ffjtMacOSLogMessageSenderImagePath:
+					goto handle_SenderImagePath
+
+				case ffjtMacOSLogMessagenosuchkey:
+					err = fs.SkipField(tok)
+					if err != nil {
+						return fs.WrapErr(err)
+					}
+					state = fflib.FFParse_after_value
+					goto mainparse
+				}
+			} else {
+				goto wantedvalue
+			}
+		}
+	}
+
+handle_Category:
+
+	/* handler: j.Category type=string kind=string quoted=false*/
+
+	{
+
+		{
+			if tok != fflib.FFTok_string && tok != fflib.FFTok_null {
+				return fs.WrapErr(fmt.Errorf("cannot unmarshal %s into Go value for string", tok))
+			}
+		}
+
+		if tok == fflib.FFTok_null {
+
+		} else {
+
+			outBuf := fs.Output.Bytes()
+
+			j.Category = string(string(outBuf))
+
+		}
+	}
+
+	state = fflib.FFParse_after_value
+	goto mainparse
+
+handle_ProcessImageUUID:
+
+	/* handler: j.ProcessImageUUID type=string kind=string quoted=false*/
+
+	{
+
+		{
+			if tok != fflib.FFTok_string && tok != fflib.FFTok_null {
+				return fs.WrapErr(fmt.Errorf("cannot unmarshal %s into Go value for string", tok))
+			}
+		}
+
+		if tok == fflib.FFTok_null {
+
+		} else {
+
+			outBuf := fs.Output.Bytes()
+
+			j.ProcessImageUUID = string(string(outBuf))
+
+		}
+	}
+
+	state = fflib.FFParse_after_value
+	goto mainparse
+
+handle_ProcessUniqueID:
+
+	/* handler: j.ProcessUniqueID type=uint64 kind=uint64 quoted=false*/
+
+	{
+		if tok != fflib.FFTok_integer && tok != fflib.FFTok_null {
+			return fs.WrapErr(fmt.Errorf("cannot unmarshal %s into Go value for uint64", tok))
+		}
+	}
+
+	{
+
+		if tok == fflib.FFTok_null {
+
+		} else {
+
+			tval, err := fflib.ParseUint(fs.Output.Bytes(), 10, 64)
+
+			if err != nil {
+				return fs.WrapErr(err)
+			}
+
+			j.ProcessUniqueID = uint64(tval)
+
+		}
+	}
+
+	state = fflib.FFParse_after_value
+	goto mainparse
+
+handle_ThreadID:
+
+	/* handler: j.ThreadID type=uint64 kind=uint64 quoted=false*/
+
+	{
+		if tok != fflib.FFTok_integer && tok != fflib.FFTok_null {
+			return fs.WrapErr(fmt.Errorf("cannot unmarshal %s into Go value for uint64", tok))
+		}
+	}
+
+	{
+
+		if tok == fflib.FFTok_null {
+
+		} else {
+
+			tval, err := fflib.ParseUint(fs.Output.Bytes(), 10, 64)
+
+			if err != nil {
+				return fs.WrapErr(err)
+			}
+
+			j.ThreadID = uint64(tval)
+
+		}
+	}
+
+	state = fflib.FFParse_after_value
+	goto mainparse
+
+handle_Timestamp:
+
+	/* handler: j.Timestamp type=string kind=string quoted=false*/
+
+	{
+
+		{
+			if tok != fflib.FFTok_string && tok != fflib.FFTok_null {
+				return fs.WrapErr(fmt.Errorf("cannot unmarshal %s into Go value for string", tok))
+			}
+		}
+
+		if tok == fflib.FFTok_null {
+
+		} else {
+
+			outBuf := fs.Output.Bytes()
+
+			j.Timestamp = string(string(outBuf))
+
+		}
+	}
+
+	state = fflib.FFParse_after_value
+	goto mainparse
+
+handle_TraceID:
+
+	/* handler: j.TraceID type=uint64 kind=uint64 quoted=false*/
+
+	{
+		if tok != fflib.FFTok_integer && tok != fflib.FFTok_null {
+			return fs.WrapErr(fmt.Errorf("cannot unmarshal %s into Go value for uint64", tok))
+		}
+	}
+
+	{
+
+		if tok == fflib.FFTok_null {
+
+		} else {
+
+			tval, err := fflib.ParseUint(fs.Output.Bytes(), 10, 64)
+
+			if err != nil {
+				return fs.WrapErr(err)
+			}
+
+			j.TraceID = uint64(tval)
+
+		}
+	}
+
+	state = fflib.FFParse_after_value
+	goto mainparse
+
+handle_MessageType:
+
+	/* handler: j.MessageType type=string kind=string quoted=false*/
+
+	{
+
+		{
+			if tok != fflib.FFTok_string && tok != fflib.FFTok_null {
+				return fs.WrapErr(fmt.Errorf("cannot unmarshal %s into Go value for string", tok))
+			}
+		}
+
+		if tok == fflib.FFTok_null {
+
+		} else {
+
+			outBuf := fs.Output.Bytes()
+
+			j.MessageType = string(string(outBuf))
+
+		}
+	}
+
+	state = fflib.FFParse_after_value
+	goto mainparse
+
+handle_ActivityID:
+
+	/* handler: j.ActivityID type=uint64 kind=uint64 quoted=false*/
+
+	{
+		if tok != fflib.FFTok_integer && tok != fflib.FFTok_null {
+			return fs.WrapErr(fmt.Errorf("cannot unmarshal %s into Go value for uint64", tok))
+		}
+	}
+
+	{
+
+		if tok == fflib.FFTok_null {
+
+		} else {
+
+			tval, err := fflib.ParseUint(fs.Output.Bytes(), 10, 64)
+
+			if err != nil {
+				return fs.WrapErr(err)
+			}
+
+			j.ActivityID = uint64(tval)
+
+		}
+	}
+
+	state = fflib.FFParse_after_value
+	goto mainparse
+
+handle_ProcessID:
+
+	/* handler: j.ProcessID type=uint64 kind=uint64 quoted=false*/
+
+	{
+		if tok != fflib.FFTok_integer && tok != fflib.FFTok_null {
+			return fs.WrapErr(fmt.Errorf("cannot unmarshal %s into Go value for uint64", tok))
+		}
+	}
+
+	{
+
+		if tok == fflib.FFTok_null {
+
+		} else {
+
+			tval, err := fflib.ParseUint(fs.Output.Bytes(), 10, 64)
+
+			if err != nil {
+				return fs.WrapErr(err)
+			}
+
+			j.ProcessID = uint64(tval)
+
+		}
+	}
+
+	state = fflib.FFParse_after_value
+	goto mainparse
+
+handle_MachTimestamp:
+
+	/* handler: j.MachTimestamp type=uint64 kind=uint64 quoted=false*/
+
+	{
+		if tok != fflib.FFTok_integer && tok != fflib.FFTok_null {
+			return fs.WrapErr(fmt.Errorf("cannot unmarshal %s into Go value for uint64", tok))
+		}
+	}
+
+	{
+
+		if tok == fflib.FFTok_null {
+
+		} else {
+
+			tval, err := fflib.ParseUint(fs.Output.Bytes(), 10, 64)
+
+			if err != nil {
+				return fs.WrapErr(err)
+			}
+
+			j.MachTimestamp = uint64(tval)
+
+		}
+	}
+
+	state = fflib.FFParse_after_value
+	goto mainparse
+
+handle_TimezoneName:
+
+	/* handler: j.TimezoneName type=string kind=string quoted=false*/
+
+	{
+
+		{
+			if tok != fflib.FFTok_string && tok != fflib.FFTok_null {
+				return fs.WrapErr(fmt.Errorf("cannot unmarshal %s into Go value for string", tok))
+			}
+		}
+
+		if tok == fflib.FFTok_null {
+
+		} else {
+
+			outBuf := fs.Output.Bytes()
+
+			j.TimezoneName = string(string(outBuf))
+
+		}
+	}
+
+	state = fflib.FFParse_after_value
+	goto mainparse
+
+handle_Subsystem:
+
+	/* handler: j.Subsystem type=string kind=string quoted=false*/
+
+	{
+
+		{
+			if tok != fflib.FFTok_string && tok != fflib.FFTok_null {
+				return fs.WrapErr(fmt.Errorf("cannot unmarshal %s into Go value for string", tok))
+			}
+		}
+
+		if tok == fflib.FFTok_null {
+
+		} else {
+
+			outBuf := fs.Output.Bytes()
+
+			j.Subsystem = string(string(outBuf))
+
+		}
+	}
+
+	state = fflib.FFParse_after_value
+	goto mainparse
+
+handle_SenderProgramCounter:
+
+	/* handler: j.SenderProgramCounter type=uint64 kind=uint64 quoted=false*/
+
+	{
+		if tok != fflib.FFTok_integer && tok != fflib.FFTok_null {
+			return fs.WrapErr(fmt.Errorf("cannot unmarshal %s into Go value for uint64", tok))
+		}
+	}
+
+	{
+
+		if tok == fflib.FFTok_null {
+
+		} else {
+
+			tval, err := fflib.ParseUint(fs.Output.Bytes(), 10, 64)
+
+			if err != nil {
+				return fs.WrapErr(err)
+			}
+
+			j.SenderProgramCounter = uint64(tval)
+
+		}
+	}
+
+	state = fflib.FFParse_after_value
+	goto mainparse
+
+handle_EventMessage:
+
+	/* handler: j.EventMessage type=string kind=string quoted=false*/
+
+	{
+
+		{
+			if tok != fflib.FFTok_string && tok != fflib.FFTok_null {
+				return fs.WrapErr(fmt.Errorf("cannot unmarshal %s into Go value for string", tok))
+			}
+		}
+
+		if tok == fflib.FFTok_null {
+
+		} else {
+
+			outBuf := fs.Output.Bytes()
+
+			j.EventMessage = string(string(outBuf))
+
+		}
+	}
+
+	state = fflib.FFParse_after_value
+	goto mainparse
+
+handle_SenderImageUUID:
+
+	/* handler: j.SenderImageUUID type=string kind=string quoted=false*/
+
+	{
+
+		{
+			if tok != fflib.FFTok_string && tok != fflib.FFTok_null {
+				return fs.WrapErr(fmt.Errorf("cannot unmarshal %s into Go value for string", tok))
+			}
+		}
+
+		if tok == fflib.FFTok_null {
+
+		} else {
+
+			outBuf := fs.Output.Bytes()
+
+			j.SenderImageUUID = string(string(outBuf))
+
+		}
+	}
+
+	state = fflib.FFParse_after_value
+	goto mainparse
+
+handle_ProcessImagePath:
+
+	/* handler: j.ProcessImagePath type=string kind=string quoted=false*/
+
+	{
+
+		{
+			if tok != fflib.FFTok_string && tok != fflib.FFTok_null {
+				return fs.WrapErr(fmt.Errorf("cannot unmarshal %s into Go value for string", tok))
+			}
+		}
+
+		if tok == fflib.FFTok_null {
+
+		} else {
+
+			outBuf := fs.Output.Bytes()
+
+			j.ProcessImagePath = string(string(outBuf))
+
+		}
+	}
+
+	state = fflib.FFParse_after_value
+	goto mainparse
+
+handle_SenderImagePath:
+
+	/* handler: j.SenderImagePath type=string kind=string quoted=false*/
+
+	{
+
+		{
+			if tok != fflib.FFTok_string && tok != fflib.FFTok_null {
+				return fs.WrapErr(fmt.Errorf("cannot unmarshal %s into Go value for string", tok))
+			}
+		}
+
+		if tok == fflib.FFTok_null {
+
+		} else {
+
+			outBuf := fs.Output.Bytes()
+
+			j.SenderImagePath = string(string(outBuf))
+
+		}
+	}
+
+	state = fflib.FFParse_after_value
+	goto mainparse
+
+wantedvalue:
+	return fs.WrapErr(fmt.Errorf("wanted value token, but got token: %v", tok))
+wrongtokenerror:
+	return fs.WrapErr(fmt.Errorf("ffjson: wanted token: %v, but got token: %v output=%s", wantedTok, tok, fs.Output.String()))
+tokerror:
+	if fs.BigError != nil {
+		return fs.WrapErr(fs.BigError)
+	}
+	err = fs.Error.ToError()
+	if err != nil {
+		return fs.WrapErr(err)
+	}
+	panic("ffjson-generated: unreachable, please report bug.")
+done:
+
+	return nil
+}
+
 // MarshalJSON marshal bytes to json - template
 func (j *OutputMsg) MarshalJSON() ([]byte, error) {
 	var buf fflib.Buffer

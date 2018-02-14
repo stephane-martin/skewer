@@ -21,6 +21,7 @@ import (
 	"github.com/stephane-martin/skewer/metrics"
 	"github.com/stephane-martin/skewer/services"
 	"github.com/stephane-martin/skewer/services/base"
+	"github.com/stephane-martin/skewer/services/macos"
 	"github.com/stephane-martin/skewer/sys/capabilities"
 	"github.com/stephane-martin/skewer/sys/kring"
 	"github.com/stephane-martin/skewer/utils"
@@ -365,6 +366,8 @@ func (ch *serveChild) StartController(typ base.Types) error {
 		return ch.StartJournal()
 	case base.Accounting:
 		return ch.StartAccounting()
+	case base.MacOS:
+		return ch.StartMacOS()
 	case base.KafkaSource:
 		return ch.StartKafkaSource()
 	case base.Filesystem:
@@ -472,6 +475,26 @@ func (ch *serveChild) StartAccounting() error {
 			return fmt.Errorf("error starting accounting plugin: %s", err)
 		}
 		ch.logger.Debug("Accounting plugin has been started")
+	}
+	return nil
+}
+
+// StartMacOS starts the MacOS logs process.
+func (ch *serveChild) StartMacOS() error {
+	if ch.conf.MacOS.Enabled && macos.Supported {
+		ch.logger.Info("macos logs source is enabled")
+		err := ch.controllers[base.MacOS].Create(
+			services.DumpableOpt(DumpableFlag),
+		)
+		if err != nil {
+			return fmt.Errorf("error creating the macos plugin: %s", err)
+		}
+		ch.controllers[base.MacOS].SetConf(*ch.conf)
+		_, err = ch.controllers[base.MacOS].Start()
+		if err != nil {
+			return fmt.Errorf("error starting macos plugin: %s", err)
+		}
+		ch.logger.Debug("macos plugin has been started")
 	}
 	return nil
 }

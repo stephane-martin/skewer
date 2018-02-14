@@ -527,6 +527,7 @@ func runUnconfined(t base.Types) {
 		base.Journal,
 		base.Store,
 		base.Accounting,
+		base.MacOS,
 		base.KafkaSource,
 		base.Filesystem,
 		base.HTTPServer:
@@ -665,13 +666,14 @@ func runConfined(t base.Types) {
 			dopanic("execve error", err, -1)
 		}
 
-	case base.Accounting,
-		base.TCP,
+	case base.TCP,
 		base.UDP,
 		base.Graylog,
 		base.RELP,
 		base.DirectRELP,
 		base.Store,
+		base.Accounting,
+		base.MacOS,
 		base.Configuration,
 		base.KafkaSource,
 		base.Filesystem,

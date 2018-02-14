@@ -9,6 +9,7 @@ import (
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/services/linux"
+	"github.com/stephane-martin/skewer/services/macos"
 	"github.com/stephane-martin/skewer/services/network"
 	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/sys/kring"
@@ -56,6 +57,8 @@ func Configure(t base.Types, c conf.BaseConfig) (res conf.BaseConfig) {
 		res.Parsers = c.Parsers
 		res.Main.InputQueueSize = c.Main.InputQueueSize
 		res.Main.MaxInputMessageSize = c.Main.MaxInputMessageSize
+	case base.MacOS:
+		res.MacOS = c.MacOS
 	}
 	return res
 }
@@ -114,7 +117,7 @@ func SetPipe(pipe *os.File) func(e *base.ProviderEnv) {
 
 type ProviderConstructor func(*base.ProviderEnv) (base.Provider, error)
 
-var constructors map[base.Types]ProviderConstructor = map[base.Types]ProviderConstructor{
+var constructors = map[base.Types]ProviderConstructor{
 	base.TCP:         network.NewTcpService,
 	base.UDP:         network.NewUdpService,
 	base.RELP:        network.NewRelpService,
@@ -126,6 +129,7 @@ var constructors map[base.Types]ProviderConstructor = map[base.Types]ProviderCon
 	base.KafkaSource: network.NewKafkaService,
 	base.Filesystem:  NewFilePollingService,
 	base.HTTPServer:  network.NewHTTPService,
+	base.MacOS:       macos.NewMacOSLogsService,
 }
 
 type ProviderOpt func(e *base.ProviderEnv)
@@ -138,5 +142,5 @@ func ProviderFactory(t base.Types, env *base.ProviderEnv) (base.Provider, error)
 		}
 		return nil, err
 	}
-	return nil, fmt.Errorf("Unknown provider type: %d", t)
+	return nil, fmt.Errorf("unknown provider type: %d", t)
 }

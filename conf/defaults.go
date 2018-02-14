@@ -21,6 +21,7 @@ func SetDefaults(v *viper.Viper) {
 		SetJournaldDefaults,
 		SetMetricsDefaults,
 		SetAccountingDefaults,
+		SetMacOSDefaults,
 		SetMetricsDefaults,
 		SetUdpDestDefaults,
 		SetTcpDestDefaults,
@@ -241,9 +242,17 @@ func SetAccountingDefaults(v *viper.Viper, prefixed bool) {
 	if prefixed {
 		prefix = "accounting."
 	}
-	v.SetDefault(prefix+"enabled", false)
 	v.SetDefault(prefix+"path", AccountingPath)
 	v.SetDefault(prefix+"period", "1s")
+}
+
+func SetMacOSDefaults(v *viper.Viper, prefixed bool) {
+	prefix := ""
+	if prefixed {
+		prefix = "macos."
+	}
+	v.SetDefault(prefix+"level", "default")
+	v.SetDefault(prefix+"command", "/usr/bin/log")
 }
 
 func SetMetricsDefaults(v *viper.Viper, prefixed bool) {

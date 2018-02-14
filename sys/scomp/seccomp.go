@@ -498,9 +498,10 @@ func applyFilter(filter *seccomp.ScmpFilter) (*seccomp.ScmpFilter, error) {
 }
 
 func SetupSeccomp(t base.Types) (err error) {
+	// MacOS source does not run under Linux
 	switch t {
 
-	case base.TCP, base.UDP, base.RELP, base.Graylog, base.Journal, base.Filesystem, base.HTTPServer:
+	case base.TCP, base.UDP, base.RELP, base.Graylog, base.Journal, base.Filesystem, base.HTTPServer, base.Accounting:
 		_, err = deriveComposeA(buildSimpleFilter, applyFilter)(baseAllowed, nil)
 
 	case base.DirectRELP, base.Store, base.KafkaSource, base.Configuration:
