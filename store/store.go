@@ -438,12 +438,7 @@ func (s *MessageStore) init(ctx context.Context) {
 
 	s.wg.Add(1)
 	go s.retrieveAndForward(ctx)
-	/*
-	for _, dest := range conf.Destinations {
-		s.wg.Add(1)
-		go s.forward(ctx, dest)
-	}
-	*/
+
 }
 
 func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests conf.DestinationType, cfnd bool, l log15.Logger) (*MessageStore, error) {
