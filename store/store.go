@@ -20,6 +20,7 @@ import (
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/db"
 	"github.com/stephane-martin/skewer/utils/queue"
+
 )
 
 var Registry *prometheus.Registry
@@ -94,7 +95,7 @@ func (dests *Destinations) Has(one conf.DestinationType) bool {
 type QueueType uint8
 
 const (
-	Messages = iota
+	Messages   = iota
 	Ready
 	Sent
 	Failed
@@ -117,7 +118,7 @@ func getPartitionPrefix(qtype QueueType, dtype conf.DestinationType) (res []byte
 }
 
 type Backend struct {
-	Partitions map[QueueType](map[conf.DestinationType]db.Partition)
+	Partitions map[QueueType]map[conf.DestinationType]db.Partition
 }
 
 func (b *Backend) GetPartition(qtype QueueType, dtype conf.DestinationType) db.Partition {
@@ -126,7 +127,7 @@ func (b *Backend) GetPartition(qtype QueueType, dtype conf.DestinationType) db.P
 
 func NewBackend(parent *badger.DB, storeSecret *memguard.LockedBuffer) (b *Backend, err error) {
 	b = &Backend{}
-	b.Partitions = map[QueueType](map[conf.DestinationType]db.Partition){}
+	b.Partitions = make(map[QueueType]map[conf.DestinationType]db.Partition, len(Queues))
 	for qtype := range Queues {
 		b.Partitions[qtype] = map[conf.DestinationType]db.Partition{}
 		for _, dtype := range conf.Destinations {
@@ -140,6 +141,7 @@ func NewBackend(parent *badger.DB, storeSecret *memguard.LockedBuffer) (b *Backe
 				return nil, err
 			}
 		}
+
 	}
 	return b, nil
 }
@@ -157,7 +159,7 @@ type MessageStore struct {
 
 	closedChan     chan struct{}
 	FatalErrorChan chan struct{}
-	OutputsChans   map[conf.DestinationType](chan []*model.FullMessage)
+	OutputsChans   map[conf.DestinationType]chan []*model.FullMessage
 
 	toStashQueue    *queue.BSliceQueue
 	ackQueue        *queue.AckQueue
@@ -194,8 +196,8 @@ func (s *MessageStore) SetDestinations(dests conf.DestinationType) {
 
 func (s *MessageStore) receiveAcks() {
 	defer s.wg.Done()
-	var ackBatchSize uint32 = s.batchSize * 4 / 5
-	var nackBatchSize uint32 = s.batchSize / 10
+	var ackBatchSize = uint32(s.batchSize * 4 / 5)
+	var nackBatchSize = uint32(s.batchSize / 10)
 	acks := make([]queue.UidDest, 0, ackBatchSize)
 	nacks := make([]queue.UidDest, 0, nackBatchSize)
 	permerrs := make([]queue.UidDest, 0, nackBatchSize)
@@ -228,7 +230,7 @@ func (s *MessageStore) consumeStashQueue() {
 	var err error
 	messages := make([][]byte, 0, s.batchSize)
 	uids := make([]utils.MyULID, 0, s.batchSize)
-	tmpMap1 := make(map[utils.MyULID]([]byte), s.batchSize)
+	tmpMap1 := make(map[utils.MyULID][]byte, s.batchSize)
 	for s.toStashQueue.Wait(0) {
 		s.toStashQueue.GetManyInto(&messages, &uids)
 		if len(messages) == 0 {
@@ -269,68 +271,136 @@ func (s *MessageStore) tickResetFailures(ctx context.Context) {
 	}
 }
 
-func (s *MessageStore) forward(ctx context.Context, d conf.DestinationType) {
+func (s *MessageStore) retrieveAndForward(ctx context.Context) {
 	var wg sync.WaitGroup
-	c := s.OutputsChans[d]
+	var messages []*model.FullMessage
+	var d conf.DestinationType
+	var nilmsg []*model.FullMessage
+	bucket := make(map[conf.DestinationType]*atomic.Value, len(conf.Destinations))
+	for _, d = range conf.Destinations {
+		bucket[d] = &atomic.Value{}
+		bucket[d].Store(nilmsg)
+	}
 	doneChan := ctx.Done()
 
-	defer func() {
-		wg.Wait()
-		close(c)
-		s.wg.Done()
-	}()
+	for _, d = range conf.Destinations {
+		wg.Add(1)
 
-	var messages []*model.FullMessage
-	var oldMessages []*model.FullMessage
-	for {
-
-	wait_messages:
-		for {
-			select {
-			case <-doneChan:
-				return
-			default:
-				if s.dests.Has(d) {
-					messages = s.retrieve(d)
-					if len(messages) > 0 {
-						break wait_messages
-					} else {
-						select {
-						case <-doneChan:
-							return
-						case <-time.After(time.Second):
-						}
-					}
-				} else {
-					// if the current destination is not active, we avoid to query the badger database
+		go func(dest conf.DestinationType) {
+			defer wg.Done()
+		ForwardLoop:
+			for {
+				if !s.dests.Has(dest) {
+					// that destination is not currently selected, do nothing
 					select {
 					case <-doneChan:
 						return
 					case <-time.After(time.Second):
+						continue ForwardLoop
 					}
 				}
-			}
-		}
+				// look into the bucket for available messages
+				msgs := bucket[dest].Load().([]*model.FullMessage)
+				if len(msgs) == 0 {
+					// no available message for that destination, let's wait a little
+					select {
+					case <-doneChan:
+						return
+					case <-time.After(time.Second):
+						continue ForwardLoop
+					}
+				}
 
-		select {
-		case s.Outputs(d) <- messages:
-			// at that point, the destination has finished processing oldMessages
-			if oldMessages != nil {
-				s.msgsSlicePool.Put(oldMessages)
-				oldMessages = messages
+				// there are some messages to forward
+				select {
+				case s.Outputs(dest) <- msgs:
+					s.msgsSlicePool.Put(msgs)
+					msgs = nil
+					bucket[dest].Store(msgs)
+				case <-doneChan:
+					return
+				}
 			}
-		case <-doneChan:
+		}(d)
+	}
+
+	defer func() {
+		wg.Wait()
+		for _, d = range conf.Destinations {
+			close(s.Outputs(d))
 			// NACK the messages that were not delivered
-			if len(messages) > 0 {
-				for _, message := range messages {
+			msgs := bucket[d].Load().([]*model.FullMessage)
+			if len(msgs) > 0 {
+				for _, message := range msgs {
 					s.NACK(message.Uid, d)
 					model.FullFree(message)
 				}
+				msgs = nil
+				bucket[d].Store(msgs)
 			}
-			return
+		}
+		s.wg.Done()
+	}()
+
+	next := make(map[conf.DestinationType]time.Time)
+	now := time.Now()
+	for _, d = range conf.Destinations {
+		if s.dests.Has(d) {
+			next[d] = now
+		} else {
+			next[d] = now.Add(time.Second)
+		}
+	}
+	var currentDest conf.DestinationType
+	var currentDestIdx uint
+	var first time.Time
+
+RetrieveLoop:
+	for {
+		// wait until we have something to do
+		now = time.Now()
+		first = now.Add(time.Hour)
+		for _, d = range conf.Destinations {
+			if next[d].Before(first) {
+				first = next[d]
+			}
+		}
+		if now.Before(first) {
+			select{
+			case <-doneChan:
+				return
+			case <-time.After(first.Sub(now)):
+			}
 		}
 
+		currentDestIdx++
+		currentDestIdx = currentDestIdx % uint(len(conf.Destinations))
+		currentDest = 1 << currentDestIdx
+		now = time.Now()
+
+		if now.Before(next[currentDest]) {
+			// wait more for next check
+			continue RetrieveLoop
+		}
+		if !s.dests.Has(currentDest) {
+			// current destination is not selected
+			next[currentDest] = now.Add(time.Second)
+			continue RetrieveLoop
+		}
+		if len(bucket[currentDest].Load().([]*model.FullMessage)) > 0 {
+			// previous messages are still being sent
+			next[currentDest] = now.Add(time.Second)
+			continue RetrieveLoop
+		}
+
+		messages = s.retrieve(currentDest)
+		if len(messages) == 0 {
+			next[currentDest] = now.Add(time.Second)
+			continue RetrieveLoop
+		}
+		bucket[currentDest].Store(messages)
 	}
+
 }
 
 func (s *MessageStore) init(ctx context.Context) {
@@ -366,10 +436,14 @@ func (s *MessageStore) init(ctx context.Context) {
 	s.wg.Add(1)
 	go s.tickResetFailures(ctx)
 
+	s.wg.Add(1)
+	go s.retrieveAndForward(ctx)
+	/*
 	for _, dest := range conf.Destinations {
 		s.wg.Add(1)
 		go s.forward(ctx, dest)
 	}
+	*/
 }
 
 func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests conf.DestinationType, cfnd bool, l log15.Logger) (*MessageStore, error) {
@@ -401,7 +475,7 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 		nackQueue:       queue.NewAckQueue(),
 		permerrorsQueue: queue.NewAckQueue(),
 		closedChan:      make(chan struct{}),
-		OutputsChans:    make(map[conf.DestinationType](chan []*model.FullMessage)),
+		OutputsChans:    make(map[conf.DestinationType]chan []*model.FullMessage, len(conf.Destinations)),
 		addMissingMsgID: cfg.AddMissingMsgID,
 		generator:       utils.NewGenerator(),
 		msgsSlicePool: &sync.Pool{
@@ -455,7 +529,7 @@ func (s *MessageStore) WaitFinished() {
 }
 
 func (s *MessageStore) StoreAllSyslogConfigs(c conf.BaseConfig) (err error) {
-	funcs := []utils.Func{}
+	funcs := make([]utils.Func, 0, 20)
 
 	for _, c := range c.TCPSource {
 		tcpConf := c
@@ -533,11 +607,11 @@ func (s *MessageStore) GetSyslogConfig(confID utils.MyULID) (*conf.FilterSubConf
 		return nil, err
 	}
 	if data == nil {
-		return nil, fmt.Errorf("Unknown syslog configuration id")
+		return nil, fmt.Errorf("unknown syslog configuration id")
 	}
 	c, err := conf.ImportSyslogConfig(data)
 	if err != nil {
-		return nil, fmt.Errorf("Can't unmarshal the syslog config: %s", err.Error())
+		return nil, fmt.Errorf("can't unmarshal the syslog config: %s", err.Error())
 	}
 	return c, nil
 }
@@ -602,7 +676,7 @@ func (s *MessageStore) pruneOrphanedByDest(dest conf.DestinationType, txn *db.NT
 	uids := messagesDB.ListKeys(txn)
 
 	// check if the corresponding uid exists in "ready" or "failed" or "permerrors"
-	orphanedUIDs := []utils.MyULID{}
+	orphanedUIDs := make([]utils.MyULID, 0)
 	for _, uid := range uids {
 		have, err = readyDB.Exists(uid, txn)
 		if err != nil {
@@ -715,8 +789,8 @@ func (s *MessageStore) resetFailuresByDest(dest conf.DestinationType) (err error
 		txn = db.NewNTransaction(s.badger, true)
 		now = time.Now()
 		iter := failedDB.KeyValueIterator(s.batchSize/5, txn)
-		uids := []utils.MyULID{}
-		invalidUids := []utils.MyULID{}
+		uids := make([]utils.MyULID, 0)
+		invalidUids := make([]utils.MyULID, 0)
 
 		for iter.Rewind(); iter.Valid(); iter.Next() {
 			uid = iter.Key()
@@ -805,7 +879,7 @@ func (s *MessageStore) Stash(uid utils.MyULID, b []byte) (fatal error, nonfatal 
 	return fatal, nil
 }
 
-func (s *MessageStore) ingestByDest(queue map[utils.MyULID]([]byte), dest conf.DestinationType, txn *db.NTransaction) (err error) {
+func (s *MessageStore) ingestByDest(queue map[utils.MyULID][]byte, dest conf.DestinationType, txn *db.NTransaction) (err error) {
 	messagesDB := s.backend.GetPartition(Messages, dest)
 	readyDB := s.backend.GetPartition(Ready, dest)
 
@@ -816,7 +890,7 @@ func (s *MessageStore) ingestByDest(queue map[utils.MyULID]([]byte), dest conf.D
 	return readyDB.AddManyTrueMap(queue, txn)
 }
 
-func (s *MessageStore) ingest(queue [][]byte, uids []utils.MyULID, tmpMap1 map[utils.MyULID]([]byte)) (n int, err error) {
+func (s *MessageStore) ingest(queue [][]byte, uids []utils.MyULID, tmpMap1 map[utils.MyULID][]byte) (n int, err error) {
 	if len(queue) == 0 {
 		return 0, nil
 	}
@@ -879,7 +953,7 @@ func (s *MessageStore) retrieve(dest conf.DestinationType) (messages []*model.Fu
 	var err error
 	var messageBytes []byte
 
-	for iter.Rewind(); iter.Valid() && fetched < s.batchSize; iter.Next() {
+	for iter.Rewind(); fetched < s.batchSize && iter.Valid(); iter.Next() {
 		if !iter.KeyInto(&uid) {
 			continue
 		}
