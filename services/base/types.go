@@ -20,9 +20,10 @@ const (
 	Graylog
 	Filesystem
 	HTTPServer
+	MacOS
 )
 
-var Names2Types map[string]Types = map[string]Types{
+var Names2Types = map[string]Types{
 	"skewer-tcp":         TCP,
 	"skewer-udp":         UDP,
 	"skewer-relp":        RELP,
@@ -35,9 +36,10 @@ var Names2Types map[string]Types = map[string]Types{
 	"skewer-graylog":     Graylog,
 	"skewer-files":       Filesystem,
 	"skewer-httpserver":  HTTPServer,
+	"skewer-macos":       MacOS,
 }
 
-var ErrNotFound = errors.New("Not found")
+var ErrNotFound = errors.New("not found")
 
 func Name(t Types, cfnd bool) (string, error) {
 	if cfnd {
@@ -112,6 +114,7 @@ func init() {
 		{Types2Names[Graylog], Logger},
 		{Types2Names[Filesystem], Logger},
 		{Types2Names[HTTPServer], Logger},
+		{Types2Names[MacOS], Logger},
 	}
 
 	HandlesMap = map[ServiceHandle]uintptr{}
