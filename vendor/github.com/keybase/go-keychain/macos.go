@@ -36,38 +36,40 @@ var (
 // createAccess creates a SecAccessRef as CFTypeRef.
 // The returned SecAccessRef, if non-nil, must be released via CFRelease.
 func createAccess(label string, trustedApplications []string) (C.CFTypeRef, error) {
-	if len(trustedApplications) == 0 {
-		return nil, nil
-	}
-
-	// Always prepend with empty string which signifies that we
-	// include a NULL application, which means ourselves.
-	trustedApplications = append([]string{""}, trustedApplications...)
-
 	var err error
 	var labelRef C.CFStringRef
 	if labelRef, err = StringToCFString(label); err != nil {
-		return nil, err
+		return 0, err
 	}
 	defer C.CFRelease(C.CFTypeRef(labelRef))
 
-	var trustedApplicationsRefs []C.CFTypeRef
-	for _, trustedApplication := range trustedApplications {
-		trustedApplicationRef, createErr := createTrustedApplication(trustedApplication)
-		if createErr != nil {
-			return nil, createErr
+	var trustedApplicationsArray C.CFArrayRef
+	if trustedApplications != nil {
+		if len(trustedApplications) > 0 {
+			// Always prepend with empty string which signifies that we
+			// include a NULL application, which means ourselves.
+			trustedApplications = append([]string{""}, trustedApplications...)
 		}
-		defer C.CFRelease(C.CFTypeRef(trustedApplicationRef))
-		trustedApplicationsRefs = append(trustedApplicationsRefs, trustedApplicationRef)
+
+		var trustedApplicationsRefs []C.CFTypeRef
+		for _, trustedApplication := range trustedApplications {
+			trustedApplicationRef, createErr := createTrustedApplication(trustedApplication)
+			if createErr != nil {
+				return 0, createErr
+			}
+			defer C.CFRelease(C.CFTypeRef(trustedApplicationRef))
+			trustedApplicationsRefs = append(trustedApplicationsRefs, trustedApplicationRef)
+		}
+
+		trustedApplicationsArray = ArrayToCFArray(trustedApplicationsRefs)
+		defer C.CFRelease(C.CFTypeRef(trustedApplicationsArray))
 	}
 
 	var access C.SecAccessRef
-	trustedApplicationsArray := ArrayToCFArray(trustedApplicationsRefs)
-	defer C.CFRelease(C.CFTypeRef(trustedApplicationsArray))
 	errCode := C.SecAccessCreate(labelRef, trustedApplicationsArray, &access)
 	err = checkError(errCode)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 
 	return C.CFTypeRef(access), nil
@@ -86,7 +88,7 @@ func createTrustedApplication(trustedApplication string) (C.CFTypeRef, error) {
 	errCode := C.SecTrustedApplicationCreateFromPath(trustedApplicationCStr, &trustedApplicationRef)
 	err := checkError(errCode)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 
 	return C.CFTypeRef(trustedApplicationRef), nil
@@ -149,19 +151,19 @@ func newKeychain(path, password string, promptUser bool) (Keychain, error) {
 	var kref C.SecKeychainRef
 
 	if promptUser {
-		errCode = C.SecKeychainCreate(pathRef, C.UInt32(0), nil, C.Boolean(1), nil, &kref)
+		errCode = C.SecKeychainCreate(pathRef, C.UInt32(0), nil, C.Boolean(1), 0, &kref)
 	} else {
 		passwordRef := C.CString(password)
 		defer C.free(unsafe.Pointer(passwordRef))
-		errCode = C.SecKeychainCreate(pathRef, C.UInt32(len(password)), unsafe.Pointer(passwordRef), C.Boolean(0), nil, &kref)
+		errCode = C.SecKeychainCreate(pathRef, C.UInt32(len(password)), unsafe.Pointer(passwordRef), C.Boolean(0), 0, &kref)
 	}
-
-	// TODO: Without passing in kref I get 'One or more parameters passed to the function were not valid (-50)'
-	defer Release(C.CFTypeRef(kref))
 
 	if err := checkError(errCode); err != nil {
 		return Keychain{}, err
 	}
+
+	// TODO: Without passing in kref I get 'One or more parameters passed to the function were not valid (-50)'
+	defer Release(C.CFTypeRef(kref))
 
 	return Keychain{
 		path: path,
@@ -195,7 +197,7 @@ func openKeychainRef(path string) (C.SecKeychainRef, error) {
 
 	var kref C.SecKeychainRef
 	if err := checkError(C.SecKeychainOpen(pathName, &kref)); err != nil {
-		return nil, err
+		return 0, err
 	}
 
 	return kref, nil
@@ -250,11 +252,11 @@ func (ka keychainArray) Convert() (C.CFTypeRef, error) {
 		if refs[idx], err = kc.Convert(); err != nil {
 			// If we error trying to convert lets release any we converted before
 			for _, ref := range refs {
-				if ref != nil {
+				if ref != 0 {
 					Release(ref)
 				}
 			}
-			return nil, err
+			return 0, err
 		}
 	}
 
