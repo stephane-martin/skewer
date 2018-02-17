@@ -1,7 +1,5 @@
 package consul
 
-//go:generate goderive .
-
 import (
 	"context"
 	"strings"
@@ -12,87 +10,88 @@ import (
 	"github.com/inconshreveable/log15"
 )
 
-func WatchTree(ctx context.Context, client *api.Client, prefix string, resultsChan chan map[string]string, logger log15.Logger) (results map[string]string, err error) {
-	// it is our job to close the notifications channel when we won't write anymore to it
-	if client == nil || len(prefix) == 0 {
+// TODO: rewrite with functional options
+func WatchTree(ctx context.Context, clt *api.Client, pre string, c chan map[string]string, logger log15.Logger) (res map[string]string, err error) {
+	// it is our job to close the c channel when we won't write anymore to it
+	if clt == nil || len(pre) == 0 {
 		logger.Info("Not watching Consul for dynamic configuration")
-		sclose(resultsChan)
+		sclose(c)
 		return nil, nil
 	}
-	logger.Debug("Getting configuration from Consul", "prefix", prefix)
+	logger.Debug("Getting configuration from Consul", "prefix", pre)
 
-	var firstIdx uint64
-	results, firstIdx, err = getTree(ctx, client, prefix, 0)
+	var idx uint64
+	res, idx, err = getTree(ctx, clt, pre, 0)
 
 	if err != nil {
-		sclose(resultsChan)
+		sclose(c)
 		return nil, err
 	}
 
-	if resultsChan == nil {
-		return results, nil
+	if c == nil {
+		return res, nil
 	}
 
-	prevIdx := firstIdx
-	prevResults := deriveCloneResults(results)
-
-	watch := func() {
-		nextResults, nextIdx, err := getTree(ctx, client, prefix, prevIdx)
-
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		if err != nil {
-			logger.Warn("Error reading configuration in Consul", "error", err)
-			time.Sleep(time.Second)
-			return
-		}
-
-		if nextIdx == prevIdx {
-			return
-		}
-
-		if deriveEqualResults(nextResults, prevResults) {
-			return
-		}
-
-		resultsChan <- nextResults
-		prevIdx = nextIdx
-		prevResults = deriveCloneResults(nextResults)
-	}
+	firstResults := cloneResults(res)
 
 	go func() {
-		defer close(resultsChan)
+		defer close(c)
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			default:
-				watch()
+				if watch(ctx, clt, pre, &idx, &res) {
+					c <- res
+				}
 			}
 		}
 	}()
 
-	return results, nil
+	return firstResults, nil
 
 }
 
-func getTree(ctx context.Context, client *api.Client, prefix string, waitIndex uint64) (map[string]string, uint64, error) {
-	q := &api.QueryOptions{RequireConsistent: true, WaitIndex: waitIndex, WaitTime: 2 * time.Second}
+func watch(ctx context.Context, client *api.Client, prefix string, idx *uint64, results *map[string]string) bool {
+	nextResults, nextIdx, err := getTree(ctx, client, prefix, *idx)
+
+	select {
+	case <-ctx.Done():
+		return false
+	default:
+	}
+
+	if err != nil {
+		time.Sleep(time.Second)
+		return false
+	}
+
+	if nextIdx == *idx {
+		return false
+	}
+
+	if equalResults(nextResults, *results) {
+		return false
+	}
+
+	*idx = nextIdx
+	*results = cloneResults(nextResults)
+	return true
+}
+
+func getTree(ctx context.Context, clt *api.Client, pre string, idx uint64) (map[string]string, uint64, error) {
+	q := &api.QueryOptions{RequireConsistent: true, WaitIndex: idx, WaitTime: 10 * time.Second}
 	q = q.WithContext(ctx)
-	kvpairs, meta, err := client.KV().List(prefix, q)
+	kvpairs, meta, err := clt.KV().List(pre, q)
 	if err != nil {
 		return nil, 0, errwrap.Wrapf("Error reading configuration in Consul: {{err}}", err)
 	}
 	if len(kvpairs) == 0 {
 		return nil, meta.LastIndex, nil
 	}
-	results := map[string]string{}
+	res := map[string]string{}
 	for _, v := range kvpairs {
-		results[strings.TrimSpace(string(v.Key))] = strings.TrimSpace(string(v.Value))
+		res[strings.TrimSpace(string(v.Key))] = strings.TrimSpace(string(v.Value))
 	}
-	return results, meta.LastIndex, nil
+	return res, meta.LastIndex, nil
 }

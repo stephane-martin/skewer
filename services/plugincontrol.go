@@ -319,7 +319,7 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 			}
 
 			s.logger.Debug("Plugin controller is stopping", "type", s.name)
-			startError(fmt.Errorf("Unexpected end of plugin before it was initialized"), nil)
+			startError(fmt.Errorf("unexpected end of plugin before it was initialized"), nil)
 
 			s.createdMu.Lock()
 			s.startedMu.Lock()
@@ -357,7 +357,7 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 		scanner.Split(utils.PluginSplit)
 		scanner.Buffer(make([]byte, 0, 132000), 132000)
 		command := ""
-		infos := []model.ListenerInfo{}
+		infos := make([]model.ListenerInfo, 0)
 		var m *model.FullMessage
 
 		for scanner.Scan() {
@@ -369,7 +369,7 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 				// in the general case the plugin should rather use the dedicated message pipe
 				if len(parts) == 2 {
 					if !initialized {
-						msg := "Plugin sent a syslog message before being initialized"
+						msg := "plugin sent a syslog message before being initialized"
 						s.logger.Error(msg)
 						startError(fmt.Errorf(msg), nil)
 						kill = true
@@ -394,11 +394,11 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 			case "started":
 				if len(parts) == 2 {
 					// fill infos about listening ports
-					infos := []model.ListenerInfo{}
-					err := json.Unmarshal([]byte(parts[1]), &infos)
+					inf := make([]model.ListenerInfo, 0)
+					err := json.Unmarshal([]byte(parts[1]), &inf)
 					if err == nil {
 						initialized = true
-						startError(nil, infos)
+						startError(nil, inf)
 					} else {
 						s.logger.Warn("Plugin sent a badly encoded JSON listener info", "error", err)
 						startError(err, nil)
@@ -408,7 +408,7 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 				}
 			case "infos":
 				if len(parts) == 2 {
-					newinfos := []model.ListenerInfo{}
+					newinfos := make([]model.ListenerInfo, 0)
 					err := json.Unmarshal([]byte(parts[1]), &newinfos)
 					if err == nil {
 						s.logger.Info("reported infos", "infos", newinfos, "type", s.name)
@@ -438,7 +438,7 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 				startError(NOLISTENER, nil)
 			case "metrics":
 				if len(parts) == 2 {
-					families := []*dto.MetricFamily{}
+					families := make([]*dto.MetricFamily, 0)
 					err := json.Unmarshal([]byte(parts[1]), &families)
 					if err == nil {
 						s.metricsChan <- families
@@ -455,7 +455,7 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 					return
 				}
 			default:
-				err := fmt.Errorf("Unexpected message from plugin")
+				err := fmt.Errorf("unexpected message from plugin")
 				s.logger.Error("Unexpected message from plugin", "command", command)
 				startError(err, nil)
 				kill = true
@@ -491,12 +491,12 @@ func (s *PluginController) Start() (infos []model.ListenerInfo, err error) {
 	if !s.created {
 		s.startedMu.Unlock()
 		s.createdMu.Unlock()
-		return nil, fmt.Errorf("Can not start, plugin '%s' has not been created", s.name)
+		return nil, fmt.Errorf("can not start, plugin '%s' has not been created", s.name)
 	}
 	if s.started {
 		s.startedMu.Unlock()
 		s.createdMu.Unlock()
-		return nil, fmt.Errorf("Plugin already started: %s", s.name)
+		return nil, fmt.Errorf("plugin already started: '%s'", s.name)
 	}
 	s.StopChan = make(chan struct{})
 
@@ -527,7 +527,7 @@ func (s *PluginController) Start() (infos []model.ListenerInfo, err error) {
 			infos = infoserr.infos
 		case <-time.After(60 * time.Second):
 			close(s.StopChan)
-			rerr = fmt.Errorf("Plugin '%s' failed to start before timeout", s.name)
+			rerr = fmt.Errorf("plugin '%s' failed to start before timeout", s.name)
 		}
 	}
 
@@ -653,6 +653,7 @@ func (s *PluginController) Create(optsfuncs ...func(*PluginCreateOpts)) error {
 		// if creating the namespaces fails, fallback to classical start
 		// this way we can support environments where user namespaces are not
 		// available
+		//noinspection GoBoolExpressions
 		if capabilities.CapabilitiesSupported {
 			s.cmd, err = namespaces.SetupCmd(
 				cname,
@@ -680,6 +681,7 @@ func (s *PluginController) Create(optsfuncs ...func(*PluginCreateOpts)) error {
 		if err != nil {
 			s.logger.Warn("Starting plugin in user namespace failed", "error", err, "type", s.name)
 		}
+		//noinspection GoBoolExpressions
 		if err != nil || !capabilities.CapabilitiesSupported {
 			s.cmd, err = namespaces.SetupCmd(
 				s.name,
@@ -711,6 +713,7 @@ func (s *PluginController) Create(optsfuncs ...func(*PluginCreateOpts)) error {
 			return err
 		}
 		s.pipe = pipew
+		//noinspection GoBoolExpressions
 		if capabilities.CapabilitiesSupported {
 			s.cmd, err = namespaces.SetupCmd(
 				cname,
@@ -739,6 +742,7 @@ func (s *PluginController) Create(optsfuncs ...func(*PluginCreateOpts)) error {
 		if err != nil {
 			s.logger.Warn("Starting plugin in user namespace failed", "error", err, "type", s.name)
 		}
+		//noinspection GoBoolExpressions
 		if err != nil || !capabilities.CapabilitiesSupported {
 			s.cmd, err = namespaces.SetupCmd(
 				s.name,
@@ -907,7 +911,7 @@ func (s *StorePlugin) Start() (infos []model.ListenerInfo, err error) {
 	if err != nil {
 		return nil, err
 	}
-	s.msgsBatch = make([]([]byte), 0, s.conf.Store.BatchSize)
+	s.msgsBatch = make([][]byte, 0, s.conf.Store.BatchSize)
 	s.pushwg.Add(1)
 	go s.push(secret)
 	return infos, nil

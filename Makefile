@@ -11,12 +11,12 @@ LDFLAGS=-ldflags '-w -s -X github.com/stephane-martin/skewer/conf.Version=${VERS
 SOURCES = $(shell find . -type f -name '*.go' -not -path "./vendor/*")
 SUBDIRS = $(shell find . -type d -regex './[a-z].*' -not -path './vendor*' -not -path '*.shapesdoc' | xargs)
 
-$(BINARY): ${SOURCES} utils/logging/types.pb.go conf/derived.gen.go utils/logging/derived.gen.go metrics/derived.gen.go consul/derived.gen.go sys/derived.gen.go sys/scomp/derived.gen.go sys/namespaces/derived.gen.go utils/queue/tcp/ring.go utils/queue/udp/ring.go utils/queue/kafka/ring.go utils/queue/message/ring.go model/types.pb.go model/types_ffjson.go 
+$(BINARY): ${SOURCES} utils/logging/types.pb.go conf/derived.gen.go utils/logging/derived.gen.go metrics/derived.gen.go sys/derived.gen.go sys/scomp/derived.gen.go sys/namespaces/derived.gen.go utils/queue/tcp/ring.go utils/queue/udp/ring.go utils/queue/kafka/ring.go utils/queue/message/ring.go model/types.pb.go model/types_ffjson.go
 	test -n "${GOPATH}"  # test $$GOPATH
 	go build -o ${BINARY}
 
 
-release: ${SOURCES} utils/logging/types.pb.go conf/derived.gen.go utils/logging/derived.gen.go metrics/derived.gen.go consul/derived.gen.go sys/derived.gen.go sys/scomp/derived.gen.go sys/namespaces/derived.gen.go utils/queue/tcp/ring.go utils/queue/udp/ring.go utils/queue/kafka/ring.go utils/queue/message/ring.go model/types.pb.go model/types_ffjson.go
+release: ${SOURCES} utils/logging/types.pb.go conf/derived.gen.go utils/logging/derived.gen.go metrics/derived.gen.go sys/derived.gen.go sys/scomp/derived.gen.go sys/namespaces/derived.gen.go utils/queue/tcp/ring.go utils/queue/udp/ring.go utils/queue/kafka/ring.go utils/queue/message/ring.go model/types.pb.go model/types_ffjson.go
 	test -n "${GOPATH}"  # test $$GOPATH
 	go build ${LDFLAGS} -o ${BINARY}
 
@@ -60,10 +60,6 @@ metrics/derived.gen.go: metrics/metrics.go
 	test -n "${GOPATH}"  # test $$GOPATH
 	go generate github.com/stephane-martin/skewer/metrics
 
-consul/derived.gen.go: consul/dynamicconf.go
-	test -n "${GOPATH}"  # test $$GOPATH
-	go generate github.com/stephane-martin/skewer/consul
-
 sys/derived.gen.go: sys/process.go
 	test -n "${GOPATH}"  # test $$GOPATH
 	go generate github.com/stephane-martin/skewer/sys
@@ -81,9 +77,24 @@ clean:
 	rm -f ${BINARY} 
 
 push: clean
-	git commit && git push origin master
+	git commit && git push 
 
 vet:
 	test -n "${GOPATH}"  # test $$GOPATH
 	go vet ./... || true
+
+tools:
+	test -n "${GOPATH}"  # test $$GOPATH
+	go get -u github.com/spf13/cobra/cobra
+	go get -u github.com/awalterschulze/goderive
+	go get -u github.com/pquerna/ffjson
+	go get -u github.com/hashrocket/ws
+	go get -u github.com/kardianos/govendor
+	go get -u github.com/cheekybits/genny
+	go get -u github.com/gogo/protobuf/proto
+	go get -u github.com/gogo/protobuf/gogoproto
+	go get -u github.com/gogo/protobuf/protoc-gen-gofast
+	go get -u github.com/gogo/protobuf/protoc-gen-gogofast
+	go get -u github.com/gogo/protobuf/protoc-gen-gogofaster
+	go get -u github.com/gogo/protobuf/protoc-gen-gogoslick
 

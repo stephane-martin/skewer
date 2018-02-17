@@ -17,10 +17,10 @@ import (
 	"text/template"
 	"time"
 
-	sarama "github.com/Shopify/sarama"
-	cluster "github.com/bsm/sarama-cluster"
+	"github.com/Shopify/sarama"
+	"github.com/bsm/sarama-cluster"
 	"github.com/fatih/set"
-	nats "github.com/nats-io/go-nats"
+	"github.com/nats-io/go-nats"
 
 	"github.com/BurntSushi/toml"
 	"github.com/hashicorp/errwrap"
@@ -35,9 +35,8 @@ import (
 var Version string
 var GitCommit string
 
-func (source BaseConfig) Clone() BaseConfig {
-	//return source
-	return deriveCloneBaseConfig(source)
+func (c BaseConfig) Clone() BaseConfig {
+	return deriveCloneBaseConfig(c)
 }
 
 func NewBaseConf() BaseConfig {
@@ -87,16 +86,37 @@ func (c *BaseConfig) String() (string, error) {
 
 type KafkaVersion [4]int
 
+//noinspection GoSnakeCaseUsage
 var V0_8_2_0 = KafkaVersion{0, 8, 2, 0}
+
+//noinspection GoSnakeCaseUsage
 var V0_8_2_1 = KafkaVersion{0, 8, 2, 1}
+
+//noinspection GoSnakeCaseUsage
 var V0_8_2_2 = KafkaVersion{0, 8, 2, 2}
+
+//noinspection GoSnakeCaseUsage
 var V0_9_0_0 = KafkaVersion{0, 9, 0, 0}
+
+//noinspection GoSnakeCaseUsage
 var V0_9_0_1 = KafkaVersion{0, 9, 0, 1}
+
+//noinspection GoSnakeCaseUsage
 var V0_10_0_0 = KafkaVersion{0, 10, 0, 0}
+
+//noinspection GoSnakeCaseUsage
 var V0_10_0_1 = KafkaVersion{0, 10, 0, 1}
+
+//noinspection GoSnakeCaseUsage
 var V0_10_1_0 = KafkaVersion{0, 10, 1, 0}
+
+//noinspection GoSnakeCaseUsage
 var V0_10_2_0 = KafkaVersion{0, 10, 2, 0}
+
+//noinspection GoSnakeCaseUsage
 var V0_11_0_0 = KafkaVersion{0, 11, 0, 0}
+
+//noinspection GoSnakeCaseUsage
 var V1_0_0_0 = KafkaVersion{1, 0, 0, 0}
 
 func ParseVersion(v string) (skv sarama.KafkaVersion, e error) {
@@ -240,9 +260,8 @@ func (c *DirectRELPSourceConfig) GetClientAuthType() tls.ClientAuthType {
 	return convertClientAuthType(c.ClientAuthType)
 }
 
-func convertClientAuthType(auth_type string) tls.ClientAuthType {
-	//s := strings.TrimSpace(c.ClientAuthType)
-	s := strings.TrimSpace(auth_type)
+func convertClientAuthType(authType string) tls.ClientAuthType {
+	s := strings.TrimSpace(authType)
 	if len(s) == 0 {
 		return tls.NoClientCert
 	}
@@ -278,8 +297,8 @@ func cleanList(list set.Interface) (res []string) {
 	return res
 }
 
-func (c *BaseConfig) GetCertificateFiles() (res map[string]([]string)) {
-	res = map[string]([]string){}
+func (c *BaseConfig) GetCertificateFiles() (res map[string][]string) {
+	res = make(map[string][]string)
 	s := set.New(set.ThreadSafe)
 	s.Add(c.KafkaDest.CAFile, c.KafkaDest.CertFile, c.KafkaDest.KeyFile)
 	s.Add(c.RELPDest.CAFile, c.RELPDest.CertFile, c.RELPDest.KeyFile)
@@ -320,8 +339,8 @@ func (c *BaseConfig) GetCertificateFiles() (res map[string]([]string)) {
 	return res
 }
 
-func (c *BaseConfig) GetCertificatePaths() (res map[string]([]string)) {
-	res = map[string]([]string){}
+func (c *BaseConfig) GetCertificatePaths() (res map[string][]string) {
+	res = map[string][]string{}
 	s := set.New(set.ThreadSafe)
 	s.Add(c.KafkaDest.CAPath)
 	s.Add(c.RELPDest.CAPath)
@@ -412,7 +431,7 @@ func ImportSyslogConfig(data []byte) (*FilterSubConfig, error) {
 	c := FilterSubConfig{}
 	err := json.Unmarshal(data, &c)
 	if err != nil {
-		return nil, fmt.Errorf("Can't unmarshal the syslog config: %s", err.Error())
+		return nil, fmt.Errorf("can't unmarshal the syslog config: %s", err.Error())
 	}
 	return &c, nil
 }
@@ -529,7 +548,7 @@ func (c *KafkaDestConfig) GetSaramaProducerConfig(confined bool) (*sarama.Config
 		s.Producer.Partitioner = sarama.NewHashPartitioner
 	}
 
-	// MetricRegistry ?
+	// TODO: MetricRegistry ?
 	return s, nil
 }
 
@@ -569,7 +588,7 @@ func (c *KafkaSourceConfig) GetClient(confined bool) (*cluster.Consumer, error) 
 	return nil, KafkaError{Err: err}
 }
 
-func InitLoad(ctx context.Context, confDir string, params consul.ConnParams, r kring.Ring, logger log15.Logger) (c BaseConfig, updated chan *BaseConfig, err error) {
+func InitLoad(ctx context.Context, confDir string, p consul.ConnParams, r kring.Ring, l log15.Logger) (c BaseConfig, up chan *BaseConfig, err error) {
 	defer func() {
 		// sometimes viper panics... let's catch that
 		if r := recover(); r != nil {
@@ -580,13 +599,13 @@ func InitLoad(ctx context.Context, confDir string, params consul.ConnParams, r k
 			case error:
 				err = x
 			default:
-				err = errors.New("Unknown panic")
+				err = errors.New("unknown panic")
 			}
-			logger.Error("Recovered in conf.InitLoad()", "error", err)
+			l.Error("Recovered in conf.InitLoad()", "error", err)
 		}
 		if err != nil {
 			c = NewBaseConf()
-			updated = nil
+			up = nil
 		}
 	}()
 
@@ -611,7 +630,7 @@ func InitLoad(ctx context.Context, confDir string, params consul.ConnParams, r k
 		default:
 			return NewBaseConf(), nil, ConfigurationReadError{err}
 		case viper.ConfigFileNotFoundError:
-			logger.Info("No configuration file was found")
+			l.Info("No configuration file was found")
 		}
 	}
 
@@ -625,28 +644,28 @@ func InitLoad(ctx context.Context, confDir string, params consul.ConnParams, r k
 	var watchCtx context.Context
 	var cancelWatch context.CancelFunc
 
-	consulAddr := strings.TrimSpace(params.Address)
+	consulAddr := strings.TrimSpace(p.Address)
 	if len(consulAddr) > 0 {
-		clt, err := consul.NewClient(params)
+		clt, err := consul.NewClient(p)
 		if err == nil {
 			consulResults = make(chan map[string]string, 10)
 			watchCtx, cancelWatch = context.WithCancel(ctx)
-			firstResults, err = consul.WatchTree(watchCtx, clt, params.Prefix, consulResults, logger)
+			firstResults, err = consul.WatchTree(watchCtx, clt, p.Prefix, consulResults, l)
 			if err == nil {
-				err = c.ParseParamsFromConsul(firstResults, params.Prefix, logger)
+				err = c.ParseParamsFromConsul(firstResults, p.Prefix, l)
 				if err != nil {
-					logger.Error("Error decoding configuration from Consul", "error", err)
+					l.Error("Error decoding configuration from Consul", "error", err)
 				}
 			} else {
-				logger.Error("Error reading from Consul", "error", err)
+				l.Error("Error reading from Consul", "error", err)
 				cancelWatch()
 				consulResults = nil
 			}
 		} else {
-			logger.Error("Error creating Consul client: configuration will not be fetched from Consul", "error", err)
+			l.Error("Error creating Consul client: configuration will not be fetched from Consul", "error", err)
 		}
 	} else {
-		logger.Info("Configuration is not fetched from Consul")
+		l.Info("Configuration is not fetched from Consul")
 	}
 
 	err = c.Complete(r)
@@ -659,27 +678,27 @@ func InitLoad(ctx context.Context, confDir string, params consul.ConnParams, r k
 
 	if consulResults != nil {
 		// watch for updates from Consul
-		updated = make(chan *BaseConfig)
+		up = make(chan *BaseConfig)
 		go func() {
 			for result := range consulResults {
 				newConfig := baseConf.Clone()
-				err := newConfig.ParseParamsFromConsul(result, params.Prefix, logger)
+				err := newConfig.ParseParamsFromConsul(result, p.Prefix, l)
 				if err == nil {
 					err = newConfig.Complete(r)
 					if err == nil {
-						updated <- &newConfig
+						up <- &newConfig
 					} else {
-						logger.Error("Error updating conf from Consul", "error", err)
+						l.Error("Error updating conf from Consul", "error", err)
 					}
 				} else {
-					logger.Error("Error decoding conf from Consul", "error", err)
+					l.Error("Error decoding conf from Consul", "error", err)
 				}
 			}
-			close(updated)
+			close(up)
 		}()
 	}
 
-	return c, updated, nil
+	return c, up, nil
 }
 
 func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix string, logger log15.Logger) error {
@@ -793,7 +812,7 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 		}
 	}
 
-	udpSourceConfs := []UDPSourceConfig{}
+	udpSourceConfs := make([]UDPSourceConfig, 0)
 	for _, syslogConf := range rawUdpSourceConf {
 		vi = viper.New()
 		for k, v := range syslogConf {
@@ -808,7 +827,7 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 		}
 	}
 
-	relpSourceConfs := []RELPSourceConfig{}
+	relpSourceConfs := make([]RELPSourceConfig, 0)
 	for _, syslogConf := range rawRelpSourceConf {
 		vi = viper.New()
 		for k, v := range syslogConf {
@@ -823,7 +842,7 @@ func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix stri
 		}
 	}
 
-	parsersConf := []ParserConfig{}
+	parsersConf := make([]ParserConfig, 0)
 	for parserName, pConf := range rawParsersConf {
 		parserConf := ParserConfig{Name: parserName}
 		vi := viper.New()
@@ -994,7 +1013,7 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 		}
 	}
 
-	sources := []Source{}
+	sources := make([]Source, 0)
 	for i := range c.FSSource {
 		sources = append(sources, &c.FSSource[i])
 	}

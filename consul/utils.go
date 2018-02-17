@@ -73,3 +73,37 @@ func sclose(c chan map[string]string) {
 		close(c)
 	}
 }
+
+func equalResults(this, that map[string]string) bool {
+	if this == nil || that == nil {
+		return this == nil && that == nil
+	}
+	if len(this) != len(that) {
+		return false
+	}
+	for k, v := range this {
+		thatv, ok := that[k]
+		if !ok {
+			return false
+		}
+		if !(v == thatv) {
+			return false
+		}
+	}
+	return true
+}
+
+func cloneResults(src map[string]string) map[string]string {
+	if src == nil {
+		return nil
+	}
+	return deepCopyMap(src)
+}
+
+func deepCopyMap(src map[string]string) (dst map[string]string) {
+	dst = make(map[string]string)
+	for srcKey, srcValue := range src {
+		dst[srcKey] = srcValue
+	}
+	return dst
+}
