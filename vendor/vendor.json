@@ -554,6 +554,12 @@
 			"revisionTime": "2017-05-05T08:58:37Z"
 		},
 		{
+			"checksumSHA1": "WR1BjzDKgv6uE+3ShcDTYz0Gl6A=",
+			"path": "github.com/hashicorp/hcl/hcl/printer",
+			"revision": "23c074d0eceb2b8a5bfdbb271ab780cde70f05a8",
+			"revisionTime": "2017-10-17T18:19:29Z"
+		},
+		{
 			"checksumSHA1": "z6wdP4mRw4GVjShkNHDaOWkbxS0=",
 			"path": "github.com/hashicorp/hcl/hcl/scanner",
 			"revision": "392dba7d905ed5d04a5794ba89f558b27e2ba1ca",
@@ -966,10 +972,10 @@
 			"revisionTime": "2017-05-08T18:43:26Z"
 		},
 		{
-			"checksumSHA1": "JGlbiYL/EEEi27iBBNj/AwVNbXM=",
+			"checksumSHA1": "Jxc83Vkfb8PalEO/knZNXgpUTMQ=",
 			"path": "github.com/spf13/viper",
-			"revision": "25b30aa063fc18e48662b86996252eabdcf2f0c7",
-			"revisionTime": "2017-07-23T05:52:07Z",
+			"revision": "aafc9e6bc7b7bb53ddaa75a5ef49a17d6e654be5",
+			"revisionTime": "2017-11-29T09:51:06Z",
 			"tree": true
 		},
 		{
