@@ -588,31 +588,8 @@ func (c *KafkaSourceConfig) GetClient(confined bool) (*cluster.Consumer, error) 
 	return nil, KafkaError{Err: err}
 }
 
-func InitLoad(ctx context.Context, confDir string, p consul.ConnParams, r kring.Ring, l log15.Logger) (c BaseConfig, up chan *BaseConfig, err error) {
-	defer func() {
-		// sometimes viper panics... let's catch that
-		if r := recover(); r != nil {
-			// find out exactly what the error was and set err
-			switch x := r.(type) {
-			case string:
-				err = errors.New(x)
-			case error:
-				err = x
-			default:
-				err = errors.New("unknown panic")
-			}
-			l.Error("Recovered in conf.InitLoad()", "error", err)
-		}
-		if err != nil {
-			c = NewBaseConf()
-			up = nil
-		}
-	}()
-
-	var firstResults map[string]string
-	var consulResults chan map[string]string
-
-	v := viper.New()
+func getViper(confDir string) (v *viper.Viper, err error) {
+	v = viper.New()
 	SetDefaults(v)
 	v.SetConfigName("skewer")
 
@@ -623,49 +600,91 @@ func InitLoad(ctx context.Context, confDir string, p consul.ConnParams, r kring.
 	if confDir != "/nonexistent" {
 		v.AddConfigPath("/etc")
 	}
-
 	err = v.ReadInConfig()
 	if err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+func InitLoad(ctx context.Context, confDir string, p consul.ConnParams, r kring.Ring, l log15.Logger) (c BaseConfig, updates chan *BaseConfig, err error) {
+	defer func() {
+		// sometimes viper panics... let's catch that
+		if recovered := recover(); recovered != nil {
+			// find out exactly what the error was and set err
+			switch x := recovered.(type) {
+			case string:
+				err = errors.New(x)
+			case error:
+				err = x
+			default:
+				err = fmt.Errorf("%s", recovered)
+			}
+			l.Warn("Panic recovered in conf.InitLoad()", "error", err)
+		}
+		if err != nil {
+			c = NewBaseConf()
+			updates = nil
+		}
+	}()
+
+	var firstResults map[string]string
+	c = NewBaseConf()
+
+	v, err := getViper(confDir)
+	if err != nil {
 		switch err.(type) {
-		default:
-			return NewBaseConf(), nil, ConfigurationReadError{err}
 		case viper.ConfigFileNotFoundError:
 			l.Info("No configuration file was found")
+		default:
+			return c, nil, ConfigurationReadError{err}
 		}
 	}
-
-	var baseConf BaseConfig
-	err = v.Unmarshal(&baseConf)
-	if err != nil {
-		return NewBaseConf(), nil, ConfigurationSyntaxError{Err: err, Filename: v.ConfigFileUsed()}
-	}
-	c = baseConf.Clone()
 
 	var watchCtx context.Context
 	var cancelWatch context.CancelFunc
-
+	var consulResults chan map[string]string
 	consulAddr := strings.TrimSpace(p.Address)
+
 	if len(consulAddr) > 0 {
-		clt, err := consul.NewClient(p)
-		if err == nil {
-			consulResults = make(chan map[string]string, 10)
+		l.Info("Reading conf from Consul", "addr", consulAddr)
+		consulResults = func(v *viper.Viper) (consulUpdates chan map[string]string) {
+			clt, err := consul.NewClient(p)
+			if err != nil {
+				l.Error("Error creating Consul client: configuration will not be fetched from Consul", "error", err)
+				return
+			}
+
+			consulUpdates = make(chan map[string]string, 10)
 			watchCtx, cancelWatch = context.WithCancel(ctx)
-			firstResults, err = consul.WatchTree(watchCtx, clt, p.Prefix, consulResults, l)
-			if err == nil {
-				err = c.ParseParamsFromConsul(firstResults, p.Prefix, l)
-				if err != nil {
-					l.Error("Error decoding configuration from Consul", "error", err)
-				}
-			} else {
+			firstResults, err = consul.Watch(
+				consul.Logger(l),
+				consul.Client(clt),
+				consul.Context(watchCtx),
+				consul.Prefix(p.Key),
+				consul.ResultsChan(consulUpdates),
+				consul.Recursive(false),
+			)
+
+			if err != nil {
 				l.Error("Error reading from Consul", "error", err)
 				cancelWatch()
-				consulResults = nil
+				consulUpdates = nil
+				return
 			}
-		} else {
-			l.Error("Error creating Consul client: configuration will not be fetched from Consul", "error", err)
-		}
-	} else {
-		l.Info("Configuration is not fetched from Consul")
+
+			err = FromConsul(v, getFirstValue(firstResults))
+			if err != nil {
+				l.Error("Error decoding configuration from Consul", "error", err)
+				return
+			}
+			return
+		}(v)
+	}
+
+	err = v.Unmarshal(&c)
+	if err != nil {
+		return NewBaseConf(), nil, ConfigurationSyntaxError{Err: err, Filename: v.ConfigFileUsed()}
 	}
 
 	err = c.Complete(r)
@@ -678,274 +697,71 @@ func InitLoad(ctx context.Context, confDir string, p consul.ConnParams, r kring.
 
 	if consulResults != nil {
 		// watch for updates from Consul
-		up = make(chan *BaseConfig)
+		updates = make(chan *BaseConfig)
 		go func() {
+		Loop:
 			for result := range consulResults {
-				newConfig := baseConf.Clone()
-				err := newConfig.ParseParamsFromConsul(result, p.Prefix, l)
-				if err == nil {
-					err = newConfig.Complete(r)
-					if err == nil {
-						up <- &newConfig
-					} else {
-						l.Error("Error updating conf from Consul", "error", err)
+				v, err := getViper(confDir)
+				if err != nil {
+					switch err.(type) {
+					case viper.ConfigFileNotFoundError:
+						l.Info("No configuration file was found")
+					default:
+						l.Warn("Error reading configuration file", "error", err)
+						continue Loop
 					}
-				} else {
-					l.Error("Error decoding conf from Consul", "error", err)
 				}
+
+				err = FromConsul(v, getFirstValue(result))
+				if err != nil {
+					l.Warn("Error decoding conf from Consul", "error", err)
+					continue Loop
+				}
+
+				newConfig := NewBaseConf()
+				err = v.Unmarshal(&newConfig)
+				if err != nil {
+					l.Warn("Error unmarshaling new configuration", "error", err)
+					continue Loop
+				}
+
+				err = newConfig.Complete(r)
+				if err != nil {
+					l.Error("Error updating conf from Consul", "error", err)
+					continue Loop
+				}
+				updates <- &newConfig
 			}
-			close(up)
+			close(updates)
 		}()
 	}
 
-	return c, up, nil
+	return c, updates, nil
 }
 
-func (c *BaseConfig) ParseParamsFromConsul(params map[string]string, prefix string, logger log15.Logger) error {
-	rawTcpSourceConf := map[string]map[string]string{}
-	rawUdpSourceConf := map[string]map[string]string{}
-	rawRelpSourceConf := map[string]map[string]string{}
-	rawJournalConf := map[string]string{}
-	rawKafkaConf := map[string]string{}
-	rawStoreConf := map[string]string{}
-	rawMetricsConf := map[string]string{}
-	rawParsersConf := map[string]map[string]string{}
-	rawAccountingConf := map[string]string{}
-	rawMainConf := map[string]string{}
-	prefixLen := len(prefix)
+func getFirstValue(m map[string]string) (val string) {
+	for _, val = range m {
+		break
+	}
+	return val
+}
 
-	for k, v := range params {
-		k = strings.Trim(k[prefixLen:], "/")
-		splits := strings.Split(k, "/")
-		switch splits[0] {
-		case "tcp_source":
-			if len(splits) == 3 {
-				if _, ok := rawTcpSourceConf[splits[1]]; !ok {
-					rawTcpSourceConf[splits[1]] = map[string]string{}
-				}
-				rawTcpSourceConf[splits[1]][splits[2]] = v
-			} else {
-				logger.Debug("Ignoring Consul KV", "key", k, "value", v)
+func FromConsul(v *viper.Viper, confStr string) (err error) {
+	defer func() {
+		// sometimes viper panics... let's catch that
+		if r := recover(); r != nil {
+			// find out exactly what the error was and set err
+			switch x := r.(type) {
+			case string:
+				err = errors.New(x)
+			case error:
+				err = x
+			default:
+				err = fmt.Errorf("%s", r)
 			}
-		case "udp_source":
-			if len(splits) == 3 {
-				if _, ok := rawUdpSourceConf[splits[1]]; !ok {
-					rawUdpSourceConf[splits[1]] = map[string]string{}
-				}
-				rawUdpSourceConf[splits[1]][splits[2]] = v
-			} else {
-				logger.Debug("Ignoring Consul KV", "key", k, "value", v)
-			}
-		case "relp_source":
-			if len(splits) == 3 {
-				if _, ok := rawRelpSourceConf[splits[1]]; !ok {
-					rawRelpSourceConf[splits[1]] = map[string]string{}
-				}
-				rawRelpSourceConf[splits[1]][splits[2]] = v
-			} else {
-				logger.Debug("Ignoring Consul KV", "key", k, "value", v)
-			}
-		case "journald":
-			if len(splits) == 2 {
-				rawJournalConf[splits[1]] = v
-			} else {
-				logger.Debug("Ignoring Consul KV", "key", k, "value", v)
-			}
-		case "kafka":
-			if len(splits) == 2 {
-				rawKafkaConf[splits[1]] = v
-			} else {
-				logger.Debug("Ignoring Consul KV", "key", k, "value", v)
-			}
-		case "store":
-			if len(splits) == 2 {
-				rawStoreConf[splits[1]] = v
-			} else {
-				logger.Debug("Ignoring Consul KV", "key", k, "value", v)
-			}
-		case "parsers":
-			if len(splits) == 3 {
-				if _, ok := rawParsersConf[splits[1]]; !ok {
-					rawParsersConf[splits[1]] = map[string]string{}
-				}
-				rawParsersConf[splits[1]][splits[2]] = v
-			} else {
-				logger.Debug("Ignoring Consul KV", "key", k, "value", v)
-			}
-		case "metrics":
-			if len(splits) == 2 {
-				rawMetricsConf[splits[1]] = v
-			} else {
-				logger.Debug("Ignoring Consul KV", "key", k, "value", v)
-			}
-		case "accounting":
-			if len(splits) == 2 {
-				rawAccountingConf[splits[1]] = v
-			} else {
-				logger.Debug("Ignoring Consul KV", "key", k, "value", v)
-			}
-		case "main":
-			if len(splits) == 2 {
-				rawMainConf[splits[1]] = v
-			} else {
-				logger.Debug("Ignoring Consul KV", "key", k, "value", v)
-			}
-		default:
-			logger.Debug("Ignoring Consul KV", "key", k, "value", v)
 		}
-	}
-
-	var vi *viper.Viper
-
-	tcpSourceConfs := make([]TCPSourceConfig, 0)
-	for _, syslogConf := range rawTcpSourceConf {
-		vi = viper.New()
-		for k, v := range syslogConf {
-			vi.Set(k, v)
-		}
-		sconf := TCPSourceConfig{}
-		err := vi.Unmarshal(&sconf)
-		if err == nil {
-			tcpSourceConfs = append(tcpSourceConfs, sconf)
-		} else {
-			return err
-		}
-	}
-
-	udpSourceConfs := make([]UDPSourceConfig, 0)
-	for _, syslogConf := range rawUdpSourceConf {
-		vi = viper.New()
-		for k, v := range syslogConf {
-			vi.Set(k, v)
-		}
-		sconf := UDPSourceConfig{}
-		err := vi.Unmarshal(&sconf)
-		if err == nil {
-			udpSourceConfs = append(udpSourceConfs, sconf)
-		} else {
-			return err
-		}
-	}
-
-	relpSourceConfs := make([]RELPSourceConfig, 0)
-	for _, syslogConf := range rawRelpSourceConf {
-		vi = viper.New()
-		for k, v := range syslogConf {
-			vi.Set(k, v)
-		}
-		sconf := RELPSourceConfig{}
-		err := vi.Unmarshal(&sconf)
-		if err == nil {
-			relpSourceConfs = append(relpSourceConfs, sconf)
-		} else {
-			return err
-		}
-	}
-
-	parsersConf := make([]ParserConfig, 0)
-	for parserName, pConf := range rawParsersConf {
-		parserConf := ParserConfig{Name: parserName}
-		vi := viper.New()
-		for k, v := range pConf {
-			vi.Set(k, v)
-		}
-		err := vi.Unmarshal(&parserConf)
-		if err == nil {
-			parsersConf = append(parsersConf, parserConf)
-		} else {
-			return err
-		}
-	}
-
-	journalConf := JournaldConfig{}
-	if len(rawJournalConf) > 0 {
-		vi = viper.New()
-		SetJournaldDefaults(vi, false)
-		for k, v := range rawJournalConf {
-			vi.Set(k, v)
-		}
-		err := vi.Unmarshal(&journalConf)
-		if err != nil {
-			return err
-		}
-		c.Journald = journalConf
-	}
-
-	kafkaConf := KafkaDestConfig{}
-	if len(rawKafkaConf) > 0 {
-		vi = viper.New()
-		SetKafkaDefaults(vi, false)
-		for k, v := range rawKafkaConf {
-			vi.Set(k, v)
-		}
-		err := vi.Unmarshal(&kafkaConf)
-		if err != nil {
-			return err
-		}
-		c.KafkaDest = &kafkaConf
-	}
-
-	storeConf := StoreConfig{}
-	if len(rawStoreConf) > 0 {
-		vi = viper.New()
-		SetStoreDefaults(vi, false)
-		for k, v := range rawStoreConf {
-			vi.Set(k, v)
-		}
-		err := vi.Unmarshal(&storeConf)
-		if err != nil {
-			return err
-		}
-		c.Store = storeConf
-	}
-
-	metricsConf := MetricsConfig{}
-	if len(rawMetricsConf) > 0 {
-		vi = viper.New()
-		SetMetricsDefaults(vi, false)
-		for k, v := range rawMetricsConf {
-			vi.Set(k, v)
-		}
-		err := vi.Unmarshal(&metricsConf)
-		if err != nil {
-			return err
-		}
-		c.Metrics = metricsConf
-	}
-
-	accountingConf := AccountingSourceConfig{}
-	if len(rawAccountingConf) > 0 {
-		vi = viper.New()
-		SetAccountingDefaults(vi, false)
-		for k, v := range rawAccountingConf {
-			vi.Set(k, v)
-		}
-		err := vi.Unmarshal(&accountingConf)
-		if err != nil {
-			return err
-		}
-		c.Accounting = accountingConf
-	}
-
-	mainConf := MainConfig{}
-	if len(rawMainConf) > 0 {
-		vi = viper.New()
-		SetMainDefaults(vi, false)
-		for k, v := range rawMainConf {
-			vi.Set(k, v)
-		}
-		err := vi.Unmarshal(&mainConf)
-		if err != nil {
-			return err
-		}
-		c.Main = mainConf
-	}
-	c.TCPSource = append(c.TCPSource, tcpSourceConfs...)
-	c.UDPSource = append(c.UDPSource, udpSourceConfs...)
-	c.RELPSource = append(c.RELPSource, relpSourceConfs...)
-	c.Parsers = append(c.Parsers, parsersConf...)
-
-	return nil
+	}()
+	return v.MergeConfig(strings.NewReader(confStr))
 }
 
 func (c *BaseConfig) Export() (string, error) {

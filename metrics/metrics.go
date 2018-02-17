@@ -37,7 +37,7 @@ func (l Logger) Println(v ...interface{}) {
 
 func (m *MetricsServer) NewConf(c conf.MetricsConfig, logger log15.Logger, gatherers ...prometheus.Gatherer) {
 	m.Stop()
-	var nonNilGatherers prometheus.Gatherers = deriveFilterGatherers(func(g prometheus.Gatherer) bool { return g != nil }, gatherers)
+	var nonNilGatherers prometheus.Gatherers = filterGatherers(func(g prometheus.Gatherer) bool { return g != nil }, gatherers)
 	logger.Debug("Number of metric gatherers", "nb", len(nonNilGatherers))
 
 	if strings.TrimSpace(c.Path) == "" {
@@ -64,8 +64,25 @@ func (m *MetricsServer) NewConf(c conf.MetricsConfig, logger log15.Logger, gathe
 			// actually listen
 			err := m.server.ListenAndServe()
 			if err != nil {
-				logger.Error("Error starting the HTTP metric server", "error", err)
+				if err == http.ErrServerClosed {
+					logger.Info("Metrics HTTP server has been shut down")
+				} else {
+					logger.Error("Error starting the HTTP metric server", "error", err)
+				}
 			}
 		}()
 	}
+}
+
+func filterGatherers(predicate func(prometheus.Gatherer) bool, list []prometheus.Gatherer) []prometheus.Gatherer {
+	j := 0
+	for i, elem := range list {
+		if predicate(elem) {
+			if i != j {
+				list[j] = list[i]
+			}
+			j++
+		}
+	}
+	return list[:j]
 }

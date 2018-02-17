@@ -34,7 +34,7 @@ var printStoreCmd = &cobra.Command{
 			CertFile:   consulCertFile,
 			KeyFile:    consulKeyFile,
 			Insecure:   consulInsecure,
-			Prefix:     consulPrefix,
+			Key:        consulPrefix,
 		}
 
 		c, _, err = conf.InitLoad(ctx, configDirName, params, nil, logger)

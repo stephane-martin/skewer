@@ -29,7 +29,7 @@ account, if you provide the necessary Consul flags on the command line.`,
 			CertFile:   consulCertFile,
 			KeyFile:    consulKeyFile,
 			Insecure:   consulInsecure,
-			Prefix:     consulPrefix,
+			Key:        consulPrefix,
 		}
 
 		c, _, err := conf.InitLoad(context.Background(), configDirName, params, nil, log15.New())

@@ -253,7 +253,7 @@ func (ch *serveChild) setupConsulRegistry() error {
 		CertFile:   consulCertFile,
 		KeyFile:    consulKeyFile,
 		Insecure:   consulInsecure,
-		Prefix:     consulPrefix,
+		Key:        consulPrefix,
 	}
 	var err error
 	if consulRegisterFlag {

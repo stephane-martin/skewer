@@ -162,7 +162,7 @@ func (c *ConfigurationService) Start(r kring.Ring) error {
 			c.logger.Debug("Configuration service is stopping")
 
 			once.Do(func() {
-				startedChan <- fmt.Errorf("Unexpected end of configuration service")
+				startedChan <- fmt.Errorf("unexpected end of configuration service")
 				close(startedChan)
 			})
 
@@ -263,6 +263,7 @@ func (c *ConfigurationService) Start(r kring.Ring) error {
 	}()
 
 	cparams, _ := json.Marshal(c.params)
+	c.logger.Info("Consul params", "params", string(cparams))
 
 	err = c.W([]byte("confdir"), []byte(c.confdir))
 	if err == nil {
@@ -315,7 +316,7 @@ Loop:
 func start(confdir string, params consul.ConnParams, r kring.Ring, logger log15.Logger) (context.CancelFunc, error) {
 
 	if len(confdir) == 0 {
-		return nil, fmt.Errorf("Configuration directory is empty")
+		return nil, fmt.Errorf("configuration directory is empty")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	gconf, updated, err := conf.InitLoad(ctx, confdir, params, r, logger)
@@ -345,11 +346,11 @@ func LaunchConfProvider(r kring.Ring, confined bool, logger log15.Logger) (err e
 	defer func() {
 		if e := recover(); e != nil {
 			errString := fmt.Sprintf("%s", e)
-			err = fmt.Errorf("Scanner panicked in configuration provider: %s", errString)
+			err = fmt.Errorf("ccanner panicked in configuration provider: %s", errString)
 		}
 	}()
 	if r == nil {
-		return fmt.Errorf("No ring")
+		return fmt.Errorf("no ring provided")
 	}
 	sigpubkey, err := r.GetSignaturePubkey()
 	if err != nil {
@@ -403,19 +404,20 @@ func LaunchConfProvider(r kring.Ring, confined bool, logger log15.Logger) (err e
 					confdir = filepath.Join("/tmp", "conf", confdir)
 				}
 			} else {
-				return fmt.Errorf("Empty confdir command")
+				return fmt.Errorf("empty confdir command")
 			}
 		case "consulparams":
 			if len(parts) == 2 {
 				newparams := consul.ConnParams{}
-				err := json.Unmarshal([]byte(parts[1]), &params)
+				err := json.Unmarshal([]byte(parts[1]), &newparams)
 				if err == nil {
+					logger.Debug("Configuration child received consul params", "params", parts[1])
 					params = newparams
 				} else {
-					return fmt.Errorf("Error unmarshaling consulparams received from parent: %s", err.Error())
+					return fmt.Errorf("error unmarshaling consulparams received from parent: %s", err.Error())
 				}
 			} else {
-				return fmt.Errorf("Empty consulparams command")
+				return fmt.Errorf("empty consulparams command")
 			}
 		case "stop":
 			if cancel != nil {
@@ -423,7 +425,7 @@ func LaunchConfProvider(r kring.Ring, confined bool, logger log15.Logger) (err e
 			}
 			return nil
 		default:
-			return fmt.Errorf("Unknown command")
+			return fmt.Errorf("unknown conf command")
 		}
 
 	}

@@ -11,12 +11,12 @@ LDFLAGS=-ldflags '-w -s -X github.com/stephane-martin/skewer/conf.Version=${VERS
 SOURCES = $(shell find . -type f -name '*.go' -not -path "./vendor/*")
 SUBDIRS = $(shell find . -type d -regex './[a-z].*' -not -path './vendor*' -not -path '*.shapesdoc' | xargs)
 
-$(BINARY): ${SOURCES} utils/logging/types.pb.go conf/derived.gen.go utils/logging/derived.gen.go metrics/derived.gen.go sys/derived.gen.go sys/scomp/derived.gen.go sys/namespaces/derived.gen.go utils/queue/tcp/ring.go utils/queue/udp/ring.go utils/queue/kafka/ring.go utils/queue/message/ring.go model/types.pb.go model/types_ffjson.go
+$(BINARY): ${SOURCES} utils/logging/types.pb.go conf/derived.gen.go utils/logging/derived.gen.go sys/derived.gen.go sys/scomp/derived.gen.go sys/namespaces/derived.gen.go utils/queue/tcp/ring.go utils/queue/udp/ring.go utils/queue/kafka/ring.go utils/queue/message/ring.go model/types.pb.go model/types_ffjson.go
 	test -n "${GOPATH}"  # test $$GOPATH
 	go build -o ${BINARY}
 
 
-release: ${SOURCES} utils/logging/types.pb.go conf/derived.gen.go utils/logging/derived.gen.go metrics/derived.gen.go sys/derived.gen.go sys/scomp/derived.gen.go sys/namespaces/derived.gen.go utils/queue/tcp/ring.go utils/queue/udp/ring.go utils/queue/kafka/ring.go utils/queue/message/ring.go model/types.pb.go model/types_ffjson.go
+release: ${SOURCES} utils/logging/types.pb.go conf/derived.gen.go utils/logging/derived.gen.go sys/derived.gen.go sys/scomp/derived.gen.go sys/namespaces/derived.gen.go utils/queue/tcp/ring.go utils/queue/udp/ring.go utils/queue/kafka/ring.go utils/queue/message/ring.go model/types.pb.go model/types_ffjson.go
 	test -n "${GOPATH}"  # test $$GOPATH
 	go build ${LDFLAGS} -o ${BINARY}
 
@@ -55,10 +55,6 @@ conf/derived.gen.go: conf/types.go conf/conf.go
 utils/logging/derived.gen.go: utils/logging/receiver.go
 	test -n "${GOPATH}"  # test $$GOPATH
 	go generate github.com/stephane-martin/skewer/utils/logging
-
-metrics/derived.gen.go: metrics/metrics.go
-	test -n "${GOPATH}"  # test $$GOPATH
-	go generate github.com/stephane-martin/skewer/metrics
 
 sys/derived.gen.go: sys/process.go
 	test -n "${GOPATH}"  # test $$GOPATH

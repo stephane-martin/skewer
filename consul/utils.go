@@ -33,7 +33,7 @@ type ConnParams struct {
 	CertFile   string `json:"cert_file"`
 	KeyFile    string `json:"key_file"`
 	Insecure   bool   `json:"insecure"`
-	Prefix     string `json:"prefix"`
+	Key        string `json:"key"`
 }
 
 func NewClient(params ConnParams) (*api.Client, error) {
