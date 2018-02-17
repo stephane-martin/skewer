@@ -942,10 +942,10 @@
 			"revisionTime": "2017-04-13T08:50:28Z"
 		},
 		{
-			"checksumSHA1": "233z49QwgSzdLglskKTSdI/CPQ8=",
+			"checksumSHA1": "bk8AIaMyTeY7CW85Zg2HDrZVSo0=",
 			"path": "github.com/spf13/cobra",
-			"revision": "cb731b898346822cc0c225c28550a8a29d93c732",
-			"revisionTime": "2017-08-15T02:24:12Z"
+			"revision": "be77323fc05148ef091e83b3866c0d47c8e74a8b",
+			"revisionTime": "2018-02-11T16:22:30Z"
 		},
 		{
 			"path": "github.com/spf13/cobra/cmd",
