@@ -122,13 +122,11 @@ func Comp2Int(c C.comp_t) int64 {
 }
 
 func Comm(b *C.char) string {
-	l := int(C.strnlen(b, COMMLEN))
+	l := C.strnlen(b, COMMLEN)
 	if l == 0 {
 		return ""
 	}
-	temp := make([]byte, l+1)
-	C.strncat((*C.char)(unsafe.Pointer(&temp[0])), b, C.size_t(l))
-	return C.GoString((*C.char)(unsafe.Pointer(&temp[0])))
+	return C.GoStringN(b, C.int(l))
 }
 
 func MakeAcct(buf []byte, tick int64) (dest Acct) {
