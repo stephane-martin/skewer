@@ -42,6 +42,7 @@ var Types = map[Type]string{
 	OldTime:      "old time",
 	NewTime:      "new time",
 	InitProcess:  "init process",
+	LoginProcess: "login process",
 	UserProcess:  "user process",
 	DeadProcess:  "dead process",
 	Accounting:   "accounting",
@@ -62,8 +63,8 @@ type Entry struct {
 
 func (e *Entry) String() string {
 	return fmt.Sprintf(
-		"User: '%s', ID: '%s', Line: '%s', Host: '%s', PID: '%d', Type: '%s', Timestamp: '%s'",
-		e.User, e.ID, e.Line, e.Host, e.PID, e.TypeStr, e.Timestamp,
+		"User: '%s', ID: '%s', Line: '%s', Host: '%s', PID: '%d', Type: '%d %s', Timestamp: '%s'",
+		e.User, e.ID, e.Line, e.Host, e.PID, e.Type, e.TypeStr, e.Timestamp,
 	)
 }
 
