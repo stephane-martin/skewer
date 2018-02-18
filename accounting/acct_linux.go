@@ -63,19 +63,19 @@ const (
 )
 
 type Acct struct {
-	Comm     string
-	Utime    time.Duration
-	Stime    time.Duration
-	Etime    time.Duration
-	Btime    time.Time
-	Uid      string
-	Gid      string
-	Mem      int64
-	Io       int64
-	Flags    Status
-	ExitCode uint32
-	Pid      uint32
-	Ppid     uint32
+	Comm     string        `json:"comm,omitempty"`
+	Utime    time.Duration `json:"utime"`
+	Stime    time.Duration `json:"stime"`
+	Etime    time.Duration `json:"etime"`
+	Btime    time.Time     `json:"btime"`
+	Uid      string        `json:"uid,omitempty"`
+	Gid      string        `json:"gid,omitempty"`
+	Mem      int64         `json:"mem"`
+	Io       int64         `json:"io"`
+	Flags    Status        `json:"flags"`
+	ExitCode uint32        `json:"exitcode"`
+	Pid      uint32        `json:"pid"`
+	Ppid     uint32        `json:"ppid"`
 }
 
 func (a *Acct) Properties() (m map[string]string) {

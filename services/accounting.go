@@ -78,17 +78,17 @@ func (s *AccountingService) makeMessage(buf []byte, tick int64, hostname string,
 	props := acct.Properties()
 	fields := model.CleanFactory()
 	fields.AppName = "accounting"
-	fields.Facility = 0
+	fields.Facility = model.Fuser
+	fields.Severity = model.Sinfo
+	fields.SetPriority()
 	fields.HostName = hostname
 	fields.MsgId = ""
-	fields.Priority = 0
 	fields.ProcId = props["pid"]
-	fields.Severity = 0
 	fields.Structured = ""
-	fields.TimeGeneratedNum = acct.Btime.UnixNano()
-	fields.TimeReportedNum = time.Now().UnixNano()
-	fields.Version = 0
-	fields.Message = fmt.Sprintf("Accounting: %s (%s/%s)", props["comm"], props["uid"], props["gid"])
+	fields.TimeReportedNum = acct.Btime.UnixNano()
+	fields.TimeGeneratedNum = time.Now().UnixNano()
+	fields.Version = 1
+	fields.Message = acct.Marshal()
 	fields.ClearDomain("accounting")
 	fields.Properties.Map["accounting"].Map = acct.Properties()
 	fields.SetProperty("skewer", "client", hostname)

@@ -62,16 +62,16 @@ func (s Status) String() string {
 }
 
 type Acct struct {
-	Comm  string
-	Utime time.Duration
-	Stime time.Duration
-	Etime time.Duration
-	Btime time.Time
-	Uid   string
-	Gid   string
-	Mem   uint16
-	Io    int64
-	Flags Status
+	Comm  string        `json:"comm,omitempty"`
+	Utime time.Duration `json:"utime"`
+	Stime time.Duration `json:"stime"`
+	Etime time.Duration `json:"etime"`
+	Btime time.Time     `json:"btime"`
+	Uid   string        `json:"uid,omitempty"`
+	Gid   string        `json:"gid,omitempty"`
+	Mem   uint16        `json:"mem"`
+	Io    int64         `json:"io"`
+	Flags Status        `json:"flags"`
 }
 
 func (a *Acct) Properties() (m map[string]string) {
