@@ -132,6 +132,7 @@ func NewRELPClient(logger log15.Logger) *RELPClient {
 }
 
 func (c *RELPClient) Host(host string) *RELPClient {
+	// TODO: support multiple hosts as failovers
 	c.host = host
 	return c
 }

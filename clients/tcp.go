@@ -48,6 +48,7 @@ func NewSyslogTCPClient(logger log15.Logger) *SyslogTCPClient {
 }
 
 func (c *SyslogTCPClient) Host(host string) *SyslogTCPClient {
+	// TODO: support multiple hosts as failovers
 	c.host = host
 	return c
 }
