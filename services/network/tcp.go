@@ -154,48 +154,54 @@ func makeLogger(logger log15.Logger, raw *model.RawTcpMessage) log15.Logger {
 	)
 }
 
-func (s *TcpServiceImpl) parseOne(raw *model.RawTcpMessage, env *base.ParsersEnv, gen *utils.Generator) {
+func (s *TcpServiceImpl) parseOne(raw *model.RawTcpMessage, env *base.ParsersEnv, gen *utils.Generator) error {
 	decoder := utils.SelectDecoder(raw.Encoding)
 	parser, err := env.GetParser(raw.Format)
 
 	if parser == nil || err != nil {
 		makeLogger(s.Logger, raw).Error("Unknown parser")
-		return
+		return nil
 	}
 
-	syslogMsg, err := parser(raw.Message, decoder)
+	syslogMsgs, err := parser(raw.Message, decoder)
 	if err != nil {
 		base.ParsingErrorCounter.WithLabelValues("tcp", raw.Client, raw.Format).Inc()
-		//logger.Info("Parsing error", "message", string(raw.Message), "error", err)
 		makeLogger(s.Logger, raw).Info("Parsing error", "error", err)
-		return
-	}
-	if syslogMsg == nil {
-		makeLogger(s.Logger, raw).Debug("Empty message")
-		return
-	}
-	if raw.Client != "" {
-		syslogMsg.SetProperty("skewer", "client", raw.Client)
-	}
-	if raw.UnixSocketPath != "" {
-		syslogMsg.SetProperty("skewer", "socketpath", raw.UnixSocketPath)
-	}
-	if raw.LocalPort != 0 {
-		syslogMsg.SetProperty("skewer", "localport", strconv.FormatInt(int64(raw.LocalPort), 10))
+		return nil
 	}
 
-	full := model.FullFactoryFrom(syslogMsg)
-	full.Uid = gen.Uid()
-	full.ConfId = raw.ConfID
-	fatal, nonfatal := s.reporter.Stash(full)
+	var syslogMsg *model.SyslogMessage
+	var full *model.FullMessage
 
-	if fatal != nil {
-		makeLogger(s.Logger, raw).Error("Fatal error stashing TCP message", "error", fatal)
-		s.dofatal()
-	} else if nonfatal != nil {
-		makeLogger(s.Logger, raw).Warn("Non-fatal error stashing TCP message", "error", nonfatal)
+	for _, syslogMsg = range syslogMsgs {
+		if syslogMsg == nil {
+			continue
+		}
+		if raw.Client != "" {
+			syslogMsg.SetProperty("skewer", "client", raw.Client)
+		}
+		if raw.UnixSocketPath != "" {
+			syslogMsg.SetProperty("skewer", "socketpath", raw.UnixSocketPath)
+		}
+		if raw.LocalPort != 0 {
+			syslogMsg.SetProperty("skewer", "localport", strconv.FormatInt(int64(raw.LocalPort), 10))
+		}
+
+		full = model.FullFactoryFrom(syslogMsg)
+		full.Uid = gen.Uid()
+		full.ConfId = raw.ConfID
+		fatal, nonfatal := s.reporter.Stash(full)
+
+		if fatal != nil {
+			makeLogger(s.Logger, raw).Error("Fatal error stashing TCP message", "error", fatal)
+			s.dofatal()
+			return fatal
+		} else if nonfatal != nil {
+			makeLogger(s.Logger, raw).Warn("Non-fatal error stashing TCP message", "error", nonfatal)
+		}
+		model.FullFree(full)
 	}
-	model.FullFree(full)
+	return nil
 }
 
 // parse fetch messages from the raw queue, parse them, and push them to be sent.
@@ -210,8 +216,11 @@ func (s *TcpServiceImpl) parse() {
 		if raw == nil || err != nil {
 			return
 		}
-		s.parseOne(raw, env, gen)
+		err = s.parseOne(raw, env, gen)
 		s.Pool.Put(raw)
+		if err != nil {
+			return
+		}
 	}
 }
 

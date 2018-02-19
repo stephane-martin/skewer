@@ -116,7 +116,8 @@ type ConcreteParser struct {
 	name string
 }
 
-func (p *ConcreteParser) Parse(rawMessage []byte, decoder *encoding.Decoder) (parsedMessage *model.SyslogMessage, err error) {
+func (p *ConcreteParser) Parse(rawMessage []byte, decoder *encoding.Decoder) ([]*model.SyslogMessage, error) {
+	var err error
 	jsParser, ok := p.env.jsParsers[p.name]
 	if !ok {
 		return nil, &decoders.UnknownFormatError{}
@@ -141,14 +142,16 @@ func (p *ConcreteParser) Parse(rawMessage []byte, decoder *encoding.Decoder) (pa
 			message, ok := jserr.Value().Export().(string)
 			if ok {
 				return nil, &decoders.JSParsingError{ParserName: p.name, Message: message}
-			} else {
-				return nil, err
 			}
-		} else {
 			return nil, err
 		}
+		return nil, err
 	}
-	return p.env.fromJsMessage(jsParsedMessage)
+	parsedMessage, err := p.env.fromJsMessage(jsParsedMessage)
+	if err != nil {
+		return nil, err
+	}
+	return []*model.SyslogMessage{parsedMessage}, nil
 }
 
 func newEnv(filterFunc, topicFunc, topicTmpl, partitionKeyFunc, partitionKeyTmpl, partitionNumberFunc string, logger log15.Logger) *Environment {

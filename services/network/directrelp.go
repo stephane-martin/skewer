@@ -378,42 +378,48 @@ func makeDRELPLogger(logger log15.Logger, raw *model.RawTcpMessage) log15.Logger
 	)
 }
 
-func (s *DirectRelpServiceImpl) parseOne(raw *model.RawTcpMessage, e *base.ParsersEnv) {
+func (s *DirectRelpServiceImpl) parseOne(raw *model.RawTcpMessage, e *base.ParsersEnv) error {
 
 	parser, err := e.GetParser(raw.Format)
 	if err != nil || parser == nil {
 		s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
 		makeDRELPLogger(s.Logger, raw).Crit("Unknown parser")
-		return
+		return nil
 	}
 	decoder := utils.SelectDecoder(raw.Encoding)
-	syslogMsg, err := parser(raw.Message, decoder)
+	syslogMsgs, err := parser(raw.Message, decoder)
 	if err != nil {
 		makeDRELPLogger(s.Logger, raw).Warn("Parsing error", "error", err)
 		s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
 		base.ParsingErrorCounter.WithLabelValues("directrelp", raw.Client, raw.Format).Inc()
-		return
-	}
-	if syslogMsg == nil {
-		s.forwarder.ForwardSucc(raw.ConnID, raw.Txnr)
-		return
+		return nil
 	}
 
-	if raw.Client != "" {
-		syslogMsg.SetProperty("skewer", "client", raw.Client)
-	}
-	if raw.LocalPort != 0 {
-		syslogMsg.SetProperty("skewer", "localport", strconv.FormatInt(int64(raw.LocalPort), 10))
-	}
-	if raw.UnixSocketPath != "" {
-		syslogMsg.SetProperty("skewer", "socketpath", raw.UnixSocketPath)
-	}
+	var syslogMsg *model.SyslogMessage
+	var full *model.FullMessage
 
-	full := model.FullFactoryFrom(syslogMsg)
-	full.Txnr = raw.Txnr
-	full.ConfId = raw.ConfID
-	full.ConnId = raw.ConnID
-	_ = s.parsedMessagesQueue.Put(full)
+	for _, syslogMsg = range syslogMsgs {
+		if syslogMsg == nil {
+			continue
+		}
+
+		if raw.Client != "" {
+			syslogMsg.SetProperty("skewer", "client", raw.Client)
+		}
+		if raw.LocalPort != 0 {
+			syslogMsg.SetProperty("skewer", "localport", strconv.FormatInt(int64(raw.LocalPort), 10))
+		}
+		if raw.UnixSocketPath != "" {
+			syslogMsg.SetProperty("skewer", "socketpath", raw.UnixSocketPath)
+		}
+
+		full = model.FullFactoryFrom(syslogMsg)
+		full.Txnr = raw.Txnr
+		full.ConfId = raw.ConfID
+		full.ConnId = raw.ConnID
+		_ = s.parsedMessagesQueue.Put(full)
+	}
+	return nil
 }
 
 func (s *DirectRelpServiceImpl) parse() {
@@ -432,8 +438,11 @@ func (s *DirectRelpServiceImpl) parse() {
 			s.Logger.Error("rawMessagesQueue returns nil, should not happen!")
 			return
 		}
-		s.parseOne(raw, e)
+		err = s.parseOne(raw, e)
 		s.Pool.Put(raw)
+		if err != nil {
+			return
+		}
 	}
 }
 
@@ -484,6 +493,8 @@ func (s *DirectRelpServiceImpl) handleResponses(conn net.Conn, connID utils.MyUL
 	successes := map[int32]bool{}
 	failures := map[int32]bool{}
 	var err error
+	var ok1, ok2 bool
+	var currentTxnr int32
 
 	writeSuccess := func(txnr int32) (err error) {
 		_, err = fmt.Fprintf(conn, "%d rsp 6 200 OK\n", txnr)
@@ -496,16 +507,24 @@ func (s *DirectRelpServiceImpl) handleResponses(conn net.Conn, connID utils.MyUL
 	}
 
 	for s.forwarder.Wait(connID) {
-		currentTxnr := s.forwarder.GetSucc(connID)
+		currentTxnr = s.forwarder.GetSucc(connID)
 		if currentTxnr != -1 {
 			//logger.Debug("New success to report to client", "txnr", currentTxnr)
-			successes[currentTxnr] = true
+			_, ok1 = successes[currentTxnr]
+			_, ok2 = failures[currentTxnr]
+			if !ok1 && !ok2 {
+				successes[currentTxnr] = true
+			}
 		}
 
 		currentTxnr = s.forwarder.GetFail(connID)
 		if currentTxnr != -1 {
 			//logger.Debug("New failure to report to client", "txnr", currentTxnr)
-			failures[currentTxnr] = true
+			_, ok1 = successes[currentTxnr]
+			_, ok2 = failures[currentTxnr]
+			if !ok1 && !ok2 {
+				failures[currentTxnr] = true
+			}
 		}
 
 		// rsyslog expects the ACK/txnr correctly and monotonously ordered
@@ -521,7 +540,7 @@ func (s *DirectRelpServiceImpl) handleResponses(conn net.Conn, connID utils.MyUL
 				err = writeSuccess(next)
 				if err == nil {
 					//logger.Debug("ACK to client", "connid", connID, "tnxr", next)
-					delete(successes, next)
+					successes[next] = false
 					relpAnswersCounter.WithLabelValues("200", client).Inc()
 					ackCounter.WithLabelValues("directrelp", "ack").Inc()
 				}
@@ -529,7 +548,7 @@ func (s *DirectRelpServiceImpl) handleResponses(conn net.Conn, connID utils.MyUL
 				err = writeFailure(next)
 				if err == nil {
 					//logger.Debug("NACK to client", "connid", connID, "txnr", next)
-					delete(failures, next)
+					failures[next] = false
 					relpAnswersCounter.WithLabelValues("500", client).Inc()
 					ackCounter.WithLabelValues("directrelp", "nack").Inc()
 				}

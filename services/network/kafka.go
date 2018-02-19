@@ -124,33 +124,39 @@ func (s *KafkaServiceImpl) startOne(config conf.KafkaSourceConfig) {
 
 func (s *KafkaServiceImpl) Parse() {
 	defer s.wg.Done()
+	var err error
+	var raw *model.RawKafkaMessage
 	env := base.NewParsersEnv(s.parserConfigs, s.logger)
 	for {
-		raw, err := s.rawMessagesQueue.Get()
+		raw, err = s.rawMessagesQueue.Get()
 		if raw == nil || err != nil {
 			return
 		}
-		s.ParseOne(env, raw)
+		err = s.ParseOne(env, raw)
+		s.rawpool.Put(raw)
+		if err != nil {
+			return
+		}
 	}
 }
 
-func (s *KafkaServiceImpl) ParseOne(env *base.ParsersEnv, raw *model.RawKafkaMessage) {
-	// be sure to free the raw pointer
-	defer s.rawpool.Put(raw)
+func (s *KafkaServiceImpl) ParseOne(env *base.ParsersEnv, raw *model.RawKafkaMessage) (err error) {
 	ackQueue := s.queues.Get(raw.ConsumerID)
 	if ackQueue == nil {
 		// the kafka consumer is gone
-		return
+		return nil
 	}
 	// be sure to ack the message to kafka
 	defer func() {
-		_ = ackQueue.Put(queue.KafkaProducerAck{
-			Offset: raw.Offset,
-			TopicPartition: queue.TopicPartition{
-				Partition: raw.Partition,
-				Topic:     raw.Topic,
-			},
-		})
+		if err == nil {
+			_ = ackQueue.Put(queue.KafkaProducerAck{
+				Offset: raw.Offset,
+				TopicPartition: queue.TopicPartition{
+					Partition: raw.Partition,
+					Topic:     raw.Topic,
+				},
+			})
+		}
 	}()
 
 	logger := s.logger.New(
@@ -163,37 +169,42 @@ func (s *KafkaServiceImpl) ParseOne(env *base.ParsersEnv, raw *model.RawKafkaMes
 	parser, err := env.GetParser(raw.Format)
 	if parser == nil || err != nil {
 		logger.Error("Unknown parser")
-		return
+		return nil
 	}
 
-	syslogMsg, err := parser(raw.Message, decoder)
+	syslogMsgs, err := parser(raw.Message, decoder)
 	if err != nil {
 		base.ParsingErrorCounter.WithLabelValues("kafka", raw.Brokers, raw.Format).Inc()
-		//logger.Info("Parsing error", "message", string(raw.Message), "error", err)
 		logger.Info("Parsing error", "error", err)
-		return
+		return nil
 	}
-	if syslogMsg == nil {
-		return
-	}
-	if raw.Brokers != "" {
-		syslogMsg.SetProperty("skewer", "client", raw.Brokers)
-	}
-	full := model.FullFactoryFrom(syslogMsg)
-	full.Uid = raw.UID
-	full.ConfId = raw.ConfID
-	fatal, nonfatal := s.reporter.Stash(full)
+	var syslogMsg *model.SyslogMessage
+	var full *model.FullMessage
+	for _, syslogMsg = range syslogMsgs {
+		if syslogMsg == nil {
+			continue
+		}
+		if raw.Brokers != "" {
+			syslogMsg.SetProperty("skewer", "client", raw.Brokers)
+		}
+		full = model.FullFactoryFrom(syslogMsg)
+		full.Uid = raw.UID
+		full.ConfId = raw.ConfID
+		fatal, nonfatal := s.reporter.Stash(full)
 
-	if fatal != nil {
-		logger.Error("Fatal error stashing Kafka message", "error", fatal)
-		s.dofatal()
-	} else if nonfatal != nil {
-		logger.Warn("Non-fatal error stashing Kafka message", "error", nonfatal)
-	} else {
-		base.IncomingMsgsCounter.WithLabelValues("kafka", raw.Brokers, "", "").Inc()
+		if fatal != nil {
+			err = fatal
+			logger.Error("Fatal error stashing Kafka message", "error", fatal)
+			s.dofatal()
+			return err
+		} else if nonfatal != nil {
+			logger.Warn("Non-fatal error stashing Kafka message", "error", nonfatal)
+		} else {
+			base.IncomingMsgsCounter.WithLabelValues("kafka", raw.Brokers, "", "").Inc()
+		}
+		model.FullFree(full)
 	}
-	model.FullFree(full)
-
+	return nil
 }
 
 func (s *KafkaServiceImpl) Shutdown() {

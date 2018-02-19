@@ -11,12 +11,11 @@ LDFLAGS=-ldflags '-w -s -X github.com/stephane-martin/skewer/conf.Version=${VERS
 SOURCES = $(shell find . -type f -name '*.go' -not -path "./vendor/*")
 SUBDIRS = $(shell find . -type d -regex './[a-z].*' -not -path './vendor*' -not -path '*.shapesdoc' | xargs)
 
-$(BINARY): ${SOURCES} utils/logging/types.pb.go conf/derived.gen.go utils/logging/derived.gen.go sys/derived.gen.go sys/scomp/derived.gen.go sys/namespaces/derived.gen.go utils/queue/tcp/ring.go utils/queue/udp/ring.go utils/queue/kafka/ring.go utils/queue/message/ring.go model/types.pb.go model/types_ffjson.go
+$(BINARY): ${SOURCES} utils/logging/types.pb.go conf/derived.gen.go utils/queue/tcp/ring.go utils/queue/udp/ring.go utils/queue/kafka/ring.go utils/queue/message/ring.go model/types.pb.go model/types_ffjson.go utils/collectd/embed/statik/statik.go
 	test -n "${GOPATH}"  # test $$GOPATH
 	go build -o ${BINARY}
 
-
-release: ${SOURCES} utils/logging/types.pb.go conf/derived.gen.go utils/logging/derived.gen.go sys/derived.gen.go sys/scomp/derived.gen.go sys/namespaces/derived.gen.go utils/queue/tcp/ring.go utils/queue/udp/ring.go utils/queue/kafka/ring.go utils/queue/message/ring.go model/types.pb.go model/types_ffjson.go
+release: ${SOURCES} utils/logging/types.pb.go conf/derived.gen.go utils/queue/tcp/ring.go utils/queue/udp/ring.go utils/queue/kafka/ring.go utils/queue/message/ring.go model/types.pb.go model/types_ffjson.go utils/collectd/embed/statik/statik.go
 	test -n "${GOPATH}"  # test $$GOPATH
 	go build ${LDFLAGS} -o ${BINARY}
 
@@ -52,22 +51,9 @@ conf/derived.gen.go: conf/types.go conf/conf.go
 	test -n "${GOPATH}"  # test $$GOPATH
 	go generate github.com/stephane-martin/skewer/conf
 
-utils/logging/derived.gen.go: utils/logging/receiver.go
+utils/collectd/embed/statik/statik.go: utils/collectd/static/types.db
 	test -n "${GOPATH}"  # test $$GOPATH
-	go generate github.com/stephane-martin/skewer/utils/logging
-
-sys/derived.gen.go: sys/process.go
-	test -n "${GOPATH}"  # test $$GOPATH
-	go generate github.com/stephane-martin/skewer/sys
-
-sys/scomp/derived.gen.go: sys/scomp/seccomp.go
-	test -n "${GOPATH}"  # test $$GOPATH
-	go generate github.com/stephane-martin/skewer/sys/scomp
-	gsed -i '1i// +build linux\n' sys/scomp/derived.gen.go
-
-sys/namespaces/derived.gen.go: sys/namespaces/base.go
-	test -n "${GOPATH}"  # test $$GOPATH
-	go generate github.com/stephane-martin/skewer/sys/namespaces
+	statik -src ./utils/collectd/static -dest ./utils/collectd/embed
 
 clean:
 	rm -f ${BINARY} 
@@ -93,4 +79,5 @@ tools:
 	go get -u github.com/gogo/protobuf/protoc-gen-gogofast
 	go get -u github.com/gogo/protobuf/protoc-gen-gogofaster
 	go get -u github.com/gogo/protobuf/protoc-gen-gogoslick
+	go get -u github.com/rakyll/statik
 

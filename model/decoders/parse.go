@@ -22,6 +22,7 @@ const (
 	InfluxDB
 	Auto
 	Protobuf
+	Collectd
 )
 
 var Formats = map[string]Format{
@@ -33,6 +34,7 @@ var Formats = map[string]Format{
 	"influxdb":    InfluxDB,
 	"auto":        Auto,
 	"protobuf":    Protobuf,
+	"collectd":    Collectd,
 }
 
 var parsers = map[Format]Parser{
@@ -44,6 +46,7 @@ var parsers = map[Format]Parser{
 	InfluxDB:    pInflux,
 	Auto:        pAuto,
 	Protobuf:    pProtobuf,
+	Collectd:    pCollectd,
 }
 
 func ParseFormat(format string) Format {
@@ -54,13 +57,17 @@ func ParseFormat(format string) Format {
 	return -1
 }
 
-type Parser func(m []byte, decoder *encoding.Decoder) (*model.SyslogMessage, error)
+type Parser func(m []byte, decoder *encoding.Decoder) ([]*model.SyslogMessage, error)
 
 func Fuzz(m []byte) int {
-	msg, err := pAuto(m, nil)
+	msgs, err := pAuto(m, nil)
 	if err != nil {
 		return 0
 	}
+	if len(msgs) == 0 {
+		return 0
+	}
+	msg := msgs[0]
 	b, err := proto.Marshal(msg)
 	if err != nil {
 		panic(err)
@@ -84,10 +91,12 @@ func GetParser(format Format) (Parser, error) {
 	return nil, fmt.Errorf("Unknown decoding format: %d", format)
 }
 
-func pAuto(m []byte, decoder *encoding.Decoder) (sm *model.SyslogMessage, err error) {
+func pAuto(m []byte, decoder *encoding.Decoder) ([]*model.SyslogMessage, error) {
 	if len(m) == 0 {
-		return sm, &EmptyMessageError{}
+		return nil, &EmptyMessageError{}
 	}
+	var sm []*model.SyslogMessage
+	var err error
 	if m[0] == byte('{') {
 		sm, err = pJSON(m, decoder)
 		if err != nil {

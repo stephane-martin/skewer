@@ -24,11 +24,11 @@ func isASCII(s []byte) bool {
 var SP []byte = []byte(" ")
 var DASH []byte = []byte("-")
 
-func p5424(m []byte, decoder *encoding.Decoder) (smsg *model.SyslogMessage, err error) {
+func p5424(m []byte, decoder *encoding.Decoder) ([]*model.SyslogMessage, error) {
 	// HEADER = PRI VERSION SP TIMESTAMP SP HOSTNAME SP APP-NAME SP PROCID SP MSGID
 	// PRI = "<" PRIVAL ">"
 	// SYSLOG-MSG = HEADER SP STRUCTURED-DATA [SP MSG]
-
+	var err error
 	if decoder == nil {
 		decoder = unicode.UTF8.NewDecoder()
 	}
@@ -43,7 +43,7 @@ func p5424(m []byte, decoder *encoding.Decoder) (smsg *model.SyslogMessage, err 
 	if len(splits) < 7 {
 		return nil, &NotEnoughPartsError{len(splits)}
 	}
-	smsg = model.CleanFactory()
+	smsg := model.CleanFactory()
 	smsg.Priority, smsg.Facility, smsg.Severity, smsg.Version, err = parsePriority(splits[0])
 	if err != nil {
 		return nil, err
@@ -107,7 +107,7 @@ func p5424(m []byte, decoder *encoding.Decoder) (smsg *model.SyslogMessage, err 
 		return nil, &InvalidStructuredDataError{"Structured data is not nil but does not start with '['"}
 	}
 
-	return smsg, nil
+	return []*model.SyslogMessage{smsg}, nil
 }
 
 func splitStructuredData(structured_and_msg []byte) ([]byte, []byte, error) {

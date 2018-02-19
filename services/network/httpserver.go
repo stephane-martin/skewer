@@ -286,28 +286,33 @@ func (s *HTTPServiceImpl) handler(config conf.HTTPServerSourceConfig) func(http.
 			raw.ConfID = config.ConfID
 			raw.Encoding = config.Encoding
 			raw.LocalPort = int32(config.Port)
-			full, err := s.parseOne(env, raw)
+
+			fulls, err := s.parseOne(env, raw)
 			defer s.rawpool.Put(raw)
 			if err != nil {
 				s.logger.Warn("Error parsing message", "error", err)
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
-			defer model.FullFree(full)
-			full.Uid = utils.NewUid()
 
-			fatal, nonfatal := s.reporter.Stash(full)
-			if fatal != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				s.logger.Error("Fatal error stashing HTTP message", "error", fatal)
-				close(s.fatalErrorChan)
-			} else if nonfatal != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				s.logger.Warn("Non-fatal error stashing HTTP message", "error", nonfatal)
-			} else {
-				w.WriteHeader(http.StatusCreated)
-				//base.IncomingMsgsCounter.WithLabelValues("kafka", raw.Brokers, "", "").Inc()
+			var full *model.FullMessage
+			for _, full = range fulls {
+				defer model.FullFree(full)
+				full.Uid = utils.NewUid()
+
+				fatal, nonfatal := s.reporter.Stash(full)
+				if fatal != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					s.logger.Error("Fatal error stashing HTTP message", "error", fatal)
+					close(s.fatalErrorChan)
+					return
+				} else if nonfatal != nil {
+					s.logger.Warn("Non-fatal error stashing HTTP message", "error", nonfatal)
+				}
 			}
+			//base.IncomingMsgsCounter.WithLabelValues("kafka", raw.Brokers, "", "").Inc()
+			w.WriteHeader(http.StatusCreated)
+
 			return
 		}
 
@@ -379,60 +384,77 @@ func (s *HTTPServiceImpl) parse() {
 		if raw == nil || err != nil {
 			return
 		}
-		s.parseAndEnqueue(env, gen, raw)
+		err = s.parseAndEnqueue(env, gen, raw)
 		s.rawpool.Put(raw)
+		if err != nil {
+			return
+		}
 	}
 }
 
-func (s *HTTPServiceImpl) parseAndEnqueue(env *base.ParsersEnv, gen *utils.Generator, raw *model.RawTcpMessage) {
+func (s *HTTPServiceImpl) parseAndEnqueue(env *base.ParsersEnv, gen *utils.Generator, raw *model.RawTcpMessage) error {
 	logger := s.logger.New(
 		"protocol", "httpserver",
 		"format", raw.Format,
 	)
-	full, err := s.parseOne(env, raw)
+	fulls, err := s.parseOne(env, raw)
 	if err != nil {
 		logger.Warn("Error parsing message", "error", err)
 		s.fail(raw.ConnID)
-		return
+		return nil
 	}
-	defer model.FullFree(full)
-	full.Uid = gen.Uid()
+	var full *model.FullMessage
+	for _, full = range fulls {
+		defer model.FullFree(full)
+		full.Uid = gen.Uid()
 
-	fatal, nonfatal := s.reporter.Stash(full)
+		fatal, nonfatal := s.reporter.Stash(full)
 
-	if fatal != nil {
-		logger.Error("Fatal error stashing HTTP message", "error", fatal)
-		s.fail(raw.ConnID)
-		s.dofatal()
-	} else if nonfatal != nil {
-		logger.Warn("Non-fatal error stashing HTTP message", "error", nonfatal)
-		s.fail(raw.ConnID)
-	} else {
-		s.done(raw.ConnID)
-		//base.IncomingMsgsCounter.WithLabelValues("kafka", raw.Brokers, "", "").Inc()
+		if fatal != nil {
+			logger.Error("Fatal error stashing HTTP message", "error", fatal)
+			s.fail(raw.ConnID)
+			s.dofatal()
+			return fatal
+		} else if nonfatal != nil {
+			logger.Warn("Non-fatal error stashing HTTP message", "error", nonfatal)
+			// TODO/ think about non-fatal handling
+		}
 	}
+	s.done(raw.ConnID)
+	return nil
+	//base.IncomingMsgsCounter.WithLabelValues("kafka", raw.Brokers, "", "").Inc()
 }
 
-func (s *HTTPServiceImpl) parseOne(env *base.ParsersEnv, raw *model.RawTcpMessage) (full *model.FullMessage, err error) {
+func (s *HTTPServiceImpl) parseOne(env *base.ParsersEnv, raw *model.RawTcpMessage) (fulls []*model.FullMessage, err error) {
 	decoder := utils.SelectDecoder(raw.Encoding)
 	parser, err := env.GetParser(raw.Format)
 	if parser == nil || err != nil {
 		return nil, fmt.Errorf("Unknown parser")
 	}
 
-	syslogMsg, err := parser(raw.Message, decoder)
+	syslogMsgs, err := parser(raw.Message, decoder)
 	if err != nil {
 		return nil, err
 		//base.ParsingErrorCounter.WithLabelValues("kafka", raw.Brokers, raw.Format).Inc()
 		//logger.Info("Parsing error", "message", string(raw.Message), "error", err)
 	}
-	if syslogMsg == nil {
-		return nil, fmt.Errorf("nil message")
+	if len(syslogMsgs) == 0 {
+		return nil, nil
 	}
-	full = model.FullFactoryFrom(syslogMsg)
-	full.ConfId = raw.ConfID
-	full.ConnId = raw.ConnID
-	return full, nil
+	fulls = make([]*model.FullMessage, 0, len(syslogMsgs))
+	var syslogMsg *model.SyslogMessage
+	var full *model.FullMessage
+
+	for _, syslogMsg = range syslogMsgs {
+		if syslogMsg == nil {
+			continue
+		}
+		full = model.FullFactoryFrom(syslogMsg)
+		full.ConfId = raw.ConfID
+		full.ConnId = raw.ConnID
+		fulls = append(fulls, full)
+	}
+	return fulls, nil
 }
 
 func (s *HTTPServiceImpl) Shutdown() {

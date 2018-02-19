@@ -1,6 +1,7 @@
 # Skewer, a Syslog to Kafka gateway
 
-Skewer is a syslog server that forwards the messages to a Kafka cluster.
+Skewer is a syslog server. It can receive logs from multiple kinds of sources
+and it can forward logs to multiple kinds of destinations.
 
 
 ## Status
@@ -12,14 +13,16 @@ to post bugs and ask questions.
 
 ## Features
 
--   Listens on TCP, UDP or RELP
--   Can fetch logs from Kafka
--   Can fetch log messages from Journald (on Linux)
--   Can fetch audit logs from the kernel (on Linux, by Journald)
--   Can forward logs to Kafka, to another syslog server, or to Graylog
--   Can write logs on the local filesystem
--   Configuration can be provided as a configuration file, or optionally
-    fetched from Consul (not really finished)
+-   Listen on TCP, UDP or RELP
+-   Fetch logs from Kafka
+-   Observe Unix accounting
+-   Fetch MacOS system logs
+-   Fetch log messages from Journald (on Linux)
+-   Forward logs to Kafka, another syslog server, a HTTP Server, Graylog,
+    NATS...
+-   Write logs to the local filesystem
+-   Configuration can be provided as a configuration file, or optionally fetched
+    from Consul
 -   Can register the TCP and RELP listeners as services in Consul
 -   Custom message parsers and filters can be defined through Javascript
     functions
@@ -117,19 +120,6 @@ You can also specify a Consul server through the command line flags. In that cas
 the configuration will be fetched from Consul. When the configuration changes in
 Consul, the services will be restarted accordingly (only the Store configuration
 is not dynamic).
-
-The configuration must be given as a tree in Consul KV. For example:
-
-> skewer/syslog/A/bind_addr 0.0.0.0
->
-> skewer/syslog/A/port 2514
-> 
-> skewer/syslog/B/bind_addr 0.0.0.0
->
-> skewer/syslog/B/port 3514
-> 
-> skewer/kafka/brokers ["kafka1","kafka2","kafka2"]
-
 
 ## Commands
 

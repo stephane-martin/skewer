@@ -470,7 +470,7 @@ func (s *RelpServiceImpl) SetConf(sc []conf.RELPSourceConfig, pc []conf.ParserCo
 	}}
 }
 
-func (s *RelpServiceImpl) parseOne(raw *model.RawTcpMessage, e *base.ParsersEnv, gen *utils.Generator) {
+func (s *RelpServiceImpl) parseOne(raw *model.RawTcpMessage, e *base.ParsersEnv, gen *utils.Generator) error {
 
 	logger := s.Logger.New(
 		"protocol", "relp",
@@ -484,49 +484,52 @@ func (s *RelpServiceImpl) parseOne(raw *model.RawTcpMessage, e *base.ParsersEnv,
 	if parser == nil || err != nil {
 		s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
 		logger.Crit("Unknown parser")
-		return
+		return nil
 	}
 	decoder := utils.SelectDecoder(raw.Encoding)
-	syslogMsg, err := parser(raw.Message, decoder)
+	syslogMsgs, err := parser(raw.Message, decoder)
 	if err != nil {
 		//logger.Warn("Parsing error", "message", string(raw.Message[:raw.Size]), "error", err)
 		logger.Warn("Parsing error", "error", err)
 		s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
 		base.ParsingErrorCounter.WithLabelValues("relp", raw.Client, raw.Format).Inc()
-		return
+		return nil
 	}
-	if syslogMsg == nil {
-		s.forwarder.ForwardSucc(raw.ConnID, raw.Txnr)
-		return
-	}
-	if raw.Client != "" {
-		syslogMsg.SetProperty("skewer", "client", raw.Client)
-	}
-	if raw.LocalPort != 0 {
-		syslogMsg.SetProperty("skewer", "localport", strconv.FormatInt(int64(raw.LocalPort), 10))
-	}
-	if raw.UnixSocketPath != "" {
-		syslogMsg.SetProperty("skewer", "socketpath", raw.UnixSocketPath)
-	}
+	var syslogMsg *model.SyslogMessage
+	var full *model.FullMessage
 
-	full := model.FullFactoryFrom(syslogMsg)
-	full.Txnr = raw.Txnr
-	full.ConfId = raw.ConfID
-	full.ConnId = raw.ConnID
-	full.Uid = gen.Uid()
-	defer model.FullFree(full)
-	f, nonf := s.reporter.Stash(full)
-	if f == nil && nonf == nil {
-		s.forwarder.ForwardSucc(full.ConnId, full.Txnr)
-	} else if f != nil {
-		s.forwarder.ForwardFail(full.ConnId, full.Txnr)
-		logger.Error("Fatal error pushing RELP message to the Store", "err", f)
-		s.StopAndWait()
-		return
-	} else {
-		s.forwarder.ForwardFail(full.ConnId, full.Txnr)
-		logger.Warn("Non fatal error pushing RELP message to the Store", "err", nonf)
+	for _, syslogMsg = range syslogMsgs {
+		if syslogMsg == nil {
+			continue
+		}
+		if raw.Client != "" {
+			syslogMsg.SetProperty("skewer", "client", raw.Client)
+		}
+		if raw.LocalPort != 0 {
+			syslogMsg.SetProperty("skewer", "localport", strconv.FormatInt(int64(raw.LocalPort), 10))
+		}
+		if raw.UnixSocketPath != "" {
+			syslogMsg.SetProperty("skewer", "socketpath", raw.UnixSocketPath)
+		}
+
+		full = model.FullFactoryFrom(syslogMsg)
+		full.Txnr = raw.Txnr
+		full.ConfId = raw.ConfID
+		full.ConnId = raw.ConnID
+		full.Uid = gen.Uid()
+		defer model.FullFree(full)
+		f, nonf := s.reporter.Stash(full)
+		if f != nil {
+			s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
+			logger.Error("Fatal error pushing RELP message to the Store", "err", f)
+			s.StopAndWait()
+			return f
+		} else if nonf != nil {
+			logger.Warn("Non fatal error pushing RELP message to the Store", "err", nonf)
+		}
 	}
+	s.forwarder.ForwardSucc(raw.ConnID, raw.Txnr)
+	return nil
 }
 
 func (s *RelpServiceImpl) Parse() {
@@ -547,8 +550,11 @@ func (s *RelpServiceImpl) Parse() {
 			s.Logger.Error("rawMessagesQueue returns nil, should not happen!")
 			return
 		}
-		s.parseOne(raw, e, gen)
+		err = s.parseOne(raw, e, gen)
 		s.Pool.Put(raw)
+		if err != nil {
+			return
+		}
 	}
 
 }
@@ -561,6 +567,7 @@ func (s *RelpServiceImpl) handleResponses(conn net.Conn, connID utils.MyULID, cl
 	successes := map[int32]bool{}
 	failures := map[int32]bool{}
 	var err error
+	var ok1, ok2 bool
 
 	writeSuccess := func(txnr int32) (err error) {
 		_, err = fmt.Fprintf(conn, "%d rsp 6 200 OK\n", txnr)
@@ -576,13 +583,21 @@ func (s *RelpServiceImpl) handleResponses(conn net.Conn, connID utils.MyULID, cl
 		currentTxnr := s.forwarder.GetSucc(connID)
 		if currentTxnr != -1 {
 			//logger.Debug("New success to report to client", "txnr", currentTxnr)
-			successes[currentTxnr] = true
+			_, ok1 = successes[currentTxnr]
+			_, ok2 = failures[currentTxnr]
+			if !ok1 && !ok2 {
+				successes[currentTxnr] = true
+			}
 		}
 
 		currentTxnr = s.forwarder.GetFail(connID)
 		if currentTxnr != -1 {
 			//logger.Debug("New failure to report to client", "txnr", currentTxnr)
-			failures[currentTxnr] = true
+			_, ok1 = successes[currentTxnr]
+			_, ok2 = failures[currentTxnr]
+			if !ok1 && !ok2 {
+				failures[currentTxnr] = true
+			}
 		}
 
 		// rsyslog expects the ACK/txnr correctly and monotonously ordered
@@ -598,14 +613,14 @@ func (s *RelpServiceImpl) handleResponses(conn net.Conn, connID utils.MyULID, cl
 				err = writeSuccess(next)
 				if err == nil {
 					//logger.Debug("ACK to client", "connid", connID, "tnxr", next)
-					delete(successes, next)
+					successes[next] = false
 					relpAnswersCounter.WithLabelValues("200", client).Inc()
 				}
 			} else if failures[next] {
 				err = writeFailure(next)
 				if err == nil {
 					//logger.Debug("NACK to client", "connid", connID, "txnr", next)
-					delete(failures, next)
+					failures[next] = false
 					relpAnswersCounter.WithLabelValues("500", client).Inc()
 				}
 			} else {

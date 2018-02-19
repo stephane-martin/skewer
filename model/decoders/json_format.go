@@ -13,7 +13,7 @@ import (
 	"gopkg.in/Graylog2/go-gelf.v2/gelf"
 )
 
-func pGELF(m []byte, decoder *encoding.Decoder) (msg *model.SyslogMessage, rerr error) {
+func pGELF(m []byte, decoder *encoding.Decoder) (msg []*model.SyslogMessage, rerr error) {
 	// we ignore decoder, JSON is always UTF-8
 	decoder = unicode.UTF8.NewDecoder()
 
@@ -27,10 +27,10 @@ func pGELF(m []byte, decoder *encoding.Decoder) (msg *model.SyslogMessage, rerr 
 	if err != nil {
 		return nil, &UnmarshalingJsonError{err}
 	}
-	return FromGelfMessage(gelfMsg), nil
+	return []*model.SyslogMessage{FromGelfMessage(gelfMsg)}, nil
 }
 
-func pJSON(m []byte, decoder *encoding.Decoder) (msg *model.SyslogMessage, rerr error) {
+func pJSON(m []byte, decoder *encoding.Decoder) ([]*model.SyslogMessage, error) {
 	// we ignore decoder, JSON is always UTF-8
 	decoder = unicode.UTF8.NewDecoder()
 
@@ -44,10 +44,10 @@ func pJSON(m []byte, decoder *encoding.Decoder) (msg *model.SyslogMessage, rerr 
 	if err != nil {
 		return nil, &UnmarshalingJsonError{err}
 	}
-	return sourceMsg.Internal(), nil
+	return []*model.SyslogMessage{sourceMsg.Internal()}, nil
 }
 
-func pRsyslogJSON(m []byte, decoder *encoding.Decoder) (msg *model.SyslogMessage, rerr error) {
+func pRsyslogJSON(m []byte, decoder *encoding.Decoder) ([]*model.SyslogMessage, error) {
 	// we ignore decoder, JSON is always UTF-8
 	decoder = unicode.UTF8.NewDecoder()
 
@@ -112,7 +112,7 @@ func pRsyslogJSON(m []byte, decoder *encoding.Decoder) (msg *model.SyslogMessage
 		structured = strings.TrimSpace(sourceMsg.Structured)
 	}
 
-	msg = model.CleanFactory()
+	msg := model.CleanFactory()
 	msg.Priority = model.Priority(pri)
 	msg.Facility = model.Facility(pri / 8)
 	msg.Severity = model.Severity(pri % 8)
@@ -130,7 +130,7 @@ func pRsyslogJSON(m []byte, decoder *encoding.Decoder) (msg *model.SyslogMessage
 		msg.SetProperty("rsyslog", strings.TrimSpace(k), strings.TrimSpace(fmt.Sprintf("%v", v)))
 	}
 
-	return msg, nil
+	return []*model.SyslogMessage{msg}, nil
 }
 
 /*
