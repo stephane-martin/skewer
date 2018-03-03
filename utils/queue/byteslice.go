@@ -16,10 +16,15 @@ type bsliceNode struct {
 }
 
 type BSliceQueue struct {
-	head     *bsliceNode
-	tail     *bsliceNode
-	disposed int32
-	pool     *sync.Pool
+	// use padding to prevent false sharing between the head and the tail
+	_padding0 [8]uint64
+	head      *bsliceNode
+	_padding1 [8]uint64
+	tail      *bsliceNode
+	_padding2 [8]uint64
+	disposed  int32
+	_padding3 [8]uint64
+	pool      *sync.Pool
 }
 
 func NewBSliceQueue() *BSliceQueue {
@@ -52,7 +57,7 @@ func (q *BSliceQueue) Wait(timeout time.Duration) bool {
 	start := time.Now()
 	var w utils.ExpWait
 	for {
-		if q.tail.next != nil {
+		if q.Has() {
 			return true
 		}
 		if timeout > 0 && time.Since(start) >= timeout {
@@ -84,11 +89,13 @@ func (q *BSliceQueue) PutSlice(m []byte) error {
 }
 
 func (q *BSliceQueue) Put(uid utils.MyULID, m []byte) error {
+	// Put puts a *copy* of the m argument into the queue
 	if q.Disposed() {
 		return utils.ErrDisposed
 	}
 	n := q.pool.Get().(*bsliceNode)
 	if cap(n.slice) >= len(m) {
+		// we can reuse the slice
 		n.slice = n.slice[:len(m)]
 	} else {
 		n.slice = make([]byte, len(m), len(m)+36)
@@ -121,6 +128,7 @@ func (q *BSliceQueue) GetManyInto(slices *[]([]byte), uids *[]utils.MyULID) {
 	var i int
 	var uid utils.MyULID
 	max := cap(*slices)
+	// the previous content of slices and uids is forgotten
 	*slices = (*slices)[:0]
 	*uids = (*uids)[:0]
 	for i < max {
@@ -139,6 +147,7 @@ func (q *BSliceQueue) GetManySlicesInto(slices *[]([]byte)) {
 	var err error
 	var i int
 	max := cap(*slices)
+	// the previous content of slices is forgotten
 	*slices = (*slices)[:0]
 	for i < max {
 		_, slice, err = q.Get()

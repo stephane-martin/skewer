@@ -464,6 +464,7 @@ func (s *RelpServiceImpl) SetConf(sc []conf.RELPSourceConfig, pc []conf.ParserCo
 	for _, c := range sc {
 		tcpConfigs = append(tcpConfigs, conf.TCPSourceConfig(c))
 	}
+	// MaxMessageSize is 132000 bytes
 	s.StreamingService.SetConf(tcpConfigs, pc, queueSize, 132000)
 	s.BaseService.Pool = &sync.Pool{New: func() interface{} {
 		return &model.RawTcpMessage{Message: make([]byte, 132000)}
@@ -710,20 +711,34 @@ func (h RelpHandler) HandleConnection(conn net.Conn, c conf.TCPSourceConfig) {
 	scanner.Buffer(make([]byte, 0, 132000), 132000)
 	var rawmsg *model.RawTcpMessage
 	var previous = int32(-1)
+	var command string
+	var err error
+	var txnr int32
+	var splits [][]byte
+	var datalen int32
+	var data []byte
 
 Loop:
 	for scanner.Scan() {
-		splits := bytes.SplitN(scanner.Bytes(), sp, 4)
-		txnr, _ := utils.Atoi32(string(splits[0]))
+		splits = bytes.SplitN(scanner.Bytes(), sp, 4)
+		txnr, err = utils.Atoi32(string(splits[0]))
+		if err != nil {
+			logger.Warn("Bad TXNR", "txnr", string(splits[0]))
+			relpProtocolErrorsCounter.WithLabelValues(client).Inc()
+			return
+		}
 		if txnr <= previous {
 			logger.Warn("TXNR did not increase", "previous", previous, "current", txnr)
 			relpProtocolErrorsCounter.WithLabelValues(client).Inc()
 			return
 		}
 		previous = txnr
-		command := string(splits[1])
-		datalen, _ := strconv.Atoi(string(splits[2]))
-		data := []byte{}
+		command = string(splits[1])
+		datalen, err = utils.Atoi32(string(splits[2]))
+		if err != nil {
+			logger.Warn("Bad datalen", "datalen", string(splits[2]))
+			return
+		}
 		if datalen != 0 {
 			if len(splits) == 4 {
 				data = bytes.Trim(splits[3], " \r\n")

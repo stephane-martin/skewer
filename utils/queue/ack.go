@@ -19,10 +19,14 @@ type ackNode struct {
 }
 
 type AckQueue struct {
-	head     *ackNode
-	tail     *ackNode
-	disposed int32
-	pool     *sync.Pool
+	_padding0 [8]uint64
+	head      *ackNode
+	_padding1 [8]uint64
+	tail      *ackNode
+	_padding2 [8]uint64
+	disposed  int32
+	_padding3 [8]uint64
+	pool      *sync.Pool
 }
 
 func NewAckQueue() *AckQueue {

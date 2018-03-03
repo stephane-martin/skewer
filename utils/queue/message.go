@@ -18,10 +18,14 @@ type messageNode struct {
 }
 
 type MessageQueue struct {
-	head     *messageNode
-	tail     *messageNode
-	disposed int32
-	pool     *sync.Pool
+	_padding0 [8]uint64
+	head      *messageNode
+	_padding1 [8]uint64
+	tail      *messageNode
+	_padding2 [8]uint64
+	disposed  int32
+	_padding3 [8]uint64
+	pool      *sync.Pool
 }
 
 func NewMessageQueue() *MessageQueue {
@@ -71,9 +75,6 @@ func (q *MessageQueue) Get() (*model.FullMessage, error) {
 	tail := q.tail
 	next := tail.next
 	if next != nil {
-		//q.tail = next
-		//tail.msg = next.msg
-		//m = tail.msg
 		(*messageNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.tail)), unsafe.Pointer(next))).msg = next.msg
 		q.pool.Put(tail)
 		return next.msg, nil

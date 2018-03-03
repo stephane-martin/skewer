@@ -24,10 +24,14 @@ type kafkaProducerAckNode struct {
 }
 
 type KafkaProducerAckQueue struct {
-	head     *kafkaProducerAckNode
-	tail     *kafkaProducerAckNode
-	disposed int32
-	pool     *sync.Pool
+	_padding0 [8]uint64
+	head      *kafkaProducerAckNode
+	_padding1 [8]uint64
+	tail      *kafkaProducerAckNode
+	_padding2 [8]uint64
+	disposed  int32
+	_padding3 [8]uint64
+	pool      *sync.Pool
 }
 
 func NewKafkaProducerAckQueue() *KafkaProducerAckQueue {

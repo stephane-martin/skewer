@@ -16,10 +16,14 @@ type intNode struct {
 }
 
 type IntQueue struct {
-	head     *intNode
-	tail     *intNode
-	disposed int32
-	pool     *sync.Pool
+	_padding0 [8]uint64
+	head      *intNode
+	_padding1 [8]uint64
+	tail      *intNode
+	_padding2 [8]uint64
+	disposed  int32
+	_padding3 [8]uint64
+	pool      *sync.Pool
 }
 
 func NewIntQueue() *IntQueue {
