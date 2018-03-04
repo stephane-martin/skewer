@@ -244,49 +244,74 @@ func RelpSplit(data []byte, atEOF bool) (advance int, token []byte, eoferr error
 	if atEOF {
 		eoferr = io.EOF
 	}
-	trimmedData := bytes.TrimLeft(data, " \r\n")
-	if len(trimmedData) == 0 {
-
-		return 0, nil, eoferr
-	}
-	splits := bytes.FieldsFunc(trimmedData, splitSpaceOrLF)
-	l := len(splits)
-	if l < 3 {
-		// Request more data
+	// TXNR COMMAND DATALEN[ DATA]\n
+	fields, adv := NFields(data, 3)
+	if len(fields) < 3 || adv == len(data) {
 		return 0, nil, eoferr
 	}
 
-	txnrStr := string(splits[0])
-	command := string(splits[1])
-	datalenStr := string(splits[2])
-	tokenStr := txnrStr + " " + command + " " + datalenStr
-	advance = len(data) - len(trimmedData) + len(tokenStr) + 1
+	txnrB := fields[0]
+	command := fields[1]
+	datalenB := fields[2]
 
-	if l == 3 && (len(data) < advance) {
-		// datalen field is not complete, request more data
-		return 0, nil, eoferr
-	}
-
-	_, err := strconv.Atoi(txnrStr)
+	_, err := strconv.Atoi(string(txnrB))
 	if err != nil {
 		return 0, nil, err
 	}
-	datalen, err := strconv.Atoi(datalenStr)
+
+	datalen, err := strconv.Atoi(string(datalenB))
 	if err != nil {
 		return 0, nil, err
 	}
+
+	token = make([]byte, 0, adv+datalen+2)
+	token = append(token, txnrB...)
+	token = append(token, ' ')
+	token = append(token, command...)
 	if datalen == 0 {
-		return advance, []byte(tokenStr), nil
+		return adv, token, nil
 	}
-	advance += datalen + 1
+
+	advance = adv + (datalen + 1) + 1 // SP DATA LF
 	if len(data) >= advance {
-		token = bytes.Trim(data[:advance], " \r\n")
+		token = append(token, ' ')
+		token = append(token, bytes.TrimSpace(data[adv+1:advance])...)
 		return advance, token, nil
 	}
-	// Request more data
 	return 0, nil, eoferr
 }
 
-func splitSpaceOrLF(r rune) bool {
-	return r == ' ' || r == '\n' || r == '\r'
+func NFields(s []byte, n int) (fields [][]byte, advance int) {
+	if n == 0 {
+		return nil, 0
+	}
+	if n == -1 {
+		n = bytes.Count(s, SP) + 1
+	}
+	fields = make([][]byte, 0, n)
+	var adv, nextsp int
+
+	for len(fields) < n {
+		s, adv = ltrim(s)
+		advance += adv
+		if len(s) == 0 {
+			return
+		}
+		nextsp = bytes.IndexAny(s, " \r\n\t")
+		if nextsp < 0 {
+			fields = append(fields, s[:len(s):len(s)])
+			advance += len(s)
+			return
+		}
+		fields = append(fields, s[:nextsp:nextsp])
+		advance += nextsp
+		s = s[nextsp:]
+	}
+	return
+}
+
+func ltrim(s []byte) (ret []byte, advance int) {
+	ret = bytes.TrimLeft(s, " \r\n\t")
+	advance = len(s) - len(ret)
+	return
 }

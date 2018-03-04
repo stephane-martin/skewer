@@ -1,14 +1,11 @@
 package network
 
 import (
-	"bufio"
-	"bytes"
 	"fmt"
 	"io"
 	"net"
 	"runtime"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -200,7 +197,7 @@ type DirectRelpServiceImpl struct {
 	StatusChan          chan RelpServerStatus
 	producer            sarama.AsyncProducer
 	reporter            base.Reporter
-	rawMessagesQueue    *tcp.Ring
+	rawQ                *tcp.Ring
 	parsedMessagesQueue *queue.MessageQueue
 	parsewg             sync.WaitGroup
 	configs             map[utils.MyULID]conf.DirectRELPSourceConfig
@@ -251,7 +248,7 @@ func (s *DirectRelpServiceImpl) Start() ([]model.ListenerInfo, error) {
 	s.Logger.Info("Listening on DirectRELP", "nb_services", len(infos))
 
 	s.parsedMessagesQueue = queue.NewMessageQueue()
-	s.rawMessagesQueue = tcp.NewRing(s.QueueSize)
+	s.rawQ = tcp.NewRing(s.QueueSize)
 	s.configs = map[utils.MyULID]conf.DirectRELPSourceConfig{}
 
 	for _, l := range s.UnixListeners {
@@ -328,8 +325,8 @@ func (s *DirectRelpServiceImpl) doStop(final bool, wait bool) {
 
 	s.resetTCPListeners() // makes the listeners stop
 	// no more message will arrive in rawMessagesQueue
-	if s.rawMessagesQueue != nil {
-		s.rawMessagesQueue.Dispose()
+	if s.rawQ != nil {
+		s.rawQ.Dispose()
 	}
 	// the parsers consume the rest of rawMessagesQueue, then they stop
 	s.parsewg.Wait() // wait that the parsers have stopped
@@ -430,7 +427,7 @@ func (s *DirectRelpServiceImpl) parse() {
 	e := base.NewParsersEnv(s.ParserConfigs, s.Logger)
 
 	for {
-		raw, err = s.rawMessagesQueue.Get()
+		raw, err = s.rawQ.Get()
 		if err != nil {
 			return
 		}
@@ -682,153 +679,33 @@ type DirectRelpHandler struct {
 }
 
 func (h DirectRelpHandler) HandleConnection(conn net.Conn, c conf.TCPSourceConfig) {
-	// http://www.rsyslog.com/doc/relp.html
+
 	config := conf.DirectRELPSourceConfig(c)
 	s := h.Server
 	s.AddConnection(conn)
 	connID := s.forwarder.AddConn()
-	scanner := bufio.NewScanner(conn)
-	logger := s.Logger.New("ConnID", connID)
+	lport, lports, client, path := props(conn)
+	l := s.Logger.New(
+		"ConnID", connID,
+		"protocol", "directrelp",
+		"client", client,
+		"local_port", lport,
+		"unix_socket_path", path,
+		"format", config.Format,
+	)
 
 	defer func() {
 		if e := recover(); e != nil {
 			errString := fmt.Sprintf("%s", e)
-			logger.Error("Scanner panicked in DirectRELP service", "error", errString)
+			l.Error("Scanner panicked in Direct RELP service", "error", errString)
 		}
-		logger.Info("Scanning the DirectRELP stream has ended", "error", scanner.Err())
+		l.Info("Scanning the Direct RELP stream has ended")
 		s.forwarder.RemoveConn(connID)
 		s.RemoveConnection(conn)
 		s.wg.Done()
 	}()
 
-	var relpIsOpen bool
-
-	client := ""
-	path := ""
-	remote := conn.RemoteAddr()
-
-	var localPort int32
-	if remote == nil {
-		client = "localhost"
-		localPort = 0
-		path = conn.LocalAddr().String()
-	} else {
-		client = strings.Split(remote.String(), ":")[0]
-		local := conn.LocalAddr()
-		if local != nil {
-			s := strings.Split(local.String(), ":")
-			localPort, _ = utils.Atoi32(s[len(s)-1])
-		}
-	}
-	client = strings.TrimSpace(client)
-	path = strings.TrimSpace(path)
-	localPortStr := strconv.FormatInt(int64(localPort), 10)
-
-	logger = logger.New(
-		"protocol", "directrelp",
-		"client", client,
-		"local_port", localPort,
-		"unix_socket_path", path,
-		"format", config.Format,
-	)
-	logger.Info("New client connection")
-	base.ClientConnectionCounter.WithLabelValues("directrelp", client, localPortStr, path).Inc()
-
 	s.wg.Add(1)
-	go s.handleResponses(conn, connID, client, logger)
-
-	timeout := config.Timeout
-	if timeout > 0 {
-		_ = conn.SetReadDeadline(time.Now().Add(timeout))
-	}
-	scanner.Split(utils.RelpSplit)
-	scanner.Buffer(make([]byte, 0, 132000), 132000)
-	var rawmsg *model.RawTcpMessage
-	var previous = int32(-1)
-
-Loop:
-	for scanner.Scan() {
-		splits := bytes.SplitN(scanner.Bytes(), sp, 4)
-		txnr, _ := utils.Atoi32(string(splits[0]))
-		if txnr <= previous {
-			logger.Warn("TXNR did not increase", "previous", previous, "current", txnr)
-			relpProtocolErrorsCounter.WithLabelValues(client).Inc()
-			return
-		}
-		previous = txnr
-		command := string(splits[1])
-		datalen, _ := strconv.Atoi(string(splits[2]))
-		data := []byte{}
-		if datalen != 0 {
-			if len(splits) == 4 {
-				data = bytes.Trim(splits[3], " \r\n")
-			} else {
-				logger.Warn("datalen is non-null, but no data is provided", "datalen", datalen)
-				relpProtocolErrorsCounter.WithLabelValues(client).Inc()
-				return
-			}
-		}
-		switch command {
-		case "open":
-			if relpIsOpen {
-				logger.Warn("Received open command twice")
-				relpProtocolErrorsCounter.WithLabelValues(client).Inc()
-				return
-			}
-			fmt.Fprintf(conn, "%d rsp %d 200 OK\n%s\n", txnr, len(data)+7, string(data))
-			relpIsOpen = true
-			logger.Info("Received 'open' command")
-		case "close":
-			if !relpIsOpen {
-				logger.Warn("Received close command before open")
-				relpProtocolErrorsCounter.WithLabelValues(client).Inc()
-				return
-			}
-			fmt.Fprintf(conn, "%d rsp 0\n0 serverclose 0\n", txnr)
-			logger.Info("Received 'close' command")
-			return
-		case "syslog":
-			if !relpIsOpen {
-				logger.Warn("Received syslog command before open")
-				relpProtocolErrorsCounter.WithLabelValues(client).Inc()
-				return
-			}
-			s.forwarder.Received(connID, txnr)
-			if len(data) == 0 {
-				s.forwarder.ForwardSucc(connID, txnr)
-				continue Loop
-			}
-			if s.MaxMessageSize > 0 && len(data) > s.MaxMessageSize {
-				logger.Warn("Message too large")
-				relpProtocolErrorsCounter.WithLabelValues(client).Inc()
-				return
-			}
-			rawmsg = s.Pool.Get().(*model.RawTcpMessage)
-			rawmsg.Txnr = txnr
-			rawmsg.Client = client
-			rawmsg.LocalPort = localPort
-			rawmsg.UnixSocketPath = path
-			rawmsg.ConfID = config.ConfID
-			rawmsg.Encoding = config.Encoding
-			rawmsg.Format = config.Format
-			rawmsg.ConnID = connID
-			rawmsg.Message = rawmsg.Message[:len(data)]
-			copy(rawmsg.Message, data)
-			err := s.rawMessagesQueue.Put(rawmsg)
-			if err != nil {
-				s.Logger.Error("Failed to enqueue new raw DirectRELP message", "error", err)
-				return
-			}
-			base.IncomingMsgsCounter.WithLabelValues("directrelp", client, localPortStr, path).Inc()
-			//logger.Debug("RELP client received a syslog message")
-		default:
-			logger.Warn("Unknown RELP command", "command", command)
-			relpProtocolErrorsCounter.WithLabelValues(client).Inc()
-			return
-		}
-		if timeout > 0 {
-			_ = conn.SetReadDeadline(time.Now().Add(timeout))
-		}
-
-	}
+	go s.handleResponses(conn, connID, client, l)
+	scan(l, s.forwarder, s.rawQ, conn, config.Timeout, config.ConfID, connID, s.MaxMessageSize, lport, config.Encoding, config.Format, lports, path, client, s.Pool)
 }

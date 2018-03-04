@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/looplab/fsm"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 
@@ -319,14 +320,14 @@ func (s *RelpService) SetConf(c conf.BaseConfig) {
 
 type RelpServiceImpl struct {
 	StreamingService
-	RelpConfigs      []conf.RELPSourceConfig
-	status           RelpServerStatus
-	StatusChan       chan RelpServerStatus
-	reporter         base.Reporter
-	rawMessagesQueue *tcp.Ring
-	parsewg          sync.WaitGroup
-	configs          map[utils.MyULID]conf.RELPSourceConfig
-	forwarder        *ackForwarder
+	RelpConfigs []conf.RELPSourceConfig
+	status      RelpServerStatus
+	StatusChan  chan RelpServerStatus
+	reporter    base.Reporter
+	rawQ        *tcp.Ring
+	parsewg     sync.WaitGroup
+	configs     map[utils.MyULID]conf.RELPSourceConfig
+	forwarder   *ackForwarder
 }
 
 func NewRelpServiceImpl(confined bool, reporter base.Reporter, b binder.Client, logger log15.Logger) *RelpServiceImpl {
@@ -363,7 +364,7 @@ func (s *RelpServiceImpl) Start() ([]model.ListenerInfo, error) {
 
 	s.Logger.Info("Listening on RELP", "nb_services", len(infos))
 
-	s.rawMessagesQueue = tcp.NewRing(s.QueueSize)
+	s.rawQ = tcp.NewRing(s.QueueSize)
 	s.configs = map[utils.MyULID]conf.RELPSourceConfig{}
 
 	for _, l := range s.UnixListeners {
@@ -435,8 +436,8 @@ func (s *RelpServiceImpl) doStop(final bool, wait bool) {
 
 	s.resetTCPListeners() // makes the listeners stop
 	// no more message will arrive in rawMessagesQueue
-	if s.rawMessagesQueue != nil {
-		s.rawMessagesQueue.Dispose()
+	if s.rawQ != nil {
+		s.rawQ.Dispose()
 	}
 	// the parsers consume the rest of rawMessagesQueue, then they stop
 	s.parsewg.Wait() // wait that the parsers have stopped
@@ -543,7 +544,7 @@ func (s *RelpServiceImpl) Parse() {
 	gen := utils.NewGenerator()
 
 	for {
-		raw, err = s.rawMessagesQueue.Get()
+		raw, err = s.rawQ.Get()
 		if err != nil {
 			return
 		}
@@ -647,168 +648,193 @@ type RelpHandler struct {
 	Server *RelpServiceImpl
 }
 
+type closedError struct{}
+
+func (e closedError) Error() string {
+	return "received close command from client"
+}
+
 func (h RelpHandler) HandleConnection(conn net.Conn, c conf.TCPSourceConfig) {
 	// http://www.rsyslog.com/doc/relp.html
 	config := conf.RELPSourceConfig(c)
 	s := h.Server
 	s.AddConnection(conn)
 	connID := s.forwarder.AddConn()
-	scanner := bufio.NewScanner(conn)
-	logger := s.Logger.New("ConnID", connID)
+	lport, lports, client, path := props(conn)
+	l := s.Logger.New(
+		"ConnID", connID,
+		"protocol", "relp",
+		"client", client,
+		"local_port", lport,
+		"unix_socket_path", path,
+		"format", config.Format,
+	)
 
 	defer func() {
 		if e := recover(); e != nil {
 			errString := fmt.Sprintf("%s", e)
-			logger.Error("Scanner panicked in RELP service", "error", errString)
+			l.Error("Scanner panicked in RELP service", "error", errString)
 		}
-		logger.Info("Scanning the RELP stream has ended", "error", scanner.Err())
+		l.Info("Scanning the RELP stream has ended")
 		s.forwarder.RemoveConn(connID)
 		s.RemoveConnection(conn)
 		s.wg.Done()
 	}()
 
-	var relpIsOpen bool
+	s.wg.Add(1)
+	go s.handleResponses(conn, connID, client, l)
+	scan(l, s.forwarder, s.rawQ, conn, config.Timeout, config.ConfID, connID, s.MaxMessageSize, lport, config.Encoding, config.Format, lports, path, client, s.Pool)
+}
 
-	client := ""
-	path := ""
+func scan(l log15.Logger, f *ackForwarder, rawq *tcp.Ring, c net.Conn, tout time.Duration, cfid, cnid utils.MyULID, msiz int, lport int32, enc, format, lports, path, clt string, p *sync.Pool) {
+	l.Info("New client connection")
+	base.ClientConnectionCounter.WithLabelValues("relp", clt, lports, path).Inc()
+
+	var previous = int32(-1)
+	var command string
+	var err error
+	var txnr int32
+	var splits [][]byte
+	var data []byte
+
+	machine := newMachine(l, f, rawq, c, cfid, cnid, msiz, lport, enc, format, lports, path, clt, p)
+
+	if tout > 0 {
+		_ = c.SetReadDeadline(time.Now().Add(tout))
+	}
+	scanner := bufio.NewScanner(c)
+	scanner.Split(utils.RelpSplit)
+	scanner.Buffer(make([]byte, 0, 132000), 132000)
+
+	defer func() {
+		err = scanner.Err()
+		if err != nil {
+			l.Info("Scanner error", "error", err)
+		}
+	}()
+
+	for scanner.Scan() {
+		splits = bytes.SplitN(scanner.Bytes(), sp, 3)
+		txnr, err = utils.Atoi32(string(splits[0]))
+		if err != nil {
+			l.Warn("Bad TXNR", "txnr", string(splits[0]))
+			relpProtocolErrorsCounter.WithLabelValues(clt).Inc()
+			return
+		}
+		if txnr <= previous {
+			l.Warn("TXNR did not increase", "previous", previous, "current", txnr)
+			relpProtocolErrorsCounter.WithLabelValues(clt).Inc()
+			return
+		}
+		previous = txnr
+		command = string(splits[1])
+		data = data[:0]
+		if len(splits) == 3 {
+			data = bytes.TrimSpace(splits[2])
+		}
+
+		err = machine.Event(command, txnr, data)
+		if err != nil {
+			switch err.(type) {
+			case fsm.UnknownEventError:
+				l.Warn("Unknown RELP command", "command", command, "error", err)
+				relpProtocolErrorsCounter.WithLabelValues(clt).Inc()
+				return
+			case fsm.InvalidEventError:
+				l.Warn("Invalid RELP command", "command", command, "error", err)
+				relpProtocolErrorsCounter.WithLabelValues(clt).Inc()
+				return
+			case fsm.InternalError:
+				l.Error("Internal machine error", "command", command, "error", err)
+				return
+			case fsm.NoTransitionError:
+				// syslog does not change opened/closed state
+			case closedError:
+				return
+			default:
+				l.Error("Unexpected error", "error", err)
+				return
+			}
+		}
+		if tout > 0 {
+			_ = c.SetReadDeadline(time.Now().Add(tout))
+		}
+	}
+}
+
+func newMachine(l log15.Logger, fwder *ackForwarder, rawq *tcp.Ring, conn io.Writer, confID, connID utils.MyULID, msiz int, lport int32, enc, format, lports, path, clt string, p *sync.Pool) *fsm.FSM {
+	return fsm.NewFSM(
+		"closed",
+		fsm.Events{
+			fsm.EventDesc{Name: "open", Src: []string{"closed"}, Dst: "opened"},
+			fsm.EventDesc{Name: "close", Src: []string{"opened"}, Dst: "closed"},
+			fsm.EventDesc{Name: "syslog", Src: []string{"opened"}, Dst: "opened"},
+		},
+		fsm.Callbacks{
+			"after_syslog": func(e *fsm.Event) {
+				txnr := e.Args[0].(int32)
+				data := e.Args[1].([]byte)
+				fwder.Received(connID, txnr)
+				if len(data) == 0 {
+					fwder.ForwardSucc(connID, txnr)
+					return
+				}
+				if msiz > 0 && len(data) > msiz {
+					relpProtocolErrorsCounter.WithLabelValues(clt).Inc()
+					e.Err = fmt.Errorf("Message too large: %d > %d", len(data), msiz)
+					return
+				}
+				rawmsg := p.Get().(*model.RawTcpMessage)
+				rawmsg.Txnr = txnr
+				rawmsg.Client = clt
+				rawmsg.LocalPort = lport
+				rawmsg.UnixSocketPath = path
+				rawmsg.ConfID = confID
+				rawmsg.Encoding = enc
+				rawmsg.Format = format
+				rawmsg.ConnID = connID
+				rawmsg.Message = rawmsg.Message[:len(data)]
+				copy(rawmsg.Message, data)
+				err := rawq.Put(rawmsg)
+				if err != nil {
+					e.Err = fmt.Errorf("Failed to enqueue new raw RELP message: %s", err.Error())
+					return
+				}
+				base.IncomingMsgsCounter.WithLabelValues("relp", clt, lports, path).Inc()
+			},
+			"enter_closed": func(e *fsm.Event) {
+				txnr := e.Args[0].(int32)
+				fmt.Fprintf(conn, "%d rsp 0\n0 serverclose 0\n", txnr)
+				l.Debug("Received 'close' command")
+				e.Err = closedError{}
+			},
+			"enter_opened": func(e *fsm.Event) {
+				txnr := e.Args[0].(int32)
+				data := e.Args[1].([]byte)
+				fmt.Fprintf(conn, "%d rsp %d 200 OK\n%s\n", txnr, len(data)+7, string(data))
+				l.Debug("Received 'open' command")
+			},
+		},
+	)
+}
+
+func props(conn net.Conn) (lport int32, lports string, client string, path string) {
 	remote := conn.RemoteAddr()
 
-	var localPort int32
 	if remote == nil {
 		client = "localhost"
-		localPort = 0
+		lport = 0
 		path = conn.LocalAddr().String()
 	} else {
 		client = strings.Split(remote.String(), ":")[0]
 		local := conn.LocalAddr()
 		if local != nil {
 			s := strings.Split(local.String(), ":")
-			localPort, _ = utils.Atoi32(s[len(s)-1])
+			lport, _ = utils.Atoi32(s[len(s)-1])
 		}
 	}
 	client = strings.TrimSpace(client)
 	path = strings.TrimSpace(path)
-	localPortStr := strconv.FormatInt(int64(localPort), 10)
-
-	logger = logger.New(
-		"protocol", "relp",
-		"client", client,
-		"local_port", localPort,
-		"unix_socket_path", path,
-		"format", config.Format,
-	)
-	logger.Info("New client connection")
-	base.ClientConnectionCounter.WithLabelValues("relp", client, localPortStr, path).Inc()
-
-	s.wg.Add(1)
-	go s.handleResponses(conn, connID, client, logger)
-
-	timeout := config.Timeout
-	if timeout > 0 {
-		_ = conn.SetReadDeadline(time.Now().Add(timeout))
-	}
-	scanner.Split(utils.RelpSplit)
-	scanner.Buffer(make([]byte, 0, 132000), 132000)
-	var rawmsg *model.RawTcpMessage
-	var previous = int32(-1)
-	var command string
-	var err error
-	var txnr int32
-	var splits [][]byte
-	var datalen int32
-	var data []byte
-
-Loop:
-	for scanner.Scan() {
-		splits = bytes.SplitN(scanner.Bytes(), sp, 4)
-		txnr, err = utils.Atoi32(string(splits[0]))
-		if err != nil {
-			logger.Warn("Bad TXNR", "txnr", string(splits[0]))
-			relpProtocolErrorsCounter.WithLabelValues(client).Inc()
-			return
-		}
-		if txnr <= previous {
-			logger.Warn("TXNR did not increase", "previous", previous, "current", txnr)
-			relpProtocolErrorsCounter.WithLabelValues(client).Inc()
-			return
-		}
-		previous = txnr
-		command = string(splits[1])
-		datalen, err = utils.Atoi32(string(splits[2]))
-		if err != nil {
-			logger.Warn("Bad datalen", "datalen", string(splits[2]))
-			return
-		}
-		if datalen != 0 {
-			if len(splits) == 4 {
-				data = bytes.Trim(splits[3], " \r\n")
-			} else {
-				logger.Warn("datalen is non-null, but no data is provided", "datalen", datalen)
-				relpProtocolErrorsCounter.WithLabelValues(client).Inc()
-				return
-			}
-		}
-		switch command {
-		case "open":
-			if relpIsOpen {
-				logger.Warn("Received open command twice")
-				relpProtocolErrorsCounter.WithLabelValues(client).Inc()
-				return
-			}
-			fmt.Fprintf(conn, "%d rsp %d 200 OK\n%s\n", txnr, len(data)+7, string(data))
-			relpIsOpen = true
-			logger.Info("Received 'open' command")
-		case "close":
-			if !relpIsOpen {
-				logger.Warn("Received close command before open")
-				relpProtocolErrorsCounter.WithLabelValues(client).Inc()
-				return
-			}
-			fmt.Fprintf(conn, "%d rsp 0\n0 serverclose 0\n", txnr)
-			logger.Info("Received 'close' command")
-			return
-		case "syslog":
-			if !relpIsOpen {
-				logger.Warn("Received syslog command before open")
-				relpProtocolErrorsCounter.WithLabelValues(client).Inc()
-				return
-			}
-			s.forwarder.Received(connID, txnr)
-			if len(data) == 0 {
-				s.forwarder.ForwardSucc(connID, txnr)
-				continue Loop
-			}
-			if s.MaxMessageSize > 0 && len(data) > s.MaxMessageSize {
-				logger.Warn("Message too large", "max", s.MaxMessageSize, "length", len(data))
-				relpProtocolErrorsCounter.WithLabelValues(client).Inc()
-				return
-			}
-			rawmsg = s.Pool.Get().(*model.RawTcpMessage)
-			rawmsg.Txnr = txnr
-			rawmsg.Client = client
-			rawmsg.LocalPort = localPort
-			rawmsg.UnixSocketPath = path
-			rawmsg.ConfID = config.ConfID
-			rawmsg.Encoding = config.Encoding
-			rawmsg.Format = config.Format
-			rawmsg.ConnID = connID
-			rawmsg.Message = rawmsg.Message[:len(data)]
-			copy(rawmsg.Message, data)
-			err := s.rawMessagesQueue.Put(rawmsg)
-			if err != nil {
-				s.Logger.Error("Failed to enqueue new raw RELP message", "error", err)
-				return
-			}
-			base.IncomingMsgsCounter.WithLabelValues("relp", client, localPortStr, path).Inc()
-			//logger.Debug("RELP client received a syslog message")
-		default:
-			logger.Warn("Unknown RELP command", "command", command)
-			relpProtocolErrorsCounter.WithLabelValues(client).Inc()
-			return
-		}
-		if timeout > 0 {
-			_ = conn.SetReadDeadline(time.Now().Add(timeout))
-		}
-
-	}
+	lports = strconv.FormatInt(int64(lport), 10)
+	return
 }
