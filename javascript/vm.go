@@ -81,7 +81,7 @@ type ParsersEnvironment interface {
 	AddParser(name string, parserFunc string) error
 }
 
-func NewParsersEnvironment(logger log15.Logger) ParsersEnvironment {
+func NewParsersEnvironment(logger log15.Logger) *Environment {
 	return newEnv("", "", "", "", "", "", logger)
 }
 
@@ -126,6 +126,7 @@ func (p *ConcreteParser) Parse(rawMessage []byte) ([]*model.SyslogMessage, error
 	if len(rawMessage) == 0 {
 		return nil, nil
 	}
+	// TODO: lock ?
 	jsRawMessage := p.env.runtime.ToValue(string(rawMessage))
 	jsParsedMessage, err := jsParser(nil, jsRawMessage)
 	if err != nil {

@@ -973,6 +973,12 @@
 			"revisionTime": "2016-09-30T03:27:40Z"
 		},
 		{
+			"checksumSHA1": "jAzqolwnRJhHsKXmmvKNrHqxqAw=",
+			"path": "github.com/spaolacci/murmur3",
+			"revision": "f09979ecbc725b9e6d41a297405f65e7e8804acc",
+			"revisionTime": "2018-01-18T20:28:30Z"
+		},
+		{
 			"checksumSHA1": "lBehULzb2/kIK3wZ0gz2yNmHq9s=",
 			"path": "github.com/spf13/afero",
 			"revision": "9be650865eab0c12963d8753212f4f9c66cdcf12",
@@ -1046,10 +1052,10 @@
 			"revisionTime": "2018-01-21T19:46:41Z"
 		},
 		{
-			"checksumSHA1": "4C0xYcWQzRehPLCDfgpCWnLhVe0=",
+			"checksumSHA1": "ldymBQM0Ntqr4ASWSdfnJN+RLVk=",
 			"path": "github.com/stephane-martin/w3c-extendedlog-parser",
-			"revision": "01a9162dc22b31a441b9e9dc0ef2fb0c476353a4",
-			"revisionTime": "2018-03-09T16:11:09Z"
+			"revision": "e7dee5496e082aaed29fb3c3f1ea31a50609fdd6",
+			"revisionTime": "2018-03-10T04:33:36Z"
 		},
 		{
 			"checksumSHA1": "G7MxSnBfyxidM5U3P6uyzsxP40E=",

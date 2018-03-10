@@ -468,21 +468,19 @@ func (s *Scanner) Scan() bool {
 		}
 		// read some more data into the free space on the right side of s.buf
 		n, err = s.reader.Read(s.buf[len(s.buf):cap(s.buf)])
-		if err == io.EOF && n > 0 {
-			s.buf = s.buf[:len(s.buf)+n]
-			s.err = io.EOF
-		} else if err == io.EOF && n == 0 {
-			s.err = io.EOF
-			return false
+		if err == io.EOF {
+			if s.err == nil {
+				s.err = io.EOF
+			}
 		} else if err != nil {
 			s.err = err
 			return false
 		} else if n == 0 {
+			// err == nil but n == 0
 			s.err = io.ErrNoProgress
 			return false
-		} else {
-			s.buf = s.buf[:len(s.buf)+n]
 		}
+		s.buf = s.buf[:len(s.buf)+n]
 	}
 }
 
