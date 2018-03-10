@@ -8,8 +8,8 @@ import (
 
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
+	"github.com/stephane-martin/skewer/encoders"
 	"github.com/stephane-martin/skewer/model"
-	"github.com/stephane-martin/skewer/model/encoders"
 )
 
 type SyslogUDPClient struct {

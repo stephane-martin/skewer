@@ -27,7 +27,7 @@ import (
 	"github.com/inconshreveable/log15"
 	"github.com/spf13/viper"
 	"github.com/stephane-martin/skewer/consul"
-	"github.com/stephane-martin/skewer/model/decoders"
+	"github.com/stephane-martin/skewer/decoders"
 	"github.com/stephane-martin/skewer/sys/kring"
 	"github.com/stephane-martin/skewer/utils"
 )
@@ -886,11 +886,11 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 		if hc.MaxBodySize == 0 {
 			hc.MaxBodySize = 10 * 1024 * 1024
 		}
-		if len(hc.Encoding) == 0 {
-			hc.Encoding = "utf8"
+		if len(hc.DecoderBaseConfig.Charset) == 0 {
+			hc.DecoderBaseConfig.Charset = "utf8"
 		}
-		if len(hc.Format) == 0 {
-			hc.Format = "json"
+		if len(hc.DecoderBaseConfig.Format) == 0 {
+			hc.DecoderBaseConfig.Format = "json"
 		}
 		if hc.MaxMessages == 0 {
 			hc.MaxMessages = 10000
@@ -901,6 +901,15 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 	for _, sourceConf := range sources {
 		listeners := sourceConf.ListenersConf()
 		filtering := sourceConf.FilterConf()
+		decodr := sourceConf.DecoderConf()
+		if decodr != nil {
+			if decodr.Format == "" {
+				decodr.Format = "rfc5424"
+			}
+			if decodr.Charset == "" {
+				decodr.Charset = "utf8"
+			}
+		}
 		if listeners != nil {
 			if listeners.UnixSocketPath == "" {
 				if listeners.BindAddr == "" {
@@ -911,15 +920,10 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 				}
 			}
 
-			if listeners.Format == "" {
-				listeners.Format = "auto"
-			}
 			if listeners.Timeout <= 0 {
 				listeners.Timeout = time.Minute
 			}
-			if listeners.Encoding == "" {
-				listeners.Encoding = "utf8"
-			}
+
 			if listeners.KeepAlivePeriod <= 0 {
 				listeners.KeepAlivePeriod = 75 * time.Second
 			}
@@ -928,11 +932,13 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 				return ConfigurationCheckError{Err: err}
 			}
 
-			if decoders.ParseFormat(listeners.Format) == -1 {
-				if _, ok := parsersNames[listeners.Format]; !ok {
-					return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown parser: '%s'", listeners.Format)}
+			/*
+				if decoders.ParseFormat(listeners.Format) == -1 {
+					if _, ok := parsersNames[listeners.Format]; !ok {
+						return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown parser: '%s'", listeners.Format)}
+					}
 				}
-			}
+			*/
 		}
 		if filtering != nil {
 			if filtering.TopicTmpl == "" {
@@ -973,12 +979,6 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 		}
 		if conf.SessionTimeout <= 0 {
 			conf.SessionTimeout = 30 * time.Second
-		}
-		if len(conf.Format) == 0 {
-			conf.Format = "json"
-		}
-		if len(conf.Encoding) == 0 {
-			conf.Encoding = "utf8"
 		}
 		if len(conf.ClientID) == 0 {
 			conf.ClientID = "skewers"
@@ -1037,12 +1037,6 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 		}
 		if conf.OffsetsInitial == 0 {
 			conf.OffsetsInitial = sarama.OffsetOldest
-		}
-
-		if decoders.ParseFormat(conf.Format) == -1 {
-			if _, ok := parsersNames[conf.Format]; !ok {
-				return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown parser: '%s'", conf.Format)}
-			}
 		}
 		conf.SetConfID()
 	}

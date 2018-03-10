@@ -91,4 +91,14 @@ func (e *ConversionJsGoError) Error() string {
 
 func (e *ConversionJsGoError) Javascript() {}
 
-// filter error (with wrapped)
+type JSParsingError struct {
+	Message    string
+	ParserName string
+}
+
+func (e *JSParsingError) Error() string {
+	return fmt.Sprintf("The provided JS parser '%s' could not parse the raw message: %s", e.ParserName, e.Message)
+}
+
+func (e *JSParsingError) Parsing()    {}
+func (e *JSParsingError) Javascript() {}

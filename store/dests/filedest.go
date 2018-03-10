@@ -19,8 +19,8 @@ import (
 	"github.com/free/concurrent-writer/concurrent"
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/conf"
+	"github.com/stephane-martin/skewer/encoders"
 	"github.com/stephane-martin/skewer/model"
-	"github.com/stephane-martin/skewer/model/encoders"
 )
 
 // ensure thread safety for the gzip writer

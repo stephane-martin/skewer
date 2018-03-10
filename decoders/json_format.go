@@ -7,64 +7,39 @@ import (
 	"time"
 
 	"github.com/pquerna/ffjson/ffjson"
+	"github.com/stephane-martin/skewer/decoders/base"
 	"github.com/stephane-martin/skewer/model"
-	"golang.org/x/text/encoding"
-	"golang.org/x/text/encoding/unicode"
 	"gopkg.in/Graylog2/go-gelf.v2/gelf"
 )
 
-func pGELF(m []byte, decoder *encoding.Decoder) (msg []*model.SyslogMessage, rerr error) {
-	// we ignore decoder, JSON is always UTF-8
-	decoder = unicode.UTF8.NewDecoder()
-
-	var err error
-	m, err = decoder.Bytes(m)
-	if err != nil {
-		return nil, &InvalidEncodingError{Err: err}
-	}
+func pGELF(m []byte) ([]*model.SyslogMessage, error) {
 	gelfMsg := &gelf.Message{}
-	err = gelfMsg.UnmarshalJSON(m)
+	err := gelfMsg.UnmarshalJSON(m)
 	if err != nil {
-		return nil, &UnmarshalingJsonError{err}
+		return nil, &base.UnmarshalingJsonError{err}
 	}
 	return []*model.SyslogMessage{FromGelfMessage(gelfMsg)}, nil
 }
 
-func pJSON(m []byte, decoder *encoding.Decoder) ([]*model.SyslogMessage, error) {
-	// we ignore decoder, JSON is always UTF-8
-	decoder = unicode.UTF8.NewDecoder()
-
-	var err error
-	m, err = decoder.Bytes(m)
-	if err != nil {
-		return nil, &InvalidEncodingError{Err: err}
-	}
+func pJSON(m []byte) ([]*model.SyslogMessage, error) {
 	sourceMsg := model.RegularSyslog{}
-	err = ffjson.Unmarshal(m, &sourceMsg)
+	err := ffjson.Unmarshal(m, &sourceMsg)
 	if err != nil {
-		return nil, &UnmarshalingJsonError{err}
+		return nil, &base.UnmarshalingJsonError{err}
 	}
 	return []*model.SyslogMessage{sourceMsg.Internal()}, nil
 }
 
-func pRsyslogJSON(m []byte, decoder *encoding.Decoder) ([]*model.SyslogMessage, error) {
-	// we ignore decoder, JSON is always UTF-8
-	decoder = unicode.UTF8.NewDecoder()
-
-	var err error
-	m, err = decoder.Bytes(m)
-	if err != nil {
-		return nil, &InvalidEncodingError{Err: err}
-	}
+func pRsyslogJSON(m []byte) ([]*model.SyslogMessage, error) {
 	sourceMsg := model.JsonRsyslogMessage{}
-	err = ffjson.Unmarshal(m, &sourceMsg)
+	err := ffjson.Unmarshal(m, &sourceMsg)
 	if err != nil {
-		return nil, &UnmarshalingJsonError{err}
+		return nil, &base.UnmarshalingJsonError{err}
 	}
 
 	pri, err := strconv.Atoi(sourceMsg.Priority)
 	if err != nil {
-		return nil, &InvalidPriorityError{}
+		return nil, &base.InvalidPriorityError{}
 	}
 
 	n := time.Now()
@@ -74,7 +49,7 @@ func pRsyslogJSON(m []byte, decoder *encoding.Decoder) ([]*model.SyslogMessage, 
 	if sourceMsg.TimeReported != "-" && len(sourceMsg.TimeReported) > 0 {
 		r, err := time.Parse(time.RFC3339Nano, sourceMsg.TimeReported)
 		if err != nil {
-			return nil, &TimeError{}
+			return nil, &base.TimeError{}
 		}
 		reported = r
 	}
@@ -82,7 +57,7 @@ func pRsyslogJSON(m []byte, decoder *encoding.Decoder) ([]*model.SyslogMessage, 
 	if sourceMsg.TimeGenerated != "-" && len(sourceMsg.TimeGenerated) > 0 {
 		g, err := time.Parse(time.RFC3339Nano, sourceMsg.TimeGenerated)
 		if err != nil {
-			return nil, &TimeError{}
+			return nil, &base.TimeError{}
 		}
 		generated = g
 	}

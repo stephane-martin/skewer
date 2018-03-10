@@ -11,6 +11,7 @@ import (
 	"github.com/inconshreveable/log15"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
+	"github.com/stephane-martin/skewer/decoders"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/utils"
@@ -126,7 +127,10 @@ func (s *KafkaServiceImpl) Parse() {
 	defer s.wg.Done()
 	var err error
 	var raw *model.RawKafkaMessage
-	env := base.NewParsersEnv(s.parserConfigs, s.logger)
+	env := decoders.NewParsersEnv(s.logger)
+	for _, pc := range s.parserConfigs {
+		env.AddJSParser(pc.Name, pc.Func)
+	}
 	for {
 		raw, err = s.rawMessagesQueue.Get()
 		if raw == nil || err != nil {
@@ -140,7 +144,7 @@ func (s *KafkaServiceImpl) Parse() {
 	}
 }
 
-func (s *KafkaServiceImpl) ParseOne(env *base.ParsersEnv, raw *model.RawKafkaMessage) (err error) {
+func (s *KafkaServiceImpl) ParseOne(env *decoders.ParsersEnv, raw *model.RawKafkaMessage) (err error) {
 	ackQueue := s.queues.Get(raw.ConsumerID)
 	if ackQueue == nil {
 		// the kafka consumer is gone
@@ -161,20 +165,19 @@ func (s *KafkaServiceImpl) ParseOne(env *base.ParsersEnv, raw *model.RawKafkaMes
 
 	logger := s.logger.New(
 		"protocol", "kafka",
-		"format", raw.Format,
+		"format", raw.Decoder.Format,
 		"brokers", raw.Brokers,
 		"topic", raw.Topic,
 	)
-	decoder := utils.SelectDecoder(raw.Encoding)
-	parser, err := env.GetParser(raw.Format)
+	parser, err := env.GetParser(&raw.Decoder)
 	if parser == nil || err != nil {
 		logger.Error("Unknown parser")
 		return nil
 	}
 
-	syslogMsgs, err := parser(raw.Message, decoder)
+	syslogMsgs, err := parser(raw.Message)
 	if err != nil {
-		base.ParsingErrorCounter.WithLabelValues("kafka", raw.Brokers, raw.Format).Inc()
+		base.ParsingErrorCounter.WithLabelValues("kafka", raw.Brokers, raw.Decoder.Format).Inc()
 		logger.Info("Parsing error", "error", err)
 		return nil
 	}
@@ -295,8 +298,7 @@ Loop:
 			raw.Brokers = brokers
 			raw.ConfID = config.ConfID
 			raw.ConsumerID = ackQueue.ID()
-			raw.Encoding = config.Encoding
-			raw.Format = config.Format
+			raw.Decoder = model.DecoderConfig(raw.Decoder)
 			raw.Message = raw.Message[:len(value)]
 			copy(raw.Message, value)
 			raw.Topic = msg.Topic

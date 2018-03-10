@@ -15,6 +15,7 @@ import (
 	"github.com/inconshreveable/log15"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
+	"github.com/stephane-martin/skewer/decoders"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/services/errors"
@@ -45,7 +46,7 @@ type TcpServiceImpl struct {
 	fatalOnce        *sync.Once
 }
 
-func NewTcpService(env *base.ProviderEnv) (base.Provider, error) {
+func NewTcpService(env *base.ProviderEnv) (*TcpServiceImpl, error) {
 	initTcpRegistry()
 	s := TcpServiceImpl{
 		status:   TcpStopped,
@@ -150,22 +151,21 @@ func makeLogger(logger log15.Logger, raw *model.RawTcpMessage) log15.Logger {
 		"client", raw.Client,
 		"local_port", raw.LocalPort,
 		"unix_socket_path", raw.UnixSocketPath,
-		"format", raw.Format,
+		"format", raw.Decoder.Format,
 	)
 }
 
-func (s *TcpServiceImpl) parseOne(raw *model.RawTcpMessage, env *base.ParsersEnv, gen *utils.Generator) error {
-	decoder := utils.SelectDecoder(raw.Encoding)
-	parser, err := env.GetParser(raw.Format)
+func (s *TcpServiceImpl) parseOne(raw *model.RawTcpMessage, env *decoders.ParsersEnv, gen *utils.Generator) error {
+	parser, err := env.GetParser(&raw.Decoder)
 
 	if parser == nil || err != nil {
 		makeLogger(s.Logger, raw).Error("Unknown parser")
 		return nil
 	}
 
-	syslogMsgs, err := parser(raw.Message, decoder)
+	syslogMsgs, err := parser(raw.Message)
 	if err != nil {
-		base.ParsingErrorCounter.WithLabelValues("tcp", raw.Client, raw.Format).Inc()
+		base.ParsingErrorCounter.WithLabelValues("tcp", raw.Client, raw.Decoder.Format).Inc()
 		makeLogger(s.Logger, raw).Info("Parsing error", "error", err)
 		return nil
 	}
@@ -208,7 +208,10 @@ func (s *TcpServiceImpl) parseOne(raw *model.RawTcpMessage, env *base.ParsersEnv
 func (s *TcpServiceImpl) parse() {
 	defer s.wg.Done()
 
-	env := base.NewParsersEnv(s.ParserConfigs, s.Logger)
+	env := decoders.NewParsersEnv(s.Logger)
+	for _, pc := range s.ParserConfigs {
+		env.AddJSParser(pc.Name, pc.Func)
+	}
 	gen := utils.NewGenerator()
 
 	for {
@@ -299,8 +302,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TCPSourceConfig)
 		rawmsg.LocalPort = localPortInt
 		rawmsg.UnixSocketPath = path
 		rawmsg.ConfID = config.ConfID
-		rawmsg.Encoding = config.Encoding
-		rawmsg.Format = config.Format
+		rawmsg.Decoder = model.DecoderConfig(config.DecoderBaseConfig)
 		rawmsg.Message = rawmsg.Message[:len(buf)]
 		copy(rawmsg.Message, buf)
 		err := s.rawMessagesQueue.Put(rawmsg)

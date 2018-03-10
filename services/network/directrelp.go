@@ -15,6 +15,7 @@ import (
 
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/conf"
+	"github.com/stephane-martin/skewer/decoders"
 	"github.com/stephane-martin/skewer/javascript"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/base"
@@ -370,25 +371,24 @@ func makeDRELPLogger(logger log15.Logger, raw *model.RawTcpMessage) log15.Logger
 		"client", raw.Client,
 		"local_port", raw.LocalPort,
 		"unix_socket_path", raw.UnixSocketPath,
-		"format", raw.Format,
+		"format", raw.Decoder.Format,
 		"txnr", raw.Txnr,
 	)
 }
 
-func (s *DirectRelpServiceImpl) parseOne(raw *model.RawTcpMessage, e *base.ParsersEnv) error {
+func (s *DirectRelpServiceImpl) parseOne(raw *model.RawTcpMessage, e *decoders.ParsersEnv) error {
 
-	parser, err := e.GetParser(raw.Format)
+	parser, err := e.GetParser(&raw.Decoder)
 	if err != nil || parser == nil {
 		s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
 		makeDRELPLogger(s.Logger, raw).Crit("Unknown parser")
 		return nil
 	}
-	decoder := utils.SelectDecoder(raw.Encoding)
-	syslogMsgs, err := parser(raw.Message, decoder)
+	syslogMsgs, err := parser(raw.Message)
 	if err != nil {
 		makeDRELPLogger(s.Logger, raw).Warn("Parsing error", "error", err)
 		s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
-		base.ParsingErrorCounter.WithLabelValues("directrelp", raw.Client, raw.Format).Inc()
+		base.ParsingErrorCounter.WithLabelValues("directrelp", raw.Client, raw.Decoder.Format).Inc()
 		return nil
 	}
 
@@ -424,7 +424,10 @@ func (s *DirectRelpServiceImpl) parse() {
 
 	var raw *model.RawTcpMessage
 	var err error
-	e := base.NewParsersEnv(s.ParserConfigs, s.Logger)
+	e := decoders.NewParsersEnv(s.Logger)
+	for _, pc := range s.ParserConfigs {
+		e.AddJSParser(pc.Name, pc.Func)
+	}
 
 	for {
 		raw, err = s.rawQ.Get()
@@ -707,5 +710,6 @@ func (h DirectRelpHandler) HandleConnection(conn net.Conn, c conf.TCPSourceConfi
 
 	s.wg.Add(1)
 	go s.handleResponses(conn, connID, client, l)
-	scan(l, s.forwarder, s.rawQ, conn, config.Timeout, config.ConfID, connID, s.MaxMessageSize, lport, config.Encoding, config.Format, lports, path, client, s.Pool)
+	var dc model.DecoderConfig = model.DecoderConfig(config.DecoderBaseConfig)
+	scan(l, s.forwarder, s.rawQ, conn, config.Timeout, config.ConfID, connID, s.MaxMessageSize, lport, dc, lports, path, client, s.Pool)
 }

@@ -7,8 +7,8 @@ import (
 
 	"github.com/go-redis/redis"
 	"github.com/stephane-martin/skewer/conf"
+	"github.com/stephane-martin/skewer/encoders"
 	"github.com/stephane-martin/skewer/model"
-	"github.com/stephane-martin/skewer/model/encoders"
 	"github.com/stephane-martin/skewer/utils"
 )
 

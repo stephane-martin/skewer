@@ -1,4 +1,4 @@
-package decoders
+package parser
 
 import (
 	"bufio"
@@ -11,37 +11,82 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
-
-	"github.com/stephane-martin/skewer/model"
-	"github.com/stephane-martin/skewer/utils/civil"
-	"github.com/valyala/bytebufferpool"
-	"golang.org/x/text/encoding"
 )
 
-var QuoteLeftOpenError = errors.New("Unclosed quote in a W3C log line")
-var EndLineInQuotesError = errors.New("Endline character appears in a quoted string")
-var NoEndLineError = errors.New("No endline at end of input")
+// ErrQuoteLeftOpen is the error returned by ExtractStrings when the input
+// shows an unclosed quoted string.
+var ErrQuoteLeftOpen = errors.New("Unclosed quote in a W3C log line")
 
-var wpool bytebufferpool.Pool
+// ErrEndlineInsideQuotes is the error returned when the input shows an
+// endline character inside a quoted string.
+var ErrEndlineInsideQuotes = errors.New("Endline character appears in a quoted string")
 
-type W3CFieldType int
+// ErrNoEndline is the error returned by ExtractStrings when the input
+// does not end with an endline character.
+var ErrNoEndline = errors.New("No endline at end of input")
+
+var sp = []byte(" ")
+
+type buff struct {
+	B []byte
+}
+
+func (b *buff) WriteByte(c byte) {
+	b.B = append(b.B, c)
+}
+
+func (b *buff) String() string {
+	return string(b.B)
+}
+
+type bPool struct {
+	pool *sync.Pool
+}
+
+func (p *bPool) Get() *buff {
+	b := p.pool.Get().(*buff)
+	b.B = b.B[:0]
+	return b
+}
+
+func (p *bPool) Put(b *buff) {
+	if b != nil {
+		p.pool.Put(b)
+	}
+}
+
+var pool *bPool
+
+func init() {
+	pool = &bPool{
+		pool: &sync.Pool{
+			New: func() interface{} {
+				return &buff{
+					B: make([]byte, 0, 256),
+				}
+			},
+		},
+	}
+}
 
 func guessType(fieldName string, value string) interface{} {
+	value = strings.TrimSpace(value)
 	switch fieldName {
 	case "date", "x-cookie-date", "x-http-date":
-		d, err := civil.ParseDate(value)
+		d, err := ParseDate(value)
 		if err != nil {
 			return nil
 		}
 		return d
 	case "time":
-		t, err := civil.ParseTime(value)
+		t, err := ParseTime(value)
 		if err != nil {
 			return nil
 		}
 		return t
-	case "time-taken", "rs-time-taken", "sc-time-taken", "rs-service-time-taken", "rs-download-time-taken", "cs-categorization-time-dynamic":
+	case "time-taken", "rs-time-taken", "sc-time-taken", "rs-service-time-taken", "rs-download-time-taken", "cs-categorization-time-dynamic", "duration":
 		ttaken, err := strconv.ParseFloat(value, 64)
 		if err != nil {
 			return nil
@@ -51,9 +96,11 @@ func guessType(fieldName string, value string) interface{} {
 		return makeInt(value)
 	case "cached":
 		return value == "1"
-	case "x-client-address", "x-bluecoat-appliance-primary-address", "x-bluecoat-proxy-primary-address", "cs-uri-address", "c-uri-address", "sr-uri-address", "s-uri-address", "x-cs-user-login-address":
+	case "x-client-address", "x-bluecoat-appliance-primary-address", "x-bluecoat-proxy-primary-address", "cs-uri-address", "c-uri-address":
 		return net.ParseIP(value)
-	case "connect-time", "dnslookup-time", "duration":
+	case "sr-uri-address", "s-uri-address", "x-cs-user-login-address":
+		return net.ParseIP(value)
+	case "connect-time", "dnslookup-time":
 		return makeInt(value)
 	case "gmttime":
 		t, err := time.Parse("02/01/2006:15:04:05", value)
@@ -61,13 +108,23 @@ func guessType(fieldName string, value string) interface{} {
 			return nil
 		}
 		return t.UTC()
-	// TODO: fix
-	//  case "localtime":
-	//	t, err := time.Parse("02/Jan/2006:15:04:05 +nnnn", value)
+	case "localtime":
+		var t time.Time
+		var err error
+		pluspos := strings.Index(value, "+")
+		if pluspos == -1 {
+			t, err = time.Parse("02/Jan/2006:15:04:05", value)
+		} else {
+			t, err = time.Parse("02/Jan/2006:15:04:05 -0700", value)
+		}
+		if err != nil {
+			return nil
+		}
+		return t.UTC()
 	case "timestamp", "x-timestamp-unix", "x-timestamp-unix-utc":
 		i := makeInt(value)
 		if i != nil {
-			return time.Unix(i.(int64), 0)
+			return time.Unix(i.(int64), 0).UTC()
 		}
 		return nil
 	default:
@@ -130,41 +187,56 @@ func guessType(fieldName string, value string) interface{} {
 
 }
 
-func W3CDecoder(fields []string) Parser {
-	// https://www.w3.org/TR/WD-logfile.html
-	return func(m []byte, decoder *encoding.Decoder) ([]*model.SyslogMessage, error) {
-		return nil, nil
-	}
-}
-
-type W3CLine struct {
+// Line represents a parsed log line
+type Line struct {
+	// Fields stores the individual fields of the log line.
 	Fields map[string]interface{}
 }
 
-func newLine() (l W3CLine) {
+func newLine() (l Line) {
 	l.Fields = make(map[string]interface{})
 	return l
 }
 
-func (l *W3CLine) Add(key string, value string) {
+func (l *Line) add(key string, value string) {
 	// guess the real type of value
 	l.Fields[key] = guessType(key, value)
 }
 
-func (l *W3CLine) MarshalJSON() ([]byte, error) {
+// MarshalJSON implements the json.Marshaler interface.
+func (l *Line) MarshalJSON() ([]byte, error) {
 	return json.Marshal(l.Fields)
 }
 
-func (l *W3CLine) GetTime() time.Time {
+// GetTime returns the log line timestamp.
+// It returns the time.Time zero value if the timestamp can not be found.
+func (l *Line) GetTime() time.Time {
 	if l.Fields["gmttime"] != nil {
 		return l.Fields["gmttime"].(time.Time)
 	}
 	if l.Fields["time"] != nil && l.Fields["date"] != nil {
-		t := l.Fields["time"].(civil.Time)
-		d := l.Fields["date"].(civil.Date)
-		return civil.DateTime{Date: d, Time: t}.In(time.UTC)
+		t := l.Fields["time"].(Time)
+		d := l.Fields["date"].(Date)
+		return DateTime{Date: d, Time: t}.In(time.UTC)
+	}
+	if l.Fields["localtime"] != nil {
+		return l.Fields["localtime"].(time.Time)
 	}
 	return time.Time{}
+}
+
+// GetProperties returns the log line fieds as a map[string]string.
+func (l *Line) GetProperties() map[string]string {
+	if len(l.Fields) == 0 {
+		return nil
+	}
+	m := make(map[string]string, len(l.Fields))
+	var k string
+	var v interface{}
+	for k, v = range l.Fields {
+		m[k] = fmt.Sprintf("%v", v)
+	}
+	return m
 }
 
 func makeStr(s string) string {
@@ -198,15 +270,16 @@ func decodeURI(s string) interface{} {
 	return uri
 }
 
-type W3CFileHeader struct {
+// FileHeader represents the header of a W3C Extended Log Format file.
+type FileHeader struct {
 	FieldNames []string
 	Software   string
 	Remark     string
 	Meta       map[string]string
 }
 
-func w3cParseFileHeader(reader *bufio.Reader) (*W3CFileHeader, error) {
-	h := new(W3CFileHeader)
+func parseFileHeader(reader *bufio.Reader) (*FileHeader, error) {
+	h := new(FileHeader)
 	h.Meta = make(map[string]string)
 	for {
 		c, err := reader.Peek(1)
@@ -248,40 +321,47 @@ func w3cParseFileHeader(reader *bufio.Reader) (*W3CFileHeader, error) {
 	return h, nil
 }
 
-type W3CFileParser struct {
-	W3CFileHeader
+// FileParser is used to parse a W3C Extended Log Format file.
+type FileParser struct {
+	FileHeader
 	reader  *bufio.Reader
-	scanner *W3CScanner
+	scanner *Scanner
 }
 
-func NewW3CFileParser(reader io.Reader) *W3CFileParser {
+// NewFileParser constructs a FileParser
+func NewFileParser(reader io.Reader) *FileParser {
 	var bufreader *bufio.Reader
 	if r, ok := reader.(*bufio.Reader); ok {
 		bufreader = r
 	} else {
 		bufreader = bufio.NewReader(reader)
 	}
-	parser := W3CFileParser{
+	parser := FileParser{
 		reader:  bufreader,
-		scanner: NewW3CScanner(bufreader),
+		scanner: NewScanner(bufreader),
 	}
 	return &parser
 }
 
-func (p *W3CFileParser) ParseHeader() error {
-	header, err := w3cParseFileHeader(p.reader)
+// ParseHeader is used to parse the header part of a W3C Extended Log Format file.
+// The io.Reader should be at the start of the file.
+func (p *FileParser) ParseHeader() error {
+	header, err := parseFileHeader(p.reader)
 	if err != nil {
 		return err
 	}
-	p.W3CFileHeader = *header
+	p.FileHeader = *header
 	return nil
 }
 
-func (p *W3CFileParser) SetFieldNames(fieldNames []string) {
-	p.W3CFileHeader.FieldNames = fieldNames
+// SetFieldNames can be used to set the Field names manually, instead of parsing the header file.
+func (p *FileParser) SetFieldNames(fieldNames []string) *FileParser {
+	p.FileHeader.FieldNames = fieldNames
+	return p
 }
 
-func (p *W3CFileParser) Next() (*W3CLine, error) {
+// Next returns the next parsed log line.
+func (p *FileParser) Next() (*Line, error) {
 	var name string
 	var i int
 	if p.scanner.Scan() {
@@ -291,14 +371,15 @@ func (p *W3CFileParser) Next() (*W3CLine, error) {
 			return nil, fmt.Errorf("Wrong number of fields: expected = %d, actual = %d", len(p.FieldNames), len(fields))
 		}
 		for i, name = range p.FieldNames {
-			l.Add(name, fields[i])
+			l.add(name, fields[i])
 		}
 		return &l, nil
 	}
-	return nil, p.scanner.Error()
+	return nil, p.scanner.Err()
 }
 
-type W3CScanner struct {
+// Scanner is a stream oriented parser for W3C Extended Log Format lines.
+type Scanner struct {
 	reader  io.Reader
 	strings []string
 	done    bool
@@ -307,8 +388,9 @@ type W3CScanner struct {
 	err     error
 }
 
-func NewW3CScanner(reader io.Reader) *W3CScanner {
-	s := W3CScanner{
+// NewScanner constructs a Scanner.
+func NewScanner(reader io.Reader) *Scanner {
+	s := Scanner{
 		reader:  reader,
 		origbuf: make([]byte, 0, 4096),
 	}
@@ -316,7 +398,12 @@ func NewW3CScanner(reader io.Reader) *W3CScanner {
 	return &s
 }
 
-func (s *W3CScanner) Scan() bool {
+// Scan advances the Scanner to the next log line, which will then be available
+// through the Strings method. It returns false when the scan stops, either by
+// reaching the end of the input or an error. After Scan returns false, the Err
+// method will return any error that occurred during scanning, except that if
+// it was io.EOF, Err will return nil.
+func (s *Scanner) Scan() bool {
 	if s.done {
 		return false
 	}
@@ -330,7 +417,7 @@ func (s *W3CScanner) Scan() bool {
 		}
 		if len(s.buf) > 0 {
 			// try to parse what we have in buf
-			rest, strings, err = W3CExtractStrings(s.buf)
+			rest, strings, err = ExtractStrings(s.buf)
 			if err == nil {
 				if len(strings) > 0 {
 					// we got a log line
@@ -341,11 +428,11 @@ func (s *W3CScanner) Scan() bool {
 				// there was no content that could be extracted
 				// so we need more data, just get rid of the useless spaces
 				s.buf = rest
-			} else if err != NoEndLineError && err != QuoteLeftOpenError {
+			} else if err != ErrNoEndline && err != ErrQuoteLeftOpen {
 				// parsing error
 				s.err = err
 				return false
-			} else if s.err == io.EOF && err == NoEndLineError {
+			} else if s.err == io.EOF && err == ErrNoEndline {
 				// there is no more available data to read
 				// just output the last content
 				if len(strings) > 0 {
@@ -354,7 +441,7 @@ func (s *W3CScanner) Scan() bool {
 					return true
 				}
 				return false
-			} else if s.err == io.EOF && err == QuoteLeftOpenError {
+			} else if s.err == io.EOF && err == ErrQuoteLeftOpen {
 				// there is no more available data to read
 				// but the last content is not valid
 				s.err = err
@@ -399,15 +486,26 @@ func (s *W3CScanner) Scan() bool {
 	}
 }
 
-func (s *W3CScanner) Strings() []string {
+// Strings returns the most recent fields generated by a call to Scan as a newly allocated string slice.
+func (s *Scanner) Strings() []string {
 	return s.strings
 }
 
-func (s *W3CScanner) Error() error {
-	return s.err
+// Err returns the first non-EOF error that was encountered by the Scanner.
+func (s *Scanner) Err() error {
+	if s.err != nil && s.err != io.EOF {
+		return s.err
+	}
+	return nil
 }
 
-func W3CExtractStrings(input []byte) (rest []byte, fields []string, err error) {
+// ExtractStrings scans the input for the next available log line.
+// It returns the unparsed part of input in rest.
+//
+// fields will contain the parsed fields of the log line.
+//
+// err will be nil, ErrEndlineInsideQuotes, ErrNoEndline or ErrQuoteLeftOpen.
+func ExtractStrings(input []byte) (rest []byte, fields []string, err error) {
 	// get rid of superfluous spaces at the beginning of the input
 	m := bytes.TrimLeft(input, "\r\n\t ")
 	l := len(m)
@@ -422,18 +520,18 @@ func W3CExtractStrings(input []byte) (rest []byte, fields []string, err error) {
 		linelen = len(m)
 	}
 	// how many spaces in that line?
-	c := bytes.Count(m[:linelen], SP)
+	c := bytes.Count(m[:linelen], sp)
 	// we assume that we have c+1 fields to extract
-	buffers := make([]*bytebufferpool.ByteBuffer, 0, c+1)
-	var curbuf *bytebufferpool.ByteBuffer
+	buffers := make([]*buff, 0, c+1)
+	var curbuf *buff
 	var haveString bool
 	var haveFirstChar bool
 	var curchar byte
 	var icur int
 
-	w := func(buffers *[]*bytebufferpool.ByteBuffer, curbuf **bytebufferpool.ByteBuffer, b byte) {
-		if *curbuf == nil {
-			*curbuf = wpool.Get()
+	w := func(buffers *[]*buff, curbuf **buff, b byte) {
+		if (*curbuf) == nil {
+			*curbuf = pool.Get()
 			*buffers = append(*buffers, *curbuf)
 		}
 		(*curbuf).WriteByte(b)
@@ -446,7 +544,7 @@ func W3CExtractStrings(input []byte) (rest []byte, fields []string, err error) {
 			// end of log line
 			if haveString {
 				// we should not meet an endline inside a quoted string
-				return input, nil, EndLineInQuotesError
+				return input, nil, ErrEndlineInsideQuotes
 			}
 			curbuf = nil
 			// consume any superfluous spaces and lineends
@@ -458,7 +556,7 @@ func W3CExtractStrings(input []byte) (rest []byte, fields []string, err error) {
 				fields = make([]string, 0, len(buffers))
 				for _, buf := range buffers {
 					fields = append(fields, replace20(buf.String()))
-					wpool.Put(buf)
+					pool.Put(buf)
 				}
 				return m[icur:], fields, nil
 			}
@@ -522,21 +620,22 @@ func W3CExtractStrings(input []byte) (rest []byte, fields []string, err error) {
 	if haveString {
 		// quoted string has not been closed
 		// it probably means that we need more content
-		return input, nil, QuoteLeftOpenError
+		return input, nil, ErrQuoteLeftOpen
 	}
 
 	if len(buffers) == 0 {
 		// no content
 		return nil, nil, nil
 	}
+
 	fields = make([]string, 0, len(buffers))
 	for _, buf := range buffers {
 		fields = append(fields, replace20(buf.String()))
-		wpool.Put(buf)
+		pool.Put(buf)
 	}
 	// we have reached the end of input, but no endline char was present
 	// that may or may not be normal, so let's report it
-	return nil, fields, NoEndLineError
+	return nil, fields, ErrNoEndline
 }
 
 func isEndline(b byte) bool {

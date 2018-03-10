@@ -7,8 +7,6 @@ import (
 	uni "unicode"
 
 	"github.com/stephane-martin/skewer/model"
-	"golang.org/x/text/encoding"
-	"golang.org/x/text/encoding/unicode"
 )
 
 // <PRI>Mmm dd hh:mm:ss HOSTNAME TAG MSG
@@ -25,15 +23,7 @@ func pair2str(s1 []byte, s2 []byte) (string, string) {
 	return string(s1), string(s2)
 }
 
-func p3164(m []byte, decoder *encoding.Decoder) ([]*model.SyslogMessage, error) {
-	if decoder == nil {
-		decoder = unicode.UTF8.NewDecoder()
-	}
-	var err error
-	m, err = decoder.Bytes(m)
-	if err != nil {
-		return nil, &InvalidEncodingError{Err: err}
-	}
+func p3164(m []byte) ([]*model.SyslogMessage, error) {
 	m = bytes.TrimSpace(m)
 
 	defaultMsg := []*model.SyslogMessage{model.CleanFactory()}

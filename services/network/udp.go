@@ -9,6 +9,7 @@ import (
 
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
+	"github.com/stephane-martin/skewer/decoders"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/services/errors"
@@ -41,7 +42,7 @@ type UdpServiceImpl struct {
 	rawMessagesQueue *udp.Ring
 }
 
-func NewUdpService(env *base.ProviderEnv) (base.Provider, error) {
+func NewUdpService(env *base.ProviderEnv) (*UdpServiceImpl, error) {
 	initUdpRegistry()
 	s := UdpServiceImpl{
 		status:     UdpStopped,
@@ -72,7 +73,10 @@ func (s *UdpServiceImpl) SetConf(c conf.BaseConfig) {
 func (s *UdpServiceImpl) Parse() {
 	defer s.wg.Done()
 
-	e := base.NewParsersEnv(s.ParserConfigs, s.Logger)
+	e := decoders.NewParsersEnv(s.Logger)
+	for _, pc := range s.ParserConfigs {
+		e.AddJSParser(pc.Name, pc.Func)
+	}
 	gen := utils.NewGenerator()
 
 	for {
@@ -88,26 +92,25 @@ func (s *UdpServiceImpl) Parse() {
 	}
 }
 
-func (s *UdpServiceImpl) ParseOne(raw *model.RawUdpMessage, e *base.ParsersEnv, gen *utils.Generator) error {
+func (s *UdpServiceImpl) ParseOne(raw *model.RawUdpMessage, e *decoders.ParsersEnv, gen *utils.Generator) error {
 
 	logger := s.Logger.New(
 		"protocol", "udp",
 		"client", raw.Client,
 		"local_port", raw.LocalPort,
 		"unix_socket_path", raw.UnixSocketPath,
-		"format", raw.Format,
+		"format", raw.Decoder.Format,
 	)
 
-	decoder := utils.SelectDecoder(raw.Encoding)
-	parser, err := e.GetParser(raw.Format)
+	parser, err := e.GetParser(&raw.Decoder)
 	if parser == nil || err != nil {
 		logger.Crit("Unknown parser")
 		return nil
 	}
 
-	syslogMsgs, err := parser(raw.Message[:raw.Size], decoder)
+	syslogMsgs, err := parser(raw.Message[:raw.Size])
 	if err != nil {
-		base.ParsingErrorCounter.WithLabelValues("udp", raw.Client, raw.Format).Inc()
+		base.ParsingErrorCounter.WithLabelValues("udp", raw.Client, raw.Decoder.Format).Inc()
 		//logger.Info("Parsing error", "message", string(raw.Message), "error", err)
 		logger.Info("Parsing error", "error", err)
 		return nil
@@ -301,8 +304,7 @@ func (s *UdpServiceImpl) handleConnection(conn net.PacketConn, config conf.UDPSo
 		}
 		rawmsg.LocalPort = localPort
 		rawmsg.UnixSocketPath = path
-		rawmsg.Encoding = config.Encoding
-		rawmsg.Format = config.Format
+		rawmsg.Decoder = model.DecoderConfig(config.DecoderBaseConfig)
 		rawmsg.ConfID = config.ConfID
 		rawmsg.Client = ""
 		if remote == nil {

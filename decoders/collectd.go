@@ -11,13 +11,12 @@ import (
 	"github.com/stephane-martin/skewer/model"
 	// import the statik store
 	_ "github.com/stephane-martin/skewer/utils/collectd/embed/statik"
-	"golang.org/x/text/encoding"
 )
 
 var typesDB *api.TypesDB
 var once sync.Once
 
-func pCollectd(m []byte, decoder *encoding.Decoder) (msgs []*model.SyslogMessage, rerr error) {
+func pCollectd(m []byte) (msgs []*model.SyslogMessage, rerr error) {
 	once.Do(func() {
 		statikFS, err := fs.New()
 		if err != nil {

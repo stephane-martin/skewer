@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/stephane-martin/skewer/model/encoders"
+	"github.com/stephane-martin/skewer/encoders"
 )
 
 // DestinationType lists the possible kind of destinations where skewer can forward messages.

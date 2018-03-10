@@ -5,25 +5,17 @@ import (
 	"time"
 
 	"github.com/influxdata/influxdb/models"
+	"github.com/stephane-martin/skewer/decoders/base"
 	"github.com/stephane-martin/skewer/model"
-	"golang.org/x/text/encoding"
-	"golang.org/x/text/encoding/unicode"
 )
 
 // TODO: JSON format
 
-func pInflux(m []byte, decoder *encoding.Decoder) ([]*model.SyslogMessage, error) {
+func pInflux(m []byte) ([]*model.SyslogMessage, error) {
 	// we assume influxdb line protocol is always UTF-8
-	decoder = unicode.UTF8.NewDecoder()
-
-	var err error
-	m, err = decoder.Bytes(m)
-	if err != nil {
-		return nil, &InvalidEncodingError{Err: err}
-	}
 	points, err := models.ParsePoints(m)
 	if err != nil {
-		return nil, &InfluxDecodingError{Err: err}
+		return nil, &base.InfluxDecodingError{Err: err}
 	}
 	if len(points) == 0 {
 		return nil, nil

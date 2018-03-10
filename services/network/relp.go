@@ -19,6 +19,7 @@ import (
 
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/conf"
+	"github.com/stephane-martin/skewer/decoders"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/services/errors"
@@ -472,29 +473,28 @@ func (s *RelpServiceImpl) SetConf(sc []conf.RELPSourceConfig, pc []conf.ParserCo
 	}}
 }
 
-func (s *RelpServiceImpl) parseOne(raw *model.RawTcpMessage, e *base.ParsersEnv, gen *utils.Generator) error {
+func (s *RelpServiceImpl) parseOne(raw *model.RawTcpMessage, e *decoders.ParsersEnv, gen *utils.Generator) error {
 
 	logger := s.Logger.New(
 		"protocol", "relp",
 		"client", raw.Client,
 		"local_port", raw.LocalPort,
 		"unix_socket_path", raw.UnixSocketPath,
-		"format", raw.Format,
+		"format", raw.Decoder.Format,
 		"txnr", raw.Txnr,
 	)
-	parser, err := e.GetParser(raw.Format)
+	parser, err := e.GetParser(&raw.Decoder)
 	if parser == nil || err != nil {
 		s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
 		logger.Crit("Unknown parser")
 		return nil
 	}
-	decoder := utils.SelectDecoder(raw.Encoding)
-	syslogMsgs, err := parser(raw.Message, decoder)
+	syslogMsgs, err := parser(raw.Message)
 	if err != nil {
 		//logger.Warn("Parsing error", "message", string(raw.Message[:raw.Size]), "error", err)
 		logger.Warn("Parsing error", "error", err)
 		s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
-		base.ParsingErrorCounter.WithLabelValues("relp", raw.Client, raw.Format).Inc()
+		base.ParsingErrorCounter.WithLabelValues("relp", raw.Client, raw.Decoder.Format).Inc()
 		return nil
 	}
 	var syslogMsg *model.SyslogMessage
@@ -537,8 +537,10 @@ func (s *RelpServiceImpl) parseOne(raw *model.RawTcpMessage, e *base.ParsersEnv,
 func (s *RelpServiceImpl) Parse() {
 	defer s.parsewg.Done()
 
-	e := base.NewParsersEnv(s.ParserConfigs, s.Logger)
-
+	e := decoders.NewParsersEnv(s.Logger)
+	for _, pc := range s.ParserConfigs {
+		e.AddJSParser(pc.Name, pc.Func)
+	}
 	var raw *model.RawTcpMessage
 	var err error
 	gen := utils.NewGenerator()
@@ -683,10 +685,11 @@ func (h RelpHandler) HandleConnection(conn net.Conn, c conf.TCPSourceConfig) {
 
 	s.wg.Add(1)
 	go s.handleResponses(conn, connID, client, l)
-	scan(l, s.forwarder, s.rawQ, conn, config.Timeout, config.ConfID, connID, s.MaxMessageSize, lport, config.Encoding, config.Format, lports, path, client, s.Pool)
+	dc := model.DecoderConfig(config.DecoderBaseConfig)
+	scan(l, s.forwarder, s.rawQ, conn, config.Timeout, config.ConfID, connID, s.MaxMessageSize, lport, dc, lports, path, client, s.Pool)
 }
 
-func scan(l log15.Logger, f *ackForwarder, rawq *tcp.Ring, c net.Conn, tout time.Duration, cfid, cnid utils.MyULID, msiz int, lport int32, enc, format, lports, path, clt string, p *sync.Pool) {
+func scan(l log15.Logger, f *ackForwarder, rawq *tcp.Ring, c net.Conn, tout time.Duration, cfid, cnid utils.MyULID, msiz int, lport int32, dc model.DecoderConfig, lports, path, clt string, p *sync.Pool) {
 	l.Info("New client connection")
 	base.ClientConnectionCounter.WithLabelValues("relp", clt, lports, path).Inc()
 
@@ -697,7 +700,7 @@ func scan(l log15.Logger, f *ackForwarder, rawq *tcp.Ring, c net.Conn, tout time
 	var splits [][]byte
 	var data []byte
 
-	machine := newMachine(l, f, rawq, c, cfid, cnid, msiz, lport, enc, format, lports, path, clt, p)
+	machine := newMachine(l, f, rawq, c, cfid, cnid, msiz, lport, dc, lports, path, clt, p)
 
 	if tout > 0 {
 		_ = c.SetReadDeadline(time.Now().Add(tout))
@@ -762,7 +765,8 @@ func scan(l log15.Logger, f *ackForwarder, rawq *tcp.Ring, c net.Conn, tout time
 	}
 }
 
-func newMachine(l log15.Logger, fwder *ackForwarder, rawq *tcp.Ring, conn io.Writer, confID, connID utils.MyULID, msiz int, lport int32, enc, format, lports, path, clt string, p *sync.Pool) *fsm.FSM {
+func newMachine(l log15.Logger, fwder *ackForwarder, rawq *tcp.Ring, conn io.Writer, confID, connID utils.MyULID, msiz int, lport int32, dc model.DecoderConfig, lports, path, clt string, p *sync.Pool) *fsm.FSM {
+	// TODO: PERF: fsm protects internal variables (states, events) with mutexes. We don't really need the mutexes here.
 	return fsm.NewFSM(
 		"closed",
 		fsm.Events{
@@ -790,9 +794,8 @@ func newMachine(l log15.Logger, fwder *ackForwarder, rawq *tcp.Ring, conn io.Wri
 				rawmsg.LocalPort = lport
 				rawmsg.UnixSocketPath = path
 				rawmsg.ConfID = confID
-				rawmsg.Encoding = enc
-				rawmsg.Format = format
 				rawmsg.ConnID = connID
+				rawmsg.Decoder = dc
 				rawmsg.Message = rawmsg.Message[:len(data)]
 				copy(rawmsg.Message, data)
 				err := rawq.Put(rawmsg)

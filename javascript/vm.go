@@ -5,13 +5,12 @@ import (
 	"fmt"
 	"strings"
 	"text/template"
+	"unicode/utf8"
 
 	"github.com/dop251/goja"
 	"github.com/inconshreveable/log15"
+	"github.com/stephane-martin/skewer/decoders/base"
 	"github.com/stephane-martin/skewer/model"
-	"github.com/stephane-martin/skewer/model/decoders"
-	"golang.org/x/text/encoding"
-	"golang.org/x/text/encoding/unicode"
 )
 
 var jsSyslogMessage string = `function SyslogMessage(p, f, s, v, timer, timeg, host, app, proc, msgid, structured, msg, props) {
@@ -78,7 +77,7 @@ type iSyslogMessage struct {
 }
 
 type ParsersEnvironment interface {
-	GetParser(name string) (decoders.Parser, error)
+	GetParser(name string) (base.Parser, error)
 	AddParser(name string, parserFunc string) error
 }
 
@@ -116,19 +115,11 @@ type ConcreteParser struct {
 	name string
 }
 
-func (p *ConcreteParser) Parse(rawMessage []byte, decoder *encoding.Decoder) ([]*model.SyslogMessage, error) {
+func (p *ConcreteParser) Parse(rawMessage []byte) ([]*model.SyslogMessage, error) {
 	var err error
 	jsParser, ok := p.env.jsParsers[p.name]
 	if !ok {
-		return nil, &decoders.UnknownFormatError{}
-	}
-
-	if decoder == nil {
-		decoder = unicode.UTF8.NewDecoder()
-	}
-	rawMessage, err = decoder.Bytes(rawMessage)
-	if err != nil {
-		return nil, &decoders.InvalidEncodingError{Err: err}
+		return nil, &base.UnknownFormatError{}
 	}
 
 	rawMessage = bytes.Trim(rawMessage, "\r\n ")
@@ -141,7 +132,7 @@ func (p *ConcreteParser) Parse(rawMessage []byte, decoder *encoding.Decoder) ([]
 		if jserr, ok := err.(*goja.Exception); ok {
 			message, ok := jserr.Value().Export().(string)
 			if ok {
-				return nil, &decoders.JSParsingError{ParserName: p.name, Message: message}
+				return nil, &JSParsingError{ParserName: p.name, Message: message}
 			}
 			return nil, err
 		}
@@ -214,7 +205,7 @@ func newEnv(filterFunc, topicFunc, topicTmpl, partitionKeyFunc, partitionKeyTmpl
 	return &e
 }
 
-func (e *Environment) GetParser(name string) (decoders.Parser, error) {
+func (e *Environment) GetParser(name string) (base.Parser, error) {
 	_, ok := e.jsParsers[name]
 	if !ok {
 		return nil, fmt.Errorf("Unknown javascript parser: %s", name)
@@ -345,8 +336,8 @@ func (e *Environment) Topic(m *model.SyslogMessage) (topic string, errs []error)
 		}
 	}
 	if len(topic) > 0 {
-		if !decoders.TopicNameIsValid(topic) {
-			errs = append(errs, &decoders.InvalidTopic{Topic: topic})
+		if !TopicNameIsValid(topic) {
+			errs = append(errs, &base.InvalidTopic{Topic: topic})
 			return "", errs
 		}
 	}
@@ -502,4 +493,44 @@ func (e *Environment) fromJsMessage(sm goja.Value) (m *model.SyslogMessage, err 
 	m.Message = imsg.Message
 	m.SetAllProperties(imsg.Properties)
 	return m, nil
+}
+
+func TopicNameIsValid(name string) bool {
+	if len(name) == 0 {
+		return false
+	}
+	if len(name) > 249 {
+		return false
+	}
+	if !utf8.ValidString(name) {
+		return false
+	}
+	for _, r := range name {
+		if !validRune(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func validRune(r rune) bool {
+	if r >= 'a' && r <= 'z' {
+		return true
+	}
+	if r >= 'A' && r <= 'Z' {
+		return true
+	}
+	if r >= '0' && r <= '9' {
+		return true
+	}
+	if r == '.' {
+		return true
+	}
+	if r == '_' {
+		return true
+	}
+	if r == '-' {
+		return true
+	}
+	return false
 }

@@ -7,7 +7,7 @@ import (
 	"github.com/inconshreveable/log15"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stephane-martin/skewer/conf"
-	"github.com/stephane-martin/skewer/model/encoders"
+	"github.com/stephane-martin/skewer/encoders"
 	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/utils"
 )

@@ -385,6 +385,10 @@ func (c *JournaldConfig) ListenersConf() *ListenersConfig {
 	return nil
 }
 
+func (c *JournaldConfig) DecoderConf() *DecoderBaseConfig {
+	return nil
+}
+
 func (c *JournaldConfig) DefaultPort() int {
 	return 0
 }
@@ -402,6 +406,10 @@ func (c *AccountingSourceConfig) FilterConf() *FilterSubConfig {
 }
 
 func (c *AccountingSourceConfig) ListenersConf() *ListenersConfig {
+	return nil
+}
+
+func (c *AccountingSourceConfig) DecoderConf() *DecoderBaseConfig {
 	return nil
 }
 
@@ -427,21 +435,47 @@ func (c *MacOSSourceConfig) ListenersConf() *ListenersConfig {
 	return nil
 }
 
+func (c *MacOSSourceConfig) DecoderConf() *DecoderBaseConfig {
+	return nil
+}
+
 func (c *MacOSSourceConfig) DefaultPort() int {
 	return 0
 }
 
+type DecoderBaseConfig struct {
+	Format    string `mapstructure:"format" toml:"format" json:"format"`
+	Charset   string `mapstructure:"charset" toml:"charset" json:"charset"`
+	W3CFields string `mapstructure:"w3c_fields" toml:"w3c_fields" json:"fields"`
+}
+
 type FilesystemSourceConfig struct {
-	FilterSubConfig `mapstructure:",squash"`
-	BaseDirectory   string       `mapstructure:"base_directory" toml:"base_directory" json:"base_directory"`
-	Glob            string       `mapstructure:"glob" toml:"glob" json:"glob"`
-	Format          string       `mapstructure:"format" toml:"format" json:"format"`
-	Encoding        string       `mapstructure:"encoding" toml:"encoding" json:"encoding"`
-	ConfID          utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
+	FilterSubConfig   `mapstructure:",squash"`
+	DecoderBaseConfig `mapstructure:",squash"`
+	BaseDirectory     string       `mapstructure:"base_directory" toml:"base_directory" json:"base_directory"`
+	Glob              string       `mapstructure:"glob" toml:"glob" json:"glob"`
+	ConfID            utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
+}
+
+func (c *FilesystemSourceConfig) FilterConf() *FilterSubConfig {
+	return &c.FilterSubConfig
+}
+
+func (c *FilesystemSourceConfig) ListenersConf() *ListenersConfig {
+	return nil
+}
+
+func (c *FilesystemSourceConfig) DecoderConf() *DecoderBaseConfig {
+	return &c.DecoderBaseConfig
+}
+
+func (c *FilesystemSourceConfig) DefaultPort() int {
+	return 0
 }
 
 type HTTPServerSourceConfig struct {
 	HTTPServerBaseConfig `mapstructure:",squash"`
+	DecoderBaseConfig    `mapstructure:",squash"`
 
 	FilterSubConfig `mapstructure:",squash"`
 	ConfID          utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
@@ -449,9 +483,7 @@ type HTTPServerSourceConfig struct {
 	TlsBaseConfig  `mapstructure:",squash"`
 	ClientAuthType string `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
 
-	Port     int    `mapstructure:"port" toml:"port" json:"port"`
-	Format   string `mapstructure:"format" toml:"format" json:"format"`
-	Encoding string `mapstructure:"encoding" toml:"encoding" json:"encoding"`
+	Port int `mapstructure:"port" toml:"port" json:"port"`
 	// should the server accept multiple messages per request
 	DisableMultiple bool   `mapstructure:"disable_multiple" toml:"disable_multiple" json:"disable_multiple"`
 	FrameDelimiter  string `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
@@ -467,18 +499,23 @@ func (c *HTTPServerSourceConfig) ListenersConf() *ListenersConfig {
 	return nil
 }
 
+func (c *HTTPServerSourceConfig) DecoderConf() *DecoderBaseConfig {
+	return &c.DecoderBaseConfig
+}
+
 func (c *HTTPServerSourceConfig) DefaultPort() int {
 	return 8081
 }
 
 type TCPSourceConfig struct {
-	ListenersConfig `mapstructure:",squash"`
-	FilterSubConfig `mapstructure:",squash"`
-	TlsBaseConfig   `mapstructure:",squash"`
-	ClientAuthType  string       `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
-	LineFraming     bool         `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
-	FrameDelimiter  string       `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
-	ConfID          utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
+	DecoderBaseConfig `mapstructure:",squash"`
+	ListenersConfig   `mapstructure:",squash"`
+	FilterSubConfig   `mapstructure:",squash"`
+	TlsBaseConfig     `mapstructure:",squash"`
+	ClientAuthType    string       `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
+	LineFraming       bool         `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
+	FrameDelimiter    string       `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
+	ConfID            utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
 }
 
 func (c *TCPSourceConfig) FilterConf() *FilterSubConfig {
@@ -489,26 +526,19 @@ func (c *TCPSourceConfig) ListenersConf() *ListenersConfig {
 	return &c.ListenersConfig
 }
 
+func (c *TCPSourceConfig) DecoderConf() *DecoderBaseConfig {
+	return &c.DecoderBaseConfig
+}
+
 func (c *TCPSourceConfig) DefaultPort() int {
 	return 1514
 }
 
-func (c *FilesystemSourceConfig) FilterConf() *FilterSubConfig {
-	return &c.FilterSubConfig
-}
-
-func (c *FilesystemSourceConfig) ListenersConf() *ListenersConfig {
-	return nil
-}
-
-func (c *FilesystemSourceConfig) DefaultPort() int {
-	return 0
-}
-
 type UDPSourceConfig struct {
-	ListenersConfig `mapstructure:",squash"`
-	FilterSubConfig `mapstructure:",squash"`
-	ConfID          utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
+	DecoderBaseConfig `mapstructure:",squash"`
+	ListenersConfig   `mapstructure:",squash"`
+	FilterSubConfig   `mapstructure:",squash"`
+	ConfID            utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
 }
 
 func (c *UDPSourceConfig) FilterConf() *FilterSubConfig {
@@ -519,14 +549,19 @@ func (c *UDPSourceConfig) ListenersConf() *ListenersConfig {
 	return &c.ListenersConfig
 }
 
+func (c *UDPSourceConfig) DecoderConf() *DecoderBaseConfig {
+	return &c.DecoderBaseConfig
+}
+
 func (c *UDPSourceConfig) DefaultPort() int {
 	return 1514
 }
 
 type GraylogSourceConfig struct {
-	ListenersConfig `mapstructure:",squash"`
-	FilterSubConfig `mapstructure:",squash"`
-	ConfID          utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
+	DecoderBaseConfig `mapstructure:",squash"`
+	ListenersConfig   `mapstructure:",squash"`
+	FilterSubConfig   `mapstructure:",squash"`
+	ConfID            utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
 }
 
 func (c *GraylogSourceConfig) FilterConf() *FilterSubConfig {
@@ -537,18 +572,23 @@ func (c *GraylogSourceConfig) ListenersConf() *ListenersConfig {
 	return &c.ListenersConfig
 }
 
+func (c *GraylogSourceConfig) DecoderConf() *DecoderBaseConfig {
+	return &c.DecoderBaseConfig
+}
+
 func (c *GraylogSourceConfig) DefaultPort() int {
 	return 12201
 }
 
 type RELPSourceConfig struct {
-	ListenersConfig `mapstructure:",squash"`
-	FilterSubConfig `mapstructure:",squash"`
-	TlsBaseConfig   `mapstructure:",squash"`
-	ClientAuthType  string       `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
-	LineFraming     bool         `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
-	FrameDelimiter  string       `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
-	ConfID          utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
+	DecoderBaseConfig `mapstructure:",squash"`
+	ListenersConfig   `mapstructure:",squash"`
+	FilterSubConfig   `mapstructure:",squash"`
+	TlsBaseConfig     `mapstructure:",squash"`
+	ClientAuthType    string       `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
+	LineFraming       bool         `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
+	FrameDelimiter    string       `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
+	ConfID            utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
 }
 
 func (c *RELPSourceConfig) FilterConf() *FilterSubConfig {
@@ -559,18 +599,23 @@ func (c *RELPSourceConfig) ListenersConf() *ListenersConfig {
 	return &c.ListenersConfig
 }
 
+func (c *RELPSourceConfig) DecoderConf() *DecoderBaseConfig {
+	return &c.DecoderBaseConfig
+}
+
 func (c *RELPSourceConfig) DefaultPort() int {
 	return 2514
 }
 
 type DirectRELPSourceConfig struct {
-	ListenersConfig `mapstructure:",squash"`
-	FilterSubConfig `mapstructure:",squash"`
-	TlsBaseConfig   `mapstructure:",squash"`
-	ClientAuthType  string       `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
-	LineFraming     bool         `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
-	FrameDelimiter  string       `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
-	ConfID          utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
+	DecoderBaseConfig `mapstructure:",squash"`
+	ListenersConfig   `mapstructure:",squash"`
+	FilterSubConfig   `mapstructure:",squash"`
+	TlsBaseConfig     `mapstructure:",squash"`
+	ClientAuthType    string       `mapstructure:"client_auth_type" toml:"client_auth_type" json:"client_auth_type"`
+	LineFraming       bool         `mapstructure:"line_framing" toml:"line_framing" json:"line_framing"`
+	FrameDelimiter    string       `mapstructure:"delimiter" toml:"delimiter" json:"delimiter"`
+	ConfID            utils.MyULID `mapstructure:"-" toml:"-" json:"conf_id"`
 }
 
 func (c *DirectRELPSourceConfig) FilterConf() *FilterSubConfig {
@@ -581,6 +626,10 @@ func (c *DirectRELPSourceConfig) ListenersConf() *ListenersConfig {
 	return &c.ListenersConfig
 }
 
+func (c *DirectRELPSourceConfig) DecoderConf() *DecoderBaseConfig {
+	return &c.DecoderBaseConfig
+}
+
 func (c *DirectRELPSourceConfig) DefaultPort() int {
 	return 3514
 }
@@ -588,6 +637,7 @@ func (c *DirectRELPSourceConfig) DefaultPort() int {
 type Source interface {
 	FilterConf() *FilterSubConfig
 	ListenersConf() *ListenersConfig
+	DecoderConf() *DecoderBaseConfig
 	DefaultPort() int
 	SetConfID()
 }
@@ -596,11 +646,9 @@ type ListenersConfig struct {
 	Ports           []int         `mapstructure:"ports" toml:"ports" json:"ports"`
 	BindAddr        string        `mapstructure:"bind_addr" toml:"bind_addr" json:"bind_addr"`
 	UnixSocketPath  string        `mapstructure:"unix_socket_path" toml:"unix_socket_path" json:"unix_socket_path"`
-	Format          string        `mapstructure:"format" toml:"format" json:"format"`
 	KeepAlive       bool          `mapstructure:"keepalive" toml:"keepalive" json:"keepalive"`
 	KeepAlivePeriod time.Duration `mapstructure:"keepalive_period" toml:"keepalive_period" json:"keepalive_period"`
 	Timeout         time.Duration `mapstructure:"timeout" toml:"timeout" json:"timeout"`
-	Encoding        string        `mapstructure:"encoding" toml:"encoding" json:"encoding"`
 }
 
 type KafkaSourceConfig struct {
@@ -608,9 +656,8 @@ type KafkaSourceConfig struct {
 	KafkaConsumerBaseConfig `mapstructure:",squash"`
 	FilterSubConfig         `mapstructure:",squash"`
 	TlsBaseConfig           `mapstructure:",squash"`
+	DecoderBaseConfig       `mapstructure:",squash"`
 	Insecure                bool          `mapstructure:"insecure" toml:"insecure" json:"insecure"`
-	Format                  string        `mapstructure:"format" toml:"format" json:"format"`
-	Encoding                string        `mapstructure:"encoding" toml:"encoding" json:"encoding"`
 	ConfID                  utils.MyULID  `mapstructure:"-" toml:"-" json:"conf_id"`
 	SessionTimeout          time.Duration `mapstructure:"session_timeout" toml:"session_timeout" json:"session_timeout"`
 	HeartbeatInterval       time.Duration `mapstructure:"heartbeat_interval" toml:"heartbeat_interval" json:"heartbeat_interval"`
@@ -625,6 +672,10 @@ func (c *KafkaSourceConfig) FilterConf() *FilterSubConfig {
 
 func (c *KafkaSourceConfig) ListenersConf() *ListenersConfig {
 	return nil
+}
+
+func (c *KafkaSourceConfig) DecoderConf() *DecoderBaseConfig {
+	return &c.DecoderBaseConfig
 }
 
 func (c *KafkaSourceConfig) DefaultPort() int {

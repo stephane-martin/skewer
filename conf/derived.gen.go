@@ -356,6 +356,7 @@ func deriveDeepCopy_8(dst, src *ElasticDestConfig) {
 
 // deriveDeepCopy_9 recursively copies the contents of src into dst.
 func deriveDeepCopy_9(dst, src *TCPSourceConfig) {
+	dst.DecoderBaseConfig = src.DecoderBaseConfig
 	field := new(ListenersConfig)
 	deriveDeepCopy_16(field, &src.ListenersConfig)
 	dst.ListenersConfig = *field
@@ -369,6 +370,7 @@ func deriveDeepCopy_9(dst, src *TCPSourceConfig) {
 
 // deriveDeepCopy_10 recursively copies the contents of src into dst.
 func deriveDeepCopy_10(dst, src *UDPSourceConfig) {
+	dst.DecoderBaseConfig = src.DecoderBaseConfig
 	field := new(ListenersConfig)
 	deriveDeepCopy_16(field, &src.ListenersConfig)
 	dst.ListenersConfig = *field
@@ -378,6 +380,7 @@ func deriveDeepCopy_10(dst, src *UDPSourceConfig) {
 
 // deriveDeepCopy_11 recursively copies the contents of src into dst.
 func deriveDeepCopy_11(dst, src *RELPSourceConfig) {
+	dst.DecoderBaseConfig = src.DecoderBaseConfig
 	field := new(ListenersConfig)
 	deriveDeepCopy_16(field, &src.ListenersConfig)
 	dst.ListenersConfig = *field
@@ -391,6 +394,7 @@ func deriveDeepCopy_11(dst, src *RELPSourceConfig) {
 
 // deriveDeepCopy_12 recursively copies the contents of src into dst.
 func deriveDeepCopy_12(dst, src *DirectRELPSourceConfig) {
+	dst.DecoderBaseConfig = src.DecoderBaseConfig
 	field := new(ListenersConfig)
 	deriveDeepCopy_16(field, &src.ListenersConfig)
 	dst.ListenersConfig = *field
@@ -410,9 +414,8 @@ func deriveDeepCopy_13(dst, src *KafkaSourceConfig) {
 	dst.KafkaConsumerBaseConfig = src.KafkaConsumerBaseConfig
 	dst.FilterSubConfig = src.FilterSubConfig
 	dst.TlsBaseConfig = src.TlsBaseConfig
+	dst.DecoderBaseConfig = src.DecoderBaseConfig
 	dst.Insecure = src.Insecure
-	dst.Format = src.Format
-	dst.Encoding = src.Encoding
 	dst.ConfID = src.ConfID
 	dst.SessionTimeout = src.SessionTimeout
 	dst.HeartbeatInterval = src.HeartbeatInterval
@@ -440,6 +443,7 @@ func deriveDeepCopy_13(dst, src *KafkaSourceConfig) {
 
 // deriveDeepCopy_14 recursively copies the contents of src into dst.
 func deriveDeepCopy_14(dst, src *GraylogSourceConfig) {
+	dst.DecoderBaseConfig = src.DecoderBaseConfig
 	field := new(ListenersConfig)
 	deriveDeepCopy_16(field, &src.ListenersConfig)
 	dst.ListenersConfig = *field
@@ -502,9 +506,7 @@ func deriveDeepCopy_16(dst, src *ListenersConfig) {
 	}
 	dst.BindAddr = src.BindAddr
 	dst.UnixSocketPath = src.UnixSocketPath
-	dst.Format = src.Format
 	dst.KeepAlive = src.KeepAlive
 	dst.KeepAlivePeriod = src.KeepAlivePeriod
 	dst.Timeout = src.Timeout
-	dst.Encoding = src.Encoding
 }

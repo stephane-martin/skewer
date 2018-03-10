@@ -15,6 +15,7 @@ import (
 	"github.com/inconshreveable/log15"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
+	"github.com/stephane-martin/skewer/decoders"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/sys/binder"
@@ -243,7 +244,10 @@ func (s *HTTPServiceImpl) startOne(config conf.HTTPServerSourceConfig) error {
 
 func (s *HTTPServiceImpl) handler(config conf.HTTPServerSourceConfig) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		env := base.NewParsersEnv(s.parserConfigs, s.logger)
+		env := decoders.NewParsersEnv(s.logger)
+		for _, pc := range s.parserConfigs {
+			env.AddJSParser(pc.Name, pc.Func)
+		}
 		// get the request body into bodyBuf
 		if config.MaxBodySize > 0 {
 			r.Body = http.MaxBytesReader(w, r.Body, config.MaxBodySize)
@@ -281,10 +285,9 @@ func (s *HTTPServiceImpl) handler(config conf.HTTPServerSourceConfig) func(http.
 			}
 			raw.Message = raw.Message[:len(tmp)]
 			copy(raw.Message, tmp)
-			raw.Format = config.Format
+			raw.Decoder = model.DecoderConfig(config.DecoderBaseConfig)
 			raw.Client = r.RemoteAddr
 			raw.ConfID = config.ConfID
-			raw.Encoding = config.Encoding
 			raw.LocalPort = int32(config.Port)
 
 			fulls, err := s.parseOne(env, raw)
@@ -358,11 +361,10 @@ func (s *HTTPServiceImpl) handler(config conf.HTTPServerSourceConfig) func(http.
 			raw := s.rawpool.Get().(*model.RawTcpMessage)
 			raw.Message = raw.Message[:len(byteMsg)]
 			copy(raw.Message, byteMsg)
-			raw.Format = config.Format
+			raw.Decoder = model.DecoderConfig(config.DecoderBaseConfig)
 			raw.Client = r.RemoteAddr
 			raw.ConnID = tracker.connID
 			raw.ConfID = config.ConfID
-			raw.Encoding = config.Encoding
 			raw.LocalPort = int32(config.Port)
 			s.rawMessagesQueue.Put(raw)
 		}
@@ -377,7 +379,10 @@ func (s *HTTPServiceImpl) Write(p []byte) (int, error) {
 
 func (s *HTTPServiceImpl) parse() {
 	defer s.wg.Done()
-	env := base.NewParsersEnv(s.parserConfigs, s.logger)
+	env := decoders.NewParsersEnv(s.logger)
+	for _, pc := range s.parserConfigs {
+		env.AddJSParser(pc.Name, pc.Func)
+	}
 	gen := utils.NewGenerator()
 	for {
 		raw, err := s.rawMessagesQueue.Get()
@@ -392,10 +397,10 @@ func (s *HTTPServiceImpl) parse() {
 	}
 }
 
-func (s *HTTPServiceImpl) parseAndEnqueue(env *base.ParsersEnv, gen *utils.Generator, raw *model.RawTcpMessage) error {
+func (s *HTTPServiceImpl) parseAndEnqueue(env *decoders.ParsersEnv, gen *utils.Generator, raw *model.RawTcpMessage) error {
 	logger := s.logger.New(
 		"protocol", "httpserver",
-		"format", raw.Format,
+		"format", raw.Decoder.Format,
 	)
 	fulls, err := s.parseOne(env, raw)
 	if err != nil {
@@ -425,14 +430,13 @@ func (s *HTTPServiceImpl) parseAndEnqueue(env *base.ParsersEnv, gen *utils.Gener
 	//base.IncomingMsgsCounter.WithLabelValues("kafka", raw.Brokers, "", "").Inc()
 }
 
-func (s *HTTPServiceImpl) parseOne(env *base.ParsersEnv, raw *model.RawTcpMessage) (fulls []*model.FullMessage, err error) {
-	decoder := utils.SelectDecoder(raw.Encoding)
-	parser, err := env.GetParser(raw.Format)
+func (s *HTTPServiceImpl) parseOne(env *decoders.ParsersEnv, raw *model.RawTcpMessage) (fulls []*model.FullMessage, err error) {
+	parser, err := env.GetParser(&raw.Decoder)
 	if parser == nil || err != nil {
 		return nil, fmt.Errorf("Unknown parser")
 	}
 
-	syslogMsgs, err := parser(raw.Message, decoder)
+	syslogMsgs, err := parser(raw.Message)
 	if err != nil {
 		return nil, err
 		//base.ParsingErrorCounter.WithLabelValues("kafka", raw.Brokers, raw.Format).Inc()

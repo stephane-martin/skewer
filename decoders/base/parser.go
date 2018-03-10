@@ -1,6 +1,12 @@
-package decoders
+package base
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/stephane-martin/skewer/model"
+)
+
+type Parser func(m []byte) ([]*model.SyslogMessage, error)
 
 type ParsingError interface {
 	Error() string
@@ -8,11 +14,11 @@ type ParsingError interface {
 }
 
 type UnknownFormatError struct {
-	format Format
+	format string
 }
 
 func (e *UnknownFormatError) Error() string {
-	return fmt.Sprintf("Unknown parsing format: '%d'", e.format)
+	return fmt.Sprintf("Unknown parsing format: '%s'", e.format)
 }
 
 func (e *UnknownFormatError) Parsing() {}
@@ -111,18 +117,6 @@ func (e *NotEnoughPartsError) Error() string {
 
 func (e *NotEnoughPartsError) Rfc5424() {}
 func (e *NotEnoughPartsError) Parsing() {}
-
-type JSParsingError struct {
-	Message    string
-	ParserName string
-}
-
-func (e *JSParsingError) Error() string {
-	return fmt.Sprintf("The provided JS parser '%s' could not parse the raw message: %s", e.ParserName, e.Message)
-}
-
-func (e *JSParsingError) Parsing()    {}
-func (e *JSParsingError) Javascript() {}
 
 type InvalidTopic struct {
 	Topic string

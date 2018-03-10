@@ -20,10 +20,15 @@ type ListenerInfo struct {
 	Protocol       string `json:"protocol" msg:"protocol"`
 }
 
-type RawFileMessage struct {
-	Hostname  string
-	Encoding  string
+type DecoderConfig struct {
 	Format    string
+	Charset   string
+	W3CFields string
+}
+
+type RawFileMessage struct {
+	Decoder   DecoderConfig
+	Hostname  string
 	Directory string
 	Glob      string
 	Filename  string
@@ -32,18 +37,16 @@ type RawFileMessage struct {
 }
 
 type RawMessage struct {
+	Decoder        DecoderConfig
 	Client         string
 	LocalPort      int32
 	UnixSocketPath string
-	Format         string
-	Encoding       string
 	ConfID         utils.MyULID
 }
 
 type RawKafkaMessage struct {
+	Decoder    DecoderConfig
 	Brokers    string
-	Format     string
-	Encoding   string
 	ConfID     utils.MyULID
 	ConsumerID uint32
 	Message    []byte

@@ -1046,6 +1046,12 @@
 			"revisionTime": "2018-01-21T19:46:41Z"
 		},
 		{
+			"checksumSHA1": "4C0xYcWQzRehPLCDfgpCWnLhVe0=",
+			"path": "github.com/stephane-martin/w3c-extendedlog-parser",
+			"revision": "01a9162dc22b31a441b9e9dc0ef2fb0c476353a4",
+			"revisionTime": "2018-03-09T16:11:09Z"
+		},
+		{
 			"checksumSHA1": "G7MxSnBfyxidM5U3P6uyzsxP40E=",
 			"path": "github.com/streadway/amqp",
 			"revision": "ff34ec9cc65c2a23db5126d962c431018f65af59",

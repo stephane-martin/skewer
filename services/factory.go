@@ -115,32 +115,41 @@ func SetPipe(pipe *os.File) func(e *base.ProviderEnv) {
 	}
 }
 
-type ProviderConstructor func(*base.ProviderEnv) (base.Provider, error)
-
-var constructors = map[base.Types]ProviderConstructor{
-	base.TCP:         network.NewTcpService,
-	base.UDP:         network.NewUdpService,
-	base.RELP:        network.NewRelpService,
-	base.DirectRELP:  network.NewDirectRelpService,
-	base.Graylog:     network.NewGraylogService,
-	base.Journal:     linux.NewJournalService,
-	base.Accounting:  NewAccountingService,
-	base.Store:       NewStoreService,
-	base.KafkaSource: network.NewKafkaService,
-	base.Filesystem:  NewFilePollingService,
-	base.HTTPServer:  network.NewHTTPService,
-	base.MacOS:       macos.NewMacOSLogsService,
-}
-
 type ProviderOpt func(e *base.ProviderEnv)
 
 func ProviderFactory(t base.Types, env *base.ProviderEnv) (base.Provider, error) {
-	if constructor, ok := constructors[t]; ok {
-		provider, err := constructor(env)
-		if err == nil {
-			return provider, nil
-		}
+	var provider base.Provider
+	var err error
+	switch t {
+	case base.TCP:
+		provider, err = network.NewTcpService(env)
+	case base.UDP:
+		provider, err = network.NewUdpService(env)
+	case base.RELP:
+		provider, err = network.NewRelpService(env)
+	case base.DirectRELP:
+		provider, err = network.NewDirectRelpService(env)
+	case base.Graylog:
+		provider, err = network.NewGraylogService(env)
+	case base.Journal:
+		provider, err = linux.NewJournalService(env)
+	case base.Accounting:
+		provider, err = NewAccountingService(env)
+	case base.Store:
+		provider, err = NewStoreService(env)
+	case base.KafkaSource:
+		provider, err = network.NewKafkaService(env)
+	case base.Filesystem:
+		provider, err = NewFilePollingService(env)
+	case base.HTTPServer:
+		provider, err = network.NewHTTPService(env)
+	case base.MacOS:
+		provider, err = macos.NewMacOSLogsService(env)
+	default:
+		return nil, fmt.Errorf("unknown provider type: %d", t)
+	}
+	if err != nil {
 		return nil, err
 	}
-	return nil, fmt.Errorf("unknown provider type: %d", t)
+	return provider, nil
 }

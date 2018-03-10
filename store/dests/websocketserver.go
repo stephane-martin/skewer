@@ -12,8 +12,8 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/stephane-martin/skewer/conf"
+	"github.com/stephane-martin/skewer/encoders"
 	"github.com/stephane-martin/skewer/model"
-	"github.com/stephane-martin/skewer/model/encoders"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/queue/message"
 )

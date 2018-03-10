@@ -14,6 +14,7 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/gotail/tail"
 	"github.com/stephane-martin/skewer/conf"
+	"github.com/stephane-martin/skewer/decoders"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/utils"
@@ -164,25 +165,23 @@ func (s *FilePollingService) Start() (infos []model.ListenerInfo, err error) {
 func makeFLogger(logger log15.Logger, raw *model.RawFileMessage) log15.Logger {
 	return logger.New(
 		"protocol", "filepoll",
-		"format", raw.Format,
-		"encoding", raw.Encoding,
+		"format", raw.Decoder.Format,
 		"filename", raw.Filename,
 	)
 }
 
-func (s *FilePollingService) parseOne(raw *model.RawFileMessage, env *base.ParsersEnv, gen *utils.Generator) error {
+func (s *FilePollingService) parseOne(raw *model.RawFileMessage, env *decoders.ParsersEnv, gen *utils.Generator) error {
 
-	decoder := utils.SelectDecoder(raw.Encoding)
-	parser, err := env.GetParser(raw.Format)
+	parser, err := env.GetParser(&raw.Decoder)
 
 	if parser == nil || err != nil {
 		makeFLogger(s.logger, raw).Error("Unknown parser")
 		return nil
 	}
 
-	syslogMsgs, err := parser(raw.Line, decoder)
+	syslogMsgs, err := parser(raw.Line)
 	if err != nil {
-		base.ParsingErrorCounter.WithLabelValues("filepoll", raw.Hostname, raw.Format).Inc()
+		base.ParsingErrorCounter.WithLabelValues("filepoll", raw.Hostname, raw.Decoder.Format).Inc()
 		makeFLogger(s.logger, raw).Info("Parsing error", "error", err)
 		return nil
 	}
@@ -219,7 +218,11 @@ func (s *FilePollingService) parseOne(raw *model.RawFileMessage, env *base.Parse
 func (s *FilePollingService) parse() {
 	defer s.wg.Done()
 
-	env := base.NewParsersEnv(s.ParserConfigs, s.logger)
+	env := decoders.NewParsersEnv(s.logger)
+	for _, pc := range s.ParserConfigs {
+		env.AddJSParser(pc.Name, pc.Func)
+	}
+
 	gen := utils.NewGenerator()
 	var raw *model.RawFileMessage
 	var err error
@@ -269,8 +272,7 @@ func (s *FilePollingService) fetchLines(results chan tail.FileLineID) {
 		config = s.confs[s.confsMap[result.Uid]]
 		raw = s.pool.Get().(*model.RawFileMessage)
 		raw.Hostname = hostname
-		raw.Encoding = config.Encoding
-		raw.Format = config.Format
+		raw.Decoder = model.DecoderConfig(config.DecoderBaseConfig)
 		raw.Directory = config.BaseDirectory
 		raw.Glob = config.Glob
 		raw.Filename = result.Filename

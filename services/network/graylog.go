@@ -15,8 +15,8 @@ import (
 
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
+	"github.com/stephane-martin/skewer/decoders"
 	"github.com/stephane-martin/skewer/model"
-	"github.com/stephane-martin/skewer/model/decoders"
 	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/services/errors"
 	"github.com/stephane-martin/skewer/utils"

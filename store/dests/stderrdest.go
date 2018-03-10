@@ -6,8 +6,8 @@ import (
 	"os"
 
 	"github.com/stephane-martin/skewer/conf"
+	"github.com/stephane-martin/skewer/encoders"
 	"github.com/stephane-martin/skewer/model"
-	"github.com/stephane-martin/skewer/model/encoders"
 )
 
 type StderrDestination struct {

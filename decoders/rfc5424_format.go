@@ -7,9 +7,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/stephane-martin/skewer/decoders/base"
 	"github.com/stephane-martin/skewer/model"
-	"golang.org/x/text/encoding"
-	"golang.org/x/text/encoding/unicode"
 )
 
 func isASCII(s []byte) bool {
@@ -24,24 +23,26 @@ func isASCII(s []byte) bool {
 var SP []byte = []byte(" ")
 var DASH []byte = []byte("-")
 
-func p5424(m []byte, decoder *encoding.Decoder) ([]*model.SyslogMessage, error) {
+func p5424(m []byte) ([]*model.SyslogMessage, error) {
 	// HEADER = PRI VERSION SP TIMESTAMP SP HOSTNAME SP APP-NAME SP PROCID SP MSGID
 	// PRI = "<" PRIVAL ">"
 	// SYSLOG-MSG = HEADER SP STRUCTURED-DATA [SP MSG]
 	var err error
-	if decoder == nil {
-		decoder = unicode.UTF8.NewDecoder()
-	}
-	m, err = decoder.Bytes(m)
-	if err != nil {
-		return nil, &InvalidEncodingError{Err: err}
-	}
+	/*
+		if decoder == nil {
+			decoder = unicode.UTF8.NewDecoder()
+		}
+		m, err = decoder.Bytes(m)
+		if err != nil {
+			return nil, &InvalidEncodingError{Err: err}
+		}
+	*/
 
 	m = bytes.TrimSpace(m)
 	splits := bytes.SplitN(m, SP, 7)
 
 	if len(splits) < 7 {
-		return nil, &NotEnoughPartsError{len(splits)}
+		return nil, &base.NotEnoughPartsError{len(splits)}
 	}
 	smsg := model.CleanFactory()
 	smsg.Priority, smsg.Facility, smsg.Severity, smsg.Version, err = parsePriority(splits[0])
@@ -104,7 +105,7 @@ func p5424(m []byte, decoder *encoding.Decoder) ([]*model.SyslogMessage, error) 
 			smsg.SetAllProperties(props)
 		}
 	} else {
-		return nil, &InvalidStructuredDataError{"Structured data is not nil but does not start with '['"}
+		return nil, &base.InvalidStructuredDataError{"Structured data is not nil but does not start with '['"}
 	}
 
 	return []*model.SyslogMessage{smsg}, nil
@@ -122,31 +123,31 @@ func splitStructuredData(structured_and_msg []byte) ([]byte, []byte, error) {
 			}
 		}
 	}
-	return []byte{}, []byte{}, &InvalidStructuredDataError{"Can not find the last ']' that marks the end of structured data"}
+	return []byte{}, []byte{}, &base.InvalidStructuredDataError{"Can not find the last ']' that marks the end of structured data"}
 }
 
 func parsePriority(pv []byte) (model.Priority, model.Facility, model.Severity, model.Version, error) {
 	if pv[0] != byte('<') {
-		return 0, 0, 0, 0, &InvalidPriorityError{}
+		return 0, 0, 0, 0, &base.InvalidPriorityError{}
 	}
 	i := bytes.Index(pv, []byte(">"))
 	if i < 2 {
-		return 0, 0, 0, 0, &InvalidPriorityError{}
+		return 0, 0, 0, 0, &base.InvalidPriorityError{}
 	}
 	if len(pv) <= (i + 1) {
-		return 0, 0, 0, 0, &InvalidPriorityError{}
+		return 0, 0, 0, 0, &base.InvalidPriorityError{}
 	}
 
 	p, err := strconv.Atoi(string(pv[1:i]))
 	if err != nil {
-		return 0, 0, 0, 0, &InvalidPriorityError{}
+		return 0, 0, 0, 0, &base.InvalidPriorityError{}
 	}
 
 	f := model.Facility(p / 8)
 	s := model.Severity(p % 8)
 	v, err := strconv.Atoi(string(pv[i+1:]))
 	if err != nil {
-		return 0, 0, 0, 0, &InvalidPriorityError{}
+		return 0, 0, 0, 0, &base.InvalidPriorityError{}
 	}
 
 	return model.Priority(p), f, s, model.Version(v), nil
@@ -155,7 +156,7 @@ func parsePriority(pv []byte) (model.Priority, model.Facility, model.Severity, m
 func parseStructData(sd []byte) (m map[string](map[string]string), err error) {
 	// see https://tools.ietf.org/html/rfc5424#section-6.3
 	if !utf8.Valid(sd) {
-		return nil, &InvalidStructuredDataError{}
+		return nil, &base.InvalidStructuredDataError{}
 	}
 	m = map[string]map[string]string{}
 	l := len(sd)
@@ -171,10 +172,10 @@ func parseStructData(sd []byte) (m map[string](map[string]string), err error) {
 	value = func() error {
 		// a bit long and painful to take care of escaped characters
 		if position == l {
-			return &InvalidStructuredDataError{"Expected SD-VALUE, got nothing"}
+			return &base.InvalidStructuredDataError{"Expected SD-VALUE, got nothing"}
 		}
 		if sd[position] != '"' {
-			return &InvalidStructuredDataError{"SD-VALUE should start with a quote"}
+			return &base.InvalidStructuredDataError{"SD-VALUE should start with a quote"}
 		}
 		position++
 		p := position
@@ -183,7 +184,7 @@ func parseStructData(sd []byte) (m map[string](map[string]string), err error) {
 			if sd[p] == '\\' {
 				p++
 				if p >= l {
-					return &InvalidStructuredDataError{"Unexpected end after a \\"}
+					return &base.InvalidStructuredDataError{"Unexpected end after a \\"}
 				}
 				if sd[p] == '"' || sd[p] == '\\' || sd[p] == ']' {
 					p++
@@ -200,7 +201,7 @@ func parseStructData(sd []byte) (m map[string](map[string]string), err error) {
 			position += len(val)
 			position++ // count for the closing quote
 			if position >= l {
-				return &InvalidStructuredDataError{"Abrupt end of SD-ELEMENT"}
+				return &base.InvalidStructuredDataError{"Abrupt end of SD-ELEMENT"}
 			}
 			if sd[position] == ' ' {
 				position++
@@ -209,22 +210,22 @@ func parseStructData(sd []byte) (m map[string](map[string]string), err error) {
 				position++
 				return openBracket()
 			} else {
-				return &InvalidStructuredDataError{fmt.Sprintf("Expected SP or ']' but got '%s' instead", string(sd[position]))}
+				return &base.InvalidStructuredDataError{fmt.Sprintf("Expected SP or ']' but got '%s' instead", string(sd[position]))}
 			}
 
 		} else {
-			return &InvalidStructuredDataError{"The end of SD-VALUE was not found"}
+			return &base.InvalidStructuredDataError{"The end of SD-VALUE was not found"}
 		}
 	}
 
 	param = func() error {
 		name_end := bytes.Index(sd[position:], []byte("="))
 		if name_end < 1 {
-			return &InvalidStructuredDataError{"Invalid SD-NAME"}
+			return &base.InvalidStructuredDataError{"Invalid SD-NAME"}
 		}
 		current_name = sd[position : position+name_end]
 		if !isASCII(current_name) {
-			return &InvalidStructuredDataError{"Invalid SD-NAME"}
+			return &base.InvalidStructuredDataError{"Invalid SD-NAME"}
 		}
 		position += name_end
 		position++ // count the '='
@@ -234,11 +235,11 @@ func parseStructData(sd []byte) (m map[string](map[string]string), err error) {
 	sdid = func() error {
 		end := bytes.IndexAny(sd[position:], " ]")
 		if end < 1 {
-			return &InvalidStructuredDataError{"Invalid SDID"}
+			return &base.InvalidStructuredDataError{"Invalid SDID"}
 		}
 		current_sdid = sd[position : position+end]
 		if !isASCII(current_sdid) {
-			return &InvalidStructuredDataError{"Invalid SDID"}
+			return &base.InvalidStructuredDataError{"Invalid SDID"}
 		}
 		position += end
 		m[string(current_sdid)] = map[string]string{}
@@ -262,7 +263,7 @@ func parseStructData(sd []byte) (m map[string](map[string]string), err error) {
 			position++
 			return sdid()
 		} else {
-			return &InvalidStructuredDataError{fmt.Sprintf("Expected '[' but got '%s' instead", string(sd[position]))}
+			return &base.InvalidStructuredDataError{fmt.Sprintf("Expected '[' but got '%s' instead", string(sd[position]))}
 		}
 	}
 
