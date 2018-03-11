@@ -9,6 +9,8 @@ import (
 	"github.com/stephane-martin/skewer/model"
 )
 
+var space = []byte(" ")
+
 // <PRI>Mmm dd hh:mm:ss HOSTNAME TAG MSG
 // or <PRI>Mmm dd hh:mm:ss TAG MSG
 // or <PRI>RFC3339 HOSTNAME TAG MSG
@@ -64,7 +66,7 @@ func p3164(m []byte) ([]*model.SyslogMessage, error) {
 		return []*model.SyslogMessage{smsg}, nil
 	}
 
-	s := bytes.Split(m, SP)
+	s := bytes.Split(m, space)
 	if m[0] >= byte('0') && m[0] <= byte('9') {
 		// RFC3339
 		s0 := string(s[0])
@@ -94,7 +96,7 @@ func p3164(m []byte) ([]*model.SyslogMessage, error) {
 			model.Free(defaultMsg[0])
 			return []*model.SyslogMessage{smsg}, nil
 		}
-		timestampBytes := bytes.Join(s[0:3], SP)
+		timestampBytes := bytes.Join(s[0:3], space)
 		t, e := time.Parse(time.Stamp, string(timestampBytes))
 		if e != nil {
 			smsg.Message = string(m)
@@ -152,13 +154,13 @@ func p3164(m []byte) ([]*model.SyslogMessage, error) {
 	if bytes.ContainsAny(s[0], "[]:") || !isHostname(s[0]) {
 		// hostname is omitted
 		smsg.AppName, smsg.ProcId = pair2str(parseTag(s[0]))
-		smsg.Message = string(bytes.Join(s[1:], SP))
+		smsg.Message = string(bytes.Join(s[1:], space))
 		model.Free(defaultMsg[0])
 		return []*model.SyslogMessage{smsg}, nil
 	}
 	smsg.HostName = string(s[0])
 	smsg.AppName, smsg.ProcId = pair2str(parseTag(s[1]))
-	smsg.Message = string(bytes.Join(s[2:], SP))
+	smsg.Message = string(bytes.Join(s[2:], space))
 	model.Free(defaultMsg[0])
 	return []*model.SyslogMessage{smsg}, nil
 }

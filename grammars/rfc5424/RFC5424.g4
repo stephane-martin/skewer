@@ -4,7 +4,7 @@ full:         headr SP+ structured (SP+ msg)? EOF;
 headr:        pri version SP+ timestamp SP+ hostname SP+ appname SP+ procid SP+ msgid;
 
 msg:          allchars*?;
-allchars:     ASCII | VALUECHAR | specialvalue | ANTISLASH | CLOSESQUARE | QUOTE;
+allchars:     ASCII | VALUECHAR | specialvalue | ANTISLASH | CLOSESQUARE | QUOTE | ANYCHAR;
 
 timestamp:    date ASCII time timezone;
 date:         year HYPHEN month HYPHEN day;

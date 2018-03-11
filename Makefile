@@ -11,7 +11,7 @@ LDFLAGS=-ldflags '-w -s -X github.com/stephane-martin/skewer/conf.Version=${VERS
 SOURCES = $(shell find . -type f -name '*.go' -not -path "./vendor/*")
 SUBDIRS = $(shell find . -type d -regex './[a-z].*' -not -path './vendor*' -not -path '*.shapesdoc' | xargs)
 
-$(BINARY): ${SOURCES} utils/logging/types.pb.go conf/derived.gen.go utils/queue/tcp/ring.go utils/queue/udp/ring.go utils/queue/kafka/ring.go utils/queue/message/ring.go model/types.pb.go model/types_ffjson.go utils/collectd/embed/statik/statik.go
+$(BINARY): ${SOURCES} utils/logging/types.pb.go conf/derived.gen.go utils/queue/tcp/ring.go utils/queue/udp/ring.go utils/queue/kafka/ring.go utils/queue/message/ring.go model/types.pb.go model/types_ffjson.go utils/collectd/embed/statik/statik.go grammars/rfc5424/rfc5424_lexer.go
 	test -n "${GOPATH}"  # test $$GOPATH
 	go build -o ${BINARY}
 
@@ -54,6 +54,10 @@ conf/derived.gen.go: conf/types.go conf/conf.go
 utils/collectd/embed/statik/statik.go: utils/collectd/static/types.db
 	test -n "${GOPATH}"  # test $$GOPATH
 	statik -src ./utils/collectd/static -dest ./utils/collectd/embed
+
+grammars/rfc5424/rfc5424_lexer.go: grammars/rfc5424/RFC5424.g4
+	rm -f grammars/rfc5424/RFC5424.interp grammars/rfc5424/RFC5424.tokens grammars/rfc5424/rfc5424_base_listener.go grammars/rfc5424/rfc5424_lexer.go grammars/rfc5424/rfc5424_listener.go grammars/rfc5424/rfc5424_parser.go grammars/rfc5424/RFC5424Lexer.interp grammars/rfc5424/RFC5424Lexer.tokens
+	antlr4 -Dlanguage=Go -package rfc5424 grammars/rfc5424/RFC5424.g4
 
 clean:
 	rm -f ${BINARY} 

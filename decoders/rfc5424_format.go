@@ -1,287 +1,232 @@
 package decoders
 
 import (
-	"bytes"
+	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
-	"unicode/utf8"
 
+	"github.com/antlr/antlr4/runtime/Go/antlr"
 	"github.com/stephane-martin/skewer/decoders/base"
+	"github.com/stephane-martin/skewer/grammars/rfc5424"
 	"github.com/stephane-martin/skewer/model"
 )
 
-func isASCII(s []byte) bool {
-	for _, c := range s {
-		if c > 127 {
-			return false
-		}
-	}
-	return true
-}
-
-var SP []byte = []byte(" ")
-var DASH []byte = []byte("-")
-
 func p5424(m []byte) ([]*model.SyslogMessage, error) {
-	// HEADER = PRI VERSION SP TIMESTAMP SP HOSTNAME SP APP-NAME SP PROCID SP MSGID
-	// PRI = "<" PRIVAL ">"
-	// SYSLOG-MSG = HEADER SP STRUCTURED-DATA [SP MSG]
-	var err error
-	/*
-		if decoder == nil {
-			decoder = unicode.UTF8.NewDecoder()
-		}
-		m, err = decoder.Bytes(m)
-		if err != nil {
-			return nil, &InvalidEncodingError{Err: err}
-		}
-	*/
+	parser := rfc5424.NewRFC5424Parser(
+		antlr.NewCommonTokenStream(
+			rfc5424.NewRFC5424Lexer(
+				antlr.NewInputStream(string(m)),
+			),
+			antlr.TokenDefaultChannel,
+		),
+	)
+	parser.RemoveErrorListeners()
+	errListner := newErrorListener()
+	parser.AddErrorListener(errListner)
+	//parser.AddErrorListener(antlr.NewDiagnosticErrorListener(false))
+	parser.SetErrorHandler(newErrorStrategy())
+	parser.BuildParseTrees = true
+	parser.GetInterpreter().SetPredictionMode(antlr.PredictionModeSLL)
+	listnr := newListener()
+	antlr.ParseTreeWalkerDefault.Walk(listnr, parser.Full())
 
-	m = bytes.TrimSpace(m)
-	splits := bytes.SplitN(m, SP, 7)
-
-	if len(splits) < 7 {
-		return nil, &base.NotEnoughPartsError{len(splits)}
+	err := errListner.Err()
+	if err == nil {
+		err = listnr.Err()
 	}
-	smsg := model.CleanFactory()
-	smsg.Priority, smsg.Facility, smsg.Severity, smsg.Version, err = parsePriority(splits[0])
 	if err != nil {
 		return nil, err
 	}
-
-	n := time.Now().UnixNano()
-	s := string(splits[1])
-	if s == "-" {
-		smsg.TimeReportedNum = time.Now().UnixNano()
-	}
-	if smsg.TimeReportedNum == 0 {
-		t1, err := time.Parse(time.RFC3339Nano, s)
-		if err != nil {
-			t2, err := time.Parse(time.RFC3339, s)
-			if err != nil {
-				smsg.TimeReportedNum = n
-			} else {
-				smsg.TimeReportedNum = t2.UnixNano()
-			}
-		} else {
-			smsg.TimeReportedNum = t1.UnixNano()
-		}
-	}
-	smsg.TimeGeneratedNum = n
-
-	s = string(splits[2])
-	if s != "-" {
-		smsg.HostName = s
-	}
-	s = string(splits[3])
-	if s != "-" {
-		smsg.AppName = s
-	}
-	s = string(splits[4])
-	if s != "-" {
-		smsg.ProcId = s
-	}
-	s = string(splits[5])
-	if s != "-" {
-		smsg.MsgId = s
-	}
-	structured_and_msg := bytes.TrimSpace(splits[6])
-	if bytes.HasPrefix(structured_and_msg, DASH) {
-		// structured data is empty
-		smsg.Message = string(bytes.TrimSpace(structured_and_msg[1:]))
-	} else if bytes.HasPrefix(structured_and_msg, []byte("[")) {
-		s1, s2, err := splitStructuredData(structured_and_msg)
-		if err != nil {
-			return nil, err
-		}
-		smsg.Message = string(s2)
-		smsg.Structured = ""
-		props, err := parseStructData(s1)
-		if err != nil {
-			return nil, err
-		}
-		if len(props) > 0 {
-			smsg.SetAllProperties(props)
-		}
-	} else {
-		return nil, &base.InvalidStructuredDataError{"Structured data is not nil but does not start with '['"}
-	}
-
-	return []*model.SyslogMessage{smsg}, nil
+	return []*model.SyslogMessage{listnr.GetMessage()}, nil
 }
 
-func splitStructuredData(structured_and_msg []byte) ([]byte, []byte, error) {
-	length := len(structured_and_msg)
-	for i := 0; i < length; i++ {
-		if structured_and_msg[i] == ']' {
-			if i == (length - 1) {
-				return structured_and_msg, []byte{}, nil
-			}
-			if structured_and_msg[i+1] == ' ' {
-				return structured_and_msg[:i+1], bytes.TrimSpace(structured_and_msg[i+1:]), nil
-			}
-		}
-	}
-	return []byte{}, []byte{}, &base.InvalidStructuredDataError{"Can not find the last ']' that marks the end of structured data"}
+type errorStrategy struct {
+	*antlr.DefaultErrorStrategy
 }
 
-func parsePriority(pv []byte) (model.Priority, model.Facility, model.Severity, model.Version, error) {
-	if pv[0] != byte('<') {
-		return 0, 0, 0, 0, &base.InvalidPriorityError{}
+func newErrorStrategy() *errorStrategy {
+	return &errorStrategy{
+		DefaultErrorStrategy: antlr.NewDefaultErrorStrategy(),
 	}
-	i := bytes.Index(pv, []byte(">"))
-	if i < 2 {
-		return 0, 0, 0, 0, &base.InvalidPriorityError{}
-	}
-	if len(pv) <= (i + 1) {
-		return 0, 0, 0, 0, &base.InvalidPriorityError{}
-	}
-
-	p, err := strconv.Atoi(string(pv[1:i]))
-	if err != nil {
-		return 0, 0, 0, 0, &base.InvalidPriorityError{}
-	}
-
-	f := model.Facility(p / 8)
-	s := model.Severity(p % 8)
-	v, err := strconv.Atoi(string(pv[i+1:]))
-	if err != nil {
-		return 0, 0, 0, 0, &base.InvalidPriorityError{}
-	}
-
-	return model.Priority(p), f, s, model.Version(v), nil
 }
 
-func parseStructData(sd []byte) (m map[string](map[string]string), err error) {
-	// see https://tools.ietf.org/html/rfc5424#section-6.3
-	if !utf8.Valid(sd) {
-		return nil, &base.InvalidStructuredDataError{}
+func (s *errorStrategy) Sync(antlr.Parser) {
+
+}
+
+type errorListener struct {
+	*antlr.DefaultErrorListener
+	err    error
+	line   int
+	column int
+}
+
+func newErrorListener() *errorListener {
+	return &errorListener{
+		DefaultErrorListener: antlr.NewDefaultErrorListener(),
 	}
-	m = map[string]map[string]string{}
-	l := len(sd)
-	position := 0
-	current_sdid := []byte{}
-	current_name := []byte{}
+}
 
-	var openBracket func() error
-	var sdid func() error
-	var value func() error
-	var param func() error
-
-	value = func() error {
-		// a bit long and painful to take care of escaped characters
-		if position == l {
-			return &base.InvalidStructuredDataError{"Expected SD-VALUE, got nothing"}
-		}
-		if sd[position] != '"' {
-			return &base.InvalidStructuredDataError{"SD-VALUE should start with a quote"}
-		}
-		position++
-		p := position
-		found := false
-		for p < l && !found {
-			if sd[p] == '\\' {
-				p++
-				if p >= l {
-					return &base.InvalidStructuredDataError{"Unexpected end after a \\"}
-				}
-				if sd[p] == '"' || sd[p] == '\\' || sd[p] == ']' {
-					p++
-				}
-			} else if sd[p] == '"' {
-				found = true
-			} else {
-				p++
-			}
-		}
-		if found {
-			val := sd[position:p]
-			m[string(current_sdid)][string(current_name)] = string(val)
-			position += len(val)
-			position++ // count for the closing quote
-			if position >= l {
-				return &base.InvalidStructuredDataError{"Abrupt end of SD-ELEMENT"}
-			}
-			if sd[position] == ' ' {
-				position++
-				return param()
-			} else if sd[position] == ']' {
-				position++
-				return openBracket()
-			} else {
-				return &base.InvalidStructuredDataError{fmt.Sprintf("Expected SP or ']' but got '%s' instead", string(sd[position]))}
-			}
-
-		} else {
-			return &base.InvalidStructuredDataError{"The end of SD-VALUE was not found"}
-		}
+func (el *errorListener) SyntaxError(rec antlr.Recognizer, offendingSymbol interface{}, line, column int, errmsg string, e antlr.RecognitionException) {
+	if len(errmsg) > 0 && el.err == nil {
+		el.err = fmt.Errorf(errmsg)
+		el.line = line
+		el.column = column
 	}
+}
 
-	param = func() error {
-		name_end := bytes.Index(sd[position:], []byte("="))
-		if name_end < 1 {
-			return &base.InvalidStructuredDataError{"Invalid SD-NAME"}
-		}
-		current_name = sd[position : position+name_end]
-		if !isASCII(current_name) {
-			return &base.InvalidStructuredDataError{"Invalid SD-NAME"}
-		}
-		position += name_end
-		position++ // count the '='
-		return value()
+func (el *errorListener) Err() error {
+	return el.err
+}
+
+type listener struct {
+	*rfc5424.BaseRFC5424Listener
+	msg        *model.SyslogMessage
+	err        error
+	currentSID string
+}
+
+func newListener() *listener {
+	return &listener{
+		BaseRFC5424Listener: &rfc5424.BaseRFC5424Listener{},
+		msg:                 model.CleanFactory(),
 	}
+}
 
-	sdid = func() error {
-		end := bytes.IndexAny(sd[position:], " ]")
-		if end < 1 {
-			return &base.InvalidStructuredDataError{"Invalid SDID"}
-		}
-		current_sdid = sd[position : position+end]
-		if !isASCII(current_sdid) {
-			return &base.InvalidStructuredDataError{"Invalid SDID"}
-		}
-		position += end
-		m[string(current_sdid)] = map[string]string{}
-		if sd[position] == byte(' ') {
-			// now read the params
-			position++
-			return param()
-		} else {
-			// end of the element
-			position++
-			return openBracket()
-		}
+func (l *listener) GetMessage() *model.SyslogMessage {
+	return l.msg
+}
 
+func (l *listener) ExitPri(ctx *rfc5424.PriContext) {
+	if l.err != nil || ctx == nil {
+		return
 	}
-
-	openBracket = func() error {
-		if position == l {
-			return nil
-		}
-		if sd[position] == '[' {
-			position++
-			return sdid()
-		} else {
-			return &base.InvalidStructuredDataError{fmt.Sprintf("Expected '[' but got '%s' instead", string(sd[position]))}
-		}
-	}
-
-	err = openBracket()
+	pri, err := strconv.Atoi(strings.Trim(ctx.GetText(), "<>"))
 	if err != nil {
-		return nil, err
+		l.setErr(new(base.InvalidPriorityError))
+		return
 	}
+	l.msg.Priority = model.Priority(pri)
+	l.msg.Facility = model.Facility(pri / 8)
+	l.msg.Severity = model.Severity(pri % 8)
+}
 
-	// remove empty SDID sections
-	emptySDIDs := []string{}
-	for id, paramvalues := range m {
-		if len(paramvalues) == 0 {
-			emptySDIDs = append(emptySDIDs, id)
+func (l *listener) ExitVersion(ctx *rfc5424.VersionContext) {
+	if l.err != nil || ctx == nil {
+		return
+	}
+	v, err := strconv.Atoi(ctx.GetText())
+	if err != nil {
+		l.setErr(new(base.InvalidPriorityError))
+		return
+	}
+	l.msg.Version = model.Version(v)
+}
+
+func (l *listener) ExitTimestamp(ctx *rfc5424.TimestampContext) {
+	if l.err != nil || ctx == nil {
+		return
+	}
+	l.msg.TimeGeneratedNum = time.Now().UnixNano()
+	t := ctx.GetText()
+	if t == "-" {
+		l.msg.TimeReportedNum = l.msg.TimeGeneratedNum
+		return
+	}
+	rep, err := time.Parse(time.RFC3339, ctx.GetText())
+	if err != nil {
+		l.setErr(err)
+		return
+	}
+	l.msg.TimeReportedNum = rep.UnixNano()
+}
+
+func (l *listener) ExitHostname(ctx *rfc5424.HostnameContext) {
+	if l.err != nil || ctx == nil {
+		return
+	}
+	h := ctx.GetText()
+	if h != "-" {
+		l.msg.HostName = h
+	}
+}
+
+func (l *listener) ExitAppname(ctx *rfc5424.AppnameContext) {
+	if l.err != nil || ctx == nil {
+		return
+	}
+	app := ctx.GetText()
+	if app != "-" {
+		l.msg.AppName = app
+	}
+}
+
+func (l *listener) ExitProcid(ctx *rfc5424.ProcidContext) {
+	if l.err != nil || ctx == nil {
+		return
+	}
+	proc := ctx.GetText()
+	if proc != "-" {
+		l.msg.ProcId = proc
+	}
+}
+
+func (l *listener) ExitMsgid(ctx *rfc5424.MsgidContext) {
+	if l.err != nil || ctx == nil {
+		return
+	}
+	msgid := ctx.GetText()
+	if msgid != "-" {
+		l.msg.MsgId = msgid
+	}
+}
+
+func (l *listener) ExitSid(ctx *rfc5424.SidContext) {
+	if l.err != nil || ctx == nil {
+		return
+	}
+	l.currentSID = ctx.GetText()
+	if len(l.currentSID) == 0 {
+		l.setErr(errors.New("Empty SDID"))
+		return
+	}
+	l.msg.ClearDomain(l.currentSID)
+}
+
+func (l *listener) ExitParam(ctx *rfc5424.ParamContext) {
+	if l.err != nil || ctx == nil {
+		return
+	}
+	if len(l.currentSID) == 0 {
+		l.setErr(errors.New("Empty SDID"))
+		return
+	}
+	name := ctx.Name()
+	value := ctx.Value()
+	if name != nil {
+		if value != nil {
+			l.msg.SetProperty(l.currentSID, name.GetText(), value.GetText())
+		} else {
+			l.msg.SetProperty(l.currentSID, name.GetText(), "")
 		}
 	}
-	for _, id := range emptySDIDs {
-		delete(m, id)
-	}
+}
 
-	return m, nil
+func (l *listener) ExitMsg(ctx *rfc5424.MsgContext) {
+	if l.err != nil || ctx == nil {
+		return
+	}
+	l.msg.Message = ctx.GetText()
+}
+
+func (l *listener) Err() error {
+	return l.err
+}
+
+func (l *listener) setErr(err error) {
+	if l.err == nil {
+		l.err = err
+	}
 }
