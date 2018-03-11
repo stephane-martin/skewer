@@ -210,6 +210,12 @@
 			"revisionTime": "2017-09-08T14:47:16Z"
 		},
 		{
+			"checksumSHA1": "RQcJoDaMSa+SCUvyyCjhivkantU=",
+			"path": "github.com/antlr/antlr4/runtime/Go/antlr",
+			"revision": "30ef969e76f6151c3acb4e85fc09b829880e5f31",
+			"revisionTime": "2018-03-01T17:29:29Z"
+		},
+		{
 			"checksumSHA1": "mEPx03tDisj6nvPDxzIeb1gt4xg=",
 			"path": "github.com/armon/consul-api",
 			"revision": "dcfedd50ed5334f96adee43fc88518a4f095e15c",
