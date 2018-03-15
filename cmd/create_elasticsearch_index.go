@@ -116,5 +116,4 @@ func init() {
 	createElasticsearchIndexCmd.Flags().BoolVarP(&test, "test", "t", false, "only display the configuration body")
 	createElasticsearchIndexCmd.Flags().StringVarP(&indexName, "name", "n", "skewer", "elasticsearch index name")
 	createElasticsearchIndexCmd.Flags().BoolVarP(&delete, "delete", "", false, "delete index instead of create")
-
 }
