@@ -952,6 +952,12 @@
 			"revisionTime": "2017-06-20T06:34:21Z"
 		},
 		{
+			"checksumSHA1": "++Uxr4F++QrnFEbBlQsJ3VuQoNM=",
+			"path": "github.com/rakyll/statik/fs",
+			"revision": "016ca6fdb1b26618ff8f53fbd1109ff834524f23",
+			"revisionTime": "2017-09-21T04:38:01Z"
+		},
+		{
 			"checksumSHA1": "KAzbLjI9MzW2tjfcAsK75lVRp6I=",
 			"path": "github.com/rcrowley/go-metrics",
 			"revision": "1f30fe9094a513ce4c700b9a54458bbb0c96996c",
