@@ -20,7 +20,6 @@ import (
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/db"
 	"github.com/stephane-martin/skewer/utils/queue"
-
 )
 
 var Registry *prometheus.Registry
@@ -95,7 +94,7 @@ func (dests *Destinations) Has(one conf.DestinationType) bool {
 type QueueType uint8
 
 const (
-	Messages   = iota
+	Messages = iota
 	Ready
 	Sent
 	Failed
@@ -295,6 +294,7 @@ func (s *MessageStore) retrieveAndForward(ctx context.Context) {
 					select {
 					case <-doneChan:
 						return
+					// TODO: exponential wait
 					case <-time.After(time.Second):
 						continue ForwardLoop
 					}
@@ -306,6 +306,7 @@ func (s *MessageStore) retrieveAndForward(ctx context.Context) {
 					select {
 					case <-doneChan:
 						return
+					// TODO: exponential wait
 					case <-time.After(time.Second):
 						continue ForwardLoop
 					}
@@ -366,7 +367,7 @@ RetrieveLoop:
 			}
 		}
 		if now.Before(first) {
-			select{
+			select {
 			case <-doneChan:
 				return
 			case <-time.After(first.Sub(now)):
@@ -389,12 +390,14 @@ RetrieveLoop:
 		}
 		if len(bucket[currentDest].Load().([]*model.FullMessage)) > 0 {
 			// previous messages are still being sent
+			// TODO: exponential wait
 			next[currentDest] = now.Add(time.Second)
 			continue RetrieveLoop
 		}
 
 		messages = s.retrieve(currentDest)
 		if len(messages) == 0 {
+			// TODO: exponential wait
 			next[currentDest] = now.Add(time.Second)
 			continue RetrieveLoop
 		}
