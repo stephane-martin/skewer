@@ -38,12 +38,6 @@ func (s *BaseRFC5424Listener) EnterMsg(ctx *MsgContext) {}
 // ExitMsg is called when production msg is exited.
 func (s *BaseRFC5424Listener) ExitMsg(ctx *MsgContext) {}
 
-// EnterAllchars is called when production allchars is entered.
-func (s *BaseRFC5424Listener) EnterAllchars(ctx *AllcharsContext) {}
-
-// ExitAllchars is called when production allchars is exited.
-func (s *BaseRFC5424Listener) ExitAllchars(ctx *AllcharsContext) {}
-
 // EnterTimestamp is called when production timestamp is entered.
 func (s *BaseRFC5424Listener) EnterTimestamp(ctx *TimestampContext) {}
 
@@ -56,65 +50,17 @@ func (s *BaseRFC5424Listener) EnterDate(ctx *DateContext) {}
 // ExitDate is called when production date is exited.
 func (s *BaseRFC5424Listener) ExitDate(ctx *DateContext) {}
 
-// EnterYear is called when production year is entered.
-func (s *BaseRFC5424Listener) EnterYear(ctx *YearContext) {}
-
-// ExitYear is called when production year is exited.
-func (s *BaseRFC5424Listener) ExitYear(ctx *YearContext) {}
-
-// EnterMonth is called when production month is entered.
-func (s *BaseRFC5424Listener) EnterMonth(ctx *MonthContext) {}
-
-// ExitMonth is called when production month is exited.
-func (s *BaseRFC5424Listener) ExitMonth(ctx *MonthContext) {}
-
-// EnterDay is called when production day is entered.
-func (s *BaseRFC5424Listener) EnterDay(ctx *DayContext) {}
-
-// ExitDay is called when production day is exited.
-func (s *BaseRFC5424Listener) ExitDay(ctx *DayContext) {}
-
 // EnterTime is called when production time is entered.
 func (s *BaseRFC5424Listener) EnterTime(ctx *TimeContext) {}
 
 // ExitTime is called when production time is exited.
 func (s *BaseRFC5424Listener) ExitTime(ctx *TimeContext) {}
 
-// EnterHour is called when production hour is entered.
-func (s *BaseRFC5424Listener) EnterHour(ctx *HourContext) {}
-
-// ExitHour is called when production hour is exited.
-func (s *BaseRFC5424Listener) ExitHour(ctx *HourContext) {}
-
-// EnterMinute is called when production minute is entered.
-func (s *BaseRFC5424Listener) EnterMinute(ctx *MinuteContext) {}
-
-// ExitMinute is called when production minute is exited.
-func (s *BaseRFC5424Listener) ExitMinute(ctx *MinuteContext) {}
-
-// EnterSecond is called when production second is entered.
-func (s *BaseRFC5424Listener) EnterSecond(ctx *SecondContext) {}
-
-// ExitSecond is called when production second is exited.
-func (s *BaseRFC5424Listener) ExitSecond(ctx *SecondContext) {}
-
-// EnterNano is called when production nano is entered.
-func (s *BaseRFC5424Listener) EnterNano(ctx *NanoContext) {}
-
-// ExitNano is called when production nano is exited.
-func (s *BaseRFC5424Listener) ExitNano(ctx *NanoContext) {}
-
 // EnterTimezone is called when production timezone is entered.
 func (s *BaseRFC5424Listener) EnterTimezone(ctx *TimezoneContext) {}
 
 // ExitTimezone is called when production timezone is exited.
 func (s *BaseRFC5424Listener) ExitTimezone(ctx *TimezoneContext) {}
-
-// EnterTimezonenum is called when production timezonenum is entered.
-func (s *BaseRFC5424Listener) EnterTimezonenum(ctx *TimezonenumContext) {}
-
-// ExitTimezonenum is called when production timezonenum is exited.
-func (s *BaseRFC5424Listener) ExitTimezonenum(ctx *TimezonenumContext) {}
 
 // EnterPri is called when production pri is entered.
 func (s *BaseRFC5424Listener) EnterPri(ctx *PriContext) {}
@@ -152,12 +98,6 @@ func (s *BaseRFC5424Listener) EnterProcid(ctx *ProcidContext) {}
 // ExitProcid is called when production procid is exited.
 func (s *BaseRFC5424Listener) ExitProcid(ctx *ProcidContext) {}
 
-// EnterAllascii is called when production allascii is entered.
-func (s *BaseRFC5424Listener) EnterAllascii(ctx *AllasciiContext) {}
-
-// ExitAllascii is called when production allascii is exited.
-func (s *BaseRFC5424Listener) ExitAllascii(ctx *AllasciiContext) {}
-
 // EnterStructured is called when production structured is entered.
 func (s *BaseRFC5424Listener) EnterStructured(ctx *StructuredContext) {}
 
@@ -188,20 +128,8 @@ func (s *BaseRFC5424Listener) EnterName(ctx *NameContext) {}
 // ExitName is called when production name is exited.
 func (s *BaseRFC5424Listener) ExitName(ctx *NameContext) {}
 
-// EnterSpecialname is called when production specialname is entered.
-func (s *BaseRFC5424Listener) EnterSpecialname(ctx *SpecialnameContext) {}
-
-// ExitSpecialname is called when production specialname is exited.
-func (s *BaseRFC5424Listener) ExitSpecialname(ctx *SpecialnameContext) {}
-
 // EnterValue is called when production value is entered.
 func (s *BaseRFC5424Listener) EnterValue(ctx *ValueContext) {}
 
 // ExitValue is called when production value is exited.
 func (s *BaseRFC5424Listener) ExitValue(ctx *ValueContext) {}
-
-// EnterSpecialvalue is called when production specialvalue is entered.
-func (s *BaseRFC5424Listener) EnterSpecialvalue(ctx *SpecialvalueContext) {}
-
-// ExitSpecialvalue is called when production specialvalue is exited.
-func (s *BaseRFC5424Listener) ExitSpecialvalue(ctx *SpecialvalueContext) {}

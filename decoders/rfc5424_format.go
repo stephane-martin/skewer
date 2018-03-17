@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
+	"sync"
 	"time"
 
 	"github.com/antlr/antlr4/runtime/Go/antlr"
@@ -13,15 +13,23 @@ import (
 	"github.com/stephane-martin/skewer/model"
 )
 
+var parser5424Pool *sync.Pool
+
+func init() {
+	parser5424Pool = &sync.Pool{
+		New: func() interface{} {
+			return rfc5424.NewRFC5424Parser(nil)
+		},
+	}
+}
+
 func p5424(m []byte) ([]*model.SyslogMessage, error) {
-	parser := rfc5424.NewRFC5424Parser(
-		antlr.NewCommonTokenStream(
-			rfc5424.NewRFC5424Lexer(
-				antlr.NewInputStream(string(m)),
-			),
-			antlr.TokenDefaultChannel,
-		),
-	)
+	parser := parser5424Pool.Get().(*rfc5424.RFC5424Parser)
+	defer parser5424Pool.Put(parser)
+
+	lexer := rfc5424.NewRFC5424Lexer(antlr.NewInputStream(string(m)))
+	parser.SetInputStream(antlr.NewCommonTokenStream(lexer, antlr.TokenDefaultChannel))
+
 	parser.RemoveErrorListeners()
 	errListner := newErrorListener()
 	parser.AddErrorListener(errListner)
@@ -103,7 +111,7 @@ func (l *listener) ExitPri(ctx *rfc5424.PriContext) {
 	if l.err != nil || ctx == nil {
 		return
 	}
-	pri, err := strconv.Atoi(strings.Trim(ctx.GetText(), "<>"))
+	pri, err := strconv.Atoi(ctx.GetText())
 	if err != nil {
 		l.setErr(new(base.InvalidPriorityError))
 		return
