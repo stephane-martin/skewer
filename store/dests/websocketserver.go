@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/encoders"
+	"github.com/stephane-martin/skewer/encoders/baseenc"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/queue/message"
@@ -52,7 +53,7 @@ func NewWebsocketServerDestination(ctx context.Context, e *Env) (Destination, er
 	}
 
 	switch d.format {
-	case encoders.Protobuf:
+	case baseenc.Protobuf:
 		d.messageType = websocket.BinaryMessage
 	default:
 		d.messageType = websocket.TextMessage

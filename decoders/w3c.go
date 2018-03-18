@@ -5,12 +5,11 @@ import (
 	"io"
 	"strings"
 
-	"github.com/stephane-martin/skewer/decoders/base"
 	"github.com/stephane-martin/skewer/model"
 	w3c "github.com/stephane-martin/w3c-extendedlog-parser"
 )
 
-func W3CDecoder(fieldNames string) base.Parser {
+func W3CDecoder(fieldNames string) func([]byte) ([]*model.SyslogMessage, error) {
 	// https://www.w3.org/TR/WD-logfile.html
 	fields := strings.Split(fieldNames, " ")
 	return func(m []byte) (msgs []*model.SyslogMessage, err error) {

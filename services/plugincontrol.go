@@ -413,8 +413,12 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 					if err == nil {
 						s.logger.Info("reported infos", "infos", newinfos, "type", s.name)
 						if s.registry != nil {
-							s.registry.UnregisterTcpListeners(infos)
-							s.registry.RegisterTcpListeners(newinfos)
+							for _, i := range infos {
+								s.registry.UnregisterTcpListener(i.BindAddr, i.Protocol, i.Port)
+							}
+							for _, i := range newinfos {
+								s.registry.RegisterTcpListener(i.BindAddr, i.Protocol, i.Port)
+							}
 							infos = newinfos
 						}
 					}

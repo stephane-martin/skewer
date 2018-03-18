@@ -33,13 +33,14 @@ type FilePollingService struct {
 	confs          map[utils.MyULID](*conf.FilesystemSourceConfig)
 	confsMap       map[ulid.ULID]utils.MyULID
 	ParserConfigs  []conf.ParserConfig
+	parserEnv      *decoders.ParsersEnv
 	tailor         *tail.Tailor
 	rawQueue       chan *model.RawFileMessage
 	fatalErrorChan chan struct{}
 	fatalOnce      *sync.Once
-	registryOnce   sync.Once
 	confined       bool
 	wg             sync.WaitGroup
+	registryOnce   sync.Once
 	nWatchedFiles  prometheus.GaugeFunc
 	nWatchedDirs   prometheus.GaugeFunc
 }
@@ -124,6 +125,7 @@ func (s *FilePollingService) Start() (infos []model.ListenerInfo, err error) {
 	}
 	s.tailor = tailor
 
+	// TODO
 	s.registryOnce.Do(func() {
 		base.Registry.MustRegister(s.nWatchedFiles, s.nWatchedDirs)
 	})
@@ -170,16 +172,17 @@ func makeFLogger(logger log15.Logger, raw *model.RawFileMessage) log15.Logger {
 	)
 }
 
-func (s *FilePollingService) parseOne(raw *model.RawFileMessage, env *decoders.ParsersEnv, gen *utils.Generator) error {
+func (s *FilePollingService) parseOne(raw *model.RawFileMessage, gen *utils.Generator) error {
 
-	parser, err := env.GetParser(&raw.Decoder)
+	parser, err := s.parserEnv.GetParser(&raw.Decoder)
 
 	if parser == nil || err != nil {
 		makeFLogger(s.logger, raw).Error("Unknown parser")
 		return nil
 	}
+	defer parser.Release()
 
-	syslogMsgs, err := parser(raw.Line)
+	syslogMsgs, err := parser.Parse(raw.Line)
 	if err != nil {
 		base.ParsingErrorCounter.WithLabelValues("filepoll", raw.Hostname, raw.Decoder.Format).Inc()
 		makeFLogger(s.logger, raw).Info("Parsing error", "error", err)
@@ -218,11 +221,6 @@ func (s *FilePollingService) parseOne(raw *model.RawFileMessage, env *decoders.P
 func (s *FilePollingService) parse() {
 	defer s.wg.Done()
 
-	env := decoders.NewParsersEnv(s.logger)
-	for _, pc := range s.ParserConfigs {
-		env.AddJSParser(pc.Name, pc.Func)
-	}
-
 	gen := utils.NewGenerator()
 	var raw *model.RawFileMessage
 	var err error
@@ -230,7 +228,7 @@ func (s *FilePollingService) parse() {
 		if raw == nil {
 			return
 		}
-		err = s.parseOne(raw, env, gen)
+		err = s.parseOne(raw, gen)
 		s.pool.Put(raw)
 		if err != nil {
 			return
@@ -272,7 +270,7 @@ func (s *FilePollingService) fetchLines(results chan tail.FileLineID) {
 		config = s.confs[s.confsMap[result.Uid]]
 		raw = s.pool.Get().(*model.RawFileMessage)
 		raw.Hostname = hostname
-		raw.Decoder = model.DecoderConfig(config.DecoderBaseConfig)
+		raw.Decoder = config.DecoderBaseConfig
 		raw.Directory = config.BaseDirectory
 		raw.Glob = config.Glob
 		raw.Filename = result.Filename
@@ -305,6 +303,7 @@ func (s *FilePollingService) SetConf(c conf.BaseConfig) {
 	}
 	s.confsMap = make(map[ulid.ULID]utils.MyULID)
 	s.ParserConfigs = c.Parsers
+	s.parserEnv = decoders.NewParsersEnv(s.ParserConfigs, s.logger)
 }
 
 func MakeFilter(globstring string) (tail.FilterFunc, error) {

@@ -15,6 +15,7 @@ import (
 
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/encoders"
+	"github.com/stephane-martin/skewer/encoders/baseenc"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/queue/message"
@@ -61,7 +62,7 @@ func NewHTTPServerDestination(ctx context.Context, e *Env) (Destination, error) 
 			}
 		} else {
 			switch d.format {
-			case encoders.JSON, encoders.GELF:
+			case baseenc.JSON, baseenc.GELF:
 				if config.LineFraming {
 					if config.FrameDelimiter == 10 {
 						// Newline delimited JSON
@@ -74,11 +75,11 @@ func NewHTTPServerDestination(ctx context.Context, e *Env) (Destination, error) 
 					// octet counting frames => text/plain
 					d.contentType = encoders.PlainMimetype
 				}
-			case encoders.Protobuf:
+			case baseenc.Protobuf:
 				// protobuf is not natively self delimited, so we use octet counting framing
 				d.contentType = encoders.OctetStreamMimetype
 				d.lineFraming = false
-			case encoders.RFC5424, encoders.RFC3164, encoders.File:
+			case baseenc.RFC5424, baseenc.RFC3164, baseenc.File:
 				d.contentType = encoders.PlainMimetype
 			default:
 				return nil, fmt.Errorf("Unknown format: '%d'", d.format)

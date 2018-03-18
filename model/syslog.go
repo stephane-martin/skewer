@@ -1,9 +1,8 @@
 package model
 
 import (
-	"github.com/spaolacci/murmur3"
+	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/utils"
-	"github.com/zond/gotomic"
 )
 
 type Stasher interface {
@@ -22,30 +21,8 @@ type ListenerInfo struct {
 	Protocol       string `json:"protocol" msg:"protocol"`
 }
 
-type DecoderConfig struct {
-	Format    string
-	Charset   string
-	W3CFields string
-}
-
-// TODO: get rid of duplicate type
-func (c *DecoderConfig) Equals(other gotomic.Thing) bool {
-	if o, ok := other.(*DecoderConfig); ok {
-		return *c == *o
-	}
-	return false
-}
-
-func (c *DecoderConfig) HashCode() uint32 {
-	h := murmur3.New32()
-	h.Write([]byte(c.Format))
-	h.Write([]byte(c.Charset))
-	h.Write([]byte(c.W3CFields))
-	return h.Sum32()
-}
-
 type RawFileMessage struct {
-	Decoder   DecoderConfig
+	Decoder   conf.DecoderBaseConfig
 	Hostname  string
 	Directory string
 	Glob      string
@@ -55,7 +32,7 @@ type RawFileMessage struct {
 }
 
 type RawMessage struct {
-	Decoder        DecoderConfig
+	Decoder        conf.DecoderBaseConfig
 	Client         string
 	LocalPort      int32
 	UnixSocketPath string
@@ -63,7 +40,7 @@ type RawMessage struct {
 }
 
 type RawKafkaMessage struct {
-	Decoder    DecoderConfig
+	Decoder    conf.DecoderBaseConfig
 	Brokers    string
 	ConfID     utils.MyULID
 	ConsumerID uint32

@@ -28,6 +28,7 @@ func initKafkaRegistry() {
 type KafkaServiceImpl struct {
 	configs          []conf.KafkaSourceConfig
 	parserConfigs    []conf.ParserConfig
+	parserEnv        *decoders.ParsersEnv
 	reporter         base.Stasher
 	rawMessagesQueue *kafka.Ring
 	MaxMessageSize   int
@@ -62,6 +63,7 @@ func (s *KafkaServiceImpl) SetConf(c conf.BaseConfig) {
 	}}
 	s.configs = c.KafkaSource
 	s.parserConfigs = c.Parsers
+	s.parserEnv = decoders.NewParsersEnv(s.parserConfigs, s.logger)
 	s.rawMessagesQueue = kafka.NewRing(c.Main.InputQueueSize)
 }
 
@@ -127,16 +129,13 @@ func (s *KafkaServiceImpl) Parse() {
 	defer s.wg.Done()
 	var err error
 	var raw *model.RawKafkaMessage
-	env := decoders.NewParsersEnv(s.logger)
-	for _, pc := range s.parserConfigs {
-		env.AddJSParser(pc.Name, pc.Func)
-	}
+
 	for {
 		raw, err = s.rawMessagesQueue.Get()
 		if raw == nil || err != nil {
 			return
 		}
-		err = s.ParseOne(env, raw)
+		err = s.ParseOne(raw)
 		s.rawpool.Put(raw)
 		if err != nil {
 			return
@@ -144,7 +143,7 @@ func (s *KafkaServiceImpl) Parse() {
 	}
 }
 
-func (s *KafkaServiceImpl) ParseOne(env *decoders.ParsersEnv, raw *model.RawKafkaMessage) (err error) {
+func (s *KafkaServiceImpl) ParseOne(raw *model.RawKafkaMessage) (err error) {
 	ackQueue := s.queues.Get(raw.ConsumerID)
 	if ackQueue == nil {
 		// the kafka consumer is gone
@@ -169,13 +168,14 @@ func (s *KafkaServiceImpl) ParseOne(env *decoders.ParsersEnv, raw *model.RawKafk
 		"brokers", raw.Brokers,
 		"topic", raw.Topic,
 	)
-	parser, err := env.GetParser(&raw.Decoder)
+	parser, err := s.parserEnv.GetParser(&raw.Decoder)
 	if parser == nil || err != nil {
 		logger.Error("Unknown parser")
 		return nil
 	}
+	defer parser.Release()
 
-	syslogMsgs, err := parser(raw.Message)
+	syslogMsgs, err := parser.Parse(raw.Message)
 	if err != nil {
 		base.ParsingErrorCounter.WithLabelValues("kafka", raw.Brokers, raw.Decoder.Format).Inc()
 		logger.Info("Parsing error", "error", err)
@@ -298,7 +298,7 @@ Loop:
 			raw.Brokers = brokers
 			raw.ConfID = config.ConfID
 			raw.ConsumerID = ackQueue.ID()
-			raw.Decoder = model.DecoderConfig(raw.Decoder)
+			raw.Decoder = config.DecoderBaseConfig
 			raw.Message = raw.Message[:len(value)]
 			copy(raw.Message, value)
 			raw.Topic = msg.Topic

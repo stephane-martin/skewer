@@ -329,6 +329,7 @@ type RelpServiceImpl struct {
 	parsewg     sync.WaitGroup
 	configs     map[utils.MyULID]conf.RELPSourceConfig
 	forwarder   *ackForwarder
+	parserEnv   *decoders.ParsersEnv
 }
 
 func NewRelpServiceImpl(confined bool, reporter base.Reporter, b binder.Client, logger log15.Logger) *RelpServiceImpl {
@@ -471,9 +472,10 @@ func (s *RelpServiceImpl) SetConf(sc []conf.RELPSourceConfig, pc []conf.ParserCo
 	s.BaseService.Pool = &sync.Pool{New: func() interface{} {
 		return &model.RawTcpMessage{Message: make([]byte, 132000)}
 	}}
+	s.parserEnv = decoders.NewParsersEnv(s.ParserConfigs, s.Logger)
 }
 
-func (s *RelpServiceImpl) parseOne(raw *model.RawTcpMessage, e *decoders.ParsersEnv, gen *utils.Generator) error {
+func (s *RelpServiceImpl) parseOne(raw *model.RawTcpMessage, gen *utils.Generator) error {
 
 	logger := s.Logger.New(
 		"protocol", "relp",
@@ -483,13 +485,14 @@ func (s *RelpServiceImpl) parseOne(raw *model.RawTcpMessage, e *decoders.Parsers
 		"format", raw.Decoder.Format,
 		"txnr", raw.Txnr,
 	)
-	parser, err := e.GetParser(&raw.Decoder)
+	parser, err := s.parserEnv.GetParser(&raw.Decoder)
 	if parser == nil || err != nil {
 		s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
 		logger.Crit("Unknown parser")
 		return nil
 	}
-	syslogMsgs, err := parser(raw.Message)
+	defer parser.Release()
+	syslogMsgs, err := parser.Parse(raw.Message)
 	if err != nil {
 		//logger.Warn("Parsing error", "message", string(raw.Message[:raw.Size]), "error", err)
 		logger.Warn("Parsing error", "error", err)
@@ -537,10 +540,6 @@ func (s *RelpServiceImpl) parseOne(raw *model.RawTcpMessage, e *decoders.Parsers
 func (s *RelpServiceImpl) Parse() {
 	defer s.parsewg.Done()
 
-	e := decoders.NewParsersEnv(s.Logger)
-	for _, pc := range s.ParserConfigs {
-		e.AddJSParser(pc.Name, pc.Func)
-	}
 	var raw *model.RawTcpMessage
 	var err error
 	gen := utils.NewGenerator()
@@ -554,7 +553,7 @@ func (s *RelpServiceImpl) Parse() {
 			s.Logger.Error("rawMessagesQueue returns nil, should not happen!")
 			return
 		}
-		err = s.parseOne(raw, e, gen)
+		err = s.parseOne(raw, gen)
 		s.Pool.Put(raw)
 		if err != nil {
 			return
@@ -685,11 +684,10 @@ func (h RelpHandler) HandleConnection(conn net.Conn, c conf.TCPSourceConfig) {
 
 	s.wg.Add(1)
 	go s.handleResponses(conn, connID, client, l)
-	dc := model.DecoderConfig(config.DecoderBaseConfig)
-	scan(l, s.forwarder, s.rawQ, conn, config.Timeout, config.ConfID, connID, s.MaxMessageSize, lport, dc, lports, path, client, s.Pool)
+	scan(l, s.forwarder, s.rawQ, conn, config.Timeout, config.ConfID, connID, s.MaxMessageSize, lport, config.DecoderBaseConfig, lports, path, client, s.Pool)
 }
 
-func scan(l log15.Logger, f *ackForwarder, rawq *tcp.Ring, c net.Conn, tout time.Duration, cfid, cnid utils.MyULID, msiz int, lport int32, dc model.DecoderConfig, lports, path, clt string, p *sync.Pool) {
+func scan(l log15.Logger, f *ackForwarder, rawq *tcp.Ring, c net.Conn, tout time.Duration, cfid, cnid utils.MyULID, msiz int, lport int32, dc conf.DecoderBaseConfig, lports, path, clt string, p *sync.Pool) {
 	l.Info("New client connection")
 	base.ClientConnectionCounter.WithLabelValues("relp", clt, lports, path).Inc()
 
@@ -765,7 +763,7 @@ func scan(l log15.Logger, f *ackForwarder, rawq *tcp.Ring, c net.Conn, tout time
 	}
 }
 
-func newMachine(l log15.Logger, fwder *ackForwarder, rawq *tcp.Ring, conn io.Writer, confID, connID utils.MyULID, msiz int, lport int32, dc model.DecoderConfig, lports, path, clt string, p *sync.Pool) *fsm.FSM {
+func newMachine(l log15.Logger, fwder *ackForwarder, rawq *tcp.Ring, conn io.Writer, confID, connID utils.MyULID, msiz int, lport int32, dc conf.DecoderBaseConfig, lports, path, clt string, p *sync.Pool) *fsm.FSM {
 	// TODO: PERF: fsm protects internal variables (states, events) with mutexes. We don't really need the mutexes here.
 	return fsm.NewFSM(
 		"closed",

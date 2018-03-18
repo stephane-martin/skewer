@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/stephane-martin/skewer/encoders"
+	"github.com/stephane-martin/skewer/encoders/baseenc"
 )
 
 // DestinationType lists the possible kind of destinations where skewer can forward messages.
@@ -134,7 +134,7 @@ func (c *BaseConfig) CheckDestinations() error {
 		c.ElasticDest.Format,
 		c.RedisDest.Format,
 	} {
-		if encoders.ParseFormat(frmt) == -1 {
+		if baseenc.ParseFormat(frmt) == -1 {
 			return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown destination format: '%s'", frmt)}
 		}
 	}

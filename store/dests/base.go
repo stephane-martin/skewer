@@ -8,6 +8,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/encoders"
+	"github.com/stephane-martin/skewer/encoders/baseenc"
 	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/utils"
 )
@@ -135,7 +136,7 @@ type baseDestination struct {
 	nack     callback
 	permerr  callback
 	confined bool
-	format   encoders.Format
+	format   baseenc.Format
 	encoder  encoders.Encoder
 	codename string
 	typ      conf.DestinationType
@@ -166,8 +167,8 @@ func newBaseDestination(typ conf.DestinationType, codename string, e *Env) *base
 	return &base
 }
 
-func (base *baseDestination) getEncoder(format string) (frmt encoders.Format, encoder encoders.Encoder, err error) {
-	frmt = encoders.ParseFormat(format)
+func (base *baseDestination) getEncoder(format string) (frmt baseenc.Format, encoder encoders.Encoder, err error) {
+	frmt = baseenc.ParseFormat(format)
 	if frmt == -1 {
 		return 0, nil, fmt.Errorf("Unknown encoding format: %s", format)
 	}

@@ -203,6 +203,7 @@ type DirectRelpServiceImpl struct {
 	parsewg             sync.WaitGroup
 	configs             map[utils.MyULID]conf.DirectRELPSourceConfig
 	forwarder           *ackForwarder
+	parserEnv           *decoders.ParsersEnv
 }
 
 func NewDirectRelpServiceImpl(confined bool, reporter base.Reporter, b binder.Client, logger log15.Logger) *DirectRelpServiceImpl {
@@ -363,6 +364,7 @@ func (s *DirectRelpServiceImpl) SetConf(sc []conf.DirectRELPSourceConfig, pc []c
 	s.BaseService.Pool = &sync.Pool{New: func() interface{} {
 		return &model.RawTcpMessage{Message: make([]byte, 132000)}
 	}}
+	s.parserEnv = decoders.NewParsersEnv(s.ParserConfigs, s.Logger)
 }
 
 func makeDRELPLogger(logger log15.Logger, raw *model.RawTcpMessage) log15.Logger {
@@ -376,15 +378,16 @@ func makeDRELPLogger(logger log15.Logger, raw *model.RawTcpMessage) log15.Logger
 	)
 }
 
-func (s *DirectRelpServiceImpl) parseOne(raw *model.RawTcpMessage, e *decoders.ParsersEnv) error {
+func (s *DirectRelpServiceImpl) parseOne(raw *model.RawTcpMessage) error {
 
-	parser, err := e.GetParser(&raw.Decoder)
+	parser, err := s.parserEnv.GetParser(&raw.Decoder)
 	if err != nil || parser == nil {
 		s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
 		makeDRELPLogger(s.Logger, raw).Crit("Unknown parser")
 		return nil
 	}
-	syslogMsgs, err := parser(raw.Message)
+	defer parser.Release()
+	syslogMsgs, err := parser.Parse(raw.Message)
 	if err != nil {
 		makeDRELPLogger(s.Logger, raw).Warn("Parsing error", "error", err)
 		s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
@@ -424,10 +427,6 @@ func (s *DirectRelpServiceImpl) parse() {
 
 	var raw *model.RawTcpMessage
 	var err error
-	e := decoders.NewParsersEnv(s.Logger)
-	for _, pc := range s.ParserConfigs {
-		e.AddJSParser(pc.Name, pc.Func)
-	}
 
 	for {
 		raw, err = s.rawQ.Get()
@@ -438,7 +437,7 @@ func (s *DirectRelpServiceImpl) parse() {
 			s.Logger.Error("rawMessagesQueue returns nil, should not happen!")
 			return
 		}
-		err = s.parseOne(raw, e)
+		err = s.parseOne(raw)
 		s.Pool.Put(raw)
 		if err != nil {
 			return
@@ -710,6 +709,5 @@ func (h DirectRelpHandler) HandleConnection(conn net.Conn, c conf.TCPSourceConfi
 
 	s.wg.Add(1)
 	go s.handleResponses(conn, connID, client, l)
-	var dc model.DecoderConfig = model.DecoderConfig(config.DecoderBaseConfig)
-	scan(l, s.forwarder, s.rawQ, conn, config.Timeout, config.ConfID, connID, s.MaxMessageSize, lport, dc, lports, path, client, s.Pool)
+	scan(l, s.forwarder, s.rawQ, conn, config.Timeout, config.ConfID, connID, s.MaxMessageSize, lport, config.DecoderBaseConfig, lports, path, client, s.Pool)
 }

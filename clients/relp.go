@@ -16,6 +16,7 @@ import (
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/encoders"
+	"github.com/stephane-martin/skewer/encoders/baseenc"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/queue"
@@ -98,7 +99,7 @@ type RELPClient struct {
 	host            string
 	port            int
 	path            string
-	format          encoders.Format
+	format          baseenc.Format
 	keepAlive       bool
 	keepAlivePeriod time.Duration
 	connTimeout     time.Duration
@@ -147,7 +148,7 @@ func (c *RELPClient) Path(path string) *RELPClient {
 	return c
 }
 
-func (c *RELPClient) Format(format encoders.Format) *RELPClient {
+func (c *RELPClient) Format(format baseenc.Format) *RELPClient {
 	c.format = format
 	return c
 }

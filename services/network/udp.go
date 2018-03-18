@@ -32,13 +32,13 @@ func initUdpRegistry() {
 
 type UdpServiceImpl struct {
 	base.BaseService
-	UdpConfigs     []conf.UDPSourceConfig
-	status         UdpServerStatus
-	stasher        base.Stasher
-	wg             sync.WaitGroup
-	fatalErrorChan chan struct{}
-	fatalOnce      *sync.Once
-
+	UdpConfigs       []conf.UDPSourceConfig
+	status           UdpServerStatus
+	stasher          base.Stasher
+	wg               sync.WaitGroup
+	fatalErrorChan   chan struct{}
+	fatalOnce        *sync.Once
+	parserEnv        *decoders.ParsersEnv
 	rawMessagesQueue *udp.Ring
 }
 
@@ -67,16 +67,13 @@ func (s *UdpServiceImpl) SetConf(c conf.BaseConfig) {
 	s.BaseService.SetConf(c.Parsers, c.Main.InputQueueSize)
 	s.UdpConfigs = c.UDPSource
 	s.rawMessagesQueue = udp.NewRing(c.Main.InputQueueSize)
+	s.parserEnv = decoders.NewParsersEnv(s.ParserConfigs, s.Logger)
 }
 
 // Parse fetch messages from the raw queue, parse them, and push them to be sent.
 func (s *UdpServiceImpl) Parse() {
 	defer s.wg.Done()
 
-	e := decoders.NewParsersEnv(s.Logger)
-	for _, pc := range s.ParserConfigs {
-		e.AddJSParser(pc.Name, pc.Func)
-	}
 	gen := utils.NewGenerator()
 
 	for {
@@ -85,14 +82,14 @@ func (s *UdpServiceImpl) Parse() {
 			return
 		}
 		s.Pool.Put(raw)
-		err = s.ParseOne(raw, e, gen)
+		err = s.ParseOne(raw, gen)
 		if err != nil {
 			return
 		}
 	}
 }
 
-func (s *UdpServiceImpl) ParseOne(raw *model.RawUdpMessage, e *decoders.ParsersEnv, gen *utils.Generator) error {
+func (s *UdpServiceImpl) ParseOne(raw *model.RawUdpMessage, gen *utils.Generator) error {
 
 	logger := s.Logger.New(
 		"protocol", "udp",
@@ -102,13 +99,14 @@ func (s *UdpServiceImpl) ParseOne(raw *model.RawUdpMessage, e *decoders.ParsersE
 		"format", raw.Decoder.Format,
 	)
 
-	parser, err := e.GetParser(&raw.Decoder)
+	parser, err := s.parserEnv.GetParser(&raw.Decoder)
 	if parser == nil || err != nil {
 		logger.Crit("Unknown parser")
 		return nil
 	}
+	defer parser.Release()
 
-	syslogMsgs, err := parser(raw.Message[:raw.Size])
+	syslogMsgs, err := parser.Parse(raw.Message[:raw.Size])
 	if err != nil {
 		base.ParsingErrorCounter.WithLabelValues("udp", raw.Client, raw.Decoder.Format).Inc()
 		//logger.Info("Parsing error", "message", string(raw.Message), "error", err)
@@ -304,7 +302,7 @@ func (s *UdpServiceImpl) handleConnection(conn net.PacketConn, config conf.UDPSo
 		}
 		rawmsg.LocalPort = localPort
 		rawmsg.UnixSocketPath = path
-		rawmsg.Decoder = model.DecoderConfig(config.DecoderBaseConfig)
+		rawmsg.Decoder = config.DecoderBaseConfig
 		rawmsg.ConfID = config.ConfID
 		rawmsg.Client = ""
 		if remote == nil {

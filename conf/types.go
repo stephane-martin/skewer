@@ -6,8 +6,10 @@ import (
 	"time"
 
 	"github.com/awnumar/memguard"
+	"github.com/spaolacci/murmur3"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/sbox"
+	"github.com/zond/gotomic"
 )
 
 // BaseConfig is the root of all configuration parameters.
@@ -447,6 +449,21 @@ type DecoderBaseConfig struct {
 	Format    string `mapstructure:"format" toml:"format" json:"format"`
 	Charset   string `mapstructure:"charset" toml:"charset" json:"charset"`
 	W3CFields string `mapstructure:"w3c_fields" toml:"w3c_fields" json:"fields"`
+}
+
+func (c *DecoderBaseConfig) Equals(other gotomic.Thing) bool {
+	if o, ok := other.(*DecoderBaseConfig); ok {
+		return *c == *o
+	}
+	return false
+}
+
+func (c *DecoderBaseConfig) HashCode() uint32 {
+	h := murmur3.New32()
+	h.Write([]byte(c.Format))
+	h.Write([]byte(c.Charset))
+	h.Write([]byte(c.W3CFields))
+	return h.Sum32()
 }
 
 type FilesystemSourceConfig struct {

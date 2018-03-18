@@ -1,10 +1,12 @@
 package decoders
 
 import (
-	"strings"
+	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/inconshreveable/log15"
+	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/decoders/base"
 	"github.com/stephane-martin/skewer/javascript"
 	"github.com/stephane-martin/skewer/model"
@@ -13,101 +15,144 @@ import (
 	"golang.org/x/text/encoding/unicode"
 )
 
-type Format int
-
-const (
-	RFC5424 Format = iota
-	RFC3164
-	JSON
-	RsyslogJSON
-	GELF
-	InfluxDB
-	Protobuf
-	Collectd
-	W3C
-)
-
-var Formats = map[string]Format{
-	"rfc5424":     RFC5424,
-	"rfc3164":     RFC3164,
-	"json":        JSON,
-	"rsyslogjson": RsyslogJSON,
-	"gelf":        GELF,
-	"influxdb":    InfluxDB,
-	"protobuf":    Protobuf,
-	"collectd":    Collectd,
-	"w3c":         W3C,
+var parsers = map[base.Format](func([]byte) ([]*model.SyslogMessage, error)){
+	base.RFC5424:     p5424,
+	base.RFC3164:     p3164,
+	base.JSON:        pJSON,
+	base.RsyslogJSON: pRsyslogJSON,
+	base.GELF:        pGELF,
+	base.InfluxDB:    pInflux,
+	base.Protobuf:    pProtobuf,
+	base.Collectd:    pCollectd,
+	base.W3C:         nil,
 }
 
-var parsers = map[Format]base.Parser{
-	RFC5424:     p5424,
-	RFC3164:     p3164,
-	JSON:        pJSON,
-	RsyslogJSON: pRsyslogJSON,
-	GELF:        pGELF,
-	InfluxDB:    pInflux,
-	Protobuf:    pProtobuf,
-	Collectd:    pCollectd,
-	W3C:         nil,
+type Parser interface {
+	Parse(m []byte) ([]*model.SyslogMessage, error)
+	Release()
 }
 
-func ParseFormat(format string) Format {
-	format = strings.ToLower(strings.TrimSpace(format))
-	if f, ok := Formats[format]; ok {
-		return f
-	}
-	return -1
+// nativeParser is a decoder implemented as golang function
+type nativeParser struct {
+	baseParser func([]byte) ([]*model.SyslogMessage, error)
 }
 
+func (p *nativeParser) Release() {}
+
+func (p *nativeParser) Parse(m []byte) ([]*model.SyslogMessage, error) {
+	return p.baseParser(m)
+}
+
+// jsParser is a decoder implemented as a JS function
+type jsParser struct {
+	baseParser func([]byte) ([]*model.SyslogMessage, error)
+	jsEnv      *javascript.Environment
+	parsersEnv *ParsersEnv
+}
+
+func (p *jsParser) Release() {
+	p.parsersEnv.jsEnvsPool.Put(p.jsEnv)
+}
+
+func (p *jsParser) Parse(m []byte) ([]*model.SyslogMessage, error) {
+	return p.baseParser(m)
+}
+
+// ParsersEnv encapsulates JS and Golang parsers.
 type ParsersEnv struct {
 	sync.Mutex
-	exists *gotomic.Hash
-	jsenv  *javascript.Environment
-	logger log15.Logger
+	parserCache *gotomic.Hash
+	jsFuncs     map[string]string
+	jsEnvsPool  *sync.Pool
+	logger      log15.Logger
 }
 
-func NewParsersEnv(logger log15.Logger) *ParsersEnv {
-	return &ParsersEnv{
-		jsenv:  javascript.NewParsersEnvironment(logger),
-		logger: logger,
-		exists: gotomic.NewHash(),
+func NewParsersEnv(config []conf.ParserConfig, logger log15.Logger) *ParsersEnv {
+	env := ParsersEnv{
+		jsFuncs:     make(map[string]string, len(config)),
+		logger:      logger,
+		parserCache: gotomic.NewHash(),
 	}
+	for _, c := range config {
+		env.jsFuncs[c.Name] = c.Func
+	}
+	env.jsEnvsPool = &sync.Pool{New: env.newJSEnv}
+	return &env
 }
 
-func (e *ParsersEnv) AddJSParser(name, funct string) {
-	err := e.jsenv.AddParser(name, funct)
-	if err != nil {
-		e.logger.Warn("Error initializing parser", "name", name, "error", err)
+func (e *ParsersEnv) newJSEnv() interface{} {
+	jsEnv := javascript.NewParsersEnvironment(e.logger)
+	var jsFuncName, jsFuncBody string
+	var err error
+	for jsFuncName, jsFuncBody = range e.jsFuncs {
+		err = jsEnv.AddParser(jsFuncName, jsFuncBody)
+		if err != nil {
+			e.logger.Warn("Error initializing parser", "name", jsFuncName, "error", err)
+		}
 	}
+	return jsEnv
 }
 
-func (e *ParsersEnv) GetParser(c *model.DecoderConfig) (p base.Parser, err error) {
-	// some parsers may be heavy to build, so we cache them
-	if pi, have := e.exists.Get(c); have {
-		return pi.(base.Parser), nil
+func (e *ParsersEnv) getJSEnv() *javascript.Environment {
+	return e.jsEnvsPool.Get().(*javascript.Environment)
+}
+
+func (e *ParsersEnv) GetParser(c *conf.DecoderBaseConfig) (p Parser, err error) {
+	frmt := base.ParseFormat(c.Format)
+	if frmt == -1 {
+		// look for a JS function
+		return e.getJSParser(c.Format)
 	}
-	e.Lock()
-	defer e.Unlock()
-	frmt := ParseFormat(c.Format)
-	switch frmt {
-	case W3C:
-		p = W3CDecoder(c.W3CFields)
-	case -1:
-		p, err = e.jsenv.GetParser(c.Format)
-	default:
-		p = parsers[frmt]
+	// casual parser
+	return e.getNonJSParser(frmt, c)
+}
+
+func (e *ParsersEnv) getJSParser(funcName string) (p Parser, err error) {
+	if _, ok := e.jsFuncs[funcName]; !ok {
+		return nil, fmt.Errorf("Unknown JS function: '%s'", funcName)
 	}
+	jsEnv := e.getJSEnv()
+	baseParser, err := jsEnv.GetParser(funcName)
 	if err != nil {
 		return nil, err
 	}
-	p = parserWithEncoding(frmt, c.Charset, p)
-	e.exists.Put(c, p)
-	return p, nil
+	return &jsParser{
+		baseParser: baseParser,
+		jsEnv:      jsEnv,
+		parsersEnv: e,
+	}, nil
 }
 
-func parserWithEncoding(frmt Format, charset string, p base.Parser) base.Parser {
+func (e *ParsersEnv) getNonJSParser(frmt base.Format, c *conf.DecoderBaseConfig) (Parser, error) {
+	// some parsers may be heavy to build, so we cache them
+	var p func([]byte) ([]*model.SyslogMessage, error)
+	if thing, have := e.parserCache.Get(c); have {
+		// fast path: we have already built such a parser
+		return &nativeParser{baseParser: thing.(func([]byte) ([]*model.SyslogMessage, error))}, nil
+	}
+	// slow path
+	e.Lock()
+	defer e.Unlock()
+	if frmt == base.W3C {
+		// W3C parsed is parametrized
+		if len(c.W3CFields) == 0 {
+			return nil, errors.New("No fields specified for W3C Extended Log Format decoder")
+		}
+		p = W3CDecoder(c.W3CFields)
+	} else {
+		p = parsers[frmt]
+	}
+	// add a decoding step to deal with charsets
+	p = parserWithEncoding(frmt, c.Charset, p)
+	// now the parser has been built. cache it so that we don't have to build it again later.
+	// we assume that the parser func is "pure" and "thread-safe".
+	e.parserCache.Put(c, p)
+	return &nativeParser{baseParser: p}, nil
+}
+
+func parserWithEncoding(frmt base.Format, charset string, p func([]byte) ([]*model.SyslogMessage, error)) func([]byte) ([]*model.SyslogMessage, error) {
 	switch frmt {
-	case RFC3164, RFC5424, W3C:
+	case base.RFC3164, base.RFC5424, base.W3C:
 		return func(m []byte) ([]*model.SyslogMessage, error) {
 			var err error
 			m, err = utils.SelectDecoder(charset).Bytes(m)
@@ -116,7 +161,7 @@ func parserWithEncoding(frmt Format, charset string, p base.Parser) base.Parser 
 			}
 			return p(m)
 		}
-	case JSON, RsyslogJSON, GELF, InfluxDB, -1:
+	case base.JSON, base.RsyslogJSON, base.GELF, base.InfluxDB, -1:
 		return func(m []byte) ([]*model.SyslogMessage, error) {
 			var err error
 			m, err = unicode.UTF8.NewDecoder().Bytes(m)
@@ -125,7 +170,7 @@ func parserWithEncoding(frmt Format, charset string, p base.Parser) base.Parser 
 			}
 			return p(m)
 		}
-	case Protobuf, Collectd:
+	case base.Protobuf, base.Collectd:
 		return p
 	default:
 		return p

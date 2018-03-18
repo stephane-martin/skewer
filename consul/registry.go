@@ -11,7 +11,6 @@ import (
 	"github.com/hashicorp/consul/api"
 	"github.com/hashicorp/errwrap"
 	"github.com/inconshreveable/log15"
-	"github.com/stephane-martin/skewer/model"
 )
 
 type ServiceActionType bool
@@ -91,34 +90,22 @@ func (r *Registry) WaitFinished() {
 	r.wgroup.Wait()
 }
 
-func (r *Registry) RegisterTcpListeners(infos []model.ListenerInfo) {
-	for _, info := range infos {
-		r.RegisterTcpListener(info)
-	}
-}
-
-func (r *Registry) RegisterTcpListener(infos model.ListenerInfo) {
-	if infos.BindAddr == "" || infos.Port == 0 || infos.Protocol == "" {
+func (r *Registry) RegisterTcpListener(bindAddr, protocol string, port int) {
+	if bindAddr == "" || port == 0 || protocol == "" {
 		return
 	}
-	svc, err := NewService(infos.BindAddr, infos.Port, fmt.Sprintf("%s:%d", infos.BindAddr, infos.Port), []string{infos.Protocol})
+	svc, err := NewService(bindAddr, port, fmt.Sprintf("%s:%d", bindAddr, port), []string{protocol})
 	if err == nil {
 		action := ServiceAction{Action: REGISTER, Service: svc}
 		r.RegisterChan <- action
 	}
 }
 
-func (r *Registry) UnregisterTcpListeners(infos []model.ListenerInfo) {
-	for _, info := range infos {
-		r.UnregisterTcpListener(info)
-	}
-}
-
-func (r *Registry) UnregisterTcpListener(infos model.ListenerInfo) {
-	if infos.BindAddr == "" || infos.Port == 0 || infos.Protocol == "" {
+func (r *Registry) UnregisterTcpListener(bindAddr, protocol string, port int) {
+	if bindAddr == "" || port == 0 || protocol == "" {
 		return
 	}
-	svc, err := NewService(infos.BindAddr, infos.Port, fmt.Sprintf("%s:%d", infos.BindAddr, infos.Port), []string{infos.Protocol})
+	svc, err := NewService(bindAddr, port, fmt.Sprintf("%s:%d", bindAddr, port), []string{protocol})
 	if err == nil {
 		action := ServiceAction{Action: UNREGISTER, Service: svc}
 		r.RegisterChan <- action

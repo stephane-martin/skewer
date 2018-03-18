@@ -44,6 +44,7 @@ type TcpServiceImpl struct {
 	rawMessagesQueue *tcp.Ring
 	fatalErrorChan   chan struct{}
 	fatalOnce        *sync.Once
+	parserEnv        *decoders.ParsersEnv
 }
 
 func NewTcpService(env *base.ProviderEnv) (*TcpServiceImpl, error) {
@@ -135,13 +136,13 @@ func (s *TcpServiceImpl) Stop() {
 }
 
 // SetConf configures the TCP service
-//func (s *TcpServiceImpl) SetConf(sc []conf.TCPSourceConfig, pc []conf.ParserConfig, queueSize uint64, messageSize int) {
 func (s *TcpServiceImpl) SetConf(c conf.BaseConfig) {
 	s.BaseService.Pool = &sync.Pool{New: func() interface{} {
 		return &model.RawTcpMessage{Message: make([]byte, c.Main.MaxInputMessageSize)}
 	}}
 	s.StreamingService.SetConf(c.TCPSource, c.Parsers, c.Main.InputQueueSize, c.Main.MaxInputMessageSize)
 	s.rawMessagesQueue = tcp.NewRing(c.Main.InputQueueSize)
+	s.parserEnv = decoders.NewParsersEnv(s.ParserConfigs, s.Logger)
 }
 
 func makeLogger(logger log15.Logger, raw *model.RawTcpMessage) log15.Logger {
@@ -155,15 +156,16 @@ func makeLogger(logger log15.Logger, raw *model.RawTcpMessage) log15.Logger {
 	)
 }
 
-func (s *TcpServiceImpl) parseOne(raw *model.RawTcpMessage, env *decoders.ParsersEnv, gen *utils.Generator) error {
-	parser, err := env.GetParser(&raw.Decoder)
+func (s *TcpServiceImpl) parseOne(raw *model.RawTcpMessage, gen *utils.Generator) error {
+	parser, err := s.parserEnv.GetParser(&raw.Decoder)
 
 	if parser == nil || err != nil {
 		makeLogger(s.Logger, raw).Error("Unknown parser")
 		return nil
 	}
+	defer parser.Release()
 
-	syslogMsgs, err := parser(raw.Message)
+	syslogMsgs, err := parser.Parse(raw.Message)
 	if err != nil {
 		base.ParsingErrorCounter.WithLabelValues("tcp", raw.Client, raw.Decoder.Format).Inc()
 		makeLogger(s.Logger, raw).Info("Parsing error", "error", err)
@@ -208,10 +210,6 @@ func (s *TcpServiceImpl) parseOne(raw *model.RawTcpMessage, env *decoders.Parser
 func (s *TcpServiceImpl) parse() {
 	defer s.wg.Done()
 
-	env := decoders.NewParsersEnv(s.Logger)
-	for _, pc := range s.ParserConfigs {
-		env.AddJSParser(pc.Name, pc.Func)
-	}
 	gen := utils.NewGenerator()
 
 	for {
@@ -219,7 +217,7 @@ func (s *TcpServiceImpl) parse() {
 		if raw == nil || err != nil {
 			return
 		}
-		err = s.parseOne(raw, env, gen)
+		err = s.parseOne(raw, gen)
 		s.Pool.Put(raw)
 		if err != nil {
 			return
@@ -302,7 +300,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TCPSourceConfig)
 		rawmsg.LocalPort = localPortInt
 		rawmsg.UnixSocketPath = path
 		rawmsg.ConfID = config.ConfID
-		rawmsg.Decoder = model.DecoderConfig(config.DecoderBaseConfig)
+		rawmsg.Decoder = config.DecoderBaseConfig
 		rawmsg.Message = rawmsg.Message[:len(buf)]
 		copy(rawmsg.Message, buf)
 		err := s.rawMessagesQueue.Put(rawmsg)

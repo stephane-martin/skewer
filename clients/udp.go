@@ -9,6 +9,7 @@ import (
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
 	"github.com/stephane-martin/skewer/encoders"
+	"github.com/stephane-martin/skewer/encoders/baseenc"
 	"github.com/stephane-martin/skewer/model"
 )
 
@@ -16,7 +17,7 @@ type SyslogUDPClient struct {
 	host   string
 	port   int
 	path   string
-	format encoders.Format
+	format baseenc.Format
 
 	conn    net.Conn
 	encoder encoders.Encoder
@@ -44,7 +45,7 @@ func (c *SyslogUDPClient) Path(path string) *SyslogUDPClient {
 	return c
 }
 
-func (c *SyslogUDPClient) Format(format encoders.Format) *SyslogUDPClient {
+func (c *SyslogUDPClient) Format(format baseenc.Format) *SyslogUDPClient {
 	c.format = format
 	return c
 }

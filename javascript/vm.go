@@ -77,7 +77,7 @@ type iSyslogMessage struct {
 }
 
 type ParsersEnvironment interface {
-	GetParser(name string) (base.Parser, error)
+	GetParser(name string) (func(m []byte) ([]*model.SyslogMessage, error), error)
 	AddParser(name string, parserFunc string) error
 }
 
@@ -116,6 +116,8 @@ type ConcreteParser struct {
 }
 
 func (p *ConcreteParser) Parse(rawMessage []byte) ([]*model.SyslogMessage, error) {
+	// we don't need a lock to ensure that Parse is thread-safe, as the
+	// parser environment is retrieved through a sync.Pool
 	var err error
 	jsParser, ok := p.env.jsParsers[p.name]
 	if !ok {
@@ -126,7 +128,6 @@ func (p *ConcreteParser) Parse(rawMessage []byte) ([]*model.SyslogMessage, error
 	if len(rawMessage) == 0 {
 		return nil, nil
 	}
-	// TODO: lock ?
 	jsRawMessage := p.env.runtime.ToValue(string(rawMessage))
 	jsParsedMessage, err := jsParser(nil, jsRawMessage)
 	if err != nil {
@@ -206,7 +207,7 @@ func newEnv(filterFunc, topicFunc, topicTmpl, partitionKeyFunc, partitionKeyTmpl
 	return &e
 }
 
-func (e *Environment) GetParser(name string) (base.Parser, error) {
+func (e *Environment) GetParser(name string) (func(m []byte) ([]*model.SyslogMessage, error), error) {
 	_, ok := e.jsParsers[name]
 	if !ok {
 		return nil, fmt.Errorf("Unknown javascript parser: %s", name)

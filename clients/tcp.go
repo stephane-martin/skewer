@@ -12,6 +12,7 @@ import (
 	"github.com/free/concurrent-writer/concurrent"
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/encoders"
+	"github.com/stephane-martin/skewer/encoders/baseenc"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/queue"
@@ -21,7 +22,7 @@ type SyslogTCPClient struct {
 	host            string
 	port            int
 	path            string
-	format          encoders.Format
+	format          baseenc.Format
 	keepAlive       bool
 	keepAlivePeriod time.Duration
 	connTimeout     time.Duration
@@ -63,7 +64,7 @@ func (c *SyslogTCPClient) Path(path string) *SyslogTCPClient {
 	return c
 }
 
-func (c *SyslogTCPClient) Format(format encoders.Format) *SyslogTCPClient {
+func (c *SyslogTCPClient) Format(format baseenc.Format) *SyslogTCPClient {
 	c.format = format
 	return c
 }

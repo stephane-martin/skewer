@@ -6,34 +6,13 @@ import (
 	"io"
 	"mime"
 	"strconv"
-	"strings"
 
+	"github.com/stephane-martin/skewer/encoders/baseenc"
 	"github.com/valyala/bytebufferpool"
 )
 
 var sp = []byte(" ")
 var endl = []byte("\n")
-
-type Format int
-
-const (
-	RFC5424 Format = 1 + iota
-	RFC3164
-	JSON
-	File
-	GELF
-	Protobuf
-)
-
-var Formats = map[string]Format{
-	"rfc5424":  RFC5424,
-	"rfc3164":  RFC3164,
-	"json":     JSON,
-	"file":     File,
-	"gelf":     GELF,
-	"protobuf": Protobuf,
-	"":         JSON,
-}
 
 var JsonMimetype = "application/json"
 var NDJsonMimetype = "application/x-ndjson"
@@ -58,30 +37,22 @@ var RMimeTypes = map[string]Encoder{
 	"text/plain":        encode5424,
 }
 
-var MimeTypes = map[Format]string{
-	RFC5424:  PlainMimetype,
-	RFC3164:  PlainMimetype,
-	JSON:     JsonMimetype,
-	File:     PlainMimetype,
-	GELF:     JsonMimetype,
-	Protobuf: ProtobufMimetype,
+var MimeTypes = map[baseenc.Format]string{
+	baseenc.RFC5424:  PlainMimetype,
+	baseenc.RFC3164:  PlainMimetype,
+	baseenc.JSON:     JsonMimetype,
+	baseenc.File:     PlainMimetype,
+	baseenc.GELF:     JsonMimetype,
+	baseenc.Protobuf: ProtobufMimetype,
 }
 
-var encoders = map[Format]Encoder{
-	RFC5424:  encode5424,
-	RFC3164:  encode3164,
-	JSON:     encodeJSON,
-	File:     encodeFile,
-	GELF:     encodeGELF,
-	Protobuf: encodePB,
-}
-
-func ParseFormat(format string) Format {
-	format = strings.ToLower(strings.TrimSpace(format))
-	if f, ok := Formats[format]; ok {
-		return f
-	}
-	return -1
+var encoders = map[baseenc.Format]Encoder{
+	baseenc.RFC5424:  encode5424,
+	baseenc.RFC3164:  encode3164,
+	baseenc.JSON:     encodeJSON,
+	baseenc.File:     encodeFile,
+	baseenc.GELF:     encodeGELF,
+	baseenc.Protobuf: encodePB,
 }
 
 type Encoder func(v interface{}, w io.Writer) error
@@ -100,7 +71,7 @@ func IsEncodingError(err error) bool {
 	}
 }
 
-func GetEncoder(frmt Format) (Encoder, error) {
+func GetEncoder(frmt baseenc.Format) (Encoder, error) {
 	if e, ok := encoders[frmt]; ok {
 		return e, nil
 	}

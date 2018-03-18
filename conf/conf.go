@@ -27,7 +27,7 @@ import (
 	"github.com/inconshreveable/log15"
 	"github.com/spf13/viper"
 	"github.com/stephane-martin/skewer/consul"
-	"github.com/stephane-martin/skewer/decoders"
+	"github.com/stephane-martin/skewer/decoders/base"
 	"github.com/stephane-martin/skewer/sys/kring"
 	"github.com/stephane-martin/skewer/utils"
 )
@@ -778,7 +778,7 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 	parsersNames := map[string]bool{}
 	for _, parserConf := range c.Parsers {
 		name := strings.TrimSpace(parserConf.Name)
-		if decoders.ParseFormat(parserConf.Name) != -1 {
+		if base.ParseFormat(parserConf.Name) != -1 {
 			return ConfigurationCheckError{ErrString: "Parser configuration must not use a reserved name"}
 		}
 		if name == "" {
