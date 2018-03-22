@@ -140,7 +140,6 @@ func NewBackend(parent *badger.DB, storeSecret *memguard.LockedBuffer) (b *Backe
 				return nil, err
 			}
 		}
-
 	}
 	return b, nil
 }
@@ -287,6 +286,7 @@ func (s *MessageStore) retrieveAndForward(ctx context.Context) {
 
 		go func(dest conf.DestinationType) {
 			defer wg.Done()
+			ew := &utils.ExpWait{}
 		ForwardLoop:
 			for {
 				if !s.dests.Has(dest) {
@@ -294,7 +294,6 @@ func (s *MessageStore) retrieveAndForward(ctx context.Context) {
 					select {
 					case <-doneChan:
 						return
-					// TODO: exponential wait
 					case <-time.After(time.Second):
 						continue ForwardLoop
 					}
@@ -306,13 +305,13 @@ func (s *MessageStore) retrieveAndForward(ctx context.Context) {
 					select {
 					case <-doneChan:
 						return
-					// TODO: exponential wait
-					case <-time.After(time.Second):
+					case <-time.After(ew.Next()):
 						continue ForwardLoop
 					}
 				}
 
 				// there are some messages to forward
+				ew.Reset()
 				select {
 				case s.Outputs(dest) <- msgs:
 					s.msgsSlicePool.Put(msgs)
@@ -343,9 +342,11 @@ func (s *MessageStore) retrieveAndForward(ctx context.Context) {
 		s.wg.Done()
 	}()
 
-	next := make(map[conf.DestinationType]time.Time)
+	next := make(map[conf.DestinationType]time.Time, len(conf.Destinations))
+	waits := make(map[conf.DestinationType]*utils.ExpWait, len(conf.Destinations))
 	now := time.Now()
 	for _, d = range conf.Destinations {
+		waits[d] = &utils.ExpWait{}
 		if s.dests.Has(d) {
 			next[d] = now
 		} else {
@@ -374,8 +375,7 @@ RetrieveLoop:
 			}
 		}
 
-		currentDestIdx++
-		currentDestIdx = currentDestIdx % uint(len(conf.Destinations))
+		currentDestIdx = (currentDestIdx + 1) % uint(len(conf.Destinations))
 		currentDest = 1 << currentDestIdx
 		now = time.Now()
 
@@ -389,18 +389,18 @@ RetrieveLoop:
 			continue RetrieveLoop
 		}
 		if len(bucket[currentDest].Load().([]*model.FullMessage)) > 0 {
-			// previous messages are still being sent
-			// TODO: exponential wait
-			next[currentDest] = now.Add(time.Second)
+			// previous messages are still there
+			next[currentDest] = now.Add(waits[currentDest].Next())
 			continue RetrieveLoop
 		}
 
 		messages = s.retrieve(currentDest)
 		if len(messages) == 0 {
-			// TODO: exponential wait
-			next[currentDest] = now.Add(time.Second)
+			// no messages in store for that destination
+			next[currentDest] = now.Add(waits[currentDest].Next())
 			continue RetrieveLoop
 		}
+		waits[currentDest].Reset()
 		bucket[currentDest].Store(messages)
 	}
 

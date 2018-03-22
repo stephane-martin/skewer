@@ -341,36 +341,36 @@ func (d *FileDestination) sendOne(message *model.FullMessage) (err error) {
 	err = d.filenameTmpl.Execute(buf, message.Fields)
 	if err != nil {
 		err = fmt.Errorf("Error calculating filename: %s", err)
-		d.permerr(message.Uid)
+		d.PermError(message.Uid)
 		return err
 	}
 	filename := strings.TrimSpace(buf.String())
 	f, err := d.files.open(filename)
 	if err != nil {
 		err = fmt.Errorf("Error opening file '%s': %s", filename, err)
-		d.nack(message.Uid)
+		d.NACK(message.Uid)
 		return err
 	}
 	encoded, err := encoders.ChainEncode(d.encoder, message, "\n")
 	if err != nil {
-		d.permerr(message.Uid)
+		d.PermError(message.Uid)
 		return err
 	}
 	_, err = f.Write(encoded)
 	if err != nil {
-		d.nack(message.Uid)
+		d.NACK(message.Uid)
 		return err
 	}
 	if f.Closed() {
 		err = f.MarkClosed()
 		if err == nil {
-			d.ack(message.Uid)
+			d.ACK(message.Uid)
 			return nil
 		}
-		d.nack(message.Uid)
+		d.NACK(message.Uid)
 		return err
 	}
-	d.ack(message.Uid)
+	d.ACK(message.Uid)
 	return nil
 }
 
@@ -379,7 +379,7 @@ func (d *FileDestination) Close() error {
 	return nil
 }
 
-func (d *FileDestination) Send(msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *FileDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
 	var i int
 	var e error
 	for i = range msgs {

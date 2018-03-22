@@ -9,6 +9,7 @@ import (
 	w3c "github.com/stephane-martin/w3c-extendedlog-parser"
 )
 
+// W3CDecoder makes a Extended Log Format decoder from given field names
 func W3CDecoder(fieldNames string) func([]byte) ([]*model.SyslogMessage, error) {
 	// https://www.w3.org/TR/WD-logfile.html
 	fields := strings.Split(fieldNames, " ")

@@ -254,6 +254,12 @@
 			"versionExact": "v2.1.10"
 		},
 		{
+			"checksumSHA1": "MsfvQZcBtSZeatCqbSZRHVsb9yU=",
+			"path": "github.com/cenk/backoff",
+			"revision": "2ea60e5f094469f9e65adb9cd103795b73ae743e",
+			"revisionTime": "2017-12-24T16:42:12Z"
+		},
+		{
 			"checksumSHA1": "PYXuf7wvcj492uWhjvmXlyyQUYc=",
 			"path": "github.com/cheekybits/genny/generic",
 			"revision": "9127e812e1e9e501ce899a18121d316ecb52e4ba",
@@ -367,6 +373,12 @@
 			"path": "github.com/edsrzf/mmap-go",
 			"revision": "0bce6a6887123b67a60366d2c9fe2dfb74289d2e",
 			"revisionTime": "2017-03-18T15:58:57Z"
+		},
+		{
+			"checksumSHA1": "imR2wF388/0fBU6RRWx8RvTi8Q8=",
+			"path": "github.com/facebookgo/clock",
+			"revision": "600d898af40aa09a7a93ecb9265d87b0504b6f03",
+			"revisionTime": "2015-04-10T01:09:13Z"
 		},
 		{
 			"checksumSHA1": "7ZZGga/NOgmEaDqRZvrhkNedbL8=",
@@ -962,6 +974,12 @@
 			"path": "github.com/rcrowley/go-metrics",
 			"revision": "1f30fe9094a513ce4c700b9a54458bbb0c96996c",
 			"revisionTime": "2016-11-28T21:05:44Z"
+		},
+		{
+			"checksumSHA1": "q6JII/ziSLMqwajFGHj6w8V+RbA=",
+			"path": "github.com/rubyist/circuitbreaker",
+			"revision": "2074adba5ddc7d5f7559448a9c3066573521c5bf",
+			"revisionTime": "2017-03-30T19:36:47Z"
 		},
 		{
 			"checksumSHA1": "bCj0+g9CKyCA90SlDxaPA6+zZeg=",

@@ -24,6 +24,7 @@ func init() {
 }
 
 func p5424(m []byte) ([]*model.SyslogMessage, error) {
+	// TODO: multiple messages ?
 	parser := parser5424Pool.Get().(*rfc5424.RFC5424Parser)
 	defer parser5424Pool.Put(parser)
 

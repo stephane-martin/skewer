@@ -157,7 +157,7 @@ func (d *HTTPDestination) Close() error {
 		if err != nil || msg == nil {
 			break
 		}
-		d.nack(msg.Uid)
+		d.NACK(msg.Uid)
 	}
 	return nil
 }
@@ -171,20 +171,20 @@ func (d *HTTPDestination) dosendOne(ctx context.Context, msg *model.FullMessage)
 	}()
 	err = d.url.Execute(urlbuf, msg.Fields)
 	if err != nil {
-		d.permerr(msg.Uid)
+		d.PermError(msg.Uid)
 		d.logger.Warn("Error calculating target URL from template", "error", err)
 		return nil
 	}
 	err = d.encoder(msg, body)
 
 	if err != nil {
-		d.permerr(msg.Uid)
+		d.PermError(msg.Uid)
 		d.logger.Warn("Error encoding message", "error", err)
 		return nil
 	}
 	req, err := http.NewRequest(d.method, urlbuf.String(), bytes.NewReader(body.B))
 	if err != nil {
-		d.permerr(msg.Uid)
+		d.PermError(msg.Uid)
 		d.logger.Warn("Error preparing HTTP request", "error", err)
 		return nil
 	}
@@ -199,7 +199,7 @@ func (d *HTTPDestination) dosendOne(ctx context.Context, msg *model.FullMessage)
 	resp, err := d.clt.Do(req)
 	if err != nil {
 		// server down ?
-		d.nack(msg.Uid)
+		d.NACK(msg.Uid)
 		d.logger.Warn("Error sending HTTP request", "error", err)
 		return err
 	}
@@ -210,22 +210,22 @@ func (d *HTTPDestination) dosendOne(ctx context.Context, msg *model.FullMessage)
 	httpStatusCounter.WithLabelValues(req.Host, strconv.FormatInt(int64(resp.StatusCode), 10)).Inc()
 
 	if 200 <= resp.StatusCode && resp.StatusCode < 300 {
-		d.ack(msg.Uid)
+		d.ACK(msg.Uid)
 		return nil
 	}
 	if 400 <= resp.StatusCode && resp.StatusCode < 500 {
 		// client-side error ??!
-		d.nack(msg.Uid)
+		d.NACK(msg.Uid)
 		d.logger.Warn("Client side error sending HTTP request", "code", resp.StatusCode, "status", resp.Status)
 		return fmt.Errorf("HTTP error when sending message to server: code '%d', status '%s'", resp.StatusCode, resp.Status)
 	}
 	if 500 <= resp.StatusCode && resp.StatusCode < 600 {
 		// server side error
-		d.nack(msg.Uid)
+		d.NACK(msg.Uid)
 		d.logger.Warn("Server side error sending HTTP request", "code", resp.StatusCode, "status", resp.Status)
 		return fmt.Errorf("HTTP error when sending message to server: code '%d', status '%s'", resp.StatusCode, resp.Status)
 	}
-	d.nack(msg.Uid)
+	d.NACK(msg.Uid)
 	d.logger.Warn("Unexpected status code sending HTTP request", "code", resp.StatusCode, "status", resp.Status)
 	return fmt.Errorf("HTTP error when sending message to server: code '%d', status '%s'", resp.StatusCode, resp.Status)
 }
@@ -252,13 +252,13 @@ func (d *HTTPDestination) sendOne(msg *model.FullMessage) (err error) {
 	err = d.sendQueue.Put(msg)
 	if err != nil {
 		// the client send queue has been disposed
-		d.nack(msg.Uid)
+		d.NACK(msg.Uid)
 		d.dofatal()
 	}
 	return err
 }
 
-func (d *HTTPDestination) Send(msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *HTTPDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
 	var i int
 	var e error
 	for i = range msgs {

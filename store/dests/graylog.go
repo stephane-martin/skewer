@@ -65,16 +65,16 @@ func (d *GraylogDestination) Close() error {
 func (d *GraylogDestination) sendOne(message *model.FullMessage) (err error) {
 	err = d.writer.WriteMessage(encoders.FullToGelfMessage(message))
 	if err == nil {
-		d.ack(message.Uid)
+		d.ACK(message.Uid)
 	} else {
-		d.nack(message.Uid)
+		d.NACK(message.Uid)
 		d.dofatal()
 	}
 	model.FullFree(message)
 	return err
 }
 
-func (d *GraylogDestination) Send(msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *GraylogDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
 	var i int
 	var e error
 	for i = range msgs {

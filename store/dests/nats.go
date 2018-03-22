@@ -92,20 +92,20 @@ func (d *NATSDestination) sendOne(msg *model.FullMessage, partitionKey string, p
 	err = d.encoder(msg, buf)
 
 	if err != nil {
-		d.permerr(msg.Uid)
+		d.PermError(msg.Uid)
 		return err
 	}
 	err = d.conn.Publish(topic, buf.Bytes())
 	if err != nil {
-		d.nack(msg.Uid)
+		d.NACK(msg.Uid)
 		d.dofatal()
 		return err
 	}
-	d.ack(msg.Uid)
+	d.ACK(msg.Uid)
 	return nil
 }
 
-func (d *NATSDestination) Send(msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *NATSDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
 	var i int
 	var e error
 	for i = range msgs {

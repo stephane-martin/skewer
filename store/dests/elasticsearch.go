@@ -172,7 +172,7 @@ func (d *ElasticDestination) after(executionId int64, requests []elastic.Bulkabl
 			continue
 		}
 		d.sentMessagesUids.Delete(uid)
-		d.ack(uid)
+		d.ACK(uid)
 	}
 	if len(failures) == 0 {
 		return
@@ -184,7 +184,7 @@ func (d *ElasticDestination) after(executionId int64, requests []elastic.Bulkabl
 			continue
 		}
 		d.sentMessagesUids.Delete(uid)
-		d.nack(uid)
+		d.NACK(uid)
 		if item.Error != nil {
 			d.logger.Warn("Elasticsearch index error", "type", item.Error.Type, "reason", item.Error.Reason, "index", item.Error.Index)
 		}
@@ -195,14 +195,14 @@ func (d *ElasticDestination) after(executionId int64, requests []elastic.Bulkabl
 func (d *ElasticDestination) Close() error {
 	d.sentMessagesUids.Each(func(k gotomic.Hashable, v gotomic.Thing) bool {
 		if uid, ok := k.(utils.MyULID); ok {
-			d.nack(uid)
+			d.NACK(uid)
 		}
 		return false
 	})
 	return d.processor.Close()
 }
 
-func (d *ElasticDestination) Send(msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *ElasticDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
 	var e error
 	var i int
 	for i = range msgs {
@@ -220,7 +220,7 @@ func (d *ElasticDestination) sendOne(msg *model.FullMessage) (err error) {
 	indexBuf := bytes.NewBuffer(nil)
 	err = d.indexNameTpl.Execute(indexBuf, msg.Fields)
 	if err != nil {
-		d.permerr(msg.Uid)
+		d.PermError(msg.Uid)
 		return err
 	}
 	// create index in ES if needed
@@ -229,14 +229,14 @@ func (d *ElasticDestination) sendOne(msg *model.FullMessage) (err error) {
 		d.logger.Info("Index does not exist yet in Elasticsearch", "name", indexName)
 		client, err := d.getClient()
 		if err != nil {
-			d.nack(msg.Uid)
+			d.NACK(msg.Uid)
 			d.dofatal()
 			return err
 		}
 		// refresh index names
 		names, err := client.IndexNames()
 		if err != nil {
-			d.nack(msg.Uid)
+			d.NACK(msg.Uid)
 			d.dofatal()
 			return err
 		}
@@ -247,11 +247,11 @@ func (d *ElasticDestination) sendOne(msg *model.FullMessage) (err error) {
 		if !d.knownIndexNames.Has(indexName) {
 			res, err := client.CreateIndex(indexName).BodyString(d.createOptionsBody).Do(context.Background())
 			if err != nil {
-				d.nack(msg.Uid)
+				d.NACK(msg.Uid)
 				return err
 			}
 			if !res.Acknowledged {
-				d.nack(msg.Uid)
+				d.NACK(msg.Uid)
 				return fmt.Errorf("Index creation not acknowledged")
 			}
 			d.knownIndexNames.Add(indexName)
@@ -263,7 +263,7 @@ func (d *ElasticDestination) sendOne(msg *model.FullMessage) (err error) {
 	var buf json.RawMessage
 	buf, err = encoders.ChainEncode(d.encoder, msg)
 	if err != nil {
-		d.permerr(msg.Uid)
+		d.PermError(msg.Uid)
 		return err
 	}
 	d.sentMessagesUids.Put(msg.Uid, true)

@@ -181,7 +181,7 @@ func (d *WebsocketServerDestination) writeLogs(wsconn *websocket.Conn) (err erro
 				writer, err = wsconn.NextWriter(d.messageType)
 				if err != nil {
 					// client is gone
-					d.nack(uid)
+					d.NACK(uid)
 					return err
 				}
 			}
@@ -194,18 +194,18 @@ func (d *WebsocketServerDestination) writeLogs(wsconn *websocket.Conn) (err erro
 				err = writer.Close()
 				writer = nil
 				if err == nil {
-					d.ack(uid)
+					d.ACK(uid)
 				} else {
 					// error when flushing
-					d.nack(uid)
+					d.NACK(uid)
 					return err
 				}
 			} else if encoders.IsEncodingError(err) {
 				// message can not be encoded
-				d.permerr(uid)
+				d.PermError(uid)
 			} else {
 				// error writing to client, must be gone
-				d.nack(uid)
+				d.NACK(uid)
 				return err
 			}
 
@@ -254,19 +254,19 @@ func (d *WebsocketServerDestination) Close() (err error) {
 		if e != nil {
 			break
 		}
-		d.nack(message.Uid)
+		d.NACK(message.Uid)
 		model.FullFree(message)
 	}
 	return err
 }
 
-func (d *WebsocketServerDestination) Send(msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *WebsocketServerDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
 	var i int
 	for len(msgs) > 0 {
 		err = d.sendQueue.Put(msgs[0].Message)
 		if err != nil {
 			for i = range msgs {
-				d.nack(msgs[i].Message.Uid)
+				d.NACK(msgs[i].Message.Uid)
 				model.FullFree(msgs[i].Message)
 			}
 			return err

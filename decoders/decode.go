@@ -15,6 +15,8 @@ import (
 	"golang.org/x/text/encoding/unicode"
 )
 
+type BaseParser func([]byte) ([]*model.SyslogMessage, error)
+
 var parsers = map[base.Format](func([]byte) ([]*model.SyslogMessage, error)){
 	base.RFC5424:     p5424,
 	base.RFC3164:     p3164,
@@ -24,6 +26,7 @@ var parsers = map[base.Format](func([]byte) ([]*model.SyslogMessage, error)){
 	base.InfluxDB:    pInflux,
 	base.Protobuf:    pProtobuf,
 	base.Collectd:    pCollectd,
+	base.LTSV:        pLTSV,
 	base.W3C:         nil,
 }
 
@@ -107,7 +110,7 @@ func (e *ParsersEnv) GetParser(c *conf.DecoderBaseConfig) (p Parser, err error) 
 	return e.getNonJSParser(frmt, c)
 }
 
-func (e *ParsersEnv) getJSParser(funcName string) (p Parser, err error) {
+func (e *ParsersEnv) getJSParser(funcName string) (*jsParser, error) {
 	if _, ok := e.jsFuncs[funcName]; !ok {
 		return nil, fmt.Errorf("Unknown JS function: '%s'", funcName)
 	}
@@ -123,7 +126,7 @@ func (e *ParsersEnv) getJSParser(funcName string) (p Parser, err error) {
 	}, nil
 }
 
-func (e *ParsersEnv) getNonJSParser(frmt base.Format, c *conf.DecoderBaseConfig) (Parser, error) {
+func (e *ParsersEnv) getNonJSParser(frmt base.Format, c *conf.DecoderBaseConfig) (*nativeParser, error) {
 	// some parsers may be heavy to build, so we cache them
 	var p func([]byte) ([]*model.SyslogMessage, error)
 	if thing, have := e.parserCache.Get(c); have {

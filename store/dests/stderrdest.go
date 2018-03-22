@@ -31,16 +31,16 @@ func (d *StderrDestination) sendOne(message *model.FullMessage) (err error) {
 	var buf []byte
 	buf, err = encoders.ChainEncode(d.encoder, message, "\n")
 	if err != nil {
-		d.permerr(message.Uid)
+		d.PermError(message.Uid)
 		return err
 	}
 	_, err = os.Stderr.Write(buf)
 	if err != nil {
-		d.nack(message.Uid)
+		d.NACK(message.Uid)
 		d.dofatal()
 		return err
 	}
-	d.ack(message.Uid)
+	d.ACK(message.Uid)
 	return nil
 }
 
@@ -48,7 +48,7 @@ func (d *StderrDestination) Close() error {
 	return nil
 }
 
-func (d *StderrDestination) Send(msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *StderrDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
 	var i int
 	var e error
 	for i = range msgs {

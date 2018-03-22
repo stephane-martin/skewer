@@ -9,6 +9,7 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/encoders"
 	"github.com/stephane-martin/skewer/encoders/baseenc"
+	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/utils"
 )
@@ -125,16 +126,14 @@ func (e *Env) Config(c conf.BaseConfig) *Env {
 	return e
 }
 
-type callback func(uid utils.MyULID)
-
 type baseDestination struct {
 	logger   log15.Logger
 	binder   binder.Client
 	fatal    chan struct{}
 	once     *sync.Once
-	ack      callback
-	nack     callback
-	permerr  callback
+	sack     storeCallback
+	snack    storeCallback
+	spermerr storeCallback
 	confined bool
 	format   baseenc.Format
 	encoder  encoders.Encoder
@@ -151,20 +150,32 @@ func newBaseDestination(typ conf.DestinationType, codename string, e *Env) *base
 		confined: e.confined,
 		codename: codename,
 		typ:      typ,
-	}
-	base.ack = func(uid utils.MyULID) {
-		e.ack(uid, typ)
-		ackCounter.WithLabelValues(codename, "ack").Inc()
-	}
-	base.nack = func(uid utils.MyULID) {
-		e.nack(uid, typ)
-		ackCounter.WithLabelValues(codename, "nack").Inc()
-	}
-	base.permerr = func(uid utils.MyULID) {
-		e.permerr(uid, typ)
-		ackCounter.WithLabelValues(codename, "permerr").Inc()
+		sack:     e.ack,
+		snack:    e.nack,
+		spermerr: e.permerr,
 	}
 	return &base
+}
+
+func (base *baseDestination) ACK(uid utils.MyULID) {
+	base.sack(uid, base.typ)
+	ackCounter.WithLabelValues(base.codename, "ack").Inc()
+}
+
+func (base *baseDestination) NACK(uid utils.MyULID) {
+	base.snack(uid, base.typ)
+	ackCounter.WithLabelValues(base.codename, "nack").Inc()
+}
+
+func (base *baseDestination) PermError(uid utils.MyULID) {
+	base.spermerr(uid, base.typ)
+	ackCounter.WithLabelValues(base.codename, "permerr").Inc()
+}
+
+func (base *baseDestination) NACKAll(msgs []*model.FullMessage) {
+	for _, msg := range msgs {
+		base.ACK(msg.Uid)
+	}
 }
 
 func (base *baseDestination) getEncoder(format string) (frmt baseenc.Format, encoder encoders.Encoder, err error) {

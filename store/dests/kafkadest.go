@@ -44,14 +44,14 @@ func NewKafkaDestination(ctx context.Context, e *Env) (Destination, error) {
 	go func() {
 		var m *sarama.ProducerMessage
 		for m = range d.producer.Successes() {
-			d.ack(m.Metadata.(utils.MyULID))
+			d.ACK(m.Metadata.(utils.MyULID))
 		}
 	}()
 
 	go func() {
 		var m *sarama.ProducerError
 		for m = range d.producer.Errors() {
-			d.nack(m.Msg.Metadata.(utils.MyULID))
+			d.NACK(m.Msg.Metadata.(utils.MyULID))
 			if model.IsFatalKafkaError(m.Err) {
 				d.dofatal()
 			}
@@ -69,7 +69,7 @@ func (d *KafkaDestination) sendOne(message *model.FullMessage, partitionKey stri
 	}()
 	err = d.encoder(message, buf)
 	if err != nil {
-		d.permerr(message.Uid)
+		d.PermError(message.Uid)
 		return err
 	}
 	kafkaMsg := &sarama.ProducerMessage{
@@ -90,7 +90,7 @@ func (d *KafkaDestination) Close() error {
 	return nil
 }
 
-func (d *KafkaDestination) Send(msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *KafkaDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
 	var i int
 	var e error
 	for i = range msgs {

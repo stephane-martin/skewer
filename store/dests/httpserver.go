@@ -168,7 +168,7 @@ func (d *HTTPServerDestination) serve(listener net.Listener) (err error) {
 func (d *HTTPServerDestination) nackall(messages []*model.FullMessage) {
 	var message *model.FullMessage
 	for _, message = range messages {
-		d.nack(message.Uid)
+		d.NACK(message.Uid)
 		model.FullFree(message)
 	}
 }
@@ -274,11 +274,11 @@ Loop:
 
 	for _, message = range messages {
 		if permerrors[message.Uid] {
-			d.permerr(message.Uid)
+			d.PermError(message.Uid)
 		} else if ok {
-			d.ack(message.Uid)
+			d.ACK(message.Uid)
 		} else {
-			d.nack(message.Uid)
+			d.NACK(message.Uid)
 		}
 		model.FullFree(message)
 	}
@@ -296,19 +296,19 @@ func (d *HTTPServerDestination) Close() (err error) {
 		if e != nil || message == nil {
 			break
 		}
-		d.nack(message.Uid)
+		d.NACK(message.Uid)
 		model.FullFree(message)
 	}
 	return err
 }
 
-func (d *HTTPServerDestination) Send(msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *HTTPServerDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
 	var i int
 	for len(msgs) > 0 {
 		err = d.sendQueue.Put(msgs[0].Message)
 		if err != nil {
 			for i = range msgs {
-				d.nack(msgs[i].Message.Uid)
+				d.NACK(msgs[i].Message.Uid)
 				model.FullFree(msgs[i].Message)
 			}
 			return err

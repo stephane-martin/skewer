@@ -59,14 +59,14 @@ func (d *UDPDestination) sendOne(message *model.FullMessage) (err error) {
 
 	// careful not to use message afterwards
 	if err == nil {
-		d.ack(uid)
+		d.ACK(uid)
 		return nil
 	} else if encoders.IsEncodingError(err) {
-		d.permerr(uid)
+		d.PermError(uid)
 		return err
 	} else {
 		// error writing to the UDP conn
-		d.nack(uid)
+		d.NACK(uid)
 		d.dofatal()
 		return err
 	}
@@ -76,7 +76,7 @@ func (d *UDPDestination) Close() error {
 	return d.client.Close()
 }
 
-func (d *UDPDestination) Send(msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *UDPDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
 	var i int
 	var e error
 	for i = range msgs {

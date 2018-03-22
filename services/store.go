@@ -12,6 +12,7 @@ import (
 	"github.com/inconshreveable/log15"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
+	circuit "github.com/rubyist/circuitbreaker"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/base"
@@ -31,16 +32,13 @@ type storeServiceImpl struct {
 	shutdownStore    context.CancelFunc
 	shutdownCtx      context.Context
 	cancelForwarders context.CancelFunc
-	mu               *sync.Mutex
-	ingestwg         *sync.WaitGroup
+	fwdersWg         sync.WaitGroup
+	mu               sync.Mutex
+	ingestwg         sync.WaitGroup
 	pipe             *os.File
 	status           bool
 	secret           *memguard.LockedBuffer
 	ring             kring.Ring
-	forwarders       map[conf.DestinationType]store.Forwarder
-	fmu              map[conf.DestinationType]*sync.Mutex
-	fstatus          map[conf.DestinationType]bool
-	fcancels         map[conf.DestinationType]context.CancelFunc
 	confined         bool
 }
 
@@ -54,20 +52,12 @@ func NewStoreService(env *base.ProviderEnv) (base.Provider, error) {
 	store.InitRegistry()
 	dests.InitRegistry()
 	impl := storeServiceImpl{
-		ingestwg: &sync.WaitGroup{},
-		mu:       &sync.Mutex{},
 		status:   false,
 		pipe:     env.Pipe,
 		logger:   env.Logger,
 		binder:   env.Binder,
 		ring:     env.Ring,
 		confined: env.Confined,
-	}
-	impl.fmu = map[conf.DestinationType]*sync.Mutex{}
-	impl.fstatus = map[conf.DestinationType]bool{}
-	impl.fcancels = map[conf.DestinationType]context.CancelFunc{}
-	for _, desttype := range conf.Destinations {
-		impl.fmu[desttype] = &sync.Mutex{}
 	}
 	impl.shutdownCtx, impl.shutdownStore = context.WithCancel(context.Background())
 
@@ -99,7 +89,7 @@ func (s *storeServiceImpl) SetConfAndRestart(c conf.BaseConfig) ([]model.Listene
 	} else {
 		s.secret = nil
 	}
-	return s.doStart(nil)
+	return s.doStart()
 }
 
 func (s *storeServiceImpl) FatalError() chan struct{} {
@@ -110,7 +100,7 @@ func (s *storeServiceImpl) FatalError() chan struct{} {
 
 func (s *storeServiceImpl) Start() ([]model.ListenerInfo, error) {
 	// unused
-	return s.doStart(s.mu)
+	return nil, nil
 }
 
 func (s *storeServiceImpl) create() error {
@@ -178,93 +168,50 @@ func (s *storeServiceImpl) startAllForwarders(dests conf.DestinationType) {
 	// returns immediately
 	var gforwarderCtx context.Context
 	gforwarderCtx, s.cancelForwarders = context.WithCancel(s.shutdownCtx)
-	s.forwarders = map[conf.DestinationType]store.Forwarder{}
 	for _, dtype := range dests.Iterate() {
 		desttype := dtype
-		s.startForwarder(gforwarderCtx, desttype)
+		s.fwdersWg.Add(1)
+		go s.startForwarder(gforwarderCtx, desttype)
 	}
 }
 
 func (s *storeServiceImpl) stopAllForwarders() {
 	if s.cancelForwarders != nil {
 		s.cancelForwarders()
-		s.cancelForwarders = nil
-		var wg sync.WaitGroup
-		for _, dtype := range conf.Destinations {
-			wg.Add(1)
-			go func(desttype conf.DestinationType) {
-				s.stopForwarder(desttype)
-				wg.Done()
-			}(dtype)
-		}
-		wg.Wait()
 	}
+	s.fwdersWg.Wait()
 }
 
-func (s *storeServiceImpl) stopForwarder(desttype conf.DestinationType) {
-	s.fmu[desttype].Lock()
-	defer s.fmu[desttype].Unlock()
-	if !s.fstatus[desttype] {
-		return
-	}
-	s.fcancels[desttype]()
-	s.fcancels[desttype] = nil
-	s.forwarders[desttype].WaitFinished()
-	s.forwarders[desttype] = nil
-	s.fstatus[desttype] = false
-}
-
-func (s *storeServiceImpl) startForwarder(gforwarderCtx context.Context, desttype conf.DestinationType) {
-	// returns immediately
-	s.fmu[desttype].Lock()
-	if s.fstatus[desttype] {
-		s.fmu[desttype].Unlock()
-		return
-	}
+func (s *storeServiceImpl) startForwarder(ctx context.Context, desttype conf.DestinationType) {
+	defer s.fwdersWg.Done()
 	s.logger.Info("Starting forwarder", "type", conf.DestinationNames[desttype])
-	s.fstatus[desttype] = true
-
-	ctx, cancel := context.WithCancel(gforwarderCtx)
 	forwarder := store.NewForwarder(desttype, s.store, s.config, s.logger, s.binder)
-	s.forwarders[desttype] = forwarder
-	s.fcancels[desttype] = cancel
-	s.fmu[desttype].Unlock()
+	cb := circuit.NewConsecutiveBreaker(3)
 
-	// start forwarding message
-	forwarder.Forward(ctx)
-
-	// monitor for remote connection errors
-	go func() {
+	for {
+		err := cb.CallContext(
+			ctx,
+			func() error { return forwarder.Forward(ctx) },
+			0,
+		)
+		if err == nil {
+			// normal shutdown
+			return
+		}
+		if err != circuit.ErrBreakerOpen {
+			s.logger.Error("Forwarder faced an error", "dest", desttype, "error", err)
+		}
+		// the forwarder faced an error, try to restart it by looping
 		select {
 		case <-ctx.Done():
 			return
-		case <-forwarder.Fatal():
-			// when the kafka forwarder signals an error,
-			// the StoreService stops the forwarder,
-			// waits 10 seconds, and then restarts the
-			// forwarder.
-			// but at the same time the main process can
-			// decide to stop/start the StoreService (for
-			// instance because it received a SIGHUP).
-			// that's why we need the mutex stuff
-			s.logger.Warn("The forwarder reported a connection error", "type", conf.DestinationNames[desttype])
-			s.stopForwarder(desttype)
-			select {
-			case <-gforwarderCtx.Done():
-			case <-time.After(10 * time.Second):
-				s.startForwarder(gforwarderCtx, desttype)
-			}
+		case <-time.After(time.Second):
 		}
-	}()
-
+	}
 }
 
-func (s *storeServiceImpl) doStart(mu *sync.Mutex) ([]model.ListenerInfo, error) {
+func (s *storeServiceImpl) doStart() ([]model.ListenerInfo, error) {
 	infos := []model.ListenerInfo{}
-	if mu != nil {
-		mu.Lock()
-		defer mu.Unlock()
-	}
 
 	select {
 	case <-s.shutdownCtx.Done():
@@ -304,7 +251,7 @@ func (s *storeServiceImpl) doStart(mu *sync.Mutex) ([]model.ListenerInfo, error)
 
 // Stop stops the Kafka forwarder
 func (s *storeServiceImpl) Stop() {
-	s.doStop(s.mu)
+	s.doStop(&s.mu)
 }
 
 func (s *storeServiceImpl) doStop(mu *sync.Mutex) {

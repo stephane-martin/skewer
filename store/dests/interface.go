@@ -6,12 +6,17 @@ import (
 
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/utils"
 )
 
 type Destination interface {
-	Send(m []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) error
+	Send(ctx context.Context, m []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) error
 	Fatal() chan struct{}
 	Close() error
+	ACK(utils.MyULID)
+	NACK(utils.MyULID)
+	PermError(utils.MyULID)
+	NACKAll([]*model.FullMessage)
 }
 
 type constructor func(ctx context.Context, e *Env) (Destination, error)

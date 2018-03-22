@@ -86,14 +86,14 @@ func NewRELPDestination(ctx context.Context, e *Env) (Destination, error) {
 				if err != nil {
 					break
 				}
-				d.ack(uid)
+				d.ACK(uid)
 			}
 			for {
 				uid, _, err = nackChan.Get()
 				if err != nil {
 					break
 				}
-				d.nack(uid)
+				d.NACK(uid)
 				d.logger.Info("RELP server returned a NACK", "uid", uid.String())
 				d.dofatal()
 			}
@@ -108,7 +108,7 @@ func (d *RELPDestination) sendOne(message *model.FullMessage) (err error) {
 	err = d.client.Send(message)
 	if err != nil {
 		// the client send queue has been disposed
-		d.nack(uid)
+		d.NACK(uid)
 		d.dofatal()
 	}
 	return
@@ -118,7 +118,7 @@ func (d *RELPDestination) Close() (err error) {
 	return d.client.Close()
 }
 
-func (d *RELPDestination) Send(msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *RELPDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
 	var i int
 	var e error
 	for i = range msgs {

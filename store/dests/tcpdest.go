@@ -86,16 +86,16 @@ func (d *TCPDestination) sendOne(message *model.FullMessage) (err error) {
 
 	if err == nil {
 		if d.previousUid != utils.ZeroUid {
-			d.ack(d.previousUid)
+			d.ACK(d.previousUid)
 		}
 		d.previousUid = uid
 	} else if encoders.IsEncodingError(err) {
-		d.permerr(uid)
+		d.PermError(uid)
 	} else {
 		// error writing to the TCP conn
-		d.nack(uid)
+		d.NACK(uid)
 		if d.previousUid != utils.ZeroUid {
-			d.nack(d.previousUid)
+			d.NACK(d.previousUid)
 			d.previousUid = utils.ZeroUid
 		}
 		d.dofatal()
@@ -107,7 +107,7 @@ func (d *TCPDestination) Close() error {
 	return d.clt.Close()
 }
 
-func (d *TCPDestination) Send(msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *TCPDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
 	var i int
 	var e error
 	for i = range msgs {

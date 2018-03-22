@@ -78,21 +78,21 @@ func (d *RedisDestination) sendOne(msg *model.FullMessage, topic string) (err er
 	var buf []byte
 	buf, err = encoders.ChainEncode(d.encoder, msg)
 	if err != nil {
-		d.permerr(uid)
+		d.PermError(uid)
 		return err
 	}
 	_, err = d.client.RPush(topic, buf).Result()
 	if err != nil {
-		d.nack(uid)
+		d.NACK(uid)
 		d.dofatal()
 		return err
 	}
-	d.ack(uid)
+	d.ACK(uid)
 
 	return nil
 }
 
-func (d *RedisDestination) Send(msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *RedisDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
 	var i int
 	var e error
 	for i = range msgs {

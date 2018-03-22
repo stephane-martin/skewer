@@ -1,8 +1,6 @@
 package store
 
 import (
-	"context"
-
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
@@ -21,10 +19,4 @@ type Store interface {
 	ReadAllBadgers() (map[string]string, map[string]string, map[string]string)
 	Destinations() []conf.DestinationType
 	Confined() bool
-}
-
-type Forwarder interface {
-	Forward(ctx context.Context)
-	Fatal() chan struct{}
-	WaitFinished()
 }

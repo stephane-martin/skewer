@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/conf"
@@ -13,54 +15,35 @@ import (
 	"github.com/stephane-martin/skewer/utils"
 )
 
-type fwderImpl struct {
+type Forwarder struct {
 	logger     log15.Logger
 	binder     binder.Client
-	wg         *sync.WaitGroup
 	once       sync.Once
 	store      Store
 	conf       conf.BaseConfig
 	desttype   conf.DestinationType
-	fatalChan  chan struct{}
 	outputMsgs []model.OutputMsg
 }
 
-func NewForwarder(desttype conf.DestinationType, st Store, bc conf.BaseConfig, logger log15.Logger, bindr binder.Client) (fwder Forwarder) {
-	f := fwderImpl{
-		logger:     logger.New("class", "forwarder"),
-		binder:     bindr,
-		store:      st,
-		conf:       bc,
-		desttype:   desttype,
-		fatalChan:  make(chan struct{}),
-		outputMsgs: make([]model.OutputMsg, bc.Store.BatchSize),
+func NewForwarder(desttype conf.DestinationType, st Store, bc conf.BaseConfig, logger log15.Logger, bindr binder.Client) *Forwarder {
+	f := Forwarder{
+		logger:   logger.New("class", "forwarder"),
+		binder:   bindr,
+		store:    st,
+		conf:     bc,
+		desttype: desttype,
 	}
 
-	f.fatalChan = make(chan struct{})
-	f.wg = &sync.WaitGroup{}
 	return &f
 }
 
-func (fwder *fwderImpl) Fatal() chan struct{} {
-	return fwder.fatalChan
-}
+func (fwder *Forwarder) Forward(ctx context.Context) (err error) {
+	// TODO: investigate fcancel and dest.Close()
+	fctx, fcancel := context.WithCancel(ctx)
+	defer fcancel()
 
-func (fwder *fwderImpl) dofatal() {
-	fwder.once.Do(func() { close(fwder.fatalChan) })
-}
-
-func (fwder *fwderImpl) WaitFinished() {
-	fwder.wg.Wait()
-}
-
-func (fwder *fwderImpl) Forward(ctx context.Context) {
-	fwder.wg.Add(1)
-	go fwder.doForward(ctx)
-}
-
-func (fwder *fwderImpl) doForward(ctx context.Context) {
-	defer fwder.wg.Done()
-	var err error
+	fwder.logger.Debug("Starting forwarder for destination", "dest", fwder.desttype)
+	fwder.outputMsgs = make([]model.OutputMsg, fwder.conf.Store.BatchSize)
 	e := dests.BuildEnv().
 		Callbacks(fwder.store.ACK, fwder.store.NACK, fwder.store.PermError).
 		Config(fwder.conf).
@@ -68,11 +51,14 @@ func (fwder *fwderImpl) doForward(ctx context.Context) {
 		Logger(fwder.logger).
 		Binder(fwder.binder)
 
-	dest, err := dests.NewDestination(ctx, fwder.desttype, e)
+	dest, err := dests.NewDestination(fctx, fwder.desttype, e)
 	if err != nil {
-		fwder.logger.Error("Error setting up the destination", "error", err)
-		fwder.dofatal()
-		return
+		select {
+		case <-fctx.Done():
+			return nil
+		default:
+			return fmt.Errorf("Error setting up the destination: %s", err.Error())
+		}
 	}
 
 	defer func() {
@@ -80,34 +66,44 @@ func (fwder *fwderImpl) doForward(ctx context.Context) {
 		_ = dest.Close()
 	}()
 
-	// listen for destination fatal errors
-	fwder.wg.Add(1)
-	go func() {
-		defer fwder.wg.Done()
-		select {
-		case <-ctx.Done():
-			return
-		case <-dest.Fatal():
-			fwder.dofatal()
-		}
-	}()
-
 	jsenvs := map[utils.MyULID]*javascript.Environment{}
-	done := ctx.Done()
 	outputs := fwder.store.Outputs(fwder.desttype)
 
 	var more bool
 	var messages []*model.FullMessage
+	var stopping int32
+	shutdown := false
+
+	go func() {
+		select {
+		case <-fctx.Done():
+			shutdown = true
+			atomic.StoreInt32(&stopping, 1)
+		case <-dest.Fatal():
+			atomic.StoreInt32(&stopping, 1)
+		}
+	}()
 
 	for {
 		select {
-		case <-done:
-			return
+
+		case <-fctx.Done():
+			return nil
+		case <-dest.Fatal():
+			return fmt.Errorf("Fatal error in destination: %d", fwder.desttype)
 		case messages, more = <-outputs:
 			if !more || messages == nil {
-				return
+				return nil
 			}
-			err = fwder.fwdMsgs(messages, jsenvs, dest)
+			if atomic.LoadInt32(&stopping) == 1 {
+				dest.NACKAll(messages)
+				if shutdown {
+					return nil
+				}
+				return fmt.Errorf("Fatal error in destination: %d", fwder.desttype)
+			}
+
+			err = fwder.fwdMsgs(fctx, messages, jsenvs, dest)
 			if err != nil {
 				fwder.logger.Warn("Error forwarding messages", "error", err)
 			}
@@ -115,7 +111,7 @@ func (fwder *fwderImpl) doForward(ctx context.Context) {
 	}
 }
 
-func (fwder *fwderImpl) fwdMsgs(msgs []*model.FullMessage, envs map[utils.MyULID]*javascript.Environment, dest dests.Destination) (err error) {
+func (fwder *Forwarder) fwdMsgs(ctx context.Context, msgs []*model.FullMessage, envs map[utils.MyULID]*javascript.Environment, dest dests.Destination) (err error) {
 	var errs []error
 	var config *conf.FilterSubConfig
 	var topic, partitionKey string
@@ -209,5 +205,5 @@ Loop:
 	if i == 0 {
 		return nil
 	}
-	return dest.Send(fwder.outputMsgs[:i], partitionKey, partitionNumber, topic)
+	return dest.Send(ctx, fwder.outputMsgs[:i], partitionKey, partitionNumber, topic)
 }
