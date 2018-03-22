@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -113,9 +114,18 @@ func NewElasticDestination(ctx context.Context, e *Env) (Destination, error) {
 	if err != nil {
 		return nil, err
 	}
+	resp, err := d.elasticClient.ClusterHealth().Level("cluster").Do(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	if resp.Status != "green" && resp.Status != "yellow" {
+		connCounter.WithLabelValues("elasticsearch", "fail").Inc()
+		return nil, errors.New("Elasticsearch cluster had red status")
+	}
 
 	names, err := d.elasticClient.IndexNames()
 	if err != nil {
+		connCounter.WithLabelValues("elasticsearch", "fail").Inc()
 		return nil, err
 	}
 	d.logger.Info("Existing indices in Elasticsearch", "names", strings.Join(names, ","))
@@ -134,6 +144,7 @@ func NewElasticDestination(ctx context.Context, e *Env) (Destination, error) {
 
 	d.processor, err = processor.Do(context.Background())
 	if err != nil {
+		connCounter.WithLabelValues("elasticsearch", "fail").Inc()
 		return nil, err
 	}
 

@@ -2,8 +2,6 @@ package dests
 
 import (
 	"context"
-	"fmt"
-	"time"
 
 	sarama "github.com/Shopify/sarama"
 	"github.com/stephane-martin/skewer/conf"
@@ -25,21 +23,13 @@ func NewKafkaDestination(ctx context.Context, e *Env) (Destination, error) {
 	if err != nil {
 		return nil, err
 	}
-	for {
-		d.producer, err = e.config.KafkaDest.GetAsyncProducer(e.confined)
-		if err == nil {
-			connCounter.WithLabelValues("kafka", "success").Inc()
-			e.logger.Info("The forwarder got a Kafka producer")
-			break
-		}
+
+	d.producer, err = e.config.KafkaDest.GetAsyncProducer(e.confined)
+	if err != nil {
 		connCounter.WithLabelValues("kafka", "fail").Inc()
-		e.logger.Debug("Error getting a Kafka client", "error", err)
-		select {
-		case <-ctx.Done():
-			return nil, fmt.Errorf("Kafka destination aborted: %s", err.Error())
-		case <-time.After(5 * time.Second):
-		}
+		return nil, err
 	}
+	connCounter.WithLabelValues("kafka", "success").Inc()
 
 	go func() {
 		var m *sarama.ProducerMessage

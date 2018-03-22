@@ -126,6 +126,18 @@ func NewHTTPDestination(ctx context.Context, e *Env) (Destination, error) {
 		Transport: transport,
 		Jar:       nil,
 	}
+
+	// try to send a HEAD request
+	urlbuf := bytes.NewBuffer(nil)
+	err = d.url.Execute(urlbuf, &model.SyslogMessage{})
+	if err == nil {
+		_, err = d.clt.Head(urlbuf.String())
+		if utils.IsConnRefused(err) || !utils.IsTemporary(err) {
+			connCounter.WithLabelValues("http", "fail").Inc()
+			return nil, err
+		}
+	}
+
 	d.sendQueue = message.NewRing(4 * uint64(config.MaxIdleConnsPerHost))
 
 	if config.Rebind > 0 {

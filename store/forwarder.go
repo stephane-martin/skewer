@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -23,6 +24,7 @@ type Forwarder struct {
 	conf       conf.BaseConfig
 	desttype   conf.DestinationType
 	outputMsgs []model.OutputMsg
+	dest       dests.Destination
 }
 
 func NewForwarder(desttype conf.DestinationType, st Store, bc conf.BaseConfig, logger log15.Logger, bindr binder.Client) *Forwarder {
@@ -37,13 +39,8 @@ func NewForwarder(desttype conf.DestinationType, st Store, bc conf.BaseConfig, l
 	return &f
 }
 
-func (fwder *Forwarder) Forward(ctx context.Context) (err error) {
-	// TODO: investigate fcancel and dest.Close()
-	fctx, fcancel := context.WithCancel(ctx)
-	defer fcancel()
-
-	fwder.logger.Debug("Starting forwarder for destination", "dest", fwder.desttype)
-	fwder.outputMsgs = make([]model.OutputMsg, fwder.conf.Store.BatchSize)
+func (fwder *Forwarder) CreateDestination(ctx context.Context) (err error) {
+	fwder.logger.Debug("Creating destination", "dest", fwder.desttype)
 	e := dests.BuildEnv().
 		Callbacks(fwder.store.ACK, fwder.store.NACK, fwder.store.PermError).
 		Config(fwder.conf).
@@ -51,21 +48,31 @@ func (fwder *Forwarder) Forward(ctx context.Context) (err error) {
 		Logger(fwder.logger).
 		Binder(fwder.binder)
 
-	dest, err := dests.NewDestination(fctx, fwder.desttype, e)
+	dest, err := dests.NewDestination(ctx, fwder.desttype, e)
 	if err != nil {
-		select {
-		case <-fctx.Done():
-			return nil
-		default:
-			return fmt.Errorf("Error setting up the destination: %s", err.Error())
-		}
+		return fmt.Errorf("Error setting up the destination: %s", err.Error())
+	}
+	select {
+	case <-ctx.Done():
+		return errors.New("shutdown")
+	default:
+		fwder.dest = dest
+	}
+	return nil
+}
+
+func (fwder *Forwarder) Forward(ctx context.Context) (err error) {
+	if fwder.dest == nil {
+		return fmt.Errorf("Destination not created for forwarder", "dest", fwder.desttype)
 	}
 
 	defer func() {
 		// be sure to Close the destination when we are done
-		_ = dest.Close()
+		_ = fwder.dest.Close()
+		fwder.dest = nil
 	}()
 
+	fwder.outputMsgs = make([]model.OutputMsg, fwder.conf.Store.BatchSize)
 	jsenvs := map[utils.MyULID]*javascript.Environment{}
 	outputs := fwder.store.Outputs(fwder.desttype)
 
@@ -76,10 +83,10 @@ func (fwder *Forwarder) Forward(ctx context.Context) (err error) {
 
 	go func() {
 		select {
-		case <-fctx.Done():
+		case <-ctx.Done():
 			shutdown = true
 			atomic.StoreInt32(&stopping, 1)
-		case <-dest.Fatal():
+		case <-fwder.dest.Fatal():
 			atomic.StoreInt32(&stopping, 1)
 		}
 	}()
@@ -87,23 +94,23 @@ func (fwder *Forwarder) Forward(ctx context.Context) (err error) {
 	for {
 		select {
 
-		case <-fctx.Done():
+		case <-ctx.Done():
 			return nil
-		case <-dest.Fatal():
+		case <-fwder.dest.Fatal():
 			return fmt.Errorf("Fatal error in destination: %d", fwder.desttype)
 		case messages, more = <-outputs:
 			if !more || messages == nil {
 				return nil
 			}
 			if atomic.LoadInt32(&stopping) == 1 {
-				dest.NACKAll(messages)
+				fwder.dest.NACKAll(messages)
 				if shutdown {
 					return nil
 				}
 				return fmt.Errorf("Fatal error in destination: %d", fwder.desttype)
 			}
 
-			err = fwder.fwdMsgs(fctx, messages, jsenvs, dest)
+			err = fwder.fwdMsgs(ctx, messages, jsenvs, fwder.dest)
 			if err != nil {
 				fwder.logger.Warn("Error forwarding messages", "error", err)
 			}

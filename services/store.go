@@ -189,19 +189,27 @@ func (s *storeServiceImpl) startForwarder(ctx context.Context, desttype conf.Des
 	cb := circuit.NewConsecutiveBreaker(3)
 
 	for {
+		fctx, fcancel := context.WithCancel(ctx)
+		// we use a circuit breaker to prevent from trying to create the destination too often
 		err := cb.CallContext(
-			ctx,
-			func() error { return forwarder.Forward(ctx) },
-			0,
+			fctx,
+			func() error { return forwarder.CreateDestination(fctx) },
+			time.Minute,
 		)
-		if err == nil {
-			// normal shutdown
-			return
+		if err != nil {
+			fcancel()
+			if err != circuit.ErrBreakerOpen {
+				s.logger.Error("Forwarder faced an error when creating destination", "dest", desttype, "error", err)
+			}
+		} else {
+			// destination was successfully created
+			err = forwarder.Forward(fctx)
+			fcancel()
+			if err == nil {
+				return
+			}
+			s.logger.Error("Forwarder error", "dest", desttype, "error", err)
 		}
-		if err != circuit.ErrBreakerOpen {
-			s.logger.Error("Forwarder faced an error", "dest", desttype, "error", err)
-		}
-		// the forwarder faced an error, try to restart it by looping
 		select {
 		case <-ctx.Done():
 			return
