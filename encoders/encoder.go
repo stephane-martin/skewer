@@ -60,6 +60,10 @@ type Encoder func(v interface{}, w io.Writer) error
 var NonEncodableError = fmt.Errorf("non encodable message")
 
 func IsEncodingError(err error) bool {
+	// TODO: check
+	if err == nil {
+		return false
+	}
 	if err == NonEncodableError {
 		return true
 	}

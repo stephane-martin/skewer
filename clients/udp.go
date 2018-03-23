@@ -1,10 +1,10 @@
 package clients
 
 import (
-	"fmt"
+	"errors"
 	"net"
 	"strconv"
-	"sync"
+	"sync/atomic"
 
 	"github.com/inconshreveable/log15"
 	"github.com/oklog/ulid"
@@ -23,7 +23,7 @@ type SyslogUDPClient struct {
 	encoder encoders.Encoder
 	logger  log15.Logger
 
-	sync.Mutex
+	closed int32
 }
 
 func NewSyslogUDPClient(logger log15.Logger) *SyslogUDPClient {
@@ -51,24 +51,23 @@ func (c *SyslogUDPClient) Format(format baseenc.Format) *SyslogUDPClient {
 }
 
 func (c *SyslogUDPClient) Close() (err error) {
-	c.Lock()
-	defer c.Unlock()
-	if c.conn == nil {
-		return nil
+	if atomic.CompareAndSwapInt32(&c.closed, 0, 1) {
+		if c.conn != nil {
+			err = c.conn.Close()
+		}
 	}
-	err = c.conn.Close()
-	c.conn = nil
 	return err
 }
 
 func (c *SyslogUDPClient) Connect() (err error) {
-	c.Lock()
 	defer func() {
 		if err != nil {
 			c.conn = nil
 		}
-		c.Unlock()
 	}()
+	if atomic.LoadInt32(&c.closed) == 1 {
+		return errors.New("SyslogUDPClient: closed")
+	}
 	if c.conn != nil {
 		return nil
 	}
@@ -82,10 +81,10 @@ func (c *SyslogUDPClient) Connect() (err error) {
 
 	if len(c.path) == 0 {
 		if len(c.host) == 0 {
-			return fmt.Errorf("SyslogUDPClient: specify a host or a unix path")
+			return errors.New("SyslogUDPClient: specify a host or a unix path")
 		}
 		if c.port == 0 {
-			return fmt.Errorf("SyslogUDPClient: specify a port")
+			return errors.New("SyslogUDPClient: specify a port")
 		}
 		hostport := net.JoinHostPort(c.host, strconv.FormatInt(int64(c.port), 10))
 		conn, err = net.Dial("udp", hostport)
@@ -120,15 +119,16 @@ func (c *SyslogUDPClient) Nack() chan ulid.ULID {
 }
 
 func (c *SyslogUDPClient) Send(msg *model.FullMessage) (err error) {
-	// may be called concurrently
 	if c.conn == nil {
-		return fmt.Errorf("SyslogUDPClient: not connected")
+		return errors.New("SyslogUDPClient: not connected")
+	}
+	if atomic.LoadInt32(&c.closed) == 1 {
+		return errors.New("SyslogUDPClient: closed")
 	}
 	if msg == nil {
 		return nil
 	}
 	buf, err := encoders.ChainEncode(c.encoder, msg)
-	model.FullFree(msg)
 	if err != nil {
 		return encoders.NonEncodableError
 	}

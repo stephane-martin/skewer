@@ -55,7 +55,7 @@ func NewTCPDestination(ctx context.Context, e *Env) (Destination, error) {
 		clt = clt.TLS(config)
 	}
 
-	err = clt.Connect()
+	err = clt.Connect(ctx)
 	if err != nil {
 		connCounter.WithLabelValues("tcp", "fail").Inc()
 		return nil, err
@@ -70,6 +70,7 @@ func NewTCPDestination(ctx context.Context, e *Env) (Destination, error) {
 			select {
 			case <-ctx.Done():
 				// the store service asked for stop
+				d.clt.Close()
 			case <-time.After(rebind):
 				e.logger.Info("TCP destination rebind period has expired", "rebind", rebind.String())
 				d.dofatal()
@@ -80,27 +81,27 @@ func NewTCPDestination(ctx context.Context, e *Env) (Destination, error) {
 	return d, nil
 }
 
-func (d *TCPDestination) sendOne(message *model.FullMessage) (err error) {
-	uid := message.Uid
-	err = d.clt.Send(message)
+func (d *TCPDestination) sendOne(ctx context.Context, message *model.FullMessage) (err error) {
+	err = d.clt.Send(ctx, message)
 
 	if err == nil {
 		if d.previousUid != utils.ZeroUid {
 			d.ACK(d.previousUid)
 		}
-		d.previousUid = uid
-	} else if encoders.IsEncodingError(err) {
-		d.PermError(uid)
-	} else {
-		// error writing to the TCP conn
-		d.NACK(uid)
-		if d.previousUid != utils.ZeroUid {
-			d.NACK(d.previousUid)
-			d.previousUid = utils.ZeroUid
-		}
-		d.dofatal()
+		d.previousUid = message.Uid
+		return nil
 	}
-	return
+	if encoders.IsEncodingError(err) {
+		d.PermError(message.Uid)
+		return err
+	}
+	// error writing to the TCP conn
+	d.NACK(message.Uid)
+	if d.previousUid != utils.ZeroUid {
+		d.NACK(d.previousUid)
+		d.previousUid = utils.ZeroUid
+	}
+	return err
 }
 
 func (d *TCPDestination) Close() error {
@@ -108,11 +109,27 @@ func (d *TCPDestination) Close() error {
 }
 
 func (d *TCPDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
-	var i int
+	var msg *model.FullMessage
 	var e error
-	for i = range msgs {
-		e = d.sendOne(msgs[i].Message)
-		if e != nil {
+
+	for {
+		if len(msgs) == 0 {
+			break
+		}
+		msg = msgs[0].Message
+		msgs = msgs[1:]
+		e = d.sendOne(ctx, msg)
+		model.FullFree(msg)
+		if e != nil && !encoders.IsEncodingError(e) {
+			// network error, we stop now and NACK remaining messages
+			for i := 0; i < len(msgs); i++ {
+				d.NACK(msgs[i].Message.Uid)
+				model.FullFree(msgs[i].Message)
+			}
+			d.dofatal()
+			return e
+		}
+		if e != nil && err == nil {
 			err = e
 		}
 	}

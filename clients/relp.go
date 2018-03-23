@@ -3,7 +3,9 @@ package clients
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"math"
 	"net"
@@ -20,13 +22,16 @@ import (
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/queue"
-	"github.com/stephane-martin/skewer/utils/queue/message"
 	"github.com/zond/gotomic"
 )
 
 var OPEN = []byte("relp_version=0\nrelp_software=skewer\ncommands=syslog")
 var endl = []byte("\n")
 var sp = []byte(" ")
+var zerotime = time.Time{}
+
+var ErrRELPNotConnected = errors.New("RELPClient: not connected")
+var ErrRELPClosed = errors.New("RELPClient: closed")
 
 type IntKey int32
 
@@ -81,9 +86,7 @@ func (m *Txnr2UidMap) Get(txnr int32) (uid utils.MyULID, err error) {
 	return
 }
 
-type Iterator func(int32, utils.MyULID)
-
-func (m *Txnr2UidMap) ForEach(f Iterator) {
+func (m *Txnr2UidMap) ForEach(f func(int32, utils.MyULID)) {
 	g := func(k gotomic.Hashable, v gotomic.Thing) bool {
 		f(int32(k.(IntKey)), v.(utils.MyULID))
 		return false
@@ -119,13 +122,12 @@ type RELPClient struct {
 	txnr2msgid *Txnr2UidMap
 	windowSize int32
 
-	ackChan   *queue.AckQueue
-	nackChan  *queue.AckQueue
-	sendQueue *message.Ring
+	ackChan  *queue.AckQueue
+	nackChan *queue.AckQueue
 
-	sync.Mutex
-	sendWg   sync.WaitGroup
 	handleWg sync.WaitGroup
+
+	closed int32
 }
 
 func NewRELPClient(logger log15.Logger) *RELPClient {
@@ -189,7 +191,9 @@ func (c *RELPClient) TLS(config *tls.Config) *RELPClient {
 }
 
 func (c *RELPClient) Connect() (err error) {
-	c.Lock()
+	if atomic.LoadInt32(&c.closed) == 1 {
+		return errors.New("RELPClient: closed")
+	}
 	defer func() {
 		if err != nil {
 			c.conn = nil
@@ -197,9 +201,7 @@ func (c *RELPClient) Connect() (err error) {
 			c.ackChan = nil
 			c.nackChan = nil
 			c.scanner = nil
-			c.sendQueue = nil
 		}
-		c.Unlock()
 	}()
 
 	if c.conn != nil {
@@ -215,10 +217,10 @@ func (c *RELPClient) Connect() (err error) {
 
 	if len(c.path) == 0 {
 		if len(c.host) == 0 {
-			return fmt.Errorf("RELPClient: specify a host or a unix path")
+			return errors.New("RELPClient: specify a host or a unix path")
 		}
 		if c.port == 0 {
-			return fmt.Errorf("RELPClient: specify a port")
+			return errors.New("RELPClient: specify a port")
 		}
 		hostport := net.JoinHostPort(c.host, strconv.FormatInt(int64(c.port), 10))
 		var dialer *net.Dialer
@@ -283,13 +285,11 @@ func (c *RELPClient) Connect() (err error) {
 					if utils.IsBrokenPipe(err) || utils.IsFileClosed(err) {
 						c.logger.Warn("Broken pipe detected when flushing buffers", "error", err)
 						_ = c.conn.Close()
-						c.sendQueue.Dispose()
 						return
 					}
 					if utils.IsTimeout(err) {
 						c.logger.Warn("Timeout detected when flushing buffers", "error", err)
 						_ = c.conn.Close()
-						c.sendQueue.Dispose()
 						return
 					}
 					c.logger.Warn("Unexpected error flushing buffers", "error", err)
@@ -306,12 +306,9 @@ func (c *RELPClient) Connect() (err error) {
 	}
 	c.ackChan = queue.NewAckQueue()
 	c.nackChan = queue.NewAckQueue()
-	c.sendQueue = message.NewRing(uint64(window))
 	c.txnr2msgid = NewTxnrMap(window)
 	c.handleWg.Add(1)
 	go c.handleRspAnswers()
-	c.sendWg.Add(1)
-	go c.doSend()
 	return nil
 }
 
@@ -336,6 +333,9 @@ func (c *RELPClient) encode(command string, v interface{}) (buf []byte, txnr int
 }
 
 func (c *RELPClient) wopen() (err error) {
+	if c.conn == nil {
+		return ErrRELPNotConnected
+	}
 	var buf []byte
 	buf, err = encoders.ChainEncode(c.encoder, int(0), sp, "open", sp, len(OPEN), sp, OPEN, endl)
 	if err != nil {
@@ -346,6 +346,9 @@ func (c *RELPClient) wopen() (err error) {
 }
 
 func (c *RELPClient) wclose() (err error) {
+	if c.conn == nil {
+		return ErrRELPNotConnected
+	}
 	buf, _, _ := c.encode("close", nil)
 	_, err = c.conn.Write(buf)
 	return err
@@ -354,8 +357,7 @@ func (c *RELPClient) wclose() (err error) {
 func (c *RELPClient) scan() (txnr int32, retcode int, data []byte, err error) {
 	defer func() {
 		if e := recover(); e != nil {
-			errString := fmt.Sprintf("%s", e)
-			err = fmt.Errorf(errString)
+			err = fmt.Errorf("%s", e)
 		}
 	}()
 	if !c.scanner.Scan() {
@@ -365,7 +367,7 @@ func (c *RELPClient) scan() (txnr int32, retcode int, data []byte, err error) {
 	splits := bytes.SplitN(c.scanner.Bytes(), sp, 4)
 	txnr64, _ := strconv.ParseInt(string(splits[0]), 10, 64)
 	if txnr64 > int64(math.MaxInt32) {
-		err = fmt.Errorf("RELPClient: received txnr is not an int32")
+		err = fmt.Errorf("RELPClient: received txnr is not an int32: %d", txnr64)
 		return
 	}
 	if string(splits[1]) != "rsp" {
@@ -390,23 +392,16 @@ func (c *RELPClient) scan() (txnr int32, retcode int, data []byte, err error) {
 	return
 }
 
-func (c *RELPClient) Send(msg *model.FullMessage) error {
-	// returns with error if the sendQueue has been disposed
-	return c.sendQueue.Put(msg)
-}
-
 func (c *RELPClient) handleRspAnswers() {
+	// returns if
+	// - Close() was called (hence the conn was closed)
+	// - conn was closed by server
+	// - there was a RELP session timeout
 	defer func() {
-		// we arrive here if
-		// - Close() was called (hence the conn was closed)
-		// - conn was closed by server
-		// - there was a RELP session timeout
-		c.sendQueue.Dispose() // stop stashing messages to be sent
-		_ = c.conn.Close()    // in case the conn was not properly closed
-		// the closed conn and the disposed queue will make doSend to return eventually
-		c.sendWg.Wait() // wait for doSend to return
+
+		_ = c.conn.Close() // in case the conn was not properly closed
 		// now we can NACK the messages that we did not have a response for,
-		// as no more txnr2msgid entries will be added by doSend
+		// as no more txnr2msgid entries will be added by Send()
 		keys := make([]int32, 0)
 		c.txnr2msgid.ForEach(
 			func(txnr int32, uid utils.MyULID) {
@@ -424,51 +419,53 @@ func (c *RELPClient) handleRspAnswers() {
 		c.nackChan.Dispose()
 		c.handleWg.Done()
 	}()
+
 	for {
 		if c.relpTimeout > 0 {
 			_ = c.conn.SetReadDeadline(time.Now().Add(c.relpTimeout))
 		}
 		txnr, retcode, _, err := c.scan()
-		_ = c.conn.SetReadDeadline(time.Time{})
-		if utils.IsFileClosed(err) {
-			// connection is closed
-			c.logger.Debug("Connection has been closed")
-			return
-		} else if err != nil {
-			if nerr, ok := err.(net.Error); ok {
-				if nerr.Timeout() {
-					c.logger.Info("timeout waiting for RELP answers", "error", err)
-					return
-				} else if nerr.Temporary() {
-					c.logger.Info("temporary error", "error", err)
-					continue
-				}
+		_ = c.conn.SetReadDeadline(zerotime) // disable deadline
+
+		if err != nil {
+			if utils.IsFileClosed(err) || utils.IsBrokenPipe(err) {
+				c.logger.Debug("Connection has been closed")
+				return
+			}
+			if utils.IsTimeout(err) {
+				c.logger.Info("timeout waiting for RELP answers", "error", err)
+				return
+			}
+			if utils.IsTemporary(err) {
+				c.logger.Info("temporary error", "error", err)
+				continue
 			}
 			c.logger.Info("error reading server responses", "error", err)
 			return
 		}
 		uid, err := c.txnr2msgid.Get(txnr)
-		if err == nil {
-			if retcode == 200 {
-				c.ackChan.Put(uid, conf.RELP)
-			} else {
-				c.nackChan.Put(uid, conf.RELP)
-			}
-		} else {
+		if err != nil {
 			c.logger.Warn("Unknown txnr", "txnr", txnr)
+			continue
 		}
+		if retcode != 200 {
+			c.nackChan.Put(uid, conf.RELP)
+			continue
+		}
+		c.ackChan.Put(uid, conf.RELP)
 	}
 }
 
 func (c *RELPClient) doSendOne(msg *model.FullMessage) (err error) {
 	if msg == nil {
-		return
+		return nil
 	}
 	buf, txnr, err := c.encode("syslog", msg)
 	if err != nil {
 		return encoders.NonEncodableError
 	}
 	if len(buf) == 0 {
+		// nothing to do
 		c.ackChan.Put(msg.Uid, conf.RELP)
 		return nil
 	}
@@ -477,73 +474,48 @@ func (c *RELPClient) doSendOne(msg *model.FullMessage) (err error) {
 	} else {
 		_, err = c.writer.Write(buf)
 	}
-	if err == nil {
-		return c.txnr2msgid.Put(txnr, msg.Uid)
+	if err != nil {
+		// error happened sending the message
+		return err
 	}
-	c.nackChan.Put(msg.Uid, conf.RELP)
-	return err
+	// everything alright, we register the Uid to wait for the server response
+	return c.txnr2msgid.Put(txnr, msg.Uid)
 }
 
-func (c *RELPClient) doSend() {
-	defer func() {
-		c.sendQueue.Dispose()
-		_ = c.Flush()
-		for {
-			msg, err := c.sendQueue.Get()
-			if err != nil {
-				break
-			}
-			c.nackChan.Put(msg.Uid, conf.RELP)
-		}
-		c.sendWg.Done()
-	}()
-	for {
-		msg, err := c.sendQueue.Get()
-		if err == utils.ErrDisposed {
-			c.logger.Debug("the queue has been disposed")
-			return
-		} else if err != nil {
-			c.logger.Info("unexpected error getting message from queue", "error", err)
-			return
-		}
+func (c *RELPClient) Send(ctx context.Context, msg *model.FullMessage) error {
 
-		err = c.doSendOne(msg)
-		model.FullFree(msg) // msg can be reused from here
-
-		if err == utils.ErrDisposed {
-			c.logger.Debug("the queue has been disposed")
-			return
-		} else if encoders.IsEncodingError(err) {
-			c.logger.Warn("dropped non-encodable message")
-			continue
-		} else if err != nil {
-			if utils.IsBrokenPipe(err) {
-				c.logger.Info("broken pipe writing to server")
-				return
-			}
-			c.logger.Info("error writing message to the server", "error", err)
-			continue
-		}
+	if c.conn == nil {
+		return ErrRELPNotConnected
 	}
+	if atomic.LoadInt32(&c.closed) == 1 {
+		return ErrRELPClosed
+	}
+	return c.doSendOne(msg)
 }
 
 func (c *RELPClient) Close() (err error) {
-	c.Lock()
-	defer c.Unlock()
-	if c.conn == nil {
+	if !atomic.CompareAndSwapInt32(&c.closed, 0, 1) {
+		// already closed
 		return nil
+	}
+	if c.conn == nil {
+		return ErrRELPNotConnected
 	}
 	if c.ticker != nil {
 		c.ticker.Stop()
 	}
-	c.sendQueue.Dispose()
-	c.conn.SetWriteDeadline(time.Now().Add(time.Second))
-	c.sendWg.Wait()
-	err = c.wclose() // try to notify the server
+	// wait that pending Send() have expired
+	c.conn.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
+	c.Flush()
+	time.Sleep(500 * time.Millisecond)
+
+	// try to notify the server
+	c.conn.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
+	err = c.wclose()
+
 	// close the connection to the RELP server
 	_ = c.conn.Close() // makes handleRspAnswers return
 	c.handleWg.Wait()
-	c.conn = nil
 	return err
 }
 

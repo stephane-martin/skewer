@@ -1,11 +1,11 @@
 package clients
 
 import (
+	"context"
 	"crypto/tls"
-	"fmt"
+	"errors"
 	"net"
 	"strconv"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -32,6 +32,7 @@ type SyslogTCPClient struct {
 	lineFraming    bool
 	frameDelimiter uint8
 
+	closed  int32
 	conn    net.Conn
 	writer  *concurrent.Writer
 	encoder encoders.Encoder
@@ -40,8 +41,6 @@ type SyslogTCPClient struct {
 
 	errorFlag int32
 	errorPrev error
-
-	sync.Mutex
 }
 
 func NewSyslogTCPClient(logger log15.Logger) *SyslogTCPClient {
@@ -105,29 +104,28 @@ func (c *SyslogTCPClient) TLS(config *tls.Config) *SyslogTCPClient {
 }
 
 func (c *SyslogTCPClient) Close() (err error) {
-	c.Lock()
-	defer c.Unlock()
-	if c.conn == nil {
-		return nil
+	if atomic.CompareAndSwapInt32(&c.closed, 0, 1) {
+		if c.ticker != nil {
+			c.ticker.Stop()
+		}
+		err = c.Flush()
+		if c.conn != nil {
+			_ = c.conn.Close()
+		}
 	}
-	if c.ticker != nil {
-		c.ticker.Stop()
-	}
-	err = c.Flush()
-	_ = c.conn.Close()
-	c.conn = nil
 	return
 }
 
-func (c *SyslogTCPClient) Connect() (err error) {
-	c.Lock()
+func (c *SyslogTCPClient) Connect(ctx context.Context) (err error) {
 	defer func() {
 		if err != nil {
 			c.conn = nil
 			c.writer = nil
 		}
-		c.Unlock()
 	}()
+	if atomic.LoadInt32(&c.closed) == 1 {
+		return errors.New("SyslogTCPClient: closed")
+	}
 	if c.conn != nil {
 		return nil
 	}
@@ -141,10 +139,10 @@ func (c *SyslogTCPClient) Connect() (err error) {
 
 	if len(c.path) == 0 {
 		if len(c.host) == 0 {
-			return fmt.Errorf("SyslogTCPClient: specify a host or a unix path")
+			return errors.New("SyslogTCPClient: specify a host or a unix path")
 		}
 		if c.port == 0 {
-			return fmt.Errorf("SyslogTCPClient: specify a port")
+			return errors.New("SyslogTCPClient: specify a port")
 		}
 		hostport := net.JoinHostPort(c.host, strconv.FormatInt(int64(c.port), 10))
 		var dialer *net.Dialer
@@ -154,8 +152,9 @@ func (c *SyslogTCPClient) Connect() (err error) {
 			dialer = &net.Dialer{Timeout: c.connTimeout}
 		}
 		if c.tlsConfig == nil {
-			conn, err = dialer.Dial("tcp", hostport)
+			conn, err = dialer.DialContext(ctx, "tcp", hostport)
 		} else {
+			dialer.Cancel = ctx.Done()
 			conn, err = tls.DialWithDialer(dialer, "tcp", hostport, c.tlsConfig)
 		}
 		if err != nil {
@@ -187,7 +186,7 @@ func (c *SyslogTCPClient) Connect() (err error) {
 			for range c.ticker.C {
 				err = c.Flush()
 				if err != nil {
-					if utils.IsBrokenPipe(err) {
+					if utils.IsBrokenPipe(err) || utils.IsFileClosed(err) {
 						_ = c.conn.Close()
 						c.logger.Warn("Broken pipe detected when flushing buffers", "error", err)
 						c.errorPrev = err
@@ -212,9 +211,12 @@ func (c *SyslogTCPClient) Connect() (err error) {
 	return nil
 }
 
-func (c *SyslogTCPClient) Send(msg *model.FullMessage) (err error) {
+func (c *SyslogTCPClient) Send(ctx context.Context, msg *model.FullMessage) (err error) {
 	if c.conn == nil {
-		return fmt.Errorf("SyslogTCPClient: not connected")
+		return errors.New("SyslogTCPClient: not connected")
+	}
+	if atomic.LoadInt32(&c.closed) == 1 {
+		return errors.New("SyslogTCPClient: closed")
 	}
 	if msg == nil {
 		return nil
@@ -225,7 +227,6 @@ func (c *SyslogTCPClient) Send(msg *model.FullMessage) (err error) {
 	} else {
 		buf, err = encoders.TcpOctetEncode(c.encoder, msg)
 	}
-	model.FullFree(msg)
 	if err != nil {
 		return encoders.NonEncodableError
 	}

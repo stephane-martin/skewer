@@ -13,6 +13,9 @@ func NewSemaphore(total int32) *Semaphore {
 }
 
 func (s *Semaphore) Acquire() error {
+	if atomic.LoadInt32(&s.disposed) == 1 {
+		return ErrDisposed
+	}
 	wait := ExpWait{}
 	// acquire spinlock
 	for !atomic.CompareAndSwapInt32(&s.spinlock, 0, 1) {

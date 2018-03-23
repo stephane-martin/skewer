@@ -12,7 +12,7 @@ import (
 
 type UDPDestination struct {
 	*baseDestination
-	client *clients.SyslogUDPClient
+	clt *clients.SyslogUDPClient
 }
 
 func NewUDPDestination(ctx context.Context, e *Env) (Destination, error) {
@@ -36,7 +36,7 @@ func NewUDPDestination(ctx context.Context, e *Env) (Destination, error) {
 	}
 	connCounter.WithLabelValues("udp", "success").Inc()
 
-	d.client = client
+	d.clt = client
 
 	rebind := e.config.UDPDest.Rebind
 	if rebind > 0 {
@@ -53,35 +53,47 @@ func NewUDPDestination(ctx context.Context, e *Env) (Destination, error) {
 	return d, nil
 }
 
-func (d *UDPDestination) sendOne(message *model.FullMessage) (err error) {
-	uid := message.Uid
-	err = d.client.Send(message)
+func (d *UDPDestination) sendOne(ctx context.Context, message *model.FullMessage) (err error) {
+	err = d.clt.Send(message)
 
-	// careful not to use message afterwards
 	if err == nil {
-		d.ACK(uid)
+		d.ACK(message.Uid)
 		return nil
-	} else if encoders.IsEncodingError(err) {
-		d.PermError(uid)
-		return err
-	} else {
-		// error writing to the UDP conn
-		d.NACK(uid)
-		d.dofatal()
+	}
+	if encoders.IsEncodingError(err) {
+		d.PermError(message.Uid)
 		return err
 	}
+	// error writing to the UDP conn
+	d.NACK(message.Uid)
+	return err
 }
 
 func (d *UDPDestination) Close() error {
-	return d.client.Close()
+	return d.clt.Close()
 }
 
 func (d *UDPDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
-	var i int
 	var e error
-	for i = range msgs {
-		e = d.sendOne(msgs[i].Message)
-		if e != nil {
+	var msg *model.FullMessage
+	for {
+		if len(msgs) == 0 {
+			break
+		}
+		msg = msgs[0].Message
+		msgs = msgs[1:]
+		e = d.sendOne(ctx, msg)
+		model.FullFree(msg)
+		if e != nil && !encoders.IsEncodingError(e) {
+			// network error, we stop now and NACK remaining messages
+			for i := 0; i < len(msgs); i++ {
+				d.NACK(msgs[i].Message.Uid)
+				model.FullFree(msgs[i].Message)
+			}
+			d.dofatal()
+			return e
+		}
+		if e != nil && err == nil {
 			err = e
 		}
 	}

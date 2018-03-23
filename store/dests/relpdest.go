@@ -6,6 +6,7 @@ import (
 
 	"github.com/stephane-martin/skewer/clients"
 	"github.com/stephane-martin/skewer/conf"
+	"github.com/stephane-martin/skewer/encoders"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/queue"
@@ -103,15 +104,20 @@ func NewRELPDestination(ctx context.Context, e *Env) (Destination, error) {
 	return d, nil
 }
 
-func (d *RELPDestination) sendOne(message *model.FullMessage) (err error) {
-	uid := message.Uid
-	err = d.client.Send(message)
+func (d *RELPDestination) sendOne(ctx context.Context, message *model.FullMessage) (err error) {
+	err = d.client.Send(ctx, message)
+
 	if err != nil {
-		// the client send queue has been disposed
-		d.NACK(uid)
-		d.dofatal()
+		if encoders.IsEncodingError(err) {
+			d.PermError(message.Uid)
+			return err
+		}
+		// error writing to the conn
+		d.NACK(message.Uid)
+		return err
 	}
-	return
+	// we do not ACK the message yet, as we have to wait for the server response
+	return nil
 }
 
 func (d *RELPDestination) Close() (err error) {
@@ -119,13 +125,28 @@ func (d *RELPDestination) Close() (err error) {
 }
 
 func (d *RELPDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
-	var i int
+	var msg *model.FullMessage
 	var e error
-	for i = range msgs {
-		e = d.sendOne(msgs[i].Message)
-		if e != nil {
+	for {
+		if len(msgs) == 0 {
+			return
+		}
+		msg = msgs[0].Message
+		msgs = msgs[1:]
+		e = d.sendOne(ctx, msg)
+		model.FullFree(msg)
+		if e != nil && !encoders.IsEncodingError(e) {
+			// network error, we stop now and NACK remaining messages
+			for i := 0; i < len(msgs); i++ {
+				d.NACK(msgs[i].Message.Uid)
+				model.FullFree(msgs[i].Message)
+			}
+			d.dofatal()
+			return e
+		}
+		if e != nil && err == nil {
 			err = e
 		}
 	}
-	return err
+	return nil
 }
