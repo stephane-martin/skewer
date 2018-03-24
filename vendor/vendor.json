@@ -1064,10 +1064,10 @@
 			"tree": true
 		},
 		{
-			"checksumSHA1": "LiTkuOgj/5r3Mv9U/9HsTlvkSwA=",
+			"checksumSHA1": "t4obuoS2gOO2agCGU+GlmK1de+Q=",
 			"path": "github.com/stephane-martin/go-semaphore",
-			"revision": "ee33a0e245d62fab12f2e747bc3cb8d13192196e",
-			"revisionTime": "2018-01-11T22:11:07Z"
+			"revision": "aa42c379d9227f51594a8aec99e0802ab51e4a89",
+			"revisionTime": "2018-03-24T19:05:08Z"
 		},
 		{
 			"checksumSHA1": "R9iIRlMSWuN9kJ4BCa763Kr3hdY=",

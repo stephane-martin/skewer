@@ -16,13 +16,19 @@ sem_t *my_sem_failed() {
 */
 import "C"
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"unsafe"
 )
 
+var semFAILED = C.my_sem_failed()
+
 // PSemaphore is a semaphore handle.
-type PSemaphore C.sem_t
+type PSemaphore struct {
+	cSem *C.sem_t
+	name string
+}
 
 // New opens an existing POSIX semaphore by name, or creates a new POSIX semaphore if it does not exist.
 //
@@ -34,13 +40,16 @@ func New(name string, value uint) (s *PSemaphore, err error) {
 	cName := C.CString(name)
 	defer C.free(unsafe.Pointer(cName))
 	semptr, err := C.my_sem_open(cName, C.O_CREAT, C.mode_t(0600), C.uint(value))
-	if semptr == C.my_sem_failed() {
+	if semptr == semFAILED {
 		if err != nil {
 			return nil, err
 		}
 		return nil, fmt.Errorf("sem_open returned SEM_FAILED")
 	}
-	return (*PSemaphore)(semptr), nil
+	goSem := &PSemaphore{}
+	goSem.cSem = semptr
+	goSem.name = name
+	return goSem, nil
 }
 
 // Destroy destroys, eg. removes from the name space, an existing semaphore.
@@ -62,8 +71,11 @@ func Destroy(name string) (err error) {
 //
 // Lock blocks until it is possible to lock it.
 func (s *PSemaphore) Lock() (err error) {
+	if s == nil || s.cSem == nil {
+		return errors.New("Not initialized")
+	}
 	var ret C.int
-	ret, err = C.sem_wait((*C.sem_t)(s))
+	ret, err = C.sem_wait(s.cSem)
 	if ret != 0 {
 		return err
 	}
@@ -74,8 +86,11 @@ func (s *PSemaphore) Lock() (err error) {
 //
 // If it is not possible to lock the semaphore, Trylock returns immediatly with an error.
 func (s *PSemaphore) TryLock() (err error) {
+	if s == nil || s.cSem == nil {
+		return errors.New("Not initialized")
+	}
 	var ret C.int
-	ret, err = C.sem_trywait((*C.sem_t)(s))
+	ret, err = C.sem_trywait(s.cSem)
 	if ret != 0 {
 		return err
 	}
@@ -84,8 +99,11 @@ func (s *PSemaphore) TryLock() (err error) {
 
 // Unlock unlocks a semaphore.
 func (s *PSemaphore) Unlock() (err error) {
+	if s == nil || s.cSem == nil {
+		return errors.New("Not initialized")
+	}
 	var ret C.int
-	ret, err = C.sem_post((*C.sem_t)(s))
+	ret, err = C.sem_post(s.cSem)
 	if ret != 0 {
 		return err
 	}
@@ -96,10 +114,18 @@ func (s *PSemaphore) Unlock() (err error) {
 //
 // The semaphore is closed but not removed from the namespace.
 func (s *PSemaphore) Close() (err error) {
+	if s == nil || s.cSem == nil {
+		return errors.New("Not initialized")
+	}
 	var ret C.int
-	ret, err = C.sem_close((*C.sem_t)(s))
+	ret, err = C.sem_close(s.cSem)
 	if ret != 0 {
 		return err
 	}
 	return nil
+}
+
+// Destroy destroys, eg. removes from the name space, an existing semaphore.
+func (s *PSemaphore) Destroy() (err error) {
+	return Destroy(s.name)
 }
