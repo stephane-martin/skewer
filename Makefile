@@ -17,7 +17,7 @@ $(BINARY): ${SOURCES} utils/logging/types.pb.go conf/derived.gen.go utils/queue/
 
 release: ${SOURCES} utils/logging/types.pb.go conf/derived.gen.go utils/queue/tcp/ring.go utils/queue/udp/ring.go utils/queue/kafka/ring.go utils/queue/message/ring.go model/types.pb.go model/types_ffjson.go utils/collectd/embed/statik/statik.go
 	test -n "${GOPATH}"  # test $$GOPATH
-	go build ${LDFLAGS} -o ${BINARY}
+	go build -o ${BINARY} -a -x ${LDFLAGS}
 
 model/types_ffjson.go: model/types.go
 	test -n "${GOPATH}"  # test $$GOPATH
