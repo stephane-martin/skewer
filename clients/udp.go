@@ -2,6 +2,7 @@ package clients
 
 import (
 	"errors"
+	"io"
 	"net"
 	"strconv"
 	"sync/atomic"
@@ -135,6 +136,6 @@ func (c *SyslogUDPClient) Send(msg *model.FullMessage) (err error) {
 	if len(buf) == 0 {
 		return nil
 	}
-	_, err = c.conn.Write(buf)
+	_, err = io.WriteString(c.conn, buf)
 	return err
 }

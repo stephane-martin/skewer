@@ -1,7 +1,6 @@
 package dests
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -20,6 +19,7 @@ import (
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/es"
+	"github.com/valyala/bytebufferpool"
 	"github.com/zond/gotomic"
 )
 
@@ -167,7 +167,7 @@ func (d *ElasticDestination) getClient() (*elastic.Client, error) {
 	return es.GetClient(d.config, d.httpClient, d.logger)
 }
 
-func (d *ElasticDestination) after(executionId int64, requests []elastic.BulkableRequest, response *elastic.BulkResponse, err error) {
+func (d *ElasticDestination) after(execID int64, requests []elastic.BulkableRequest, response *elastic.BulkResponse, err error) {
 	if response == nil {
 		d.dofatal()
 		return
@@ -210,45 +210,37 @@ func (d *ElasticDestination) Close() error {
 		}
 		return false
 	})
-	return d.processor.Close()
-}
-
-func (d *ElasticDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
-	var e error
-	var i int
-	for i = range msgs {
-		e = d.sendOne(msgs[i].Message)
-		if e != nil {
-			err = e
-		}
-	}
-	return err
+	return d.processor.Close() // processor.Close() must only be called after we are sure that no more Send() will happen... or panic.
 }
 
 func (d *ElasticDestination) sendOne(msg *model.FullMessage) (err error) {
-	defer model.FullFree(msg)
-
-	indexBuf := bytes.NewBuffer(nil)
+	// compute the destination index name
+	indexBuf := bytebufferpool.Get()
 	err = d.indexNameTpl.Execute(indexBuf, msg.Fields)
 	if err != nil {
-		d.PermError(msg.Uid)
-		return err
+		bytebufferpool.Put(indexBuf)
+		return encoders.NonEncodableError
 	}
-	// create index in ES if needed
 	indexName := indexBuf.String()
+	bytebufferpool.Put(indexBuf)
+
+	// serialize the message
+	var buf string
+	buf, err = encoders.ChainEncode(d.encoder, msg)
+	if err != nil {
+		return encoders.NonEncodableError
+	}
+
+	// create index in ES if needed
 	if d.config.CreateIndices && !d.knownIndexNames.Has(indexName) {
 		d.logger.Info("Index does not exist yet in Elasticsearch", "name", indexName)
 		client, err := d.getClient()
 		if err != nil {
-			d.NACK(msg.Uid)
-			d.dofatal()
 			return err
 		}
 		// refresh index names
 		names, err := client.IndexNames()
 		if err != nil {
-			d.NACK(msg.Uid)
-			d.dofatal()
 			return err
 		}
 		d.knownIndexNames.Clear()
@@ -258,11 +250,9 @@ func (d *ElasticDestination) sendOne(msg *model.FullMessage) (err error) {
 		if !d.knownIndexNames.Has(indexName) {
 			res, err := client.CreateIndex(indexName).BodyString(d.createOptionsBody).Do(context.Background())
 			if err != nil {
-				d.NACK(msg.Uid)
 				return err
 			}
 			if !res.Acknowledged {
-				d.NACK(msg.Uid)
 				return fmt.Errorf("Index creation not acknowledged")
 			}
 			d.knownIndexNames.Add(indexName)
@@ -271,16 +261,37 @@ func (d *ElasticDestination) sendOne(msg *model.FullMessage) (err error) {
 	}
 
 	// add message to the bulk processor work list
-	var buf json.RawMessage
-	buf, err = encoders.ChainEncode(d.encoder, msg)
-	if err != nil {
-		d.PermError(msg.Uid)
-		return err
-	}
 	d.sentMessagesUids.Put(msg.Uid, true)
 	d.processor.Add(
-		elastic.NewBulkIndexRequest().Index(indexName).Type(d.messagesType).Id(msg.Uid.String()).Doc(buf),
+		elastic.NewBulkIndexRequest().Index(indexName).Type(d.messagesType).Id(msg.Uid.String()).Doc(json.RawMessage(buf)),
 	)
 
 	return nil
+}
+
+func (d *ElasticDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
+	var e error
+	var msg *model.FullMessage
+	var uid utils.MyULID
+	for len(msgs) > 0 {
+		msg = msgs[0].Message
+		uid = msg.Uid
+		msgs = msgs[1:]
+		e = d.sendOne(msg)
+		model.FullFree(msg)
+		if e != nil {
+			if encoders.IsEncodingError(e) {
+				d.PermError(uid)
+			} else {
+				d.NACK(uid)
+				d.NACKRemaining(msgs)
+				d.dofatal()
+				return e
+			}
+			if err == nil {
+				err = e
+			}
+		}
+	}
+	return err
 }

@@ -243,7 +243,7 @@ Loop:
 	w.Header().Set("Content-Type", contentType)
 	w.WriteHeader(http.StatusOK)
 
-	var buf []byte
+	var buf string
 	var i int
 	last := len(messages) - 1
 	permerrors := make(map[utils.MyULID]bool)
@@ -263,7 +263,7 @@ Loop:
 			// error encoding one message
 			permerrors[message.Uid] = true
 		} else {
-			_, err = w.Write(buf)
+			_, err = io.WriteString(w, buf)
 			if err != nil {
 				// client is gone
 				ok = false
@@ -303,17 +303,19 @@ func (d *HTTPServerDestination) Close() (err error) {
 }
 
 func (d *HTTPServerDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
-	var i int
+	var msg *model.FullMessage
+	var uid utils.MyULID
 	for len(msgs) > 0 {
-		err = d.sendQueue.Put(msgs[0].Message)
+		msg = msgs[0].Message
+		uid = msg.Uid
+		msgs = msgs[1:]
+		err = d.sendQueue.Put(msg)
 		if err != nil {
-			for i = range msgs {
-				d.NACK(msgs[i].Message.Uid)
-				model.FullFree(msgs[i].Message)
-			}
+			d.NACK(uid)
+			model.FullFree(msg)
+			d.NACKRemaining(msgs)
 			return err
 		}
-		msgs = msgs[1:]
 	}
 	return nil
 }

@@ -3,11 +3,13 @@ package dests
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/encoders"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/utils"
 )
 
 type StderrDestination struct {
@@ -28,20 +30,13 @@ func NewStderrDestination(ctx context.Context, e *Env) (Destination, error) {
 
 func (d *StderrDestination) sendOne(message *model.FullMessage) (err error) {
 	defer model.FullFree(message)
-	var buf []byte
+	var buf string
 	buf, err = encoders.ChainEncode(d.encoder, message, "\n")
 	if err != nil {
-		d.PermError(message.Uid)
 		return err
 	}
-	_, err = os.Stderr.Write(buf)
-	if err != nil {
-		d.NACK(message.Uid)
-		d.dofatal()
-		return err
-	}
-	d.ACK(message.Uid)
-	return nil
+	_, err = io.WriteString(os.Stderr, buf)
+	return err
 }
 
 func (d *StderrDestination) Close() error {
@@ -49,12 +44,29 @@ func (d *StderrDestination) Close() error {
 }
 
 func (d *StderrDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
-	var i int
+	var msg *model.FullMessage
+	var uid utils.MyULID
 	var e error
-	for i = range msgs {
-		e = d.sendOne(msgs[i].Message)
+	for len(msgs) > 0 {
+		msg = msgs[0].Message
+		uid = msg.Uid
+		msgs = msgs[1:]
+		e = d.sendOne(msg)
+		model.FullFree(msg)
 		if e != nil {
-			err = e
+			if encoders.IsEncodingError(e) {
+				d.PermError(uid)
+			} else {
+				d.NACK(uid)
+				d.NACKRemaining(msgs)
+				d.dofatal()
+				return e
+			}
+			if err == nil {
+				err = e
+			}
+		} else {
+			d.ACK(uid)
 		}
 	}
 	return err

@@ -358,6 +358,7 @@ func (s *HTTPServiceImpl) handler(config conf.HTTPServerSourceConfig) func(http.
 		for _, byteMsg = range byteMsgs {
 			raw := s.rawpool.Get().(*model.RawTcpMessage)
 			raw.Message = raw.Message[:len(byteMsg)]
+			// we copy the byteMsg so that we can release the bodyBuf afterwards
 			copy(raw.Message, byteMsg)
 			raw.Decoder = config.DecoderBaseConfig
 			raw.Client = r.RemoteAddr

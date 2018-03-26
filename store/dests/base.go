@@ -175,6 +175,14 @@ func (base *baseDestination) PermError(uid utils.MyULID) {
 func (base *baseDestination) NACKAll(msgs []*model.FullMessage) {
 	for _, msg := range msgs {
 		base.ACK(msg.Uid)
+		model.FullFree(msg)
+	}
+}
+
+func (base *baseDestination) NACKRemaining(msgs []model.OutputMsg) {
+	for i := range msgs {
+		base.NACK(msgs[i].Message.Uid)
+		model.FullFree(msgs[i].Message)
 	}
 }
 

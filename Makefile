@@ -11,7 +11,7 @@ LDFLAGS=-ldflags '-w -s -X github.com/stephane-martin/skewer/conf.Version=${VERS
 SOURCES = $(shell find . -type f -name '*.go' -not -path "./vendor/*")
 SUBDIRS = $(shell find . -type d -regex './[a-z].*' -not -path './vendor*' -not -path '*.shapesdoc' | xargs)
 
-$(BINARY): ${SOURCES} utils/logging/types.pb.go conf/derived.gen.go utils/queue/tcp/ring.go utils/queue/udp/ring.go utils/queue/kafka/ring.go utils/queue/message/ring.go model/types.pb.go model/types_ffjson.go utils/collectd/embed/statik/statik.go grammars/rfc5424/rfc5424_lexer.go
+$(BINARY): ${SOURCES} utils/logging/types.pb.go conf/derived.gen.go utils/queue/tcp/ring.go utils/queue/udp/ring.go utils/queue/defered/ring.go utils/queue/kafka/ring.go utils/queue/message/ring.go model/types.pb.go model/types_ffjson.go utils/collectd/embed/statik/statik.go grammars/rfc5424/rfc5424_lexer.go
 	test -n "${GOPATH}"  # test $$GOPATH
 	go build -o ${BINARY}
 
@@ -31,6 +31,10 @@ utils/queue/kafka/ring.go: utils/queue/ring.go
 	test -n "${GOPATH}"  # test $$GOPATH
 	genny -in=utils/queue/ring.go -out=utils/queue/kafka/ring.go -pkg=kafka gen Data=model.RawKafkaMessage
 
+utils/queue/defered/ring.go: utils/queue/ring.go
+	test -n "${GOPATH}"  # test $$GOPATH
+	genny -in=utils/queue/ring.go -out=utils/queue/defered/ring.go -pkg=defered gen Data=model.DeferedRequest
+	
 utils/queue/message/ring.go: utils/queue/ring.go
 	test -n "${GOPATH}"  # test $$GOPATH
 	genny -in=utils/queue/ring.go -out=utils/queue/message/ring.go -pkg=message gen Data=model.FullMessage

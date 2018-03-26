@@ -1,10 +1,8 @@
 package dests
 
 import (
-	"bytes"
 	"compress/gzip"
 	"context"
-	"fmt"
 	"io"
 	"math"
 	"os"
@@ -21,6 +19,8 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/encoders"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/utils"
+	"github.com/valyala/bytebufferpool"
 )
 
 // ensure thread safety for the gzip writer
@@ -332,45 +332,39 @@ func NewFileDestination(ctx context.Context, e *Env) (Destination, error) {
 }
 
 func (d *FileDestination) sendOne(message *model.FullMessage) (err error) {
-	defer model.FullFree(message)
-
 	if len(message.Fields.AppName) == 0 {
 		message.Fields.AppName = "unknown"
 	}
-	buf := bytes.NewBuffer(nil)
+	buf := bytebufferpool.Get()
 	err = d.filenameTmpl.Execute(buf, message.Fields)
 	if err != nil {
-		err = fmt.Errorf("Error calculating filename: %s", err)
-		d.PermError(message.Uid)
-		return err
+		d.logger.Warn("Error calculating filename", "error", err)
+		bytebufferpool.Put(buf)
+		return encoders.NonEncodableError
 	}
 	filename := strings.TrimSpace(buf.String())
+	bytebufferpool.Put(buf)
 	f, err := d.files.open(filename)
 	if err != nil {
-		err = fmt.Errorf("Error opening file '%s': %s", filename, err)
-		d.NACK(message.Uid)
+		d.logger.Warn("Error opening file", "filename", filename, "error", err)
 		return err
 	}
 	encoded, err := encoders.ChainEncode(d.encoder, message, "\n")
 	if err != nil {
-		d.PermError(message.Uid)
-		return err
+		d.logger.Warn("Error encoding message", "error", err)
+		return encoders.NonEncodableError
 	}
-	_, err = f.Write(encoded)
+	_, err = io.WriteString(f, encoded)
 	if err != nil {
-		d.NACK(message.Uid)
 		return err
 	}
 	if f.Closed() {
 		err = f.MarkClosed()
 		if err == nil {
-			d.ACK(message.Uid)
 			return nil
 		}
-		d.NACK(message.Uid)
 		return err
 	}
-	d.ACK(message.Uid)
 	return nil
 }
 
@@ -380,12 +374,29 @@ func (d *FileDestination) Close() error {
 }
 
 func (d *FileDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
-	var i int
+	var msg *model.FullMessage
 	var e error
-	for i = range msgs {
-		e = d.sendOne(msgs[i].Message)
+	var uid utils.MyULID
+	for len(msgs) > 0 {
+		msg = msgs[0].Message
+		uid = msg.Uid
+		msgs = msgs[1:]
+		e = d.sendOne(msg)
+		model.FullFree(msg)
 		if e != nil {
-			err = e
+			if encoders.IsEncodingError(e) {
+				d.PermError(uid)
+			} else {
+				d.NACK(uid)
+				d.NACKRemaining(msgs)
+				d.dofatal()
+				return e
+			}
+			if err == nil {
+				err = e
+			}
+		} else {
+			d.ACK(uid)
 		}
 	}
 	return err

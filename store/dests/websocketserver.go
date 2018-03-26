@@ -260,18 +260,21 @@ func (d *WebsocketServerDestination) Close() (err error) {
 	return err
 }
 
-func (d *WebsocketServerDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
-	var i int
+func (d *WebsocketServerDestination) Send(ctx context.Context, msgs []model.OutputMsg, pKey string, pNumber int32, topic string) (err error) {
+	var msg *model.FullMessage
+	var uid utils.MyULID
+
 	for len(msgs) > 0 {
-		err = d.sendQueue.Put(msgs[0].Message)
+		msg = msgs[0].Message
+		uid = msg.Uid
+		msgs = msgs[1:]
+		err = d.sendQueue.Put(msg)
 		if err != nil {
-			for i = range msgs {
-				d.NACK(msgs[i].Message.Uid)
-				model.FullFree(msgs[i].Message)
-			}
+			d.NACK(uid)
+			model.FullFree(msg)
+			d.NACKRemaining(msgs)
 			return err
 		}
-		msgs = msgs[1:]
 	}
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"io"
 	"net"
 	"strconv"
 	"sync/atomic"
@@ -221,7 +222,7 @@ func (c *SyslogTCPClient) Send(ctx context.Context, msg *model.FullMessage) (err
 	if msg == nil {
 		return nil
 	}
-	var buf []byte
+	var buf string
 	if c.lineFraming {
 		buf, err = encoders.ChainEncode(c.encoder, msg, []byte{c.frameDelimiter})
 	} else {
@@ -237,9 +238,9 @@ func (c *SyslogTCPClient) Send(ctx context.Context, msg *model.FullMessage) (err
 		return c.errorPrev
 	}
 	if c.writer != nil {
-		_, err = c.writer.Write(buf)
+		_, err = c.writer.WriteString(buf)
 	} else {
-		_, err = c.conn.Write(buf)
+		_, err = io.WriteString(c.conn, buf)
 	}
 	return err
 }

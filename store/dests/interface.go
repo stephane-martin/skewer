@@ -17,6 +17,7 @@ type Destination interface {
 	NACK(utils.MyULID)
 	PermError(utils.MyULID)
 	NACKAll([]*model.FullMessage)
+	NACKRemaining([]model.OutputMsg)
 }
 
 type constructor func(ctx context.Context, e *Env) (Destination, error)

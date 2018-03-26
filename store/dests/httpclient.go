@@ -19,7 +19,7 @@ import (
 	"github.com/stephane-martin/skewer/encoders"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
-	"github.com/stephane-martin/skewer/utils/queue/message"
+	"github.com/stephane-martin/skewer/utils/queue/defered"
 	"github.com/valyala/bytebufferpool"
 )
 
@@ -32,7 +32,7 @@ type HTTPDestination struct {
 	url         *template.Template
 	method      string
 	contentType string
-	sendQueue   *message.Ring
+	queue       *defered.Ring
 	wg          sync.WaitGroup
 }
 
@@ -138,7 +138,7 @@ func NewHTTPDestination(ctx context.Context, e *Env) (Destination, error) {
 		}
 	}
 
-	d.sendQueue = message.NewRing(4 * uint64(config.MaxIdleConnsPerHost))
+	d.queue = defered.NewRing(4 * uint64(config.MaxIdleConnsPerHost))
 
 	if config.Rebind > 0 {
 		go func() {
@@ -154,52 +154,28 @@ func NewHTTPDestination(ctx context.Context, e *Env) (Destination, error) {
 
 	for i := 0; i < config.MaxIdleConnsPerHost; i++ {
 		d.wg.Add(1)
-		go d.dosend(ctx)
+		go d.dequeue(ctx)
 	}
 
 	return d, nil
 }
 
 func (d *HTTPDestination) Close() error {
-	d.sendQueue.Dispose()
+	d.queue.Dispose()
 	d.wg.Wait()
-	// nack remaining messages
+	// nack remaining enqueued requests
 	for {
-		msg, err := d.sendQueue.Get()
-		if err != nil || msg == nil {
+		req, err := d.queue.Get()
+		if err != nil || req == nil {
 			break
 		}
-		d.NACK(msg.Uid)
+		d.NACK(req.UID)
 	}
 	return nil
 }
 
-func (d *HTTPDestination) dosendOne(ctx context.Context, msg *model.FullMessage) (err error) {
-	urlbuf := bytebufferpool.Get()
-	body := bytebufferpool.Get()
-	defer func() {
-		bytebufferpool.Put(body)
-		bytebufferpool.Put(urlbuf)
-	}()
-	err = d.url.Execute(urlbuf, msg.Fields)
-	if err != nil {
-		d.PermError(msg.Uid)
-		d.logger.Warn("Error calculating target URL from template", "error", err)
-		return nil
-	}
-	err = d.encoder(msg, body)
+func (d *HTTPDestination) doHTTP(ctx context.Context, uid utils.MyULID, req *http.Request) (err error) {
 
-	if err != nil {
-		d.PermError(msg.Uid)
-		d.logger.Warn("Error encoding message", "error", err)
-		return nil
-	}
-	req, err := http.NewRequest(d.method, urlbuf.String(), bytes.NewReader(body.B))
-	if err != nil {
-		d.PermError(msg.Uid)
-		d.logger.Warn("Error preparing HTTP request", "error", err)
-		return nil
-	}
 	req.Header.Set("Content-Type", d.contentType)
 	if len(d.useragent) > 0 {
 		req.Header.Set("User-Agent", d.useragent)
@@ -208,10 +184,13 @@ func (d *HTTPDestination) dosendOne(ctx context.Context, msg *model.FullMessage)
 		req.SetBasicAuth(d.username, d.password)
 	}
 	req = req.WithContext(ctx)
+
+	// TODO: retry the request
+	// perform the HTTP request
 	resp, err := d.clt.Do(req)
+
 	if err != nil {
 		// server down ?
-		d.NACK(msg.Uid)
 		d.logger.Warn("Error sending HTTP request", "error", err)
 		return err
 	}
@@ -222,61 +201,98 @@ func (d *HTTPDestination) dosendOne(ctx context.Context, msg *model.FullMessage)
 	httpStatusCounter.WithLabelValues(req.Host, strconv.FormatInt(int64(resp.StatusCode), 10)).Inc()
 
 	if 200 <= resp.StatusCode && resp.StatusCode < 300 {
-		d.ACK(msg.Uid)
 		return nil
 	}
 	if 400 <= resp.StatusCode && resp.StatusCode < 500 {
 		// client-side error ??!
-		d.NACK(msg.Uid)
 		d.logger.Warn("Client side error sending HTTP request", "code", resp.StatusCode, "status", resp.Status)
 		return fmt.Errorf("HTTP error when sending message to server: code '%d', status '%s'", resp.StatusCode, resp.Status)
 	}
 	if 500 <= resp.StatusCode && resp.StatusCode < 600 {
 		// server side error
-		d.NACK(msg.Uid)
 		d.logger.Warn("Server side error sending HTTP request", "code", resp.StatusCode, "status", resp.Status)
 		return fmt.Errorf("HTTP error when sending message to server: code '%d', status '%s'", resp.StatusCode, resp.Status)
 	}
-	d.NACK(msg.Uid)
 	d.logger.Warn("Unexpected status code sending HTTP request", "code", resp.StatusCode, "status", resp.Status)
 	return fmt.Errorf("HTTP error when sending message to server: code '%d', status '%s'", resp.StatusCode, resp.Status)
 }
 
-func (d *HTTPDestination) dosend(ctx context.Context) {
+func (d *HTTPDestination) dequeue(ctx context.Context) error {
 	defer d.wg.Done()
-	var msg *model.FullMessage
+	var defered *model.DeferedRequest
 	var err error
 	for {
-		msg, err = d.sendQueue.Get()
-		if err != nil || msg == nil {
-			return
+		defered, err = d.queue.Get()
+		if err != nil || defered == nil {
+			return nil
 		}
-		err = d.dosendOne(ctx, msg)
-		model.FullFree(msg)
+		err = d.doHTTP(ctx, defered.UID, defered.Request)
 		if err != nil {
+			d.NACK(defered.UID)
 			d.dofatal()
-			return
+			return err
 		}
+		d.ACK(defered.UID)
 	}
 }
 
-func (d *HTTPDestination) sendOne(msg *model.FullMessage) (err error) {
-	err = d.sendQueue.Put(msg)
+func (d *HTTPDestination) enqueue(msg *model.FullMessage) (err error) {
+	urlbuf := bytebufferpool.Get()
+	body := bytebufferpool.Get()
+	defer func() {
+		bytebufferpool.Put(body)
+		bytebufferpool.Put(urlbuf)
+	}()
+	err = d.url.Execute(urlbuf, msg.Fields)
 	if err != nil {
-		// the client send queue has been disposed
-		d.NACK(msg.Uid)
-		d.dofatal()
+		d.logger.Warn("Error calculating target URL from template", "error", err)
+		return encoders.NonEncodableError
 	}
-	return err
+	err = d.encoder(msg, body)
+	if err != nil {
+		d.logger.Warn("Error encoding message", "error", err)
+		return encoders.NonEncodableError
+	}
+
+	// we use String() methods to get a copy of the bytebuffers, so that we can Put them back to the pool afterwards
+	req, err := http.NewRequest(d.method, urlbuf.String(), strings.NewReader(body.String()))
+	if err != nil {
+		d.logger.Warn("Error preparing HTTP request", "error", err)
+		return encoders.NonEncodableError
+	}
+
+	dreq := &model.DeferedRequest{Request: req, UID: msg.Uid}
+
+	err = d.queue.Put(dreq)
+	if err != nil {
+		// the queue has been disposed
+		return err
+	}
+	return nil
 }
 
 func (d *HTTPDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
-	var i int
 	var e error
-	for i = range msgs {
-		e = d.sendOne(msgs[i].Message)
+	var msg *model.FullMessage
+	var uid utils.MyULID
+	for len(msgs) > 0 {
+		msg = msgs[0].Message
+		uid = msg.Uid
+		msgs = msgs[1:]
+		e = d.enqueue(msg)
+		model.FullFree(msg)
 		if e != nil {
-			err = e
+			if encoders.IsEncodingError(e) {
+				d.PermError(uid)
+			} else {
+				d.NACK(uid)
+				d.NACKRemaining(msgs)
+				d.dofatal()
+				return e
+			}
+			if err == nil {
+				err = e
+			}
 		}
 	}
 	return err

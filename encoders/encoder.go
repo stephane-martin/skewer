@@ -116,50 +116,61 @@ func defaultEncode(v interface{}, w io.Writer) error {
 	}
 }
 
-func ChainEncode(e Encoder, objs ...interface{}) (ret []byte, err error) {
+func ChainEncode(e Encoder, objs ...interface{}) (ret string, err error) {
+	if len(objs) == 0 {
+		return "", nil
+	}
 	buf := bytebufferpool.Get()
-	for _, obj := range objs {
+	var obj interface{}
+	for _, obj = range objs {
 		err = e(obj, buf)
 		if err != nil {
-			return nil, err
+			bytebufferpool.Put(buf)
+			return "", err
 		}
 	}
-	ret = buf.Bytes()
+	ret = buf.String()
 	bytebufferpool.Put(buf)
 	return ret, nil
 }
 
-func TcpOctetEncode(e Encoder, obj interface{}) (ret []byte, err error) {
+func TcpOctetEncode(e Encoder, obj interface{}) (ret string, err error) {
 	if obj == nil {
-		return []byte{}, nil
+		return "", nil
 	}
 	buf := bytebufferpool.Get()
 	err = e(obj, buf)
 	if err != nil {
-		return nil, err
+		bytebufferpool.Put(buf)
+		return "", err
 	}
 	data := buf.Bytes()
-	bytebufferpool.Put(buf)
 	if len(data) == 0 {
-		return nil, nil
+		bytebufferpool.Put(buf)
+		return "", nil
 	}
-	return ChainEncode(e, len(data), sp, data)
+	ret, err = ChainEncode(e, len(data), sp, data)
+	bytebufferpool.Put(buf)
+	return ret, err
 }
 
-func RelpEncode(e Encoder, txnr int32, command string, obj interface{}) ([]byte, error) {
+func RelpEncode(e Encoder, txnr int32, command string, obj interface{}) (ret string, err error) {
 	if obj == nil {
 		return ChainEncode(e, txnr, sp, command, sp, int(0), endl)
 	}
-	var err error
 	buf := bytebufferpool.Get()
 	err = e(obj, buf)
 	if err != nil {
-		return nil, err
+		bytebufferpool.Put(buf)
+		return "", err
 	}
 	data := buf.Bytes()
-	bytebufferpool.Put(buf)
 	if len(data) == 0 {
-		return ChainEncode(e, txnr, sp, command, sp, int(0), endl)
+		ret, err = ChainEncode(e, txnr, sp, command, sp, int(0), endl)
+		bytebufferpool.Put(buf)
+		return ret, err
 	}
-	return ChainEncode(e, txnr, sp, command, sp, len(data), sp, data, endl)
+	ret, err = ChainEncode(e, txnr, sp, command, sp, len(data), sp, data, endl)
+	bytebufferpool.Put(buf)
+	return ret, err
 }

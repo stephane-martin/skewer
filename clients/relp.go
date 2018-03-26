@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net"
 	"strconv"
@@ -312,11 +313,11 @@ func (c *RELPClient) Connect() (err error) {
 	return nil
 }
 
-func (c *RELPClient) encode(command string, v interface{}) (buf []byte, txnr int32, err error) {
+func (c *RELPClient) encode(command string, v interface{}) (buf string, txnr int32, err error) {
 	// first encode the message
 	buf, err = encoders.ChainEncode(c.encoder, v)
 	if err != nil {
-		return nil, 0, err
+		return "", 0, err
 	}
 	// if no error, we can increment txnr
 	txnr = atomic.AddInt32(&c.curtxnr, 1)
@@ -327,7 +328,7 @@ func (c *RELPClient) encode(command string, v interface{}) (buf []byte, txnr int
 	}
 	if err != nil {
 		c.logger.Error("RelpEncode error, should not happen", "error", err)
-		return nil, 0, err
+		return "", 0, err
 	}
 	return buf, txnr, nil
 }
@@ -336,12 +337,12 @@ func (c *RELPClient) wopen() (err error) {
 	if c.conn == nil {
 		return ErrRELPNotConnected
 	}
-	var buf []byte
+	var buf string
 	buf, err = encoders.ChainEncode(c.encoder, int(0), sp, "open", sp, len(OPEN), sp, OPEN, endl)
 	if err != nil {
 		return err
 	}
-	_, err = c.conn.Write(buf)
+	_, err = io.WriteString(c.conn, buf)
 	return err
 }
 
@@ -350,7 +351,7 @@ func (c *RELPClient) wclose() (err error) {
 		return ErrRELPNotConnected
 	}
 	buf, _, _ := c.encode("close", nil)
-	_, err = c.conn.Write(buf)
+	_, err = io.WriteString(c.conn, buf)
 	return err
 }
 
@@ -470,9 +471,9 @@ func (c *RELPClient) doSendOne(msg *model.FullMessage) (err error) {
 		return nil
 	}
 	if c.writer == nil {
-		_, err = c.conn.Write(buf)
+		_, err = io.WriteString(c.conn, buf)
 	} else {
-		_, err = c.writer.Write(buf)
+		_, err = c.writer.WriteString(buf)
 	}
 	if err != nil {
 		// error happened sending the message

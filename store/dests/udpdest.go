@@ -8,6 +8,7 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/encoders"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/utils"
 )
 
 type UDPDestination struct {
@@ -43,6 +44,7 @@ func NewUDPDestination(ctx context.Context, e *Env) (Destination, error) {
 		go func() {
 			select {
 			case <-ctx.Done():
+				d.clt.Close()
 			case <-time.After(rebind):
 				e.logger.Info("UDP destination rebind period has expired", "rebind", rebind.String())
 				d.dofatal()
@@ -53,22 +55,6 @@ func NewUDPDestination(ctx context.Context, e *Env) (Destination, error) {
 	return d, nil
 }
 
-func (d *UDPDestination) sendOne(ctx context.Context, message *model.FullMessage) (err error) {
-	err = d.clt.Send(message)
-
-	if err == nil {
-		d.ACK(message.Uid)
-		return nil
-	}
-	if encoders.IsEncodingError(err) {
-		d.PermError(message.Uid)
-		return err
-	}
-	// error writing to the UDP conn
-	d.NACK(message.Uid)
-	return err
-}
-
 func (d *UDPDestination) Close() error {
 	return d.clt.Close()
 }
@@ -76,25 +62,25 @@ func (d *UDPDestination) Close() error {
 func (d *UDPDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
 	var e error
 	var msg *model.FullMessage
-	for {
-		if len(msgs) == 0 {
-			break
-		}
+	var uid utils.MyULID
+	for len(msgs) > 0 {
 		msg = msgs[0].Message
+		uid = msg.Uid
 		msgs = msgs[1:]
-		e = d.sendOne(ctx, msg)
+		e = d.clt.Send(msg)
 		model.FullFree(msg)
-		if e != nil && !encoders.IsEncodingError(e) {
-			// network error, we stop now and NACK remaining messages
-			for i := 0; i < len(msgs); i++ {
-				d.NACK(msgs[i].Message.Uid)
-				model.FullFree(msgs[i].Message)
+		if e != nil {
+			if encoders.IsEncodingError(e) {
+				d.PermError(uid)
+			} else {
+				d.NACK(uid)
+				d.NACKRemaining(msgs)
+				d.dofatal()
+				return e
 			}
-			d.dofatal()
-			return e
-		}
-		if e != nil && err == nil {
-			err = e
+			if err == nil {
+				err = e
+			}
 		}
 	}
 	return err

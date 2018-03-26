@@ -112,25 +112,20 @@ func (d *TCPDestination) Send(ctx context.Context, msgs []model.OutputMsg, parti
 	var msg *model.FullMessage
 	var e error
 
-	for {
-		if len(msgs) == 0 {
-			break
-		}
+	for len(msgs) > 0 {
 		msg = msgs[0].Message
 		msgs = msgs[1:]
 		e = d.sendOne(ctx, msg)
 		model.FullFree(msg)
-		if e != nil && !encoders.IsEncodingError(e) {
-			// network error, we stop now and NACK remaining messages
-			for i := 0; i < len(msgs); i++ {
-				d.NACK(msgs[i].Message.Uid)
-				model.FullFree(msgs[i].Message)
+		if e != nil {
+			if !encoders.IsEncodingError(e) {
+				d.NACKRemaining(msgs)
+				d.dofatal()
+				return e
 			}
-			d.dofatal()
-			return e
-		}
-		if e != nil && err == nil {
-			err = e
+			if err == nil {
+				err = e
+			}
 		}
 	}
 	return err

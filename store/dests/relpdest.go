@@ -14,7 +14,7 @@ import (
 
 type RELPDestination struct {
 	*baseDestination
-	client *clients.RELPClient
+	clt *clients.RELPClient
 }
 
 func NewRELPDestination(ctx context.Context, e *Env) (Destination, error) {
@@ -60,7 +60,7 @@ func NewRELPDestination(ctx context.Context, e *Env) (Destination, error) {
 	}
 	connCounter.WithLabelValues("relp", "success").Inc()
 
-	d.client = clt
+	d.clt = clt
 
 	rebind := e.config.RELPDest.Rebind
 	if rebind > 0 {
@@ -68,6 +68,7 @@ func NewRELPDestination(ctx context.Context, e *Env) (Destination, error) {
 			select {
 			case <-ctx.Done():
 				// the store service asked for stop
+				d.clt.Close()
 			case <-time.After(rebind):
 				e.logger.Info("RELP destination rebind period has expired", "rebind", rebind.String())
 				d.dofatal()
@@ -76,8 +77,8 @@ func NewRELPDestination(ctx context.Context, e *Env) (Destination, error) {
 	}
 
 	go func() {
-		ackChan := d.client.Ack()
-		nackChan := d.client.Nack()
+		ackChan := d.clt.Ack()
+		nackChan := d.clt.Nack()
 		var err error
 		var uid utils.MyULID
 
@@ -104,48 +105,32 @@ func NewRELPDestination(ctx context.Context, e *Env) (Destination, error) {
 	return d, nil
 }
 
-func (d *RELPDestination) sendOne(ctx context.Context, message *model.FullMessage) (err error) {
-	err = d.client.Send(ctx, message)
-
-	if err != nil {
-		if encoders.IsEncodingError(err) {
-			d.PermError(message.Uid)
-			return err
-		}
-		// error writing to the conn
-		d.NACK(message.Uid)
-		return err
-	}
-	// we do not ACK the message yet, as we have to wait for the server response
-	return nil
-}
-
 func (d *RELPDestination) Close() (err error) {
-	return d.client.Close()
+	return d.clt.Close()
 }
 
 func (d *RELPDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
 	var msg *model.FullMessage
 	var e error
-	for {
-		if len(msgs) == 0 {
-			return
-		}
+	var uid utils.MyULID
+	for len(msgs) > 0 {
 		msg = msgs[0].Message
+		uid = msg.Uid
 		msgs = msgs[1:]
-		e = d.sendOne(ctx, msg)
+		e = d.clt.Send(ctx, msg)
 		model.FullFree(msg)
-		if e != nil && !encoders.IsEncodingError(e) {
-			// network error, we stop now and NACK remaining messages
-			for i := 0; i < len(msgs); i++ {
-				d.NACK(msgs[i].Message.Uid)
-				model.FullFree(msgs[i].Message)
+		if e != nil {
+			if encoders.IsEncodingError(e) {
+				d.PermError(uid)
+			} else {
+				d.NACK(uid)
+				d.NACKRemaining(msgs)
+				d.dofatal()
+				return e
 			}
-			d.dofatal()
-			return e
-		}
-		if e != nil && err == nil {
-			err = e
+			if err == nil {
+				err = e
+			}
 		}
 	}
 	return nil

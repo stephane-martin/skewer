@@ -6,6 +6,7 @@ import (
 
 	nats "github.com/nats-io/go-nats"
 	"github.com/stephane-martin/skewer/conf"
+	"github.com/stephane-martin/skewer/encoders"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/valyala/bytebufferpool"
@@ -85,33 +86,39 @@ func (d *NATSDestination) Close() error {
 
 func (d *NATSDestination) sendOne(msg *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
 	buf := bytebufferpool.Get()
-	defer func() {
-		bytebufferpool.Put(buf)
-		model.FullFree(msg)
-	}()
+	defer bytebufferpool.Put(buf)
 	err = d.encoder(msg, buf)
-
 	if err != nil {
-		d.PermError(msg.Uid)
 		return err
 	}
-	err = d.conn.Publish(topic, buf.Bytes())
-	if err != nil {
-		d.NACK(msg.Uid)
-		d.dofatal()
-		return err
-	}
-	d.ACK(msg.Uid)
-	return nil
+	// we use buf.String() to get a copy of buf, so that we can release buf afterwards
+	return d.conn.Publish(topic, []byte(buf.String()))
 }
 
 func (d *NATSDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
-	var i int
 	var e error
-	for i = range msgs {
-		e = d.sendOne(msgs[i].Message, msgs[i].PartitionKey, msgs[i].PartitionNumber, msgs[i].Topic)
+	var msg *model.FullMessage
+	var uid utils.MyULID
+	for len(msgs) > 0 {
+		msg = msgs[0].Message
+		uid = msg.Uid
+		e = d.sendOne(msg, msgs[0].PartitionKey, msgs[0].PartitionNumber, msgs[0].Topic)
+		model.FullFree(msg)
+		msgs = msgs[1:]
 		if e != nil {
-			err = e
+			if encoders.IsEncodingError(e) {
+				d.PermError(uid)
+			} else {
+				d.NACK(uid)
+				d.NACKRemaining(msgs)
+				d.dofatal()
+				return e
+			}
+			if err == nil {
+				err = e
+			}
+		} else {
+			d.ACK(msg.Uid)
 		}
 	}
 	return err

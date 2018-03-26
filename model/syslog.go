@@ -1,6 +1,8 @@
 package model
 
 import (
+	"net/http"
+
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/utils"
 )
@@ -62,4 +64,9 @@ type RawUdpMessage struct {
 	RawMessage
 	Message [65536]byte
 	Size    int
+}
+
+type DeferedRequest struct {
+	UID     utils.MyULID
+	Request *http.Request
 }
