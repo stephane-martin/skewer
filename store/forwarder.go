@@ -103,7 +103,7 @@ func (fwder *Forwarder) Forward(ctx context.Context) (err error) {
 				return nil
 			}
 			if atomic.LoadInt32(&stopping) == 1 {
-				fwder.dest.NACKAll(messages)
+				fwder.dest.NACKAllSlice(messages)
 				if shutdown {
 					return nil
 				}

@@ -189,6 +189,14 @@ func (base *baseDestination) NACKAll(msgQ *message.Ring) {
 	}
 }
 
+func (base *baseDestination) NACKAllSlice(msgs []*model.FullMessage) {
+	var msg *model.FullMessage
+	for _, msg = range msgs {
+		base.NACK(msg.Uid)
+		model.FullFree(msg)
+	}
+}
+
 func (base *baseDestination) NACKRemaining(msgs []model.OutputMsg) {
 	for i := range msgs {
 		base.NACK(msgs[i].Message.Uid)
