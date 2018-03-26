@@ -1,6 +1,7 @@
 package dests
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -12,6 +13,8 @@ import (
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/queue/message"
+	"github.com/uber-go/multierr"
 )
 
 var Registry *prometheus.Registry
@@ -172,9 +175,16 @@ func (base *baseDestination) PermError(uid utils.MyULID) {
 	ackCounter.WithLabelValues(base.codename, "permerr").Inc()
 }
 
-func (base *baseDestination) NACKAll(msgs []*model.FullMessage) {
-	for _, msg := range msgs {
-		base.ACK(msg.Uid)
+func (base *baseDestination) NACKAll(msgQ *message.Ring) {
+	msgQ.Dispose()
+	var msg *model.FullMessage
+	var err error
+	for {
+		msg, err = msgQ.Get()
+		if err != nil || msg == nil {
+			break
+		}
+		base.NACK(msg.Uid)
 		model.FullFree(msg)
 	}
 }
@@ -184,6 +194,60 @@ func (base *baseDestination) NACKRemaining(msgs []model.OutputMsg) {
 		base.NACK(msgs[i].Message.Uid)
 		model.FullFree(msgs[i].Message)
 	}
+}
+
+func (base *baseDestination) ForEach(ctx context.Context, f func(context.Context, *model.FullMessage) error, ackf func(utils.MyULID), msgs []model.OutputMsg) (err error) {
+	var msg *model.FullMessage
+	var e error
+	var uid utils.MyULID
+	for len(msgs) > 0 {
+		msg = msgs[0].Message
+		uid = msg.Uid
+		e = f(ctx, msg)
+		msgs = msgs[1:]
+		model.FullFree(msg)
+		if e != nil {
+			err = multierr.Append(err, e)
+			if encoders.IsEncodingError(e) {
+				base.PermError(uid)
+			} else {
+				base.NACK(uid)
+				base.NACKRemaining(msgs)
+				base.dofatal()
+				return err
+			}
+		} else if ackf != nil {
+			ackf(uid)
+		}
+	}
+	return err
+}
+
+func (base *baseDestination) ForEachWithTopic(ctx context.Context, f func(context.Context, *model.FullMessage, string, string, int32) error, ackf func(utils.MyULID), msgs []model.OutputMsg) (err error) {
+	var msg *model.FullMessage
+	var e error
+	var uid utils.MyULID
+	for len(msgs) > 0 {
+		msg = msgs[0].Message
+		uid = msg.Uid
+		e = f(ctx, msg, msgs[0].Topic, msgs[0].PartitionKey, msgs[0].PartitionNumber)
+		msgs = msgs[1:]
+		model.FullFree(msg)
+		if e != nil {
+			err = multierr.Append(err, e)
+			if encoders.IsEncodingError(e) {
+				base.PermError(uid)
+			} else {
+				base.NACK(uid)
+				base.NACKRemaining(msgs)
+				base.dofatal()
+				return err
+			}
+		} else if ackf != nil {
+			ackf(uid)
+		}
+	}
+	return err
 }
 
 func (base *baseDestination) getEncoder(format string) (frmt baseenc.Format, encoder encoders.Encoder, err error) {

@@ -288,34 +288,14 @@ func (d *HTTPServerDestination) Close() (err error) {
 	d.sendQueue.Dispose()
 	err = d.server.Close()
 	d.wg.Wait()
-	// nack remaining messages
-	var message *model.FullMessage
-	var e error
-	for {
-		message, e = d.sendQueue.Get()
-		if e != nil || message == nil {
-			break
-		}
-		d.NACK(message.Uid)
-		model.FullFree(message)
-	}
+	d.NACKAll(d.sendQueue)
 	return err
 }
 
+func (d *HTTPServerDestination) sendOne(ctx context.Context, msg *model.FullMessage) error {
+	return d.sendQueue.Put(msg)
+}
+
 func (d *HTTPServerDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
-	var msg *model.FullMessage
-	var uid utils.MyULID
-	for len(msgs) > 0 {
-		msg = msgs[0].Message
-		uid = msg.Uid
-		msgs = msgs[1:]
-		err = d.sendQueue.Put(msg)
-		if err != nil {
-			d.NACK(uid)
-			model.FullFree(msg)
-			d.NACKRemaining(msgs)
-			return err
-		}
-	}
-	return nil
+	return d.ForEach(ctx, d.sendOne, nil, msgs)
 }

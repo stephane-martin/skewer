@@ -71,7 +71,7 @@ func (d *RedisDestination) Close() error {
 	return d.client.Close()
 }
 
-func (d *RedisDestination) sendOne(msg *model.FullMessage, topic string) (err error) {
+func (d *RedisDestination) sendOne(ctx context.Context, msg *model.FullMessage, topic, pKey string, pNumber int32) (err error) {
 	var buf string
 	buf, err = encoders.ChainEncode(d.encoder, msg)
 	if err != nil {
@@ -82,30 +82,5 @@ func (d *RedisDestination) sendOne(msg *model.FullMessage, topic string) (err er
 }
 
 func (d *RedisDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
-	var msg *model.FullMessage
-	var uid utils.MyULID
-	var e error
-	for len(msgs) > 0 {
-		msg = msgs[0].Message
-		uid = msg.Uid
-		e = d.sendOne(msg, msgs[0].Topic)
-		model.FullFree(msg)
-		msgs = msgs[1:]
-		if e != nil {
-			if encoders.IsEncodingError(e) {
-				d.PermError(uid)
-			} else {
-				d.NACK(uid)
-				d.NACKRemaining(msgs)
-				d.dofatal()
-				return e
-			}
-			if err == nil {
-				err = e
-			}
-		} else {
-			d.ACK(uid)
-		}
-	}
-	return err
+	return d.ForEachWithTopic(ctx, d.sendOne, d.ACK, msgs)
 }

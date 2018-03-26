@@ -9,7 +9,6 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/encoders"
 	"github.com/stephane-martin/skewer/model"
-	"github.com/stephane-martin/skewer/utils"
 	"gopkg.in/Graylog2/go-gelf.v2/gelf"
 )
 
@@ -63,26 +62,10 @@ func (d *GraylogDestination) Close() error {
 	return d.writer.Close()
 }
 
+func (d *GraylogDestination) sendOne(ctx context.Context, m *model.FullMessage) error {
+	return d.writer.WriteMessage(encoders.FullToGelfMessage(m))
+}
+
 func (d *GraylogDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
-	var e error
-	var msg *model.FullMessage
-	var uid utils.MyULID
-	for len(msgs) > 0 {
-		msg = msgs[0].Message
-		uid = msg.Uid
-		msgs = msgs[1:]
-		e = d.writer.WriteMessage(encoders.FullToGelfMessage(msg))
-		model.FullFree(msg)
-		if e != nil {
-			d.NACK(uid)
-			d.NACKRemaining(msgs)
-			d.dofatal()
-			if err == nil {
-				err = e
-			}
-		} else {
-			d.ACK(uid)
-		}
-	}
-	return err
+	return d.ForEach(ctx, d.sendOne, d.ACK, msgs)
 }

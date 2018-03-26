@@ -6,7 +6,6 @@ import (
 
 	"github.com/stephane-martin/skewer/clients"
 	"github.com/stephane-martin/skewer/conf"
-	"github.com/stephane-martin/skewer/encoders"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/queue"
@@ -110,28 +109,5 @@ func (d *RELPDestination) Close() (err error) {
 }
 
 func (d *RELPDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
-	var msg *model.FullMessage
-	var e error
-	var uid utils.MyULID
-	for len(msgs) > 0 {
-		msg = msgs[0].Message
-		uid = msg.Uid
-		msgs = msgs[1:]
-		e = d.clt.Send(ctx, msg)
-		model.FullFree(msg)
-		if e != nil {
-			if encoders.IsEncodingError(e) {
-				d.PermError(uid)
-			} else {
-				d.NACK(uid)
-				d.NACKRemaining(msgs)
-				d.dofatal()
-				return e
-			}
-			if err == nil {
-				err = e
-			}
-		}
-	}
-	return nil
+	return d.ForEach(ctx, d.clt.Send, nil, msgs)
 }

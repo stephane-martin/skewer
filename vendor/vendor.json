@@ -400,6 +400,12 @@
 			"revisionTime": "2017-03-29T04:21:07Z"
 		},
 		{
+			"checksumSHA1": "1FUlfAAlQ+COXShfQ+PXamvZjjA=",
+			"path": "github.com/gizak/termui",
+			"revision": "e9a3a6b3d6472ce875254d734f36335c15ebd4e6",
+			"revisionTime": "2018-01-02T09:47:07Z"
+		},
+		{
 			"checksumSHA1": "IvHj/4iR2nYa/S3cB2GXoyDG/xQ=",
 			"path": "github.com/go-ole/go-ole",
 			"revision": "085abb85892dc1949567b726dff00fa226c60c45",
@@ -744,6 +750,12 @@
 			"revisionTime": "2017-11-20T08:03:33Z"
 		},
 		{
+			"checksumSHA1": "HR/f0Ivx47ri0Jy7FnMeLnH8s9Q=",
+			"path": "github.com/maruel/panicparse/stack",
+			"revision": "4417700b5a8d33fbb4416bb04359d20329f60008",
+			"revisionTime": "2018-03-18T23:01:39Z"
+		},
+		{
 			"checksumSHA1": "uAVg4Tj5Fxi62z7/ScDEkHr6Ue8=",
 			"path": "github.com/mattn/go-colorable",
 			"revision": "ded68f7a9561c023e790de24279db7ebf473ea80",
@@ -754,6 +766,12 @@
 			"path": "github.com/mattn/go-isatty",
 			"revision": "fc9e8d8ef48496124e79ae0df75490096eccf6fe",
 			"revisionTime": "2017-03-22T23:44:13Z"
+		},
+		{
+			"checksumSHA1": "A/hIVM4h5YznSJfpfp+divDCuxo=",
+			"path": "github.com/mattn/go-runewidth",
+			"revision": "a9d6d1e4dc51df2130326793d49971f238839169",
+			"revisionTime": "2018-03-04T23:54:28Z"
 		},
 		{
 			"checksumSHA1": "dRJZvT5HWleLgwM8w7g09IE6Q4w=",
@@ -780,6 +798,12 @@
 			"revisionTime": "2016-12-03T19:45:07Z"
 		},
 		{
+			"checksumSHA1": "L3leymg2RT8hFl5uL+5KP/LpBkg=",
+			"path": "github.com/mitchellh/go-wordwrap",
+			"revision": "ad45545899c7b13c020ea92b2072220eefad42b8",
+			"revisionTime": "2015-03-14T17:03:34Z"
+		},
+		{
 			"checksumSHA1": "c1JIqjo91nD1RMFImnW69n8jtj8=",
 			"path": "github.com/mitchellh/mapstructure",
 			"revision": "cc8532a8e9a55ea36402aa21efdf403a60d34096",
@@ -799,6 +823,12 @@
 			"path": "github.com/nats-io/nuid",
 			"revision": "33c603157d6fd1b0ac2599bcc4a286b36479a06d",
 			"revisionTime": "2017-10-25T20:31:29Z"
+		},
+		{
+			"checksumSHA1": "Gh8slTOBOPcvaHuQhXSN1N6wj9A=",
+			"path": "github.com/nsf/termbox-go",
+			"revision": "e2050e41c8847748ec5288741c0b19a8cb26d084",
+			"revisionTime": "2018-03-03T15:24:53Z"
 		},
 		{
 			"checksumSHA1": "B1iGaUz7NrjEmCjVdIgH5pvkTe8=",
@@ -964,6 +994,13 @@
 			"revisionTime": "2017-06-20T06:34:21Z"
 		},
 		{
+			"checksumSHA1": "T8muObVzDHXd5vzq1qvg5CJpcmE=",
+			"path": "github.com/rakyll/gom",
+			"revision": "183a9e70f4777aa03d377d21a0ed023a6afac141",
+			"revisionTime": "2016-11-22T08:07:31Z",
+			"tree": true
+		},
+		{
 			"checksumSHA1": "++Uxr4F++QrnFEbBlQsJ3VuQoNM=",
 			"path": "github.com/rakyll/statik/fs",
 			"revision": "016ca6fdb1b26618ff8f53fbd1109ff834524f23",
@@ -1113,6 +1150,12 @@
 			"revisionTime": "2017-07-04T07:02:18Z"
 		},
 		{
+			"checksumSHA1": "J/PSMDqoJe+ya5NJUXleEhJq8gQ=",
+			"path": "github.com/uber-go/multierr",
+			"revision": "ddea229ff1dff9e6fe8a6c0344ac73b09e81fce5",
+			"revisionTime": "2018-01-22T17:25:45Z"
+		},
+		{
 			"checksumSHA1": "MxLnUmfrP+r5HfCZM29+WPKebn8=",
 			"path": "github.com/ugorji/go/codec",
 			"revision": "708a42d246822952f38190a8d8c4e6b16a0e600c",
@@ -1159,6 +1202,12 @@
 			"path": "github.com/zond/gotomic",
 			"revision": "c442ca1e4aa6e53bdcd0ef5b5d691564436a6867",
 			"revisionTime": "2016-09-12T09:35:11Z"
+		},
+		{
+			"checksumSHA1": "HedK9m8E8iyib4bIBtIX7xprOgo=",
+			"path": "go.uber.org/atomic",
+			"revision": "8474b86a5a6f79c443ce4b2992817ff32cf208b8",
+			"revisionTime": "2017-11-14T20:44:01Z"
 		},
 		{
 			"checksumSHA1": "LthQ7a40qQdnXS2RT1/Rijz9IUU=",

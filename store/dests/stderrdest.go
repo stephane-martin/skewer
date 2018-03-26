@@ -10,6 +10,7 @@ import (
 	"github.com/stephane-martin/skewer/encoders"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/uber-go/multierr"
 )
 
 type StderrDestination struct {
@@ -54,16 +55,14 @@ func (d *StderrDestination) Send(ctx context.Context, msgs []model.OutputMsg, pa
 		e = d.sendOne(msg)
 		model.FullFree(msg)
 		if e != nil {
+			err = multierr.Append(err, e)
 			if encoders.IsEncodingError(e) {
 				d.PermError(uid)
 			} else {
 				d.NACK(uid)
 				d.NACKRemaining(msgs)
 				d.dofatal()
-				return e
-			}
-			if err == nil {
-				err = e
+				return err
 			}
 		} else {
 			d.ACK(uid)

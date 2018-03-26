@@ -236,7 +236,7 @@ func (d *HTTPDestination) dequeue(ctx context.Context) error {
 	}
 }
 
-func (d *HTTPDestination) enqueue(msg *model.FullMessage) (err error) {
+func (d *HTTPDestination) enqueue(ctx context.Context, msg *model.FullMessage) (err error) {
 	urlbuf := bytebufferpool.Get()
 	body := bytebufferpool.Get()
 	defer func() {
@@ -272,28 +272,5 @@ func (d *HTTPDestination) enqueue(msg *model.FullMessage) (err error) {
 }
 
 func (d *HTTPDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
-	var e error
-	var msg *model.FullMessage
-	var uid utils.MyULID
-	for len(msgs) > 0 {
-		msg = msgs[0].Message
-		uid = msg.Uid
-		msgs = msgs[1:]
-		e = d.enqueue(msg)
-		model.FullFree(msg)
-		if e != nil {
-			if encoders.IsEncodingError(e) {
-				d.PermError(uid)
-			} else {
-				d.NACK(uid)
-				d.NACKRemaining(msgs)
-				d.dofatal()
-				return e
-			}
-			if err == nil {
-				err = e
-			}
-		}
-	}
-	return err
+	return d.ForEach(ctx, d.enqueue, nil, msgs)
 }

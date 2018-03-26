@@ -243,38 +243,17 @@ func (d *WebsocketServerDestination) Close() (err error) {
 	d.mu.Lock()
 	for wsconn := range d.connections {
 		wsconn.Close()
+		delete(d.connections, wsconn)
 	}
-	d.connections = make(map[*websocket.Conn]bool)
 	d.mu.Unlock()
-	// nack remaining messages
-	var e error
-	var message *model.FullMessage
-	for {
-		message, e = d.sendQueue.Get()
-		if e != nil {
-			break
-		}
-		d.NACK(message.Uid)
-		model.FullFree(message)
-	}
+	d.NACKAll(d.sendQueue)
 	return err
 }
 
-func (d *WebsocketServerDestination) Send(ctx context.Context, msgs []model.OutputMsg, pKey string, pNumber int32, topic string) (err error) {
-	var msg *model.FullMessage
-	var uid utils.MyULID
+func (d *WebsocketServerDestination) sendOne(ctx context.Context, msg *model.FullMessage) error {
+	return d.sendQueue.Put(msg)
+}
 
-	for len(msgs) > 0 {
-		msg = msgs[0].Message
-		uid = msg.Uid
-		msgs = msgs[1:]
-		err = d.sendQueue.Put(msg)
-		if err != nil {
-			d.NACK(uid)
-			model.FullFree(msg)
-			d.NACKRemaining(msgs)
-			return err
-		}
-	}
-	return nil
+func (d *WebsocketServerDestination) Send(ctx context.Context, msgs []model.OutputMsg, pKey string, pNumber int32, topic string) (err error) {
+	return d.ForEach(ctx, d.sendOne, nil, msgs)
 }

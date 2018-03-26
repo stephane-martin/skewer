@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/pprof"
 
+	gomhttp "github.com/rakyll/gom/http"
 	"github.com/stephane-martin/skewer/sys/binder"
 )
 
@@ -22,8 +23,9 @@ func (s *HTTPServer) ListenAndServe(b binder.Client) error {
 func ProfileServer(b binder.Client) {
 	go func() {
 		mux := http.NewServeMux()
-		mux.Handle("/pprof/heap", pprof.Handler("heap"))
-		mux.Handle("/pprof/profile", http.HandlerFunc(pprof.Profile))
+		mux.Handle("/debug/pprof/heap", pprof.Handler("heap"))
+		mux.Handle("/debug/pprof/profile", http.HandlerFunc(pprof.Profile))
+		mux.HandleFunc("/debug/_gom", gomhttp.Handler())
 		server := &HTTPServer{
 			srv: &http.Server{
 				Handler: mux,

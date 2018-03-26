@@ -9,6 +9,7 @@ import (
 	"github.com/stephane-martin/skewer/encoders"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/uber-go/multierr"
 )
 
 var sp = []byte(" ")
@@ -118,14 +119,13 @@ func (d *TCPDestination) Send(ctx context.Context, msgs []model.OutputMsg, parti
 		e = d.sendOne(ctx, msg)
 		model.FullFree(msg)
 		if e != nil {
+			err = multierr.Append(err, e)
 			if !encoders.IsEncodingError(e) {
 				d.NACKRemaining(msgs)
 				d.dofatal()
-				return e
+				return err
 			}
-			if err == nil {
-				err = e
-			}
+			// ACK, NACK and PermError for current message are handled by sendOne
 		}
 	}
 	return err

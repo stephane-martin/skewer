@@ -5,7 +5,6 @@ import (
 
 	sarama "github.com/Shopify/sarama"
 	"github.com/stephane-martin/skewer/conf"
-	"github.com/stephane-martin/skewer/encoders"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/valyala/bytebufferpool"
@@ -52,7 +51,7 @@ func NewKafkaDestination(ctx context.Context, e *Env) (Destination, error) {
 	return d, nil
 }
 
-func (d *KafkaDestination) sendOne(message *model.FullMessage, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *KafkaDestination) sendOne(ctx context.Context, message *model.FullMessage, topic, pKey string, pNumber int32) (err error) {
 	buf := bytebufferpool.Get()
 	err = d.encoder(message, buf)
 	if err != nil {
@@ -61,8 +60,8 @@ func (d *KafkaDestination) sendOne(message *model.FullMessage, partitionKey stri
 	}
 	// we use buf.String() to get a copy of the buffer, so that we can push back the buffer to the pool
 	kafkaMsg := &sarama.ProducerMessage{
-		Key:       sarama.StringEncoder(partitionKey),
-		Partition: partitionNumber,
+		Key:       sarama.StringEncoder(pKey),
+		Partition: pNumber,
 		Value:     sarama.StringEncoder(buf.String()),
 		Topic:     topic,
 		Timestamp: message.Fields.GetTimeReported(),
@@ -80,29 +79,5 @@ func (d *KafkaDestination) Close() error {
 }
 
 func (d *KafkaDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
-	var e error
-	var msg *model.FullMessage
-	var uid utils.MyULID
-	// we always send all messages to sarama
-	for len(msgs) > 0 {
-		msg = msgs[0].Message
-		uid = msg.Uid
-		e = d.sendOne(msg, msgs[0].PartitionKey, msgs[0].PartitionNumber, msgs[0].Topic)
-		model.FullFree(msg)
-		msgs = msgs[1:]
-		if e != nil {
-			if encoders.IsEncodingError(e) {
-				d.PermError(uid)
-				if err == nil {
-					err = e
-				}
-			} else {
-				d.NACK(uid)
-				d.NACKRemaining(msgs)
-				d.dofatal()
-				return e
-			}
-		}
-	}
-	return err
+	return d.ForEachWithTopic(ctx, d.sendOne, nil, msgs)
 }

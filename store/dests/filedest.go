@@ -19,7 +19,6 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/encoders"
 	"github.com/stephane-martin/skewer/model"
-	"github.com/stephane-martin/skewer/utils"
 	"github.com/valyala/bytebufferpool"
 )
 
@@ -331,7 +330,7 @@ func NewFileDestination(ctx context.Context, e *Env) (Destination, error) {
 	return dest, nil
 }
 
-func (d *FileDestination) sendOne(message *model.FullMessage) (err error) {
+func (d *FileDestination) sendOne(ctx context.Context, message *model.FullMessage) (err error) {
 	if len(message.Fields.AppName) == 0 {
 		message.Fields.AppName = "unknown"
 	}
@@ -374,30 +373,5 @@ func (d *FileDestination) Close() error {
 }
 
 func (d *FileDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
-	var msg *model.FullMessage
-	var e error
-	var uid utils.MyULID
-	for len(msgs) > 0 {
-		msg = msgs[0].Message
-		uid = msg.Uid
-		msgs = msgs[1:]
-		e = d.sendOne(msg)
-		model.FullFree(msg)
-		if e != nil {
-			if encoders.IsEncodingError(e) {
-				d.PermError(uid)
-			} else {
-				d.NACK(uid)
-				d.NACKRemaining(msgs)
-				d.dofatal()
-				return e
-			}
-			if err == nil {
-				err = e
-			}
-		} else {
-			d.ACK(uid)
-		}
-	}
-	return err
+	return d.ForEach(ctx, d.sendOne, d.ACK, msgs)
 }
