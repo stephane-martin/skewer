@@ -463,7 +463,7 @@ func (c *RELPClient) doSendOne(msg *model.FullMessage) (err error) {
 	}
 	buf, txnr, err := c.encode("syslog", msg)
 	if err != nil {
-		return encoders.NonEncodableError
+		return encoders.ErrNonEncodable
 	}
 	if len(buf) == 0 {
 		// nothing to do

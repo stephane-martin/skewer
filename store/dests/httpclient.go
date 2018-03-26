@@ -246,19 +246,19 @@ func (d *HTTPDestination) enqueue(msg *model.FullMessage) (err error) {
 	err = d.url.Execute(urlbuf, msg.Fields)
 	if err != nil {
 		d.logger.Warn("Error calculating target URL from template", "error", err)
-		return encoders.NonEncodableError
+		return encoders.ErrNonEncodable
 	}
 	err = d.encoder(msg, body)
 	if err != nil {
 		d.logger.Warn("Error encoding message", "error", err)
-		return encoders.NonEncodableError
+		return encoders.ErrNonEncodable
 	}
 
 	// we use String() methods to get a copy of the bytebuffers, so that we can Put them back to the pool afterwards
 	req, err := http.NewRequest(d.method, urlbuf.String(), strings.NewReader(body.String()))
 	if err != nil {
 		d.logger.Warn("Error preparing HTTP request", "error", err)
-		return encoders.NonEncodableError
+		return encoders.ErrNonEncodable
 	}
 
 	dreq := &model.DeferedRequest{Request: req, UID: msg.Uid}

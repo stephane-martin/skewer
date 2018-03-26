@@ -219,7 +219,7 @@ func (d *ElasticDestination) sendOne(msg *model.FullMessage) (err error) {
 	err = d.indexNameTpl.Execute(indexBuf, msg.Fields)
 	if err != nil {
 		bytebufferpool.Put(indexBuf)
-		return encoders.NonEncodableError
+		return encoders.ErrNonEncodable
 	}
 	indexName := indexBuf.String()
 	bytebufferpool.Put(indexBuf)
@@ -228,7 +228,7 @@ func (d *ElasticDestination) sendOne(msg *model.FullMessage) (err error) {
 	var buf string
 	buf, err = encoders.ChainEncode(d.encoder, msg)
 	if err != nil {
-		return encoders.NonEncodableError
+		return encoders.ErrNonEncodable
 	}
 
 	// create index in ES if needed

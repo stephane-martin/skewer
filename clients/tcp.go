@@ -229,7 +229,7 @@ func (c *SyslogTCPClient) Send(ctx context.Context, msg *model.FullMessage) (err
 		buf, err = encoders.TcpOctetEncode(c.encoder, msg)
 	}
 	if err != nil {
-		return encoders.NonEncodableError
+		return encoders.ErrNonEncodable
 	}
 	if len(buf) == 0 {
 		return nil

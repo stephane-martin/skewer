@@ -340,7 +340,7 @@ func (d *FileDestination) sendOne(message *model.FullMessage) (err error) {
 	if err != nil {
 		d.logger.Warn("Error calculating filename", "error", err)
 		bytebufferpool.Put(buf)
-		return encoders.NonEncodableError
+		return encoders.ErrNonEncodable
 	}
 	filename := strings.TrimSpace(buf.String())
 	bytebufferpool.Put(buf)
@@ -352,7 +352,7 @@ func (d *FileDestination) sendOne(message *model.FullMessage) (err error) {
 	encoded, err := encoders.ChainEncode(d.encoder, message, "\n")
 	if err != nil {
 		d.logger.Warn("Error encoding message", "error", err)
-		return encoders.NonEncodableError
+		return encoders.ErrNonEncodable
 	}
 	_, err = io.WriteString(f, encoded)
 	if err != nil {

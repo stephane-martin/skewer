@@ -2,6 +2,7 @@ package encoders
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -55,16 +56,19 @@ var encoders = map[baseenc.Format]Encoder{
 	baseenc.Protobuf: encodePB,
 }
 
+// Encoder is the function type that represents encoders
 type Encoder func(v interface{}, w io.Writer) error
 
-var NonEncodableError = fmt.Errorf("non encodable message")
+// ErrNonEncodable is returned when a given *model.FullMessage is not encodable by an encoder
+var ErrNonEncodable = errors.New("non encodable message")
 
+// IsEncodingError returns true when the given error is a message encoding error
 func IsEncodingError(err error) bool {
 	// TODO: check
 	if err == nil {
 		return false
 	}
-	if err == NonEncodableError {
+	if err == ErrNonEncodable {
 		return true
 	}
 	switch err.(type) {
@@ -91,25 +95,25 @@ func defaultEncode(v interface{}, w io.Writer) error {
 		_, err := w.Write(val)
 		return err
 	case string:
-		_, err := w.Write([]byte(val))
+		_, err := io.WriteString(w, val)
 		return err
 	case int:
-		_, err := w.Write([]byte(strconv.FormatInt(int64(val), 10)))
+		_, err := io.WriteString(w, strconv.FormatInt(int64(val), 10))
 		return err
 	case int32:
-		_, err := w.Write([]byte(strconv.FormatInt(int64(val), 10)))
+		_, err := io.WriteString(w, strconv.FormatInt(int64(val), 10))
 		return err
 	case int64:
-		_, err := w.Write([]byte(strconv.FormatInt(int64(val), 10)))
+		_, err := io.WriteString(w, strconv.FormatInt(int64(val), 10))
 		return err
 	case uint:
-		_, err := w.Write([]byte(strconv.FormatUint(uint64(val), 10)))
+		_, err := io.WriteString(w, strconv.FormatUint(uint64(val), 10))
 		return err
 	case uint32:
-		_, err := w.Write([]byte(strconv.FormatUint(uint64(val), 10)))
+		_, err := io.WriteString(w, strconv.FormatUint(uint64(val), 10))
 		return err
 	case uint64:
-		_, err := w.Write([]byte(strconv.FormatUint(uint64(val), 10)))
+		_, err := io.WriteString(w, strconv.FormatUint(uint64(val), 10))
 		return err
 	default:
 		return fmt.Errorf("Dont know how to encode that type: '%T'", val)
