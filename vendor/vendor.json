@@ -1150,6 +1150,12 @@
 			"revisionTime": "2017-07-04T07:02:18Z"
 		},
 		{
+			"checksumSHA1": "8vVtJo81mYY6CPavgvy5gRXgkhs=",
+			"path": "github.com/uber-go/atomic",
+			"revision": "8474b86a5a6f79c443ce4b2992817ff32cf208b8",
+			"revisionTime": "2017-11-14T20:44:01Z"
+		},
+		{
 			"checksumSHA1": "J/PSMDqoJe+ya5NJUXleEhJq8gQ=",
 			"path": "github.com/uber-go/multierr",
 			"revision": "ddea229ff1dff9e6fe8a6c0344ac73b09e81fce5",
