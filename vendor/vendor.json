@@ -1075,10 +1075,10 @@
 			"tree": true
 		},
 		{
-			"checksumSHA1": "BNWq+huxi9nPuGVtBxkw6ilGZ9s=",
+			"checksumSHA1": "x76MsklrZD88Y3CQpfDy+5315qo=",
 			"path": "github.com/spf13/cobra/cobra",
-			"revision": "b78744579491c1ceeaaa3b40205e56b0591b93a3",
-			"revisionTime": "2017-09-05T17:20:51Z",
+			"revision": "4dab30cb33e6633c33c787106bafbfbfdde7842d",
+			"revisionTime": "2018-03-31T12:36:20Z",
 			"tree": true
 		},
 		{
