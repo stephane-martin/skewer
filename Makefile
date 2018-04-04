@@ -6,18 +6,19 @@ SED=/usr/local/bin/gsed
 BINARY=skewer
 COMMIT=$(shell git rev-parse HEAD)
 VERSION=0.1
-LDFLAGS=-ldflags '-w -s -X github.com/stephane-martin/skewer/conf.Version=${VERSION} -X github.com/stephane-martin/skewer/conf.GitCommit=${COMMIT}"'
+LDFLAGS=-ldflags '-X github.com/stephane-martin/skewer/conf.Version=${VERSION} -X github.com/stephane-martin/skewer/conf.GitCommit=${COMMIT}'
+LDFLAGS_RELEASE=-ldflags '-w -s -X github.com/stephane-martin/skewer/conf.Version=${VERSION} -X github.com/stephane-martin/skewer/conf.GitCommit=${COMMIT}"'
 
 SOURCES = $(shell find . -type f -name '*.go' -not -path "./vendor/*")
 SUBDIRS = $(shell find . -type d -regex './[a-z].*' -not -path './vendor*' -not -path '*.shapesdoc' | xargs)
 
 $(BINARY): ${SOURCES} utils/logging/types.pb.go conf/derived.gen.go utils/queue/tcp/ring.go utils/queue/udp/ring.go utils/queue/defered/ring.go utils/queue/kafka/ring.go utils/queue/message/ring.go model/types.pb.go model/types_ffjson.go utils/collectd/embed/statik/statik.go grammars/rfc5424/rfc5424_lexer.go
 	test -n "${GOPATH}"  # test $$GOPATH
-	go build -o ${BINARY}
+	go build -o ${BINARY} ${LDFLAGS}
 
 release: ${SOURCES} utils/logging/types.pb.go conf/derived.gen.go utils/queue/tcp/ring.go utils/queue/udp/ring.go utils/queue/kafka/ring.go utils/queue/message/ring.go model/types.pb.go model/types_ffjson.go utils/collectd/embed/statik/statik.go
 	test -n "${GOPATH}"  # test $$GOPATH
-	go build -o ${BINARY} -a -x ${LDFLAGS}
+	go build -o ${BINARY} -a -x ${LDFLAGS_RELEASE}
 
 model/types_ffjson.go: model/types.go
 	test -n "${GOPATH}"  # test $$GOPATH
