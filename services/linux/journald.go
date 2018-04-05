@@ -1,7 +1,6 @@
 package linux
 
 import (
-	"os"
 	"sync"
 
 	"github.com/inconshreveable/log15"
@@ -56,47 +55,44 @@ func (s *JournalService) dofatal() {
 
 func (s *JournalService) Start() (infos []model.ListenerInfo, err error) {
 	infos = []model.ListenerInfo{}
-	hostname, err := os.Hostname()
-	if err != nil {
-		hostname = "unknown"
-	}
 
 	if s.reader == nil {
 		// create the low level journald reader if needed
-		s.reader, err = journald.NewReader(s.logger)
+		s.reader, err = journald.NewReader(s.stasher, s.logger)
 		if err != nil {
 			return infos, err
 		}
 	}
-	s.reader.Start()
+	s.reader.Start(s.Conf.ConfID)
 	s.fatalErrorChan = make(chan struct{})
 	s.fatalOnce = &sync.Once{}
 
-	s.wgroup.Add(1)
-	go func() {
-		defer s.wgroup.Done()
+	/*
+		s.wgroup.Add(1)
+		go func() {
+			defer s.wgroup.Done()
 
-		var m *model.FullMessage
-		var err error
-		q := s.reader.Entries()
+			var m *model.FullMessage
+			var err error
+			q := s.reader.Entries()
 
-		for q.Wait(0) {
-			m, err = q.Get()
-			if m != nil && err == nil {
-				m.ConfId = s.Conf.ConfID
-				f, nf := s.stasher.Stash(m)
-				if nf != nil {
-					s.logger.Warn("Non-fatal error stashing journal message", "error", nf)
-				} else if f != nil {
-					s.logger.Error("Fatal error stashing journal message", "error", f)
-					s.dofatal()
-				} else {
-					base.IncomingMsgsCounter.WithLabelValues("journald", hostname, "", "").Inc()
+			for q.Wait(0) {
+				m, err = q.Get()
+				if m != nil && err == nil {
+					f, nf := s.stasher.Stash(m)
+					if nf != nil {
+						s.logger.Warn("Non-fatal error stashing journal message", "error", nf)
+					} else if f != nil {
+						s.logger.Error("Fatal error stashing journal message", "error", f)
+						s.dofatal()
+					} else {
+						base.IncomingMsgsCounter.WithLabelValues("journald", hostname, "", "").Inc()
+					}
+					model.FullFree(m)
 				}
-				model.FullFree(m)
 			}
-		}
-	}()
+		}()
+	*/
 
 	s.logger.Debug("Journald service has started")
 	return infos, nil

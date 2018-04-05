@@ -3,6 +3,7 @@
 package journald
 
 import (
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -12,21 +13,21 @@ import (
 	"github.com/coreos/go-systemd/sdjournal"
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/utils"
-	"github.com/stephane-martin/skewer/utils/queue"
 )
 
 // TODO: provide a way to link statically to libsystemd
 
-var Supported bool = true
+var Supported = true
 
-type reader struct {
+type Reader struct {
 	journal      *sdjournal.Journal
-	entries      *queue.MessageQueue
 	stopchan     chan struct{}
 	shutdownchan chan struct{}
 	wgroup       *sync.WaitGroup
 	logger       log15.Logger
+	stasher      base.Stasher
 }
 
 type Converter func(map[string]string) *model.FullMessage
@@ -86,7 +87,7 @@ func EntryToSyslog(entry map[string]string) (m *model.SyslogMessage) {
 	return m
 }
 
-func makeMapConverter(coding string) Converter {
+func makeMapConverter(coding string, confID utils.MyULID) Converter {
 	decoder := utils.SelectDecoder(coding)
 	generator := utils.NewGenerator()
 	return func(m map[string]string) *model.FullMessage {
@@ -104,11 +105,12 @@ func makeMapConverter(coding string) Converter {
 		}
 		full := model.FullFactoryFrom(EntryToSyslog(dest))
 		full.Uid = generator.Uid()
+		full.ConfId = confID
 		return full
 	}
 }
 
-func NewReader(logger log15.Logger) (JournaldReader, error) {
+func NewReader(logger log15.Logger) (*Reader, error) {
 	var err error
 	r := &reader{logger: logger}
 	r.journal, err = sdjournal.NewJournal()
@@ -130,11 +132,7 @@ func NewReader(logger log15.Logger) (JournaldReader, error) {
 	return r, nil
 }
 
-func (r *reader) Entries() *queue.MessageQueue {
-	return r.entries
-}
-
-func (r *reader) wait() chan struct{} {
+func (r *Reader) wait() chan struct{} {
 	events := make(chan struct{})
 	r.wgroup.Add(1)
 
@@ -165,26 +163,28 @@ func (r *reader) wait() chan struct{} {
 			}
 		}
 	}()
-
 	return events
 }
 
-func (r *reader) Start() {
+func (r *Reader) Start(confID utils.MyULID) {
 	r.stopchan = make(chan struct{})
-	r.entries = queue.NewMessageQueue()
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = "unknown"
+	}
 
 	r.wgroup.Add(1)
 	go func() {
 		defer func() {
 			r.entries.Dispose()
-			//close(r.entries)
 			r.wgroup.Done()
 		}()
 
 		var err error
 		var nb uint64
 		var entry *sdjournal.JournalEntry
-		converter := makeMapConverter("utf8")
+		converter := makeMapConverter("utf8", confID)
+		var m *model.FullMessage
 
 		for {
 			// get entries from journald
@@ -197,21 +197,28 @@ func (r *reader) Start() {
 					nb, err = r.journal.Next()
 					if err != nil {
 						return
-					} else if nb == 0 {
+					}
+					if nb == 0 {
 						select {
 						case <-r.shutdownchan:
 							return
 						default:
 							break LoopGetEntries
 						}
-					} else {
-						entry, err = r.journal.GetEntry()
-						if err != nil {
-							return
-						} else {
-							r.entries.Put(converter(entry.Fields))
-						}
 					}
+					entry, err = r.journal.GetEntry()
+					if err != nil {
+						return
+					}
+					f, nf := r.stasher.Stash(converter(entry.Fields))
+					if nf != nil {
+						r.logger.Warn("Non-fatal error stashing journal message", "error", nf)
+					} else if f != nil {
+						r.logger.Error("Fatal error stashing journal message", "error", f)
+					} else {
+						base.IncomingMsgsCounter.WithLabelValues("journald", hostname, "", "").Inc()
+					}
+
 				}
 			}
 
@@ -226,14 +233,14 @@ func (r *reader) Start() {
 	}()
 }
 
-func (r *reader) Stop() {
+func (r *Reader) Stop() {
 	if r.stopchan != nil {
 		close(r.stopchan)
 		r.wgroup.Wait()
 	}
 }
 
-func (r *reader) Shutdown() {
+func (r *Reader) Shutdown() {
 	close(r.shutdownchan)
 	r.wgroup.Wait()
 	if r.stopchan != nil {

@@ -1,10 +1,9 @@
 package journald
 
-import "github.com/stephane-martin/skewer/utils/queue"
+import "github.com/stephane-martin/skewer/utils"
 
 type JournaldReader interface {
-	Start()
+	Start(utils.MyULID)
 	Stop()
 	Shutdown()
-	Entries() *queue.MessageQueue
 }

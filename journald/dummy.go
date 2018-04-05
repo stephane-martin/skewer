@@ -4,25 +4,19 @@ package journald
 
 import (
 	"github.com/inconshreveable/log15"
-	"github.com/stephane-martin/skewer/utils/queue"
+	"github.com/stephane-martin/skewer/services/base"
+	"github.com/stephane-martin/skewer/utils"
 )
 
-var Supported bool = false
+var Supported = false
 
-type reader struct {
-	entries *queue.MessageQueue
+type DummyReader struct {
 }
 
-func NewReader(logger log15.Logger) (JournaldReader, error) {
-	r := &reader{}
-	r.entries = queue.NewMessageQueue()
-	return r, nil
+func NewReader(stasher base.Stasher, logger log15.Logger) (*DummyReader, error) {
+	return new(DummyReader), nil
 }
 
-func (r *reader) Start()    {}
-func (r *reader) Stop()     {}
-func (r *reader) Shutdown() {}
-
-func (r *reader) Entries() *queue.MessageQueue {
-	return r.entries
-}
+func (r *DummyReader) Start(utils.MyULID) {}
+func (r *DummyReader) Stop()              {}
+func (r *DummyReader) Shutdown()          {}
