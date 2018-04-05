@@ -110,9 +110,9 @@ func makeMapConverter(coding string, confID utils.MyULID) Converter {
 	}
 }
 
-func NewReader(logger log15.Logger) (*Reader, error) {
+func NewReader(stasher base.Stasher, logger log15.Logger) (*Reader, error) {
 	var err error
-	r := &reader{logger: logger}
+	r := &Reader{logger: logger, stasher: stasher}
 	r.journal, err = sdjournal.NewJournal()
 	if err != nil {
 		return nil, err
@@ -176,7 +176,6 @@ func (r *Reader) Start(confID utils.MyULID) {
 	r.wgroup.Add(1)
 	go func() {
 		defer func() {
-			r.entries.Dispose()
 			r.wgroup.Done()
 		}()
 
@@ -184,7 +183,6 @@ func (r *Reader) Start(confID utils.MyULID) {
 		var nb uint64
 		var entry *sdjournal.JournalEntry
 		converter := makeMapConverter("utf8", confID)
-		var m *model.FullMessage
 
 		for {
 			// get entries from journald
