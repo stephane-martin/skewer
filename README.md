@@ -94,6 +94,7 @@ to post bugs and ask questions.
 
 
 ![Architecture](archi.png)
+[![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2Fstephane-martin%2Fskewer.svg?type=shield)](https://app.fossa.io/projects/git%2Bgithub.com%2Fstephane-martin%2Fskewer?ref=badge_shield)
 
 
 ## Building
@@ -154,3 +155,7 @@ Flags are documented in the command line help.
 
     Generates a secret that you can use in the Store configuration, so that
     log messages are not written in clear text on disk.
+
+
+## License
+[![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2Fstephane-martin%2Fskewer.svg?type=large)](https://app.fossa.io/projects/git%2Bgithub.com%2Fstephane-martin%2Fskewer?ref=badge_large)
