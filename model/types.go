@@ -10,6 +10,7 @@ import (
 	"github.com/awnumar/memguard"
 	"github.com/gogo/protobuf/proto"
 	"github.com/pquerna/ffjson/ffjson"
+	"github.com/stephane-martin/skewer/model/avro"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/sbox"
 )
@@ -223,15 +224,18 @@ type RegularSyslog struct {
 	Severity      string                       `json:"severity"`
 	TimeReported  time.Time                    `json:"timereported"`
 	TimeGenerated time.Time                    `json:"timegenerated"`
-	HostName      string                       `json:"hostname"`
-	AppName       string                       `json:"appname"`
-	ProcID        string                       `json:"procid"`
-	MsgID         string                       `json:"msgid"`
-	Message       string                       `json:"message"`
-	Properties    map[string]map[string]string `json:"properties"`
+	HostName      string                       `json:"hostname,omitempty"`
+	AppName       string                       `json:"appname,omitempty"`
+	ProcID        string                       `json:"procid,omitempty"`
+	MsgID         string                       `json:"msgid,omitempty"`
+	Message       string                       `json:"message,omitempty"`
+	Properties    map[string]map[string]string `json:"properties,omitempty"`
 }
 
 func (m *RegularSyslog) Internal() (res *SyslogMessage) {
+	if m == nil {
+		return nil
+	}
 	res = Factory()
 	res.Facility = FacilityFromString(m.Facility)
 	res.Severity = SeverityFromString(m.Severity)
@@ -250,6 +254,9 @@ func (m *RegularSyslog) Internal() (res *SyslogMessage) {
 }
 
 func (m *SyslogMessage) Regular() (reg *RegularSyslog) {
+	if m == nil {
+		return nil
+	}
 	return &RegularSyslog{
 		Facility:      m.Facility.String(),
 		Severity:      m.Severity.String(),
@@ -264,8 +271,119 @@ func (m *SyslogMessage) Regular() (reg *RegularSyslog) {
 	}
 }
 
-func (m *SyslogMessage) RegularJson() ([]byte, error) {
+func (m *SyslogMessage) Avro() *avro.SyslogMessage {
+	if m == nil {
+		return nil
+	}
+	return &avro.SyslogMessage{
+		Facility:      m.Facility.String(),
+		Severity:      m.Severity.String(),
+		TimeReported:  time.Unix(0, m.TimeReportedNum).UTC().Format(time.RFC3339Nano),
+		TimeGenerated: time.Unix(0, m.TimeGeneratedNum).UTC().Format(time.RFC3339Nano),
+		Hostname:      m.HostName,
+		Appname:       m.AppName,
+		Procid:        m.ProcId,
+		Msgid:         m.MsgId,
+		Properties:    m.GetAllProperties(),
+	}
+}
+
+func (m *SyslogMessage) NativeAvro() map[string]interface{} {
+	if m == nil {
+		return nil
+	}
+	props := m.GetAllProperties()
+	nprops := make(map[string]interface{}, len(props))
+	for k, v := range props {
+		nprops[k] = v
+	}
+	return map[string]interface{}{
+		"Facility":      m.Facility.String(),
+		"Severity":      m.Severity.String(),
+		"TimeReported":  time.Unix(0, m.TimeReportedNum).UTC().Format(time.RFC3339Nano),
+		"TimeGenerated": time.Unix(0, m.TimeGeneratedNum).UTC().Format(time.RFC3339Nano),
+		"Hostname":      m.HostName,
+		"Appname":       m.AppName,
+		"Procid":        m.ProcId,
+		"Msgid":         m.MsgId,
+		"Properties":    nprops,
+	}
+}
+
+func (m *SyslogMessage) RegularJSON() ([]byte, error) {
+	if m == nil {
+		return nil, nil
+	}
 	return ffjson.Marshal(m.Regular())
+}
+
+type RegularFullMessage struct {
+	ClientAddr string         `json:"client_addr,omitempty"`
+	SourceType string         `json:"source_type,omitempty"`
+	SourcePath string         `json:"source_path,omitempty"`
+	SourcePort int32          `json:"source_port"`
+	Uid        string         `json:"uid,omitempty"`
+	Fields     *RegularSyslog `json:"fields"`
+}
+
+func (m *RegularFullMessage) Internal() (res *FullMessage, err error) {
+	if m == nil || m.Fields == nil {
+		return nil, nil
+	}
+	var uid utils.MyULID
+	uid, err = utils.ParseMyULID(m.Uid)
+	if err != nil {
+		return nil, err
+	}
+	res = FullFactoryFrom(m.Fields.Internal())
+	res.ClientAddr = m.ClientAddr
+	res.SourceType = m.SourceType
+	res.SourcePath = m.SourcePath
+	res.SourcePort = m.SourcePort
+	res.Uid = uid
+	return res, nil
+}
+
+func (m *FullMessage) Regular() *RegularFullMessage {
+	if m == nil || m.Fields == nil {
+		return nil
+	}
+	return &RegularFullMessage{
+		ClientAddr: m.ClientAddr,
+		SourceType: m.SourceType,
+		SourcePath: m.SourcePath,
+		SourcePort: m.SourcePort,
+		Uid:        m.Uid.String(),
+		Fields:     m.Fields.Regular(),
+	}
+}
+
+func (m *FullMessage) Avro() *avro.FullMessage {
+	if m == nil || m.Fields == nil {
+		return nil
+	}
+	return &avro.FullMessage{
+		ClientAddr: m.ClientAddr,
+		SourceType: m.SourceType,
+		SourcePath: m.SourcePath,
+		SourcePort: m.SourcePort,
+		Uid:        m.Uid.String(),
+		Fields:     m.Fields.Avro(),
+	}
+}
+
+func (m *FullMessage) NativeAvro() map[string]interface{} {
+	if m == nil || m.Fields == nil {
+		return nil
+	}
+	return map[string]interface{}{
+		"Fields":     m.Fields.NativeAvro(),
+		"ClientAddr": m.ClientAddr,
+		"SourceType": m.SourceType,
+		"SourcePath": m.SourcePath,
+		"SourcePort": m.SourcePort,
+		"Uid":        m.Uid.String(),
+	}
 }
 
 /*

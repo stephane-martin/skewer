@@ -1,0 +1,16 @@
+{
+	"type": "record",
+	"namespace": "skewer",
+	"name": "SyslogMessage",
+	"fields": [
+		{ "name": "Facility", "type": "string" },
+		{ "name": "Severity", "type": "string" },
+		{ "name": "TimeReported", "type": "string" },
+		{ "name": "TimeGenerated", "type": "string" },
+		{ "name": "Hostname", "type": "string" },
+		{ "name": "Appname", "type": "string" },
+		{ "name": "Procid", "type": "string" },
+		{ "name": "Msgid", "type": "string" },
+		{ "name": "Properties", "type": { "type": "map", "values": { "type": "map", "values": "string" } } }
+	]
+}

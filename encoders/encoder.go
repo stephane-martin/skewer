@@ -1,14 +1,13 @@
 package encoders
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"mime"
 	"strconv"
 
 	"github.com/stephane-martin/skewer/encoders/baseenc"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 	"github.com/valyala/bytebufferpool"
 )
 
@@ -17,12 +16,14 @@ var endl = []byte("\n")
 
 var JsonMimetype = "application/json"
 var NDJsonMimetype = "application/x-ndjson"
+var AvroMimetype = "application/x-avro-binary"
 var ProtobufMimetype = "application/vnd.google.protobuf"
 var OctetStreamMimetype = "application/octet-stream"
 var PlainMimetype = mime.FormatMediaType("text/plain", map[string]string{"charset": "utf-8"})
 
 var AcceptedMimeTypes = []string{
 	JsonMimetype,
+	AvroMimetype,
 	NDJsonMimetype,
 	ProtobufMimetype,
 	OctetStreamMimetype,
@@ -32,6 +33,7 @@ var AcceptedMimeTypes = []string{
 var RMimeTypes = map[string]Encoder{
 	JsonMimetype:        encodeJSON,
 	NDJsonMimetype:      encodeJSON,
+	AvroMimetype:        encodeFullAVRO,
 	ProtobufMimetype:    encodePB,
 	OctetStreamMimetype: encodePB,
 	PlainMimetype:       encode5424,
@@ -39,44 +41,38 @@ var RMimeTypes = map[string]Encoder{
 }
 
 var MimeTypes = map[baseenc.Format]string{
-	baseenc.RFC5424:  PlainMimetype,
-	baseenc.RFC3164:  PlainMimetype,
-	baseenc.JSON:     JsonMimetype,
-	baseenc.File:     PlainMimetype,
-	baseenc.GELF:     JsonMimetype,
-	baseenc.Protobuf: ProtobufMimetype,
+	baseenc.RFC5424:      PlainMimetype,
+	baseenc.RFC3164:      PlainMimetype,
+	baseenc.JSON:         JsonMimetype,
+	baseenc.FullJSON:     JsonMimetype,
+	baseenc.AVRO:         AvroMimetype,
+	baseenc.FullAVRO:     AvroMimetype,
+	baseenc.JSONAVRO:     JsonMimetype,
+	baseenc.FullJSONAVRO: JsonMimetype,
+	baseenc.File:         PlainMimetype,
+	baseenc.GELF:         JsonMimetype,
+	baseenc.Protobuf:     ProtobufMimetype,
 }
 
 var encoders = map[baseenc.Format]Encoder{
-	baseenc.RFC5424:  encode5424,
-	baseenc.RFC3164:  encode3164,
-	baseenc.JSON:     encodeJSON,
-	baseenc.File:     encodeFile,
-	baseenc.GELF:     encodeGELF,
-	baseenc.Protobuf: encodePB,
+	baseenc.RFC5424:      encode5424,
+	baseenc.RFC3164:      encode3164,
+	baseenc.JSON:         encodeJSON,
+	baseenc.FullJSON:     encodeFullJSON,
+	baseenc.AVRO:         encodeAVRO,
+	baseenc.FullAVRO:     encodeFullAVRO,
+	baseenc.JSONAVRO:     encodeJSONAVRO,
+	baseenc.FullJSONAVRO: encodeFullJSONAVRO,
+	baseenc.File:         encodeFile,
+	baseenc.GELF:         encodeGELF,
+	baseenc.Protobuf:     encodePB,
 }
 
 // Encoder is the function type that represents encoders
 type Encoder func(v interface{}, w io.Writer) error
 
-// ErrNonEncodable is returned when a given *model.FullMessage is not encodable by an encoder
-var ErrNonEncodable = errors.New("non encodable message")
-
-// IsEncodingError returns true when the given error is a message encoding error
-func IsEncodingError(err error) bool {
-	// TODO: check
-	if err == nil {
-		return false
-	}
-	if err == ErrNonEncodable {
-		return true
-	}
-	switch err.(type) {
-	case *json.MarshalerError, *ErrInvalid5424:
-		return true
-	default:
-		return false
-	}
+func EncodingError(err error) error {
+	return eerrors.Wrap(eerrors.WithTypes(err, "Encoding"), "error encoding message")
 }
 
 func GetEncoder(frmt baseenc.Format) (Encoder, error) {
@@ -86,37 +82,39 @@ func GetEncoder(frmt baseenc.Format) (Encoder, error) {
 	return nil, fmt.Errorf("NewEncoder: unknown encoding format '%d'", frmt)
 }
 
-func defaultEncode(v interface{}, w io.Writer) error {
+func defaultEncode(v interface{}, w io.Writer) (err error) {
 	if v == nil {
 		return nil
 	}
 	switch val := v.(type) {
 	case []byte:
-		_, err := w.Write(val)
+		_, err = w.Write(val)
 		return err
 	case string:
-		_, err := io.WriteString(w, val)
+		_, err = io.WriteString(w, val)
 		return err
 	case int:
-		_, err := io.WriteString(w, strconv.FormatInt(int64(val), 10))
+		_, err = io.WriteString(w, strconv.FormatInt(int64(val), 10))
 		return err
 	case int32:
-		_, err := io.WriteString(w, strconv.FormatInt(int64(val), 10))
+		_, err = io.WriteString(w, strconv.FormatInt(int64(val), 10))
 		return err
 	case int64:
-		_, err := io.WriteString(w, strconv.FormatInt(int64(val), 10))
+		_, err = io.WriteString(w, strconv.FormatInt(int64(val), 10))
 		return err
 	case uint:
-		_, err := io.WriteString(w, strconv.FormatUint(uint64(val), 10))
+		_, err = io.WriteString(w, strconv.FormatUint(uint64(val), 10))
 		return err
 	case uint32:
-		_, err := io.WriteString(w, strconv.FormatUint(uint64(val), 10))
+		_, err = io.WriteString(w, strconv.FormatUint(uint64(val), 10))
 		return err
 	case uint64:
-		_, err := io.WriteString(w, strconv.FormatUint(uint64(val), 10))
+		_, err = io.WriteString(w, strconv.FormatUint(uint64(val), 10))
 		return err
 	default:
-		return fmt.Errorf("Dont know how to encode that type: '%T'", val)
+		return EncodingError(
+			eerrors.Errorf("Dont know how to encode that type: '%T'", val),
+		)
 	}
 }
 

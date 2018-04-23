@@ -1,0 +1,13 @@
+{
+	"type": "record",
+	"namespace": "skewer",
+	"name": "FullMessage",
+	"fields": [
+		{ "name": "ClientAddr", "type": "string" },
+		{ "name": "SourceType", "type": "string" },
+		{ "name": "SourcePath", "type": "string" },
+		{ "name": "SourcePort", "type": "int" },
+		{ "name": "Uid", "type": "string" },
+		{ "name": "Fields", "type": "SyslogMessage" }
+	]
+}

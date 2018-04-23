@@ -34,9 +34,13 @@ message SyslogMessage {
 
 message FullMessage {
 	int32 txnr = 1;
-	bytes conn_id = 2 [(gogoproto.customtype) = "github.com/stephane-martin/skewer/utils.MyULID",(gogoproto.nullable) = false];
-	bytes conf_id = 3 [(gogoproto.customtype) = "github.com/stephane-martin/skewer/utils.MyULID",(gogoproto.nullable) = false];
-	bytes uid = 4 [(gogoproto.customtype) = "github.com/stephane-martin/skewer/utils.MyULID",(gogoproto.nullable) = false];
-	SyslogMessage fields = 5;
+	string client_addr = 2;
+	string source_type = 3;
+	string source_path = 4;
+	int32 source_port = 5;
+	bytes conn_id = 6 [(gogoproto.customtype) = "github.com/stephane-martin/skewer/utils.MyULID",(gogoproto.nullable) = false];
+	bytes conf_id = 7 [(gogoproto.customtype) = "github.com/stephane-martin/skewer/utils.MyULID",(gogoproto.nullable) = false];
+	bytes uid = 8 [(gogoproto.customtype) = "github.com/stephane-martin/skewer/utils.MyULID",(gogoproto.nullable) = false];
+	SyslogMessage fields = 9;
 }
 
