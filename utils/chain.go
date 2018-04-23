@@ -3,6 +3,8 @@ package utils
 import (
 	"io"
 	"sync"
+
+	"github.com/stephane-martin/skewer/utils/eerrors"
 )
 
 type Func func() error
@@ -18,13 +20,13 @@ func Chain(funs ...Func) (err error) {
 	return nil
 }
 
-// All executes all the provided funcs and returns the first error.
-func All(funs ...Func) (err error) {
-	errs := make([]error, 0, len(funs))
+// All executes all the provided funcs and returns the errors.
+func All(funs ...Func) (err eerrors.ErrorSlice) {
+	c := eerrors.ChainErrors()
 	for _, f := range funs {
-		errs = append(errs, f())
+		c.Append(f())
 	}
-	return AnyErr(errs...)
+	return c.Sum()
 }
 
 // ChainWrites writes the provided buffers until an error is returned.
@@ -52,26 +54,16 @@ func AnyErr(errs ...error) (err error) {
 }
 
 // Parallel executes the provided funcs in parallel and returns one of the returned errors if any.
-func Parallel(funs ...Func) error {
+func Parallel(funs ...Func) eerrors.ErrorSlice {
 	var wg sync.WaitGroup
-	errs := make([]error, 0, len(funs))
-	errChan := make(chan error)
-	finished := make(chan struct{})
+	c := eerrors.ChainErrors()
 	for _, fun := range funs {
 		wg.Add(1)
 		go func(f func() error) {
-			errChan <- f()
+			c.Append(f())
 			wg.Done()
 		}(fun)
 	}
-	go func() {
-		for err := range errChan {
-			errs = append(errs, err)
-		}
-		close(finished)
-	}()
 	wg.Wait()
-	close(errChan)
-	<-finished
-	return AnyErr(errs...)
+	return c.Sum()
 }

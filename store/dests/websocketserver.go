@@ -12,10 +12,9 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/stephane-martin/skewer/conf"
-	"github.com/stephane-martin/skewer/encoders"
 	"github.com/stephane-martin/skewer/encoders/baseenc"
 	"github.com/stephane-martin/skewer/model"
-	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 	"github.com/stephane-martin/skewer/utils/queue/message"
 )
 
@@ -169,7 +168,7 @@ func (d *WebsocketServerDestination) writeLogs(wsconn *websocket.Conn) (err erro
 		}
 
 		message, err = d.sendQueue.Poll(remain)
-		if err == utils.ErrDisposed {
+		if err == eerrors.ErrQDisposed {
 			// server is shutting down
 			return nil
 		}
@@ -200,7 +199,7 @@ func (d *WebsocketServerDestination) writeLogs(wsconn *websocket.Conn) (err erro
 					d.NACK(uid)
 					return err
 				}
-			} else if encoders.IsEncodingError(err) {
+			} else if IsEncodingError(err) {
 				// message can not be encoded
 				d.PermError(uid)
 			} else {
@@ -254,6 +253,6 @@ func (d *WebsocketServerDestination) sendOne(ctx context.Context, msg *model.Ful
 	return d.sendQueue.Put(msg)
 }
 
-func (d *WebsocketServerDestination) Send(ctx context.Context, msgs []model.OutputMsg, pKey string, pNumber int32, topic string) (err error) {
-	return d.ForEach(ctx, d.sendOne, nil, msgs)
+func (d *WebsocketServerDestination) Send(ctx context.Context, msgs []model.OutputMsg, pKey string, pNumber int32, topic string) (err eerrors.ErrorSlice) {
+	return d.ForEach(ctx, d.sendOne, false, false, msgs)
 }

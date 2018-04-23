@@ -5,14 +5,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	"errors"
 	"fmt"
 	"io"
 	"math"
 	"net"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/free/concurrent-writer/concurrent"
@@ -22,8 +20,10 @@ import (
 	"github.com/stephane-martin/skewer/encoders/baseenc"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 	"github.com/stephane-martin/skewer/utils/queue"
 	"github.com/zond/gotomic"
+	"go.uber.org/atomic"
 )
 
 var OPEN = []byte("relp_version=0\nrelp_software=skewer\ncommands=syslog")
@@ -31,8 +31,8 @@ var endl = []byte("\n")
 var sp = []byte(" ")
 var zerotime = time.Time{}
 
-var ErrRELPNotConnected = errors.New("RELPClient: not connected")
-var ErrRELPClosed = errors.New("RELPClient: closed")
+var ErrRELPNotConnected = eerrors.New("RELPClient: not connected")
+var ErrRELPClosed = eerrors.New("RELPClient: closed")
 
 type IntKey int32
 
@@ -119,7 +119,7 @@ type RELPClient struct {
 	logger  log15.Logger
 	ticker  *time.Ticker
 
-	curtxnr    int32
+	curtxnr    atomic.Int32
 	txnr2msgid *Txnr2UidMap
 	windowSize int32
 
@@ -128,7 +128,7 @@ type RELPClient struct {
 
 	handleWg sync.WaitGroup
 
-	closed int32
+	closed atomic.Bool
 }
 
 func NewRELPClient(logger log15.Logger) *RELPClient {
@@ -192,8 +192,8 @@ func (c *RELPClient) TLS(config *tls.Config) *RELPClient {
 }
 
 func (c *RELPClient) Connect() (err error) {
-	if atomic.LoadInt32(&c.closed) == 1 {
-		return errors.New("RELPClient: closed")
+	if c.closed.Load() {
+		return eerrors.New("RELPClient: closed")
 	}
 	defer func() {
 		if err != nil {
@@ -218,10 +218,10 @@ func (c *RELPClient) Connect() (err error) {
 
 	if len(c.path) == 0 {
 		if len(c.host) == 0 {
-			return errors.New("RELPClient: specify a host or a unix path")
+			return eerrors.New("RELPClient: specify a host or a unix path")
 		}
 		if c.port == 0 {
-			return errors.New("RELPClient: specify a port")
+			return eerrors.New("RELPClient: specify a port")
 		}
 		hostport := net.JoinHostPort(c.host, strconv.FormatInt(int64(c.port), 10))
 		var dialer *net.Dialer
@@ -283,12 +283,12 @@ func (c *RELPClient) Connect() (err error) {
 			for range c.ticker.C {
 				err = c.Flush()
 				if err != nil {
-					if utils.IsBrokenPipe(err) || utils.IsFileClosed(err) {
+					if eerrors.HasBrokenPipe(err) || eerrors.HasFileClosed(err) {
 						c.logger.Warn("Broken pipe detected when flushing buffers", "error", err)
 						_ = c.conn.Close()
 						return
 					}
-					if utils.IsTimeout(err) {
+					if eerrors.IsTimeout(err) {
 						c.logger.Warn("Timeout detected when flushing buffers", "error", err)
 						_ = c.conn.Close()
 						return
@@ -320,7 +320,7 @@ func (c *RELPClient) encode(command string, v interface{}) (buf string, txnr int
 		return "", 0, err
 	}
 	// if no error, we can increment txnr
-	txnr = atomic.AddInt32(&c.curtxnr, 1)
+	txnr = c.curtxnr.Add(1)
 	if len(buf) == 0 {
 		buf, err = encoders.RelpEncode(c.encoder, txnr, command, nil) // cannot fail
 	} else {
@@ -429,15 +429,15 @@ func (c *RELPClient) handleRspAnswers() {
 		_ = c.conn.SetReadDeadline(zerotime) // disable deadline
 
 		if err != nil {
-			if utils.IsFileClosed(err) || utils.IsBrokenPipe(err) {
+			if eerrors.HasFileClosed(err) || eerrors.HasBrokenPipe(err) {
 				c.logger.Debug("Connection has been closed")
 				return
 			}
-			if utils.IsTimeout(err) {
+			if eerrors.IsTimeout(err) {
 				c.logger.Info("timeout waiting for RELP answers", "error", err)
 				return
 			}
-			if utils.IsTemporary(err) {
+			if eerrors.IsTemporary(err) {
 				c.logger.Info("temporary error", "error", err)
 				continue
 			}
@@ -463,7 +463,7 @@ func (c *RELPClient) doSendOne(msg *model.FullMessage) (err error) {
 	}
 	buf, txnr, err := c.encode("syslog", msg)
 	if err != nil {
-		return encoders.ErrNonEncodable
+		return err
 	}
 	if len(buf) == 0 {
 		// nothing to do
@@ -488,14 +488,14 @@ func (c *RELPClient) Send(ctx context.Context, msg *model.FullMessage) error {
 	if c.conn == nil {
 		return ErrRELPNotConnected
 	}
-	if atomic.LoadInt32(&c.closed) == 1 {
+	if c.closed.Load() {
 		return ErrRELPClosed
 	}
 	return c.doSendOne(msg)
 }
 
 func (c *RELPClient) Close() (err error) {
-	if !atomic.CompareAndSwapInt32(&c.closed, 0, 1) {
+	if !c.closed.CAS(false, true) {
 		// already closed
 		return nil
 	}

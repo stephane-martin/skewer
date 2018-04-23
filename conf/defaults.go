@@ -197,7 +197,7 @@ func SetStderrDestDefaults(v *viper.Viper, prefixed bool) {
 	if prefixed {
 		prefix = "stderr_destination."
 	}
-	v.SetDefault(prefix+"format", "json")
+	v.SetDefault(prefix+"format", "fulljson")
 }
 
 func SetUdpDestDefaults(v *viper.Viper, prefixed bool) {

@@ -10,7 +10,7 @@ func pProtobuf(m []byte) ([]*model.SyslogMessage, error) {
 	msg := model.Factory()
 	err := proto.Unmarshal(m, msg)
 	if err != nil {
-		return nil, err
+		return nil, DecodingError(err)
 	}
 	return []*model.SyslogMessage{msg}, nil
 }

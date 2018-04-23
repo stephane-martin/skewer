@@ -36,7 +36,7 @@ func pCollectd(m []byte) (msgs []*model.SyslogMessage, rerr error) {
 	}
 	lists, err := network.Parse(m, opts)
 	if err != nil {
-		return nil, err
+		return nil, DecodingError(err)
 	}
 	var list *api.ValueList
 	var values []api.Value

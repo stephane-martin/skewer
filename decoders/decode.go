@@ -1,7 +1,6 @@
 package decoders
 
 import (
-	"errors"
 	"fmt"
 	"sync"
 
@@ -11,6 +10,7 @@ import (
 	"github.com/stephane-martin/skewer/javascript"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 	"github.com/zond/gotomic"
 	"golang.org/x/text/encoding/unicode"
 )
@@ -139,7 +139,7 @@ func (e *ParsersEnv) getNonJSParser(frmt base.Format, c *conf.DecoderBaseConfig)
 	if frmt == base.W3C {
 		// W3C parsed is parametrized
 		if len(c.W3CFields) == 0 {
-			return nil, errors.New("No fields specified for W3C Extended Log Format decoder")
+			return nil, eerrors.New("No fields specified for W3C Extended Log Format decoder")
 		}
 		p = W3CDecoder(c.W3CFields)
 	} else {
@@ -160,7 +160,7 @@ func parserWithEncoding(frmt base.Format, charset string, p func([]byte) ([]*mod
 			var err error
 			m, err = utils.SelectDecoder(charset).Bytes(m)
 			if err != nil {
-				return nil, &base.InvalidEncodingError{Err: err}
+				return nil, InvalidCharsetError(err)
 			}
 			return p(m)
 		}
@@ -169,7 +169,7 @@ func parserWithEncoding(frmt base.Format, charset string, p func([]byte) ([]*mod
 			var err error
 			m, err = unicode.UTF8.NewDecoder().Bytes(m)
 			if err != nil {
-				return nil, &base.InvalidEncodingError{Err: err}
+				return nil, InvalidCharsetError(err)
 			}
 			return p(m)
 		}

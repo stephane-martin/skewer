@@ -1,16 +1,15 @@
 package decoders
 
 import (
-	"errors"
 	"fmt"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/antlr/antlr4/runtime/Go/antlr"
-	"github.com/stephane-martin/skewer/decoders/base"
 	"github.com/stephane-martin/skewer/grammars/rfc5424"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 )
 
 var parser5424Pool *sync.Pool
@@ -46,7 +45,7 @@ func p5424(m []byte) ([]*model.SyslogMessage, error) {
 		err = listnr.Err()
 	}
 	if err != nil {
-		return nil, err
+		return nil, RFC5424DecodingError(err)
 	}
 	return []*model.SyslogMessage{listnr.GetMessage()}, nil
 }
@@ -114,7 +113,7 @@ func (l *listener) ExitPri(ctx *rfc5424.PriContext) {
 	}
 	pri, err := strconv.Atoi(ctx.GetText())
 	if err != nil {
-		l.setErr(new(base.InvalidPriorityError))
+		l.setErr(ErrInvalidPriority)
 		return
 	}
 	l.msg.Priority = model.Priority(pri)
@@ -128,7 +127,7 @@ func (l *listener) ExitVersion(ctx *rfc5424.VersionContext) {
 	}
 	v, err := strconv.Atoi(ctx.GetText())
 	if err != nil {
-		l.setErr(new(base.InvalidPriorityError))
+		l.setErr(ErrInvalidPriority)
 		return
 	}
 	l.msg.Version = model.Version(v)
@@ -198,7 +197,7 @@ func (l *listener) ExitSid(ctx *rfc5424.SidContext) {
 	}
 	l.currentSID = ctx.GetText()
 	if len(l.currentSID) == 0 {
-		l.setErr(errors.New("Empty SDID"))
+		l.setErr(eerrors.New("Empty SDID"))
 		return
 	}
 	l.msg.ClearDomain(l.currentSID)
@@ -209,7 +208,7 @@ func (l *listener) ExitParam(ctx *rfc5424.ParamContext) {
 		return
 	}
 	if len(l.currentSID) == 0 {
-		l.setErr(errors.New("Empty SDID"))
+		l.setErr(eerrors.New("Empty SDID"))
 		return
 	}
 	name := ctx.Name()

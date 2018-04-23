@@ -7,17 +7,16 @@ import (
 	"unsafe"
 
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 )
 
 type bsliceNode struct {
+	uid   utils.MyULID
 	next  *bsliceNode
 	slice []byte
-	uid   utils.MyULID
 }
 
 type BSliceQueue struct {
-	// use padding to prevent false sharing between the head and the tail
-	_padding0 [8]uint64
 	head      *bsliceNode
 	_padding1 [8]uint64
 	tail      *bsliceNode
@@ -28,14 +27,13 @@ type BSliceQueue struct {
 }
 
 func NewBSliceQueue() *BSliceQueue {
-	stub := &bsliceNode{}
+	stub := new(bsliceNode)
 	return &BSliceQueue{
-		disposed: 0,
-		head:     stub,
-		tail:     stub,
+		head: stub,
+		tail: stub,
 		pool: &sync.Pool{
 			New: func() interface{} {
-				return &bsliceNode{}
+				return new(bsliceNode)
 			},
 		},
 	}
@@ -78,7 +76,7 @@ func (q *BSliceQueue) Get() (utils.MyULID, []byte, error) {
 		q.pool.Put(tail)
 		return next.uid, next.slice, nil
 	} else if q.Disposed() {
-		return utils.ZeroUid, nil, utils.ErrDisposed
+		return utils.ZeroUid, nil, eerrors.ErrQDisposed
 	} else {
 		return utils.ZeroUid, nil, nil
 	}
@@ -91,7 +89,7 @@ func (q *BSliceQueue) PutSlice(m []byte) error {
 func (q *BSliceQueue) Put(uid utils.MyULID, m []byte) error {
 	// Put puts a *copy* of the m argument into the queue
 	if q.Disposed() {
-		return utils.ErrDisposed
+		return eerrors.ErrQDisposed
 	}
 	n := q.pool.Get().(*bsliceNode)
 	if cap(n.slice) >= len(m) {

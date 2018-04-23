@@ -5,7 +5,6 @@ import (
 	"io"
 	"net"
 	"runtime"
-	"strconv"
 	"sync"
 	"time"
 
@@ -19,10 +18,9 @@ import (
 	"github.com/stephane-martin/skewer/javascript"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/base"
-	"github.com/stephane-martin/skewer/services/errors"
 	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/utils"
-	"github.com/stephane-martin/skewer/utils/queue"
+	"github.com/stephane-martin/skewer/utils/queue/message"
 	"github.com/stephane-martin/skewer/utils/queue/tcp"
 )
 
@@ -199,7 +197,7 @@ type DirectRelpServiceImpl struct {
 	producer            sarama.AsyncProducer
 	reporter            base.Reporter
 	rawQ                *tcp.Ring
-	parsedMessagesQueue *queue.MessageQueue
+	parsedMessagesQueue *message.Ring
 	parsewg             sync.WaitGroup
 	configs             map[utils.MyULID]conf.DirectRELPSourceConfig
 	forwarder           *ackForwarder
@@ -226,10 +224,10 @@ func (s *DirectRelpServiceImpl) Start() ([]model.ListenerInfo, error) {
 	s.LockStatus()
 	defer s.UnlockStatus()
 	if s.status == FinalStopped {
-		return nil, errors.ServerDefinitelyStopped
+		return nil, ServerDefinitelyStopped
 	}
 	if s.status != Stopped && s.status != Waiting {
-		return nil, errors.ServerNotStopped
+		return nil, ServerNotStopped
 	}
 
 	infos := s.initTCPListeners()
@@ -249,7 +247,7 @@ func (s *DirectRelpServiceImpl) Start() ([]model.ListenerInfo, error) {
 
 	s.Logger.Info("Listening on DirectRELP", "nb_services", len(infos))
 
-	s.parsedMessagesQueue = queue.NewMessageQueue()
+	s.parsedMessagesQueue = message.NewRing(s.QueueSize)
 	s.rawQ = tcp.NewRing(s.QueueSize)
 	s.configs = map[utils.MyULID]conf.DirectRELPSourceConfig{}
 
@@ -403,21 +401,18 @@ func (s *DirectRelpServiceImpl) parseOne(raw *model.RawTcpMessage) error {
 			continue
 		}
 
-		if raw.Client != "" {
-			syslogMsg.SetProperty("skewer", "client", raw.Client)
-		}
-		if raw.LocalPort != 0 {
-			syslogMsg.SetProperty("skewer", "localport", strconv.FormatInt(int64(raw.LocalPort), 10))
-		}
-		if raw.UnixSocketPath != "" {
-			syslogMsg.SetProperty("skewer", "socketpath", raw.UnixSocketPath)
-		}
-
 		full = model.FullFactoryFrom(syslogMsg)
+		full.SourceType = "directrelp"
+		full.SourcePath = raw.UnixSocketPath
+		full.SourcePort = raw.LocalPort
+		full.ClientAddr = raw.Client
 		full.Txnr = raw.Txnr
 		full.ConfId = raw.ConfID
 		full.ConnId = raw.ConnID
-		_ = s.parsedMessagesQueue.Put(full)
+		err = s.parsedMessagesQueue.Put(full)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -493,7 +488,6 @@ func (s *DirectRelpServiceImpl) handleResponses(conn net.Conn, connID utils.MyUL
 	failures := map[int32]bool{}
 	var err error
 	var ok1, ok2 bool
-	var currentTxnr int32
 
 	writeSuccess := func(txnr int32) (err error) {
 		_, err = fmt.Fprintf(conn, "%d rsp 6 200 OK\n", txnr)
@@ -505,24 +499,30 @@ func (s *DirectRelpServiceImpl) handleResponses(conn net.Conn, connID utils.MyUL
 		return err
 	}
 
-	for s.forwarder.Wait(connID) {
-		currentTxnr = s.forwarder.GetSucc(connID)
-		if currentTxnr != -1 {
+	var next int32 = -1
+
+	for {
+		txnrSuccess, txnrFailure := s.forwarder.GetSuccAndFail(connID)
+
+		if txnrSuccess == -1 && txnrFailure == -1 {
+			return
+		}
+
+		if txnrSuccess != -1 {
 			//logger.Debug("New success to report to client", "txnr", currentTxnr)
-			_, ok1 = successes[currentTxnr]
-			_, ok2 = failures[currentTxnr]
+			_, ok1 = successes[txnrSuccess]
+			_, ok2 = failures[txnrSuccess]
 			if !ok1 && !ok2 {
-				successes[currentTxnr] = true
+				successes[txnrSuccess] = true
 			}
 		}
 
-		currentTxnr = s.forwarder.GetFail(connID)
-		if currentTxnr != -1 {
+		if txnrFailure != -1 {
 			//logger.Debug("New failure to report to client", "txnr", currentTxnr)
-			_, ok1 = successes[currentTxnr]
-			_, ok2 = failures[currentTxnr]
+			_, ok1 = successes[txnrFailure]
+			_, ok2 = failures[txnrFailure]
 			if !ok1 && !ok2 {
-				failures[currentTxnr] = true
+				failures[txnrFailure] = true
 			}
 		}
 
@@ -530,7 +530,9 @@ func (s *DirectRelpServiceImpl) handleResponses(conn net.Conn, connID utils.MyUL
 		// so we need a bit of cooking to ensure that
 	Cooking:
 		for {
-			next := s.forwarder.NextToCommit(connID)
+			if next == -1 {
+				next = s.forwarder.NextToCommit(connID)
+			}
 			if next == -1 {
 				break Cooking
 			}
@@ -556,7 +558,7 @@ func (s *DirectRelpServiceImpl) handleResponses(conn net.Conn, connID utils.MyUL
 			}
 
 			if err == nil {
-				s.forwarder.Commit(connID)
+				next = -1
 			} else if err == io.EOF {
 				// client is gone
 				return
@@ -579,12 +581,9 @@ func (s *DirectRelpServiceImpl) push2kafka() {
 	var message *model.FullMessage
 	var err error
 
-	for s.parsedMessagesQueue.Wait(0) {
+	for {
 		message, err = s.parsedMessagesQueue.Get()
 		if message == nil || err != nil {
-			// should not happen
-			s.Logger.Error("Fatal error getting messages from the parsed messages queue", "error", err)
-			s.StopAndWait()
 			return
 		}
 		s.pushOne(message, &envs)
@@ -614,22 +613,22 @@ func (s *DirectRelpServiceImpl) pushOne(message *model.FullMessage, envs *map[ut
 		e = (*envs)[message.ConfId]
 	}
 
-	topic, errs := e.Topic(message.Fields)
-	for _, err = range errs {
-		s.Logger.Info("Error calculating topic", "error", err, "txnr", message.Txnr)
+	topic, joinedErr := e.Topic(message.Fields)
+	if joinedErr != nil {
+		s.Logger.Info("Error calculating topic", "error", joinedErr.Error(), "txnr", message.Txnr)
 	}
 	if len(topic) == 0 {
 		s.Logger.Warn("Topic or PartitionKey could not be calculated", "txnr", message.Txnr)
 		s.forwarder.ForwardFail(message.ConnId, message.Txnr)
 		return
 	}
-	partitionKey, errs := e.PartitionKey(message.Fields)
-	for _, err = range errs {
-		s.Logger.Info("Error calculating the partition key", "error", err, "txnr", message.Txnr)
+	partitionKey, joinedErr := e.PartitionKey(message.Fields)
+	if joinedErr != nil {
+		s.Logger.Info("Error calculating the partition key", "error", joinedErr.Error(), "txnr", message.Txnr)
 	}
-	partitionNumber, errs := e.PartitionNumber(message.Fields)
-	for _, err = range errs {
-		s.Logger.Info("Error calculating the partition number", "error", err, "txnr", message.Txnr)
+	partitionNumber, joinedErr := e.PartitionNumber(message.Fields)
+	if joinedErr != nil {
+		s.Logger.Info("Error calculating the partition number", "error", joinedErr.Error(), "txnr", message.Txnr)
 	}
 
 	filterResult, err := e.FilterMessage(message.Fields)
@@ -656,7 +655,7 @@ func (s *DirectRelpServiceImpl) pushOne(message *model.FullMessage, envs *map[ut
 		return
 	}
 
-	serialized, err := message.Fields.RegularJson()
+	serialized, err := message.Fields.RegularJSON()
 
 	if err != nil {
 		s.Logger.Warn("Error generating Kafka message", "error", err, "txnr", message.Txnr)
@@ -685,7 +684,7 @@ func (h DirectRelpHandler) HandleConnection(conn net.Conn, c conf.TCPSourceConfi
 	config := conf.DirectRELPSourceConfig(c)
 	s := h.Server
 	s.AddConnection(conn)
-	connID := s.forwarder.AddConn()
+	connID := s.forwarder.AddConn(s.QueueSize)
 	lport, lports, client, path := props(conn)
 	l := s.Logger.New(
 		"ConnID", connID,

@@ -12,13 +12,18 @@ LDFLAGS_RELEASE=-ldflags '-w -s -X github.com/stephane-martin/skewer/conf.Versio
 SOURCES = $(shell find . -type f -name '*.go' -not -path "./vendor/*")
 SUBDIRS = $(shell find . -type d -regex './[a-z].*' -not -path './vendor*' -not -path '*.shapesdoc' | xargs)
 
-$(BINARY): ${SOURCES} utils/logging/types.pb.go conf/derived.gen.go utils/queue/tcp/ring.go utils/queue/udp/ring.go utils/queue/defered/ring.go utils/queue/kafka/ring.go utils/queue/message/ring.go model/types.pb.go model/types_ffjson.go utils/collectd/embed/statik/statik.go grammars/rfc5424/rfc5424_lexer.go
+$(BINARY): ${SOURCES} utils/logging/types.pb.go conf/derived.gen.go utils/queue/intq/ring.go utils/queue/tcp/ring.go utils/queue/udp/ring.go utils/queue/defered/ring.go utils/queue/kafka/ring.go utils/queue/message/ring.go model/types.pb.go model/types_ffjson.go utils/collectd/embed/statik/statik.go grammars/rfc5424/rfc5424_lexer.go model/avro/full_message.go
 	test -n "${GOPATH}"  # test $$GOPATH
 	go build -o ${BINARY} ${LDFLAGS}
 
-release: ${SOURCES} utils/logging/types.pb.go conf/derived.gen.go utils/queue/tcp/ring.go utils/queue/udp/ring.go utils/queue/kafka/ring.go utils/queue/message/ring.go model/types.pb.go model/types_ffjson.go utils/collectd/embed/statik/statik.go
+release: ${SOURCES} utils/logging/types.pb.go conf/derived.gen.go utils/queue/intq/ring.go utils/queue/tcp/ring.go utils/queue/udp/ring.go utils/queue/defered/ring.go utils/queue/kafka/ring.go utils/queue/message/ring.go model/types.pb.go model/types_ffjson.go utils/collectd/embed/statik/statik.go grammars/rfc5424/rfc5424_lexer.go
 	test -n "${GOPATH}"  # test $$GOPATH
 	go build -o ${BINARY} -a -x ${LDFLAGS_RELEASE}
+
+model/avro/full_message.go: avro/fullmessage.avsc avro/syslogmessage.avsc
+	test -n "${GOPATH}"  # test $$GOPATH
+	gogen-avro --containers model/avro avro/syslogmessage.avsc avro/fullmessage.avsc
+
 
 model/types_ffjson.go: model/types.go
 	test -n "${GOPATH}"  # test $$GOPATH
@@ -28,25 +33,29 @@ model/types.pb.go: model/types.proto
 	test -n "${GOPATH}"  # test $$GOPATH
 	protoc -I=. -I="$$GOPATH/src" -I="$$GOPATH/src/github.com/stephane-martin/skewer/vendor/github.com/gogo/protobuf/protobuf" --gogoslick_out=. model/types.proto
 
+utils/queue/intq/ring.go: utils/queue/ring.go
+	test -n "${GOPATH}"  # test $$GOPATH
+	genny -in=utils/queue/ring.go -out=utils/queue/intq/ring.go -pkg=intq gen Data=int32
+
 utils/queue/kafka/ring.go: utils/queue/ring.go
 	test -n "${GOPATH}"  # test $$GOPATH
-	genny -in=utils/queue/ring.go -out=utils/queue/kafka/ring.go -pkg=kafka gen Data=model.RawKafkaMessage
+	genny -in=utils/queue/ring.go -out=utils/queue/kafka/ring.go -pkg=kafka gen Data=*model.RawKafkaMessage
 
 utils/queue/defered/ring.go: utils/queue/ring.go
 	test -n "${GOPATH}"  # test $$GOPATH
-	genny -in=utils/queue/ring.go -out=utils/queue/defered/ring.go -pkg=defered gen Data=model.DeferedRequest
+	genny -in=utils/queue/ring.go -out=utils/queue/defered/ring.go -pkg=defered gen Data=*model.DeferedRequest
 	
 utils/queue/message/ring.go: utils/queue/ring.go
 	test -n "${GOPATH}"  # test $$GOPATH
-	genny -in=utils/queue/ring.go -out=utils/queue/message/ring.go -pkg=message gen Data=model.FullMessage
+	genny -in=utils/queue/ring.go -out=utils/queue/message/ring.go -pkg=message gen Data=*model.FullMessage
 
 utils/queue/tcp/ring.go: utils/queue/ring.go
 	test -n "${GOPATH}"  # test $$GOPATH
-	genny -in=utils/queue/ring.go -out=utils/queue/tcp/ring.go -pkg=tcp gen Data=model.RawTcpMessage
+	genny -in=utils/queue/ring.go -out=utils/queue/tcp/ring.go -pkg=tcp gen Data=*model.RawTcpMessage
 
 utils/queue/udp/ring.go: utils/queue/ring.go
 	test -n "${GOPATH}"  # test $$GOPATH
-	genny -in=utils/queue/ring.go -out=utils/queue/udp/ring.go -pkg=udp gen Data=model.RawUdpMessage
+	genny -in=utils/queue/ring.go -out=utils/queue/udp/ring.go -pkg=udp gen Data=*model.RawUdpMessage
 
 utils/logging/types.pb.go: utils/logging/types.proto
 	test -n "${GOPATH}"  # test $$GOPATH

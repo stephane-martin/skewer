@@ -11,6 +11,7 @@ import (
 
 	"github.com/kardianos/osext"
 	"github.com/stephane-martin/skewer/sys/kring"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 )
 
 type NamespacedCmd struct {
@@ -164,13 +165,13 @@ func SetupCmd(name string, ring kring.Ring, funcopts ...func(*CmdOpts)) (cmd *Pl
 	}
 	rPipe, wPipe, err := os.Pipe()
 	if err != nil {
-		return nil, err
+		return nil, eerrors.WithTags(eerrors.Wrap(err, "error creating a pipe to communicate with child"), "name", name)
 	}
 	files = append(files, rPipe)
 	err = opts.ring.WriteRingPass(wPipe)
 	_ = wPipe.Close()
 	if err != nil {
-		return nil, err
+		return nil, eerrors.WithTags(eerrors.Wrap(err, "error writing ring password to child"), "name", name)
 	}
 
 	cmd.Cmd = &exec.Cmd{
@@ -182,11 +183,11 @@ func SetupCmd(name string, ring kring.Ring, funcopts ...func(*CmdOpts)) (cmd *Pl
 	}
 	cmd.Stdin, err = cmd.Cmd.StdinPipe()
 	if err != nil {
-		return nil, err
+		return nil, eerrors.Wrap(err, "error creating stdin pipe for child")
 	}
 	cmd.Stdout, err = cmd.Cmd.StdoutPipe()
 	if err != nil {
-		return nil, err
+		return nil, eerrors.Wrap(err, "error creating stdout pipe for child")
 	}
 	return cmd, nil
 }

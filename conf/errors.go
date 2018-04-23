@@ -1,82 +1,33 @@
 package conf
 
-import "fmt"
+import (
+	"github.com/stephane-martin/skewer/utils/eerrors"
+)
 
-type ConfigurationError interface {
-	Error() string
-	ConfigError() string
-	WrappedErrors() []error
+func configurationError(err error) error {
+	return eerrors.WithTypes(err, "Configuration")
 }
 
-//
-type ConfigurationReadError struct {
-	Err error
+func confReadError(err error, filename string) error {
+	return configurationError(
+		eerrors.WithTags(
+			eerrors.Wrap(err, "Error reading configuration file"),
+			"filename", filename,
+		),
+	)
 }
 
-func (e ConfigurationReadError) Error() string {
-	return fmt.Sprintf("Error reading configuration file: %s", e.Err.Error())
+func confSyntaxError(err error, filename string) error {
+	return configurationError(
+		eerrors.WithTags(
+			eerrors.Wrap(err, "Syntax error in configuration file"),
+			"filename", filename,
+		),
+	)
 }
 
-func (e ConfigurationReadError) WrappedErrors() []error {
-	return []error{e.Err}
-}
-
-func (e ConfigurationReadError) ConfigError() string {
-	return e.Error()
-}
-
-type ConfigurationSyntaxError struct {
-	Err      error
-	Filename string
-}
-
-func (e ConfigurationSyntaxError) Error() string {
-	return fmt.Sprintf("Syntax error in configuration file '%s': %s", e.Filename, e.Err.Error())
-}
-
-func (e ConfigurationSyntaxError) WrappedErrors() []error {
-	return []error{e.Err}
-}
-
-func (e ConfigurationSyntaxError) ConfigError() string {
-	return e.Error()
-}
-
-type ConfigurationCheckError struct {
-	ErrString string
-	Err       error
-}
-
-func (e ConfigurationCheckError) Error() string {
-	if e.Err == nil {
-		return e.ErrString
-	}
-	if len(e.ErrString) == 0 {
-		return e.Err.Error()
-	}
-	return fmt.Sprintf("%s: %s", e.ErrString, e.Err.Error())
-}
-
-func (e ConfigurationCheckError) WrappedErrors() []error {
-	if e.Err == nil {
-		return nil
-	}
-	return []error{e.Err}
-}
-
-func (e ConfigurationCheckError) ConfigError() string {
-	return e.Error()
-}
-
-//
-type KafkaError struct {
-	Err error
-}
-
-func (e KafkaError) Error() string {
-	return fmt.Sprintf("Kafka error: %s", e.Err.Error())
-}
-
-func (e KafkaError) WrappedErrors() []error {
-	return []error{e.Err}
+func confCheckError(err error) error {
+	return configurationError(
+		eerrors.Wrap(err, "Configuration check failed"),
+	)
 }

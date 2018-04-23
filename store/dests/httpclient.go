@@ -15,10 +15,12 @@ import (
 	"text/template"
 	"time"
 
+	circuit "github.com/rubyist/circuitbreaker"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/encoders"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 	"github.com/stephane-martin/skewer/utils/queue/defered"
 	"github.com/valyala/bytebufferpool"
 )
@@ -26,6 +28,7 @@ import (
 type HTTPDestination struct {
 	*baseDestination
 	clt         *http.Client
+	breaker     *circuit.Breaker
 	username    string
 	password    string
 	useragent   string
@@ -132,13 +135,15 @@ func NewHTTPDestination(ctx context.Context, e *Env) (Destination, error) {
 	err = d.url.Execute(urlbuf, &model.SyslogMessage{})
 	if err == nil {
 		_, err = d.clt.Head(urlbuf.String())
-		if utils.IsConnRefused(err) || !utils.IsTemporary(err) {
+		if eerrors.HasConnRefused(err) || !eerrors.IsTemporary(err) {
 			connCounter.WithLabelValues("http", "fail").Inc()
 			return nil, err
 		}
 	}
 
 	d.queue = defered.NewRing(4 * uint64(config.MaxIdleConnsPerHost))
+	// TODO: why 5 ?
+	d.breaker = circuit.NewConsecutiveBreaker(5)
 
 	if config.Rebind > 0 {
 		go func() {
@@ -185,9 +190,26 @@ func (d *HTTPDestination) doHTTP(ctx context.Context, uid utils.MyULID, req *htt
 	}
 	req = req.WithContext(ctx)
 
-	// TODO: retry the request
-	// perform the HTTP request
-	resp, err := d.clt.Do(req)
+	// perform the HTTP request, retry every second, use a circuit breaker to limit the tries
+	var resp *http.Response
+	for {
+		err = d.breaker.CallContext(ctx, func() (e error) {
+			resp, e = d.clt.Do(req)
+			return e
+		}, 0) // TODO: timeout for the request ?
+		if err == nil {
+			break
+		}
+		if err == context.Canceled {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return context.Canceled
+		case <-time.After(time.Second):
+		}
+	}
+	//resp, err := d.clt.Do(req)
 
 	if err != nil {
 		// server down ?
@@ -236,6 +258,8 @@ func (d *HTTPDestination) dequeue(ctx context.Context) error {
 	}
 }
 
+var ErrCalculateURL = eerrors.New("Error calculating target URL from template")
+
 func (d *HTTPDestination) enqueue(ctx context.Context, msg *model.FullMessage) (err error) {
 	urlbuf := bytebufferpool.Get()
 	body := bytebufferpool.Get()
@@ -245,32 +269,23 @@ func (d *HTTPDestination) enqueue(ctx context.Context, msg *model.FullMessage) (
 	}()
 	err = d.url.Execute(urlbuf, msg.Fields)
 	if err != nil {
-		d.logger.Warn("Error calculating target URL from template", "error", err)
-		return encoders.ErrNonEncodable
+		return encoders.EncodingError(ErrCalculateURL)
 	}
 	err = d.encoder(msg, body)
 	if err != nil {
-		d.logger.Warn("Error encoding message", "error", err)
-		return encoders.ErrNonEncodable
+		return err
 	}
 
 	// we use String() methods to get a copy of the bytebuffers, so that we can Put them back to the pool afterwards
 	req, err := http.NewRequest(d.method, urlbuf.String(), strings.NewReader(body.String()))
 	if err != nil {
-		d.logger.Warn("Error preparing HTTP request", "error", err)
-		return encoders.ErrNonEncodable
+		return encoders.EncodingError(eerrors.Wrap(err, "Error preparing HTTP request"))
 	}
 
 	dreq := &model.DeferedRequest{Request: req, UID: msg.Uid}
-
-	err = d.queue.Put(dreq)
-	if err != nil {
-		// the queue has been disposed
-		return err
-	}
-	return nil
+	return d.queue.Put(dreq)
 }
 
-func (d *HTTPDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
-	return d.ForEach(ctx, d.enqueue, nil, msgs)
+func (d *HTTPDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err eerrors.ErrorSlice) {
+	return d.ForEach(ctx, d.enqueue, false, true, msgs)
 }

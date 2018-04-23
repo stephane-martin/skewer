@@ -32,6 +32,8 @@ func NewRemoteLogger(ctx context.Context, remote *net.UnixConn, secret *memguard
 		var rbis Record
 		var r *log15.Record
 		done := ctx.Done()
+		buf := proto.NewBuffer(make([]byte, 0, 1024))
+		encbuf := make([]byte, 0, 1024)
 
 	Send:
 		for {
@@ -61,7 +63,9 @@ func NewRemoteLogger(ctx context.Context, remote *net.UnixConn, secret *memguard
 					}
 
 				}
-				dec, err := proto.Marshal(&rbis)
+				buf.Reset()
+				encbuf = encbuf[:0]
+				err := buf.Marshal(&rbis)
 				if err != nil {
 					continue Send
 				}
@@ -70,11 +74,11 @@ func NewRemoteLogger(ctx context.Context, remote *net.UnixConn, secret *memguard
 				case <-done:
 					return
 				default:
-					enc, err := sbox.Encrypt(dec, secret)
+					encbuf, err = sbox.EncryptTo(buf.Bytes(), secret, encbuf)
 					if err != nil {
 						continue Send
 					}
-					_, _ = remote.Write(enc)
+					_, _ = remote.Write(encbuf)
 				}
 			}
 		}

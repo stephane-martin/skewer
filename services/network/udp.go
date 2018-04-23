@@ -12,8 +12,8 @@ import (
 	"github.com/stephane-martin/skewer/decoders"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/base"
-	"github.com/stephane-martin/skewer/services/errors"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 	"github.com/stephane-martin/skewer/utils/queue/udp"
 )
 
@@ -121,28 +121,24 @@ func (s *UdpServiceImpl) ParseOne(raw *model.RawUdpMessage, gen *utils.Generator
 		if syslogMsg == nil {
 			continue
 		}
-		if raw.Client != "" {
-			syslogMsg.SetProperty("skewer", "client", raw.Client)
-		}
-		if raw.LocalPort != 0 {
-			syslogMsg.SetProperty("skewer", "localport", strconv.FormatInt(int64(raw.LocalPort), 10))
-		}
-		if raw.UnixSocketPath != "" {
-			syslogMsg.SetProperty("skewer", "socketpath", raw.UnixSocketPath)
-		}
 		full = model.FullFactoryFrom(syslogMsg)
 		full.Uid = gen.Uid()
 		full.ConfId = raw.ConfID
-		fatal, nonfatal := s.stasher.Stash(full)
-
-		if fatal != nil {
-			logger.Error("Fatal error stashing UDP message", "error", fatal)
-			s.dofatal()
-			return fatal
-		} else if nonfatal != nil {
-			logger.Warn("Non-fatal error stashing UDP message", "error", nonfatal)
-		}
+		full.SourceType = "udp"
+		full.SourcePath = raw.UnixSocketPath
+		full.SourcePort = raw.LocalPort
+		full.ClientAddr = raw.Client
+		err := s.stasher.Stash(full)
 		model.FullFree(full)
+
+		if eerrors.Is("Fatal", err) {
+			logger.Error("Fatal error stashing UDP message", "error", err)
+			s.dofatal()
+			return err
+		}
+		if err != nil {
+			logger.Warn("Non-fatal error stashing UDP message", "error", err)
+		}
 	}
 	return nil
 }
@@ -155,7 +151,7 @@ func (s *UdpServiceImpl) Start() ([]model.ListenerInfo, error) {
 	s.LockStatus()
 	defer s.UnlockStatus()
 	if s.status != UdpStopped {
-		return nil, errors.ServerNotStopped
+		return nil, ServerNotStopped
 	}
 	s.fatalErrorChan = make(chan struct{})
 	s.fatalOnce = &sync.Once{}

@@ -11,6 +11,7 @@ import (
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 	"github.com/stephane-martin/skewer/utils/queue"
 )
 
@@ -25,7 +26,7 @@ type Stasher interface {
 	Start()
 	SetSecret(secret *memguard.LockedBuffer)
 	Stop()
-	Stash(m *model.FullMessage) (error, error)
+	Stash(m *model.FullMessage) error
 }
 
 type Reporter interface {
@@ -107,7 +108,7 @@ func (s *ReporterImpl) Stop() {
 }
 
 // Stash reports one syslog message to the controller.
-func (s *ReporterImpl) Stash(m *model.FullMessage) (fatal, nonfatal error) {
+func (s *ReporterImpl) Stash(m *model.FullMessage) error {
 	var b []byte
 	var err error
 	size := m.Size()
@@ -118,20 +119,31 @@ func (s *ReporterImpl) Stash(m *model.FullMessage) (fatal, nonfatal error) {
 		_, err = m.MarshalTo(b)
 	}
 	if err != nil {
-		return nil, err
+		return eerrors.Wrapf(err, "Failed to marshal a message to be sent by plugin: %s", s.name)
 	}
-	fatal = s.queue.PutSlice(b) // fatal is set when the queue has been disposed
-	return fatal, nil
+	// Fatal is set when the queue has been disposed
+	return eerrors.WithTypes(
+		eerrors.Wrapf(
+			s.queue.PutSlice(b),
+			"Failed to enqueue a message to be sent by plugin: %s",
+			s.name,
+		),
+		"Fatal",
+	)
 }
 
 // Report reports information about the actual listening ports to the controller.
 func (s *ReporterImpl) Report(infos []model.ListenerInfo) error {
 	b, err := json.Marshal(infos)
 	if err != nil {
-		return err
+		return eerrors.Wrapf(err, "Plugin '%s' failed to report infos", s.name)
 	}
 	stdoutLock.Lock()
-	err = utils.NewEncryptWriter(os.Stdout, nil).WriteWithHeader(INFOS, b)
+	err = eerrors.Wrapf(
+		utils.NewEncryptWriter(os.Stdout, nil).WriteWithHeader(INFOS, b),
+		"Plugin '%s' failed to write infos to its stdout",
+		s.name,
+	)
 	stdoutLock.Unlock()
 	return err
 }

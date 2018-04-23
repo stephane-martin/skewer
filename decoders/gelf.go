@@ -8,6 +8,15 @@ import (
 	"gopkg.in/Graylog2/go-gelf.v2/gelf"
 )
 
+func pGELF(m []byte) ([]*model.SyslogMessage, error) {
+	gelfMsg := &gelf.Message{}
+	err := gelfMsg.UnmarshalJSON(m)
+	if err != nil {
+		return nil, UnmarshalJsonError(err)
+	}
+	return []*model.SyslogMessage{FromGelfMessage(gelfMsg)}, nil
+}
+
 func FromGelfMessage(gelfm *gelf.Message) (msg *model.SyslogMessage) {
 	msg = model.CleanFactory()
 	fromGelfMessage(msg, gelfm)

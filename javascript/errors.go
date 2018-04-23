@@ -1,104 +1,73 @@
 package javascript
 
-import "fmt"
-import "github.com/dop251/goja"
+import (
+	"github.com/dop251/goja"
+	"github.com/stephane-martin/skewer/utils/eerrors"
+)
 
-type JavascriptError interface {
-	Error() string
-	Javascript()
+func ErrorUnknownFormat(format string) error {
+	return DecodingError(eerrors.Errorf("Unknown decoder: '%s'", format))
 }
 
-type ObjectNotFoundError struct {
-	Object string
+func InvalidTopicError(topic string) error {
+	return DecodingError(
+		eerrors.Errorf("The topic name is invalid: '%s'", topic),
+	)
 }
 
-func (e *ObjectNotFoundError) Error() string {
-	return fmt.Sprintf("Object was not found in the Javascript VM: '%s'", e.Object)
+func DecodingError(err error) error {
+	return eerrors.WithTypes(
+		eerrors.Wrap(err, "Error decoding message"),
+		"Decoding",
+	)
 }
 
-func (e *ObjectNotFoundError) Javascript() {}
-
-type NotAFunctionError struct {
-	Object string
+func jsvmError(err error) error {
+	return eerrors.WithTypes(err, "Javascript")
 }
 
-func (e *NotAFunctionError) Error() string {
-	return fmt.Sprintf("The object is not a JS function: '%s'", e.Object)
+func objectNotFoundError(obj string) error {
+	return jsvmError(eerrors.Errorf("Object was not found in the JS VM: '%s'", obj))
 }
 
-func (e *NotAFunctionError) Javascript() {}
-
-type ExecutingError interface {
-	Error() string
-	Javascript()
-	Executing()
+func notAFunctionError(obj string) error {
+	return jsvmError(eerrors.Errorf("The object is not a JS function: '%s'", obj))
 }
 
-type ExceptionExecutingJSError struct {
-	Exc      *goja.Exception
-	FuncName string
+func jsExceptionError(exc *goja.Exception, funcname string) error {
+	return jsvmError(
+		eerrors.Errorf(
+			"A JS exception happened when executing the JS function '%s': %s",
+			funcname, exc.String(),
+		),
+	)
 }
 
-func (e *ExceptionExecutingJSError) Error() string {
-	return fmt.Sprintf("A JS exception happened when executing the JS function '%s'", e.FuncName)
+func executingJSError(err error, funcname string) error {
+	return jsvmError(eerrors.Wrapf(err, "An unexpected error happened when executing the JS function '%s'", funcname))
 }
 
-func (e *ExceptionExecutingJSError) GetValue() goja.Value {
-	return e.Exc.Value()
-}
-
-func (e *ExceptionExecutingJSError) Javascript() {}
-func (e *ExceptionExecutingJSError) Executing()  {}
-
-type ExecutingJSError struct {
-	Err      error
-	FuncName string
-}
-
-func (e *ExecutingJSError) Error() string {
-	return fmt.Sprintf("An unexpected error happened when executing the JS function '%s': %s", e.FuncName, e.Err.Error())
-}
-
-func (e *ExecutingJSError) Javascript() {}
-func (e *ExecutingJSError) Executing()  {}
-
-func ExecutingJSErrorFactory(err error, funcname string) ExecutingError {
+func executingJSErrorFactory(err error, funcname string) error {
 	if jsexc, ok := err.(*goja.Exception); ok {
-		return &ExceptionExecutingJSError{Exc: jsexc, FuncName: funcname}
-	} else {
-		return &ExecutingJSError{Err: err, FuncName: funcname}
+		return jsExceptionError(jsexc, funcname)
 	}
+	return executingJSError(err, funcname)
 }
 
-// go-js object conversions error (with wrapped)
-type ConversionGoJsError struct {
-	Err ExecutingError
+func go2jsError(err error) error {
+	return jsvmError(eerrors.Wrap(err, "Error converting a Go variable to JS"))
 }
 
-func (e *ConversionGoJsError) Error() string {
-	return fmt.Sprintf("Error converting a Go variable to Javascript: %s", e.Err.Error())
+func js2goError(err error) error {
+	return jsvmError(eerrors.Wrap(err, "Error converting a JS variable to Go"))
 }
 
-func (e *ConversionGoJsError) Javascript() {}
-
-type ConversionJsGoError struct {
-	Err error
+func jsDecodingError(msg string, decoderName string) error {
+	return eerrors.WithTypes(
+		eerrors.Errorf(
+			"The provided JS parser '%s' could not parse the following message: %s",
+			decoderName, msg,
+		),
+		"Decoding", "Javascript",
+	)
 }
-
-func (e *ConversionJsGoError) Error() string {
-	return fmt.Sprintf("Error converting a Javascript variable to Go: %s", e.Err.Error())
-}
-
-func (e *ConversionJsGoError) Javascript() {}
-
-type JSParsingError struct {
-	Message    string
-	ParserName string
-}
-
-func (e *JSParsingError) Error() string {
-	return fmt.Sprintf("The provided JS parser '%s' could not parse the raw message: %s", e.ParserName, e.Message)
-}
-
-func (e *JSParsingError) Parsing()    {}
-func (e *JSParsingError) Javascript() {}

@@ -3,8 +3,8 @@ package services
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"sync"
 
@@ -12,6 +12,7 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 )
 
 var stdoutMu sync.Mutex
@@ -25,28 +26,31 @@ func Wout(header []byte, msg []byte) (err error) {
 	stdoutMu.Lock()
 	err = stdoutWriter.WriteWithHeader(header, msg)
 	stdoutMu.Unlock()
-	return err
+	return eerrors.Wrap(err, "error writing to stdout of plugin provider")
 }
 
-func Launch(typ base.Types, opts ...ProviderOpt) (err error) {
+func Launch(ctx context.Context, typ base.Types, opts ...ProviderOpt) (err error) {
+	// TODO: wrap all errors correctly
+	name := base.Types2Names[typ]
 	defer func() {
-		if e := recover(); e != nil {
-			errString := fmt.Sprintf("%s", e)
-			err = fmt.Errorf("Scanner panicked in plugin provider: %s", errString)
+		if e := eerrors.Err(recover()); e != nil {
+			err = eerrors.Wrapf(err, "Scanner panicked in plugin provider '%s'", name)
 		}
 	}()
+
 	env := &base.ProviderEnv{}
 	for _, opt := range opts {
 		opt(env)
 	}
 
+	var globalConf conf.BaseConfig
+	fatalctx, dofatal := context.WithCancel(ctx)
 	var command string
-	name := base.Types2Names[typ]
 	hasConf := false
 
 	if typ != base.Store && typ != base.Configuration {
 		if env.Pipe == nil {
-			return fmt.Errorf("Plugin '%s' has a nil pipe", name)
+			return eerrors.Errorf("Plugin '%s' has a nil pipe", name)
 		}
 		SetReporter(base.NewReporter(name, env.Logger, env.Pipe))(env)
 		defer env.Reporter.Stop() // will close the pipe
@@ -54,43 +58,33 @@ func Launch(typ base.Types, opts ...ProviderOpt) (err error) {
 
 	svc, err := ProviderFactory(typ, env)
 	if err != nil {
-		err = fmt.Errorf("The Service Factory returned an error for plugin '%s': %s", name, err.Error())
+		err = eerrors.Wrapf(err, "The Service Factory returned an error for plugin '%s': %s", name)
 		_ = Wout(STARTERROR, []byte(err.Error()))
 		return err
 	}
 	if svc == nil {
-		err := fmt.Errorf("The Service Factory returned 'nil' for plugin '%s'", name)
+		err := eerrors.Errorf("The Service Factory returned 'nil' for plugin '%s'", name)
 		_ = Wout(STARTERROR, []byte(err.Error()))
 		return err
 	}
 
-	var fatalChan chan struct{}
-
-	var globalConf conf.BaseConfig
-
 	signpubkey, err := env.Ring.GetSignaturePubkey()
 	if err != nil {
+		err = eerrors.Wrap(err, "Can't get the signature key")
+		_ = Wout(STARTERROR, []byte(err.Error()))
 		return err
 	}
 
-	scanner := bufio.NewScanner(os.Stdin)
+	scanner := utils.NewWrappedScanner(fatalctx, bufio.NewScanner(os.Stdin))
 	scanner.Split(utils.MakeSignSplit(signpubkey))
 
 	for scanner.Scan() {
-		select {
-		case <-fatalChan:
-			svc.Shutdown()
-			_ = Wout(SHUTDOWN, []byte("fatal"))
-			return fmt.Errorf("Store fatal error in plugin '%s'", name)
-		default:
-		}
-
 		parts := bytes.SplitN(scanner.Bytes(), space, 2)
 		command = string(parts[0])
 		switch command {
 		case "start":
 			if !hasConf {
-				err := fmt.Errorf("Configuration was not provided to plugin '%s' before start", name)
+				err := eerrors.Errorf("Configuration was not provided to plugin '%s' before start", name)
 				_ = Wout([]byte("syslogconferror"), []byte(err.Error()))
 				return err
 			}
@@ -99,6 +93,7 @@ func Launch(typ base.Types, opts ...ProviderOpt) (err error) {
 					env.Logger.Debug("Encrypting messages from plugin", "type", name)
 					secret, err := env.Ring.GetBoxSecret()
 					if err != nil {
+						err = eerrors.Wrap(err, "Can't get box secret")
 						_ = Wout(STARTERROR, []byte(err.Error()))
 						return err
 					}
@@ -110,6 +105,7 @@ func Launch(typ base.Types, opts ...ProviderOpt) (err error) {
 			}
 			infos, err := ConfigureAndStartService(svc, globalConf)
 			if err != nil {
+				err = eerrors.Wrapf(err, "Can't configure service '%s'", name)
 				_ = Wout(STARTERROR, []byte(err.Error()))
 				return err
 			} else if len(infos) == 0 && (typ == base.TCP || typ == base.UDP) {
@@ -136,12 +132,15 @@ func Launch(typ base.Types, opts ...ProviderOpt) (err error) {
 					return err
 				}
 			}
-			fatalChan = svc.FatalError()
+			go func() {
+				<-svc.FatalError()
+				dofatal()
+			}()
 		case "stop":
 			svc.Stop()
-			err := Wout(STOPPED, base.SUCC)
+			err = Wout(STOPPED, base.SUCC)
 			if err != nil {
-				return err
+				return eerrors.Wrap(err, "Error reporting 'stopped' to the controller")
 			}
 			// here we *do not return*. So the plugin process continues to live
 			// and to listen for subsequent control commands
@@ -154,7 +153,7 @@ func Launch(typ base.Types, opts ...ProviderOpt) (err error) {
 			return nil
 		case "conf":
 			c := conf.BaseConfig{}
-			err := json.Unmarshal(parts[1], &c)
+			err = json.Unmarshal(parts[1], &c)
 			if err == nil {
 				globalConf = c
 				hasConf = true
@@ -176,19 +175,37 @@ func Launch(typ base.Types, opts ...ProviderOpt) (err error) {
 			}
 			err = Wout(METRICS, familiesb)
 			if err != nil {
-				env.Logger.Crit("Could not write metrics to upstream", "type", name, "error", err)
-				return err
+				return eerrors.Wrap(err, "Can not write metrics to the controller")
 			}
 		default:
 			env.Logger.Crit("Unknown command", "type", name, "command", command)
-			return fmt.Errorf("Unknown command '%s' in plugin '%s'", command, name)
+			return eerrors.Errorf("Unknown command '%s' received by plugin '%s'", command, name)
 		}
 
 	}
-	e := scanner.Err()
-	if e != nil {
-		env.Logger.Error("In plugin provider, scanning stdin met error", "error", e)
-		return e
+	select {
+	case <-ctx.Done():
+		svc.Shutdown()
+		err = eerrors.Errorf("SIGTERM received by plugin '%s'", name)
+		_ = Wout(SHUTDOWN, []byte(err.Error()))
+		return nil
+	default:
 	}
+	select {
+	case <-fatalctx.Done():
+		svc.Shutdown()
+		err = eerrors.Errorf("Fatal error in plugin '%s'", name)
+		_ = Wout(SHUTDOWN, []byte(err.Error()))
+		return err
+	default:
+	}
+	err = scanner.Err()
+	if err != nil {
+		err = eerrors.Wrapf(err, "Error scanning stdin of plugin '%s'", name)
+		svc.Shutdown()
+		_ = Wout(SHUTDOWN, []byte(err.Error()))
+		return err
+	}
+
 	return nil
 }

@@ -10,16 +10,16 @@ import (
 
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 )
 
 type ackNode struct {
-	next *ackNode
 	uid  utils.MyULID
 	dest conf.DestinationType
+	next *ackNode
 }
 
 type AckQueue struct {
-	_padding0 [8]uint64
 	head      *ackNode
 	_padding1 [8]uint64
 	tail      *ackNode
@@ -53,7 +53,7 @@ func (q *AckQueue) Get() (utils.MyULID, conf.DestinationType, error) {
 		q.pool.Put(tail)
 		return next.uid, next.dest, nil
 	} else if q.Disposed() {
-		return utils.ZeroUid, 0, utils.ErrDisposed
+		return utils.ZeroUid, 0, eerrors.ErrQDisposed
 	}
 	return utils.ZeroUid, 0, nil
 }
@@ -64,7 +64,7 @@ func (q *AckQueue) Put(uid utils.MyULID, dest conf.DestinationType) error {
 	n.dest = dest
 	n.next = nil
 	if q.Disposed() {
-		return utils.ErrDisposed
+		return eerrors.ErrQDisposed
 	}
 	(*ackNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.head)), unsafe.Pointer(n))).next = n
 	return nil

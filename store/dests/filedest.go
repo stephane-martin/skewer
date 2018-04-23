@@ -10,7 +10,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"text/template"
 	"time"
 
@@ -19,7 +18,9 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/encoders"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 	"github.com/valyala/bytebufferpool"
+	"go.uber.org/atomic"
 )
 
 // ensure thread safety for the gzip writer
@@ -55,8 +56,8 @@ func (gw *cGzipWriter) Close() (err error) {
 
 type openedFile struct {
 	oFile      *os.File
-	closeAt    int64
-	closed     int32
+	closeAt    atomic.Int64
+	closed     atomic.Bool
 	name       string
 	writer     *concurrent.Writer
 	gzipwriter *cGzipWriter
@@ -70,10 +71,10 @@ func finalizer(obj *openedFile) {
 func newOpenedFile(f *os.File, name string, closeAt int64, bufferSize int, dogzip bool, level int) *openedFile {
 	openedFilesGauge.Inc()
 	o := openedFile{
-		oFile:   f,
-		name:    name,
-		closeAt: closeAt,
+		oFile: f,
+		name:  name,
 	}
+	o.closeAt.Store(closeAt)
 	if level == 0 || !dogzip {
 		o.writer = concurrent.NewWriterAutoFlush(f, bufferSize, 0.75)
 	} else {
@@ -108,18 +109,20 @@ func (o *openedFile) Sync() (err error) {
 }
 
 func (o *openedFile) Closed() bool {
-	return atomic.LoadInt32(&o.closed) == 1
+	return o.closed.Load()
 }
 
 func (o *openedFile) MarkClosed() (err error) {
-	atomic.StoreInt32(&o.closed, 1)
-	// flush the concurrent cuffer
-	err = o.Flush()
-	if err != nil {
-		return err
+	if o.closed.CAS(false, true) {
+		// flush the concurrent cuffer
+		err = o.Flush()
+		if err != nil {
+			return err
+		}
+		// sync changes to disk
+		return o.Sync()
 	}
-	// sync changes to disk
-	return o.Sync()
+	return nil
 }
 
 func (o *openedFile) closeFile() {
@@ -137,7 +140,7 @@ type openedFiles struct {
 	filesMu     sync.Mutex
 	timeout     time.Duration
 	logger      log15.Logger
-	nb          uint64
+	nb          atomic.Uint64
 	max         uint64
 	bufferSize  int
 	flushPeriod time.Duration
@@ -205,7 +208,7 @@ func newOpenedFiles(ctx context.Context, c conf.FileDestConfig, l log15.Logger) 
 			o.filesMu.Lock()
 			o.files.Range(func(key interface{}, val interface{}) bool {
 				f := val.(*openedFile)
-				if atomic.LoadInt64(&(f.closeAt)) <= now {
+				if f.closeAt.Load() <= now {
 					toClose = append(toClose, f)
 				}
 				return true
@@ -217,7 +220,7 @@ func newOpenedFiles(ctx context.Context, c conf.FileDestConfig, l log15.Logger) 
 				if err != nil {
 					o.logger.Error("Error flushing file destination buffers. Message loss may have occurred.", "error", err)
 				}
-				atomic.AddUint64(&o.nb, ^uint64(0))
+				o.nb.Add(^uint64(0))
 			}
 			o.filesMu.Unlock()
 			runtime.GC()
@@ -236,7 +239,7 @@ func (o *openedFiles) open(filename string) (fi *openedFile, err error) {
 	val, ok := o.files.Load(filename)
 	if ok {
 		fi = val.(*openedFile)
-		atomic.StoreInt64(&fi.closeAt, closeAt)
+		fi.closeAt.Store(closeAt)
 		return
 	}
 	dirname := filepath.Dir(filename)
@@ -254,7 +257,7 @@ func (o *openedFiles) open(filename string) (fi *openedFile, err error) {
 
 	fi = newOpenedFile(f, filename, closeAt, o.bufferSize, o.gzip, o.gziplevel)
 	o.files.Store(filename, fi)
-	if atomic.AddUint64(&o.nb, 1) > o.max {
+	if o.nb.Add(1) > o.max {
 		// if there are too many opened files, close one of them
 		o.closeOne()
 	}
@@ -268,7 +271,7 @@ func (o *openedFiles) closeOne() {
 	defer o.filesMu.Unlock()
 	o.files.Range(func(key interface{}, val interface{}) bool {
 		f := val.(*openedFile)
-		closeAt := atomic.LoadInt64(&f.closeAt)
+		closeAt := f.closeAt.Load()
 		if closeAt < min {
 			min = closeAt
 			minf = f
@@ -281,7 +284,7 @@ func (o *openedFiles) closeOne() {
 		if err != nil {
 			o.logger.Error("Error flushing file destination buffers. Message loss may have occurred.", "error", err)
 		}
-		atomic.AddUint64(&o.nb, ^uint64(0))
+		o.nb.Add(^uint64(0))
 	}
 }
 
@@ -339,7 +342,7 @@ func (d *FileDestination) sendOne(ctx context.Context, message *model.FullMessag
 	if err != nil {
 		d.logger.Warn("Error calculating filename", "error", err)
 		bytebufferpool.Put(buf)
-		return encoders.ErrNonEncodable
+		return encoders.EncodingError(err)
 	}
 	filename := strings.TrimSpace(buf.String())
 	bytebufferpool.Put(buf)
@@ -351,7 +354,7 @@ func (d *FileDestination) sendOne(ctx context.Context, message *model.FullMessag
 	encoded, err := encoders.ChainEncode(d.encoder, message, "\n")
 	if err != nil {
 		d.logger.Warn("Error encoding message", "error", err)
-		return encoders.ErrNonEncodable
+		return encoders.EncodingError(err)
 	}
 	_, err = io.WriteString(f, encoded)
 	if err != nil {
@@ -372,6 +375,6 @@ func (d *FileDestination) Close() error {
 	return nil
 }
 
-func (d *FileDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
-	return d.ForEach(ctx, d.sendOne, d.ACK, msgs)
+func (d *FileDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err eerrors.ErrorSlice) {
+	return d.ForEach(ctx, d.sendOne, true, true, msgs)
 }

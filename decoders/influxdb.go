@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/influxdata/influxdb/models"
-	"github.com/stephane-martin/skewer/decoders/base"
 	"github.com/stephane-martin/skewer/model"
 )
 
@@ -15,7 +14,7 @@ func pInflux(m []byte) ([]*model.SyslogMessage, error) {
 	// we assume influxdb line protocol is always UTF-8
 	points, err := models.ParsePoints(m)
 	if err != nil {
-		return nil, &base.InfluxDecodingError{Err: err}
+		return nil, InfluxDecodingError(err)
 	}
 	if len(points) == 0 {
 		return nil, nil

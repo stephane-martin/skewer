@@ -15,6 +15,7 @@ import (
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 	"github.com/stephane-martin/skewer/utils/queue"
 	"github.com/stephane-martin/skewer/utils/queue/kafka"
 )
@@ -187,25 +188,24 @@ func (s *KafkaServiceImpl) ParseOne(raw *model.RawKafkaMessage) (err error) {
 		if syslogMsg == nil {
 			continue
 		}
-		if raw.Brokers != "" {
-			syslogMsg.SetProperty("skewer", "client", raw.Brokers)
-		}
 		full = model.FullFactoryFrom(syslogMsg)
 		full.Uid = raw.UID
 		full.ConfId = raw.ConfID
-		fatal, nonfatal := s.reporter.Stash(full)
+		full.SourceType = "kafka"
+		full.ClientAddr = raw.Brokers
+		err := s.reporter.Stash(full)
+		model.FullFree(full)
 
-		if fatal != nil {
-			err = fatal
-			logger.Error("Fatal error stashing Kafka message", "error", fatal)
+		if eerrors.Is("Fatal", err) {
+			logger.Error("Fatal error stashing Kafka message", "error", err)
 			s.dofatal()
 			return err
-		} else if nonfatal != nil {
-			logger.Warn("Non-fatal error stashing Kafka message", "error", nonfatal)
-		} else {
-			base.IncomingMsgsCounter.WithLabelValues("kafka", raw.Brokers, "", "").Inc()
 		}
-		model.FullFree(full)
+		if err != nil {
+			logger.Warn("Non-fatal error stashing Kafka message", "error", err)
+			continue
+		}
+		base.IncomingMsgsCounter.WithLabelValues("kafka", raw.Brokers, "", "").Inc()
 	}
 	return nil
 }

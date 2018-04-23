@@ -3,11 +3,9 @@ package clients
 import (
 	"context"
 	"crypto/tls"
-	"errors"
 	"io"
 	"net"
 	"strconv"
-	"sync/atomic"
 	"time"
 
 	"github.com/free/concurrent-writer/concurrent"
@@ -15,9 +13,13 @@ import (
 	"github.com/stephane-martin/skewer/encoders"
 	"github.com/stephane-martin/skewer/encoders/baseenc"
 	"github.com/stephane-martin/skewer/model"
-	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 	"github.com/stephane-martin/skewer/utils/queue"
+	"go.uber.org/atomic"
 )
+
+var ErrTCPNotConnected = eerrors.WithTypes(eerrors.New("TCPClient: not connected"), "NotConnected")
+var ErrTCPClosed = eerrors.WithTypes(eerrors.New("TCPClient: closed"), "Closed")
 
 type SyslogTCPClient struct {
 	host            string
@@ -33,14 +35,14 @@ type SyslogTCPClient struct {
 	lineFraming    bool
 	frameDelimiter uint8
 
-	closed  int32
+	closed  atomic.Bool
 	conn    net.Conn
 	writer  *concurrent.Writer
 	encoder encoders.Encoder
 	ticker  *time.Ticker
 	logger  log15.Logger
 
-	errorFlag int32
+	errorFlag atomic.Bool
 	errorPrev error
 }
 
@@ -105,7 +107,7 @@ func (c *SyslogTCPClient) TLS(config *tls.Config) *SyslogTCPClient {
 }
 
 func (c *SyslogTCPClient) Close() (err error) {
-	if atomic.CompareAndSwapInt32(&c.closed, 0, 1) {
+	if c.closed.CAS(false, true) {
 		if c.ticker != nil {
 			c.ticker.Stop()
 		}
@@ -114,7 +116,7 @@ func (c *SyslogTCPClient) Close() (err error) {
 			_ = c.conn.Close()
 		}
 	}
-	return
+	return err
 }
 
 func (c *SyslogTCPClient) Connect(ctx context.Context) (err error) {
@@ -124,8 +126,8 @@ func (c *SyslogTCPClient) Connect(ctx context.Context) (err error) {
 			c.writer = nil
 		}
 	}()
-	if atomic.LoadInt32(&c.closed) == 1 {
-		return errors.New("SyslogTCPClient: closed")
+	if c.closed.Load() {
+		return ErrTCPClosed
 	}
 	if c.conn != nil {
 		return nil
@@ -140,10 +142,10 @@ func (c *SyslogTCPClient) Connect(ctx context.Context) (err error) {
 
 	if len(c.path) == 0 {
 		if len(c.host) == 0 {
-			return errors.New("SyslogTCPClient: specify a host or a unix path")
+			return eerrors.New("SyslogTCPClient: specify a host or a unix path")
 		}
 		if c.port == 0 {
-			return errors.New("SyslogTCPClient: specify a port")
+			return eerrors.New("SyslogTCPClient: specify a port")
 		}
 		hostport := net.JoinHostPort(c.host, strconv.FormatInt(int64(c.port), 10))
 		var dialer *net.Dialer
@@ -159,7 +161,7 @@ func (c *SyslogTCPClient) Connect(ctx context.Context) (err error) {
 			conn, err = tls.DialWithDialer(dialer, "tcp", hostport, c.tlsConfig)
 		}
 		if err != nil {
-			return err
+			return eerrors.Wrap(err, "TCPClient: connection error")
 		}
 		tcpconn := conn.(*net.TCPConn)
 		_ = tcpconn.SetNoDelay(true)
@@ -174,11 +176,12 @@ func (c *SyslogTCPClient) Connect(ctx context.Context) (err error) {
 			conn, err = net.DialTimeout("unix", c.path, c.connTimeout)
 		}
 		if err != nil {
-			return err
+			return eerrors.Wrap(err, "TCPClient: connection error")
 		}
 	}
 	c.conn = conn
 	if c.flushPeriod > 0 {
+		// TODO: 4096 ?
 		c.writer = concurrent.NewWriterAutoFlush(c.conn, 4096, 0.75)
 		c.ticker = time.NewTicker(c.flushPeriod)
 
@@ -187,18 +190,18 @@ func (c *SyslogTCPClient) Connect(ctx context.Context) (err error) {
 			for range c.ticker.C {
 				err = c.Flush()
 				if err != nil {
-					if utils.IsBrokenPipe(err) || utils.IsFileClosed(err) {
+					if eerrors.HasBrokenPipe(err) || eerrors.HasFileClosed(err) {
 						_ = c.conn.Close()
 						c.logger.Warn("Broken pipe detected when flushing buffers", "error", err)
 						c.errorPrev = err
-						atomic.StoreInt32(&c.errorFlag, 1)
+						c.errorFlag.Store(true)
 						return
 					}
-					if utils.IsTimeout(err) {
+					if eerrors.IsTimeout(err) {
 						_ = c.conn.Close()
 						c.logger.Warn("Timeout detected when flushing buffers", "error", err)
 						c.errorPrev = err
-						atomic.StoreInt32(&c.errorFlag, 1)
+						c.errorFlag.Store(true)
 						return
 					}
 					c.logger.Warn("Unexpected error flushing buffers", "error", err)
@@ -214,10 +217,10 @@ func (c *SyslogTCPClient) Connect(ctx context.Context) (err error) {
 
 func (c *SyslogTCPClient) Send(ctx context.Context, msg *model.FullMessage) (err error) {
 	if c.conn == nil {
-		return errors.New("SyslogTCPClient: not connected")
+		return ErrTCPNotConnected
 	}
-	if atomic.LoadInt32(&c.closed) == 1 {
-		return errors.New("SyslogTCPClient: closed")
+	if c.closed.Load() {
+		return ErrTCPClosed
 	}
 	if msg == nil {
 		return nil
@@ -229,12 +232,12 @@ func (c *SyslogTCPClient) Send(ctx context.Context, msg *model.FullMessage) (err
 		buf, err = encoders.TcpOctetEncode(c.encoder, msg)
 	}
 	if err != nil {
-		return encoders.ErrNonEncodable
+		return err
 	}
 	if len(buf) == 0 {
 		return nil
 	}
-	if atomic.LoadInt32(&c.errorFlag) == 1 {
+	if c.errorFlag.Load() {
 		return c.errorPrev
 	}
 	if c.writer != nil {

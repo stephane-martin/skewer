@@ -2,6 +2,7 @@ package binder
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/awnumar/memguard"
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 )
 
 func IsStream(lnet string) bool {
@@ -27,7 +29,7 @@ func IsStream(lnet string) bool {
 type fileConn struct {
 	net.Conn
 	uid string
-	err string
+	err error
 }
 
 func (c *fileConn) SetWriteBuffer(bytes int) error {
@@ -57,7 +59,7 @@ func (c *fileConn) Close() error {
 type filePConn struct {
 	net.PacketConn
 	uid string
-	err string
+	err error
 }
 
 func (c *filePConn) SetWriteBuffer(bytes int) error {
@@ -245,7 +247,7 @@ func (s *scannerOob) Read() (msg string, oob []byte, err error) {
 	msg = string(token)
 	if strings.HasPrefix(msg, "newconn ") {
 		if len(s.oobbuf) < oobSize {
-			return "", nil, fmt.Errorf("Not enough out of band data: %d < %d", len(s.oobbuf), oobSize)
+			return "", nil, eerrors.Errorf("Not enough out of band data: %d < %d", len(s.oobbuf), oobSize)
 		}
 		oob = s.oobbuf[:oobSize]
 		s.oobbuf = s.oobbuf[oobSize:]
@@ -270,9 +272,8 @@ func NewClient(binderFile *os.File, secret *memguard.LockedBuffer, logger log15.
 
 	go func() {
 		defer func() {
-			if e := recover(); e != nil {
-				errString := fmt.Sprintf("%s", e)
-				logger.Crit("panic in binder client", "error", errString)
+			if e := eerrors.Err(recover()); e != nil {
+				logger.Crit("panic in binder client", "error", e.Error())
 				// the skewer parent process may be gone... for whatever reason
 				// we should stop before some catastrophe happens
 				c.newConns.close()
@@ -296,12 +297,12 @@ func NewClient(binderFile *os.File, secret *memguard.LockedBuffer, logger log15.
 					parts := strings.SplitN(msg, " ", 3)
 					addr := parts[1]
 					lnet := strings.SplitN(addr, ":", 2)[0]
-					errorstr := parts[2]
+					err := eerrors.New(parts[2])
 
 					if IsStream(lnet) {
-						c.newConns.push(addr, &fileConn{err: errorstr})
+						c.newConns.push(addr, &fileConn{err: err})
 					} else {
-						c.newPConns.push(addr, &filePConn{err: errorstr})
+						c.newPConns.push(addr, &filePConn{err: err})
 					}
 				}
 
@@ -369,7 +370,7 @@ func (l *Listener) Close() error {
 
 func (l *Listener) Accept() (net.Conn, error) {
 	ichan := l.client.newConns.get(l.addr, false)
-	notListenErr := &net.OpError{Err: fmt.Errorf("Not listening on that address"), Addr: l.Addr(), Op: "Accept"}
+	notListenErr := &net.OpError{Err: errors.New("Not listening on that address"), Addr: l.Addr(), Op: "Accept"}
 	if ichan == nil {
 		return nil, notListenErr
 	}
@@ -377,8 +378,8 @@ func (l *Listener) Accept() (net.Conn, error) {
 	if !more {
 		return nil, notListenErr
 	}
-	if len(conn.err) > 0 {
-		return nil, &net.OpError{Err: fmt.Errorf(conn.err), Addr: l.Addr(), Op: "Accept"}
+	if conn.err != nil {
+		return nil, &net.OpError{Err: conn.err, Addr: l.Addr(), Op: "Accept"}
 	}
 	if c, ok := conn.Conn.(*net.TCPConn); ok {
 		if l.keepalive {
@@ -438,9 +439,9 @@ func (c *clientImpl) ListenKeepAlive(lnet string, laddr string, period time.Dura
 
 	confirmation, more := <-ichan
 	if !more {
-		return nil, &net.OpError{Err: fmt.Errorf("closed ichan"), Op: "Listen"}
-	} else if len(confirmation.err) > 0 {
-		return nil, &net.OpError{Err: fmt.Errorf(confirmation.err), Op: "Listen"}
+		return nil, &net.OpError{Err: errors.New("closed ichan"), Op: "Listen"}
+	} else if confirmation.err != nil {
+		return nil, &net.OpError{Err: confirmation.err, Op: "Listen"}
 	}
 	if period != 0 {
 		l = &Listener{addr: addr, client: c, keepalive: true, period: period, logger: c.logger}
@@ -463,10 +464,10 @@ func (c *clientImpl) ListenPacket(lnet string, laddr string, bytes int) (pconn n
 	conn, more = <-ichan
 	c.newPConns.delete(addr)
 	if !more {
-		return nil, fmt.Errorf("There was an error when asking the parent process for a packet connection")
+		return nil, errors.New("There was an error when asking the parent process for a packet connection")
 	}
-	if len(conn.err) > 0 {
-		return nil, fmt.Errorf(conn.err)
+	if conn.err != nil {
+		return nil, conn.err
 	}
 	pconn = conn
 	if bytes > 0 {
@@ -487,7 +488,7 @@ func (c *clientImpl) StopListen(addr string) error {
 		_, _ = c.writer.Write([]byte(fmt.Sprintf("stoplisten %s", addr)))
 		return nil
 	}
-	return fmt.Errorf("Already closed")
+	return errors.New("Already closed")
 }
 
 func (c *clientImpl) Quit() error {

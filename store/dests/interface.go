@@ -7,10 +7,12 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
+	"github.com/stephane-martin/skewer/utils/queue"
 )
 
 type Destination interface {
-	Send(ctx context.Context, m []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) error
+	Send(ctx context.Context, m []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) eerrors.ErrorSlice
 	Fatal() chan struct{}
 	Close() error
 	ACK(utils.MyULID)
@@ -42,4 +44,13 @@ func NewDestination(ctx context.Context, typ conf.DestinationType, e *Env) (Dest
 		return c(ctx, e)
 	}
 	return nil, fmt.Errorf("Unknown destination type: %d", typ)
+}
+
+type RemoteClient interface {
+	Connect() error
+	Close() error
+	Send(msg *model.FullMessage) error
+	Flush() error
+	Ack() *queue.AckQueue
+	Nack() *queue.AckQueue
 }

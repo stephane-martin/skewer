@@ -6,6 +6,7 @@ import (
 	"unsafe"
 
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 )
 
 type TopicPartition struct {
@@ -14,8 +15,8 @@ type TopicPartition struct {
 }
 
 type KafkaProducerAck struct {
-	TopicPartition
 	Offset int64
+	TopicPartition
 }
 
 type kafkaProducerAckNode struct {
@@ -24,7 +25,6 @@ type kafkaProducerAckNode struct {
 }
 
 type KafkaProducerAckQueue struct {
-	_padding0 [8]uint64
 	head      *kafkaProducerAckNode
 	_padding1 [8]uint64
 	tail      *kafkaProducerAckNode
@@ -58,7 +58,7 @@ func (q *KafkaProducerAckQueue) Get() (KafkaProducerAck, error) {
 		q.pool.Put(tail)
 		return next.ack, nil
 	} else if q.Disposed() {
-		return KafkaProducerAck{}, utils.ErrDisposed
+		return KafkaProducerAck{}, eerrors.ErrQDisposed
 	}
 	return KafkaProducerAck{}, nil
 }
@@ -68,7 +68,7 @@ func (q *KafkaProducerAckQueue) Put(ack KafkaProducerAck) error {
 	n.ack = ack
 	n.next = nil
 	if q.Disposed() {
-		return utils.ErrDisposed
+		return eerrors.ErrQDisposed
 	}
 	(*kafkaProducerAckNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.head)), unsafe.Pointer(n))).next = n
 	return nil

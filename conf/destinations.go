@@ -1,10 +1,10 @@
 package conf
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/stephane-martin/skewer/encoders/baseenc"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 )
 
 // DestinationType lists the possible kind of destinations where skewer can forward messages.
@@ -95,11 +95,15 @@ func (m *MainConfig) GetDestinations() (dests DestinationType, err error) {
 	destr := strings.TrimSpace(strings.ToLower(m.Destination))
 	for _, dest := range strings.Split(destr, ",") {
 		d, ok := Destinations[strings.TrimSpace(dest)]
-		if ok {
-			dests = dests | d
-		} else {
-			return 0, ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown destination type: '%s'", dest)}
+		if !ok {
+			return 0, confCheckError(
+				eerrors.WithTags(
+					eerrors.New("Unknown destination type"),
+					"destination", dest,
+				),
+			)
 		}
+		dests = dests | d
 	}
 	if dests == 0 {
 		return Stderr, nil
@@ -135,7 +139,12 @@ func (c *BaseConfig) CheckDestinations() error {
 		c.RedisDest.Format,
 	} {
 		if baseenc.ParseFormat(frmt) == -1 {
-			return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown destination format: '%s'", frmt)}
+			return confCheckError(
+				eerrors.WithTags(
+					eerrors.New("Unknown destination format"),
+					"format", frmt,
+				),
+			)
 		}
 	}
 	return nil

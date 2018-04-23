@@ -5,37 +5,45 @@
 package message
 
 import (
-	"sync/atomic"
 	"time"
 
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
+	"go.uber.org/atomic"
 )
 
 type node struct {
-	position uint64
+	position atomic.Uint64
 	data     *model.FullMessage
+}
+
+func newNode(pos uint64) *node {
+	var n node
+	n.position.Store(pos)
+	return &n
 }
 
 type nodes []*node
 
-// Ring is a thread-safe bounded queue that stores model.FullMessage messages.
+// Ring is a thread-safe bounded queue that stores *model.FullMessage messages.
 type Ring struct {
-	_padding0      [8]uint64
-	queue          uint64
-	_padding1      [8]uint64
-	dequeue        uint64
-	_padding2      [8]uint64
-	mask, disposed uint64
-	_padding3      [8]uint64
-	nodes          nodes
+	mask      uint64
+	_padding0 [8]uint64
+	queue     atomic.Uint64
+	_padding1 [8]uint64
+	dequeue   atomic.Uint64
+	_padding2 [8]uint64
+	disposed  atomic.Bool
+	_padding3 [8]uint64
+	nodes     nodes
 }
 
 func (rb *Ring) init(size uint64) {
 	size = utils.RoundUp(size)
 	rb.nodes = make(nodes, size)
 	for i := uint64(0); i < size; i++ {
-		rb.nodes[i] = &node{position: i}
+		rb.nodes[i] = newNode(i)
 	}
 	rb.mask = size - 1 // so we don't have to do this with every put/get operation
 }
@@ -60,24 +68,24 @@ func (rb *Ring) put(item *model.FullMessage, offer bool) (bool, error) {
 		n *node
 		w utils.ExpWait
 	)
-	pos := atomic.LoadUint64(&rb.queue)
+	pos := rb.queue.Load()
 L:
 	for {
-		if atomic.LoadUint64(&rb.disposed) == 1 {
-			return false, utils.ErrDisposed
+		if rb.disposed.Load() {
+			return false, eerrors.ErrQDisposed
 		}
 
 		n = rb.nodes[pos&rb.mask]
-		seq := atomic.LoadUint64(&n.position)
+		seq := n.position.Load()
 		switch dif := seq - pos; {
 		case dif == 0:
-			if atomic.CompareAndSwapUint64(&rb.queue, pos, pos+1) {
+			if rb.queue.CAS(pos, pos+1) {
 				break L
 			}
 		case dif < 0:
 			panic(`Ring buffer in a compromised state during a put operation.`)
 		default:
-			pos = atomic.LoadUint64(&rb.queue)
+			pos = rb.queue.Load()
 		}
 
 		if offer {
@@ -88,7 +96,7 @@ L:
 	}
 
 	n.data = item
-	atomic.StoreUint64(&n.position, pos+1)
+	n.position.Store(pos + 1)
 	return true, nil
 }
 
@@ -112,9 +120,10 @@ func (rb *Ring) PollDeadline(deadline time.Time) (*model.FullMessage, error) {
 func (rb *Ring) Poll(timeout time.Duration) (*model.FullMessage, error) {
 	var (
 		n     *node
-		pos   = atomic.LoadUint64(&rb.dequeue)
+		pos   = rb.dequeue.Load()
 		start time.Time
 		w     utils.ExpWait
+		zero  *model.FullMessage
 	)
 	if timeout > 0 {
 		start = time.Now()
@@ -122,35 +131,35 @@ func (rb *Ring) Poll(timeout time.Duration) (*model.FullMessage, error) {
 L:
 	for {
 		n = rb.nodes[pos&rb.mask]
-		seq := atomic.LoadUint64(&n.position)
+		seq := n.position.Load()
 		switch dif := seq - (pos + 1); {
 		case dif == 0:
-			if atomic.CompareAndSwapUint64(&rb.dequeue, pos, pos+1) {
+			if rb.dequeue.CAS(pos, pos+1) {
 				break L
 			}
 		case dif < 0:
 			panic(`Ring buffer in compromised state during a get operation.`)
 		default:
-			pos = atomic.LoadUint64(&rb.dequeue)
+			pos = rb.dequeue.Load()
 		}
 
 		if timeout > 0 && time.Since(start) >= timeout {
-			return nil, utils.ErrTimeout
+			return zero, eerrors.ErrQTimeout
 		}
-		if atomic.LoadUint64(&rb.disposed) == 1 {
-			return nil, utils.ErrDisposed
+		if rb.disposed.Load() {
+			return zero, eerrors.ErrQDisposed
 		}
 		w.Wait()
 	}
 	data := n.data
-	n.data = nil
-	atomic.StoreUint64(&n.position, pos+rb.mask+1)
+	n.data = zero
+	n.position.Store(pos + rb.mask + 1)
 	return data, nil
 }
 
 // Len returns the number of items in the queue.
 func (rb *Ring) Len() uint64 {
-	return atomic.LoadUint64(&rb.queue) - atomic.LoadUint64(&rb.dequeue)
+	return rb.queue.Load() - rb.dequeue.Load()
 }
 
 // Cap returns the capacity of this ring buffer.
@@ -162,13 +171,13 @@ func (rb *Ring) Cap() uint64 {
 // in the Put and/or Get methods.  Calling those methods on a disposed
 // queue will return an error.
 func (rb *Ring) Dispose() {
-	atomic.CompareAndSwapUint64(&rb.disposed, 0, 1)
+	rb.disposed.Store(true)
 }
 
 // IsDisposed will return a bool indicating if this queue has been
 // disposed.
 func (rb *Ring) IsDisposed() bool {
-	return atomic.LoadUint64(&rb.disposed) == 1
+	return rb.disposed.Load()
 }
 
 // NewRing will allocate, initialize, and return a ring buffer

@@ -9,6 +9,7 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/encoders"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 	"gopkg.in/Graylog2/go-gelf.v2/gelf"
 )
 
@@ -66,6 +67,6 @@ func (d *GraylogDestination) sendOne(ctx context.Context, m *model.FullMessage) 
 	return d.writer.WriteMessage(encoders.FullToGelfMessage(m))
 }
 
-func (d *GraylogDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
-	return d.ForEach(ctx, d.sendOne, d.ACK, msgs)
+func (d *GraylogDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err eerrors.ErrorSlice) {
+	return d.ForEach(ctx, d.sendOne, true, true, msgs)
 }

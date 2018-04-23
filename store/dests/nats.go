@@ -8,6 +8,7 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 	"github.com/valyala/bytebufferpool"
 )
 
@@ -94,6 +95,6 @@ func (d *NATSDestination) sendOne(ctx context.Context, msg *model.FullMessage, t
 	return d.conn.Publish(topic, []byte(buf.String()))
 }
 
-func (d *NATSDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
-	return d.ForEachWithTopic(ctx, d.sendOne, d.ACK, msgs)
+func (d *NATSDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err eerrors.ErrorSlice) {
+	return d.ForEachWithTopic(ctx, d.sendOne, true, true, msgs)
 }

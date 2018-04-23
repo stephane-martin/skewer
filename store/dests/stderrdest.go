@@ -9,8 +9,7 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/encoders"
 	"github.com/stephane-martin/skewer/model"
-	"github.com/stephane-martin/skewer/utils"
-	"github.com/uber-go/multierr"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 )
 
 type StderrDestination struct {
@@ -29,7 +28,7 @@ func NewStderrDestination(ctx context.Context, e *Env) (Destination, error) {
 	return d, nil
 }
 
-func (d *StderrDestination) sendOne(message *model.FullMessage) (err error) {
+func (d *StderrDestination) sendOne(ctx context.Context, message *model.FullMessage) (err error) {
 	defer model.FullFree(message)
 	var buf string
 	buf, err = encoders.ChainEncode(d.encoder, message, "\n")
@@ -44,29 +43,6 @@ func (d *StderrDestination) Close() error {
 	return nil
 }
 
-func (d *StderrDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
-	var msg *model.FullMessage
-	var uid utils.MyULID
-	var e error
-	for len(msgs) > 0 {
-		msg = msgs[0].Message
-		uid = msg.Uid
-		msgs = msgs[1:]
-		e = d.sendOne(msg)
-		model.FullFree(msg)
-		if e != nil {
-			err = multierr.Append(err, e)
-			if encoders.IsEncodingError(e) {
-				d.PermError(uid)
-			} else {
-				d.NACK(uid)
-				d.NACKRemaining(msgs)
-				d.dofatal()
-				return err
-			}
-		} else {
-			d.ACK(uid)
-		}
-	}
-	return err
+func (d *StderrDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err eerrors.ErrorSlice) {
+	return d.ForEach(ctx, d.sendOne, true, true, msgs)
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/stephane-martin/skewer/encoders/baseenc"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 	"github.com/stephane-martin/skewer/utils/queue/message"
 )
 
@@ -220,9 +221,9 @@ func (d *HTTPServerDestination) ServeHTTP(w http.ResponseWriter, r *http.Request
 Loop:
 	for len(messages) < nMessages {
 		message, err = d.sendQueue.Poll(10 * time.Millisecond)
-		if err == utils.ErrTimeout {
+		if err == eerrors.ErrQTimeout {
 			break Loop
-		} else if err == utils.ErrDisposed || message == nil {
+		} else if err == eerrors.ErrQDisposed || message == nil {
 			// the sendQueue has been closed, definitely no more messages
 			defer d.dofatal()
 			break Loop
@@ -296,6 +297,6 @@ func (d *HTTPServerDestination) sendOne(ctx context.Context, msg *model.FullMess
 	return d.sendQueue.Put(msg)
 }
 
-func (d *HTTPServerDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
-	return d.ForEach(ctx, d.sendOne, nil, msgs)
+func (d *HTTPServerDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err eerrors.ErrorSlice) {
+	return d.ForEach(ctx, d.sendOne, false, false, msgs)
 }

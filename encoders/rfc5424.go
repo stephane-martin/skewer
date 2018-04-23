@@ -8,6 +8,7 @@ import (
 
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 )
 
 func encode5424(v interface{}, w io.Writer) error {
@@ -24,17 +25,11 @@ func encode5424(v interface{}, w io.Writer) error {
 	}
 }
 
-type ErrInvalid5424 struct {
-	Property string
-	Value    interface{}
-}
-
-func (e *ErrInvalid5424) Error() string {
-	return fmt.Sprintf("Message cannot be RFC5424 serialized: %s is invalid ('%v')", e.Property, e.Value)
-}
-
 func invalid5424(property string, value interface{}) error {
-	return &ErrInvalid5424{Property: property, Value: value}
+	return EncodingError(eerrors.Errorf(
+		"Message cannot be RFC5424 serialized: %s is invalid ('%v')",
+		property, value,
+	))
 }
 
 func validRfc5424(m *model.SyslogMessage) error {
@@ -180,7 +175,7 @@ func encodeMsg5424(m *model.SyslogMessage, b io.Writer) (err error) {
 		if err != nil {
 			return err
 		}
-		_, err = b.Write([]byte(m.Message))
+		_, err = io.WriteString(b, m.Message)
 		if err != nil {
 			return err
 		}

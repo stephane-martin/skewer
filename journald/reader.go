@@ -15,6 +15,7 @@ import (
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 )
 
 // TODO: provide a way to link statically to libsystemd
@@ -208,14 +209,17 @@ func (r *Reader) Start(confID utils.MyULID) {
 					if err != nil {
 						return
 					}
-					f, nf := r.stasher.Stash(converter(entry.Fields))
-					if nf != nil {
-						r.logger.Warn("Non-fatal error stashing journal message", "error", nf)
-					} else if f != nil {
-						r.logger.Error("Fatal error stashing journal message", "error", f)
-					} else {
-						base.IncomingMsgsCounter.WithLabelValues("journald", hostname, "", "").Inc()
+					err = r.stasher.Stash(converter(entry.Fields))
+					if eerrors.Is("Fatal", err) {
+						r.logger.Error("Fatal error stashing journal message", "error", err)
+						continue
+						// TODO: fix
 					}
+					if err != nil {
+						r.logger.Warn("Non-fatal error stashing journal message", "error", err)
+						continue
+					}
+					base.IncomingMsgsCounter.WithLabelValues("journald", hostname, "", "").Inc()
 
 				}
 			}

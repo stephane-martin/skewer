@@ -1,49 +1,53 @@
 package utils
 
-import "sync/atomic"
+import (
+	"github.com/stephane-martin/skewer/utils/eerrors"
+	"go.uber.org/atomic"
+)
 
 type Semaphore struct {
-	count    int32
-	disposed int32
-	spinlock int32
+	count    atomic.Int32
+	disposed atomic.Bool
+	spinlock atomic.Bool
 }
 
 func NewSemaphore(total int32) *Semaphore {
-	return &Semaphore{count: total}
+	var s Semaphore
+	s.count.Store(total)
+	return &s
 }
 
 func (s *Semaphore) Acquire() error {
-	if atomic.LoadInt32(&s.disposed) == 1 {
-		return ErrDisposed
+	if s.disposed.Load() {
+		return eerrors.ErrQDisposed
 	}
-	wait := ExpWait{}
+	var wait ExpWait
 	// acquire spinlock
-	for !atomic.CompareAndSwapInt32(&s.spinlock, 0, 1) {
-		if atomic.LoadInt32(&s.disposed) == 1 {
-			return ErrDisposed
+	for !s.spinlock.CAS(false, true) {
+		if s.disposed.Load() {
+			return eerrors.ErrQDisposed
 		}
 		wait.Wait()
 	}
-	// at most one user of the semaphore arrives here
-	// wait for the semaphore to be acquired
-	wait = ExpWait{}
-	atomic.AddInt32(&s.count, -1)
-	for atomic.LoadInt32(&s.count) < 0 {
-		if atomic.LoadInt32(&s.disposed) == 1 {
-			atomic.AddInt32(&s.count, 1)
-			atomic.StoreInt32(&s.spinlock, 0)
-			return ErrDisposed
+	defer s.spinlock.Store(false)
+	// at most one user of the semaphore arrives here;
+	// let's wait for the semaphore to be acquired
+	wait.Reset()
+	s.count.Dec()
+	for s.count.Load() < 0 {
+		if s.disposed.Load() {
+			s.count.Inc()
+			return eerrors.ErrQDisposed
 		}
 		wait.Wait()
 	}
-	atomic.StoreInt32(&s.spinlock, 0)
 	return nil
 }
 
 func (s *Semaphore) Release() {
-	atomic.AddInt32(&s.count, 1)
+	s.count.Inc()
 }
 
 func (s *Semaphore) Dispose() {
-	atomic.StoreInt32(&s.disposed, 1)
+	s.disposed.Store(true)
 }

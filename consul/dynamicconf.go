@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/hashicorp/consul/api"
-	"github.com/hashicorp/errwrap"
 	"github.com/inconshreveable/log15"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 )
 
 type WatchOpts struct {
@@ -149,7 +149,7 @@ func getTree(ctx context.Context, clt *api.Client, pre string, idx uint64, rec b
 		kvpairs = []*api.KVPair{kvpair}
 	}
 	if err != nil {
-		return nil, 0, errwrap.Wrapf("Error reading configuration in Consul: {{err}}", err)
+		return nil, 0, eerrors.Wrap(err, "Error fetching configuration from consul")
 	}
 	if len(kvpairs) == 0 {
 		return nil, meta.LastIndex, nil

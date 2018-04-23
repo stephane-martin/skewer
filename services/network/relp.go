@@ -22,10 +22,10 @@ import (
 	"github.com/stephane-martin/skewer/decoders"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/base"
-	"github.com/stephane-martin/skewer/services/errors"
 	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/utils"
-	"github.com/stephane-martin/skewer/utils/queue"
+	"github.com/stephane-martin/skewer/utils/eerrors"
+	"github.com/stephane-martin/skewer/utils/queue/intq"
 	"github.com/stephane-martin/skewer/utils/queue/tcp"
 )
 
@@ -100,19 +100,13 @@ func bytes2txnr(b []byte) int32 {
 
 func (f *ackForwarder) Received(connID utils.MyULID, txnr int32) {
 	if c, ok := f.comm.Load(connID); ok {
-		_ = c.(*queue.IntQueue).Put(txnr)
-	}
-}
-
-func (f *ackForwarder) Commit(connID utils.MyULID) {
-	if c, ok := f.comm.Load(connID); ok {
-		_, _ = c.(*queue.IntQueue).Get()
+		_ = c.(*intq.Ring).Put(txnr)
 	}
 }
 
 func (f *ackForwarder) NextToCommit(connID utils.MyULID) int32 {
 	if c, ok := f.comm.Load(connID); ok {
-		next, err := c.(*queue.IntQueue).Peek()
+		next, err := c.(*intq.Ring).Poll(time.Nanosecond)
 		if err != nil {
 			return -1
 		}
@@ -123,53 +117,78 @@ func (f *ackForwarder) NextToCommit(connID utils.MyULID) int32 {
 
 func (f *ackForwarder) ForwardSucc(connID utils.MyULID, txnr int32) {
 	if q, ok := f.succ.Load(connID); ok {
-		_ = q.(*queue.IntQueue).Put(txnr)
+		_ = q.(*intq.Ring).Put(txnr)
 	}
-}
-
-func (f *ackForwarder) GetSucc(connID utils.MyULID) int32 {
-	if q, ok := f.succ.Load(connID); ok {
-		txnr, err := q.(*queue.IntQueue).Get()
-		if err != nil {
-			return -1
-		}
-		return txnr
-	}
-	return -1
 }
 
 func (f *ackForwarder) ForwardFail(connID utils.MyULID, txnr int32) {
 	if q, ok := f.fail.Load(connID); ok {
-		_ = q.(*queue.IntQueue).Put(txnr)
+		_ = q.(*intq.Ring).Put(txnr)
 	}
 }
 
-func (f *ackForwarder) GetFail(connID utils.MyULID) int32 {
-	if q, ok := f.fail.Load(connID); ok {
-		txnr, err := q.(*queue.IntQueue).Get()
-		if err != nil {
-			return -1
+func (f *ackForwarder) GetSuccAndFail(connID utils.MyULID) (success int32, failure int32) {
+	var w utils.ExpWait
+	var err error
+	success = -1
+	failure = -1
+
+	if q1, ok := f.succ.Load(connID); ok {
+		if q2, ok := f.fail.Load(connID); ok {
+			qsucc := q1.(*intq.Ring)
+			qfail := q2.(*intq.Ring)
+			for {
+				if qsucc.IsDisposed() || qfail.IsDisposed() {
+					return -1, -1
+				}
+				if qsucc.Len() == 0 && qfail.Len() == 0 {
+					w.Wait()
+					continue
+				}
+				if qsucc.Len() > 0 {
+					success, err = qsucc.Get()
+					if err == eerrors.ErrQDisposed {
+						return -1, -1
+					}
+					if err == eerrors.ErrQTimeout {
+						success = -1
+					}
+				}
+				if qfail.Len() > 0 {
+					failure, err = qfail.Get()
+					if err == eerrors.ErrQDisposed {
+						return -1, -1
+					}
+					if err == eerrors.ErrQTimeout {
+						failure = -1
+					}
+				}
+				if success == -1 && failure == -1 {
+					w.Wait()
+					continue
+				}
+				return success, failure
+			}
 		}
-		return txnr
 	}
-	return -1
+	return -1, -1
 }
 
-func (f *ackForwarder) AddConn() utils.MyULID {
+func (f *ackForwarder) AddConn(qsize uint64) utils.MyULID {
 	connID := utils.NewUid()
-	f.succ.Store(connID, queue.NewIntQueue())
-	f.fail.Store(connID, queue.NewIntQueue())
-	f.comm.Store(connID, queue.NewIntQueue())
+	f.succ.Store(connID, intq.NewRing(qsize))
+	f.fail.Store(connID, intq.NewRing(qsize))
+	f.comm.Store(connID, intq.NewRing(qsize))
 	return connID
 }
 
 func (f *ackForwarder) RemoveConn(connID utils.MyULID) {
 	if q, ok := f.succ.Load(connID); ok {
-		q.(*queue.IntQueue).Dispose()
+		q.(*intq.Ring).Dispose()
 		f.succ.Delete(connID)
 	}
 	if q, ok := f.fail.Load(connID); ok {
-		q.(*queue.IntQueue).Dispose()
+		q.(*intq.Ring).Dispose()
 		f.fail.Delete(connID)
 	}
 	f.comm.Delete(connID)
@@ -179,18 +198,6 @@ func (f *ackForwarder) RemoveAll() {
 	f.succ = sync.Map{}
 	f.fail = sync.Map{}
 	f.comm = sync.Map{}
-}
-
-func (f *ackForwarder) Wait(connID utils.MyULID) bool {
-	qsucc, ok := f.succ.Load(connID)
-	if !ok {
-		return false
-	}
-	qfail, ok := f.fail.Load(connID)
-	if !ok {
-		return false
-	}
-	return queue.WaitOne(qsucc.(*queue.IntQueue), qfail.(*queue.IntQueue))
 }
 
 type meta struct {
@@ -352,10 +359,10 @@ func (s *RelpServiceImpl) Start() ([]model.ListenerInfo, error) {
 	s.LockStatus()
 	defer s.UnlockStatus()
 	if s.status == FinalStopped {
-		return nil, errors.ServerDefinitelyStopped
+		return nil, ServerDefinitelyStopped
 	}
 	if s.status != Stopped && s.status != Waiting {
-		return nil, errors.ServerNotStopped
+		return nil, ServerNotStopped
 	}
 
 	infos := s.initTCPListeners()
@@ -488,13 +495,12 @@ func (s *RelpServiceImpl) parseOne(raw *model.RawTcpMessage, gen *utils.Generato
 	parser, err := s.parserEnv.GetParser(&raw.Decoder)
 	if parser == nil || err != nil {
 		s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
-		logger.Crit("Unknown parser")
+		logger.Error("Unknown decoder", "name", raw.Decoder.Format)
 		return nil
 	}
 	defer parser.Release()
 	syslogMsgs, err := parser.Parse(raw.Message)
 	if err != nil {
-		//logger.Warn("Parsing error", "message", string(raw.Message[:raw.Size]), "error", err)
 		logger.Warn("Parsing error", "error", err)
 		s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
 		base.ParsingErrorCounter.WithLabelValues("relp", raw.Client, raw.Decoder.Format).Inc()
@@ -507,30 +513,27 @@ func (s *RelpServiceImpl) parseOne(raw *model.RawTcpMessage, gen *utils.Generato
 		if syslogMsg == nil {
 			continue
 		}
-		if raw.Client != "" {
-			syslogMsg.SetProperty("skewer", "client", raw.Client)
-		}
-		if raw.LocalPort != 0 {
-			syslogMsg.SetProperty("skewer", "localport", strconv.FormatInt(int64(raw.LocalPort), 10))
-		}
-		if raw.UnixSocketPath != "" {
-			syslogMsg.SetProperty("skewer", "socketpath", raw.UnixSocketPath)
-		}
 
 		full = model.FullFactoryFrom(syslogMsg)
 		full.Txnr = raw.Txnr
 		full.ConfId = raw.ConfID
-		full.ConnId = raw.ConnID
+		//full.ConnId = raw.ConnID
 		full.Uid = gen.Uid()
-		defer model.FullFree(full)
-		f, nonf := s.reporter.Stash(full)
-		if f != nil {
+		full.SourceType = "relp"
+		full.ClientAddr = raw.Client
+		full.SourcePort = raw.LocalPort
+		full.SourcePath = raw.UnixSocketPath
+
+		err := s.reporter.Stash(full)
+		model.FullFree(full)
+		if eerrors.Is("Fatal", err) {
 			s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
-			logger.Error("Fatal error pushing RELP message to the Store", "err", f)
+			logger.Error("Fatal error pushing RELP message to the Store", "err", err)
 			s.StopAndWait()
-			return f
-		} else if nonf != nil {
-			logger.Warn("Non fatal error pushing RELP message to the Store", "err", nonf)
+			return err
+		}
+		if err != nil {
+			logger.Warn("Non fatal error pushing RELP message to the Store", "err", err)
 		}
 	}
 	s.forwarder.ForwardSucc(raw.ConnID, raw.Txnr)
@@ -546,16 +549,13 @@ func (s *RelpServiceImpl) Parse() {
 
 	for {
 		raw, err = s.rawQ.Get()
-		if err != nil {
-			return
-		}
-		if raw == nil {
-			s.Logger.Error("rawMessagesQueue returns nil, should not happen!")
+		if err != nil || raw == nil {
 			return
 		}
 		err = s.parseOne(raw, gen)
 		s.Pool.Put(raw)
 		if err != nil {
+			// TODO: check error type
 			return
 		}
 	}
@@ -582,32 +582,40 @@ func (s *RelpServiceImpl) handleResponses(conn net.Conn, connID utils.MyULID, cl
 		return err
 	}
 
-	for s.forwarder.Wait(connID) {
-		currentTxnr := s.forwarder.GetSucc(connID)
-		if currentTxnr != -1 {
+	var next int32 = -1
+
+	for {
+		txnrSuccess, txnrFailure := s.forwarder.GetSuccAndFail(connID)
+
+		if txnrSuccess == -1 && txnrFailure == -1 {
+			return
+		}
+
+		if txnrSuccess != -1 {
 			//logger.Debug("New success to report to client", "txnr", currentTxnr)
-			_, ok1 = successes[currentTxnr]
-			_, ok2 = failures[currentTxnr]
+			_, ok1 = successes[txnrSuccess]
+			_, ok2 = failures[txnrSuccess]
 			if !ok1 && !ok2 {
-				successes[currentTxnr] = true
+				successes[txnrSuccess] = true
 			}
 		}
 
-		currentTxnr = s.forwarder.GetFail(connID)
-		if currentTxnr != -1 {
+		if txnrFailure != -1 {
 			//logger.Debug("New failure to report to client", "txnr", currentTxnr)
-			_, ok1 = successes[currentTxnr]
-			_, ok2 = failures[currentTxnr]
+			_, ok1 = successes[txnrFailure]
+			_, ok2 = failures[txnrFailure]
 			if !ok1 && !ok2 {
-				failures[currentTxnr] = true
+				failures[txnrFailure] = true
 			}
 		}
 
-		// rsyslog expects the ACK/txnr correctly and monotonously ordered
+		// rsyslog expects the ACK/txnr correctly and monotonicly ordered
 		// so we need a bit of cooking to ensure that
 	Cooking:
 		for {
-			next := s.forwarder.NextToCommit(connID)
+			if next == -1 {
+				next = s.forwarder.NextToCommit(connID)
+			}
 			if next == -1 {
 				break Cooking
 			}
@@ -631,7 +639,7 @@ func (s *RelpServiceImpl) handleResponses(conn net.Conn, connID utils.MyULID, cl
 			}
 
 			if err == nil {
-				s.forwarder.Commit(connID)
+				next = -1
 			} else if err == io.EOF {
 				// client is gone
 				return
@@ -649,18 +657,13 @@ type RelpHandler struct {
 	Server *RelpServiceImpl
 }
 
-type closedError struct{}
-
-func (e closedError) Error() string {
-	return "received close command from client"
-}
-
 func (h RelpHandler) HandleConnection(conn net.Conn, c conf.TCPSourceConfig) {
+	// TODO: return error
 	// http://www.rsyslog.com/doc/relp.html
 	config := conf.RELPSourceConfig(c)
 	s := h.Server
 	s.AddConnection(conn)
-	connID := s.forwarder.AddConn()
+	connID := s.forwarder.AddConn(s.QueueSize)
 	lport, lports, client, path := props(conn)
 	l := s.Logger.New(
 		"ConnID", connID,
@@ -687,13 +690,12 @@ func (h RelpHandler) HandleConnection(conn net.Conn, c conf.TCPSourceConfig) {
 	scan(l, s.forwarder, s.rawQ, conn, config.Timeout, config.ConfID, connID, s.MaxMessageSize, lport, config.DecoderBaseConfig, lports, path, client, s.Pool)
 }
 
-func scan(l log15.Logger, f *ackForwarder, rawq *tcp.Ring, c net.Conn, tout time.Duration, cfid, cnid utils.MyULID, msiz int, lport int32, dc conf.DecoderBaseConfig, lports, path, clt string, p *sync.Pool) {
+func scan(l log15.Logger, f *ackForwarder, rawq *tcp.Ring, c net.Conn, tout time.Duration, cfid, cnid utils.MyULID, msiz int, lport int32, dc conf.DecoderBaseConfig, lports, path, clt string, p *sync.Pool) (err error) {
 	l.Info("New client connection")
 	base.ClientConnectionCounter.WithLabelValues("relp", clt, lports, path).Inc()
 
 	var previous = int32(-1)
 	var command string
-	var err error
 	var txnr int32
 	var splits [][]byte
 	var data []byte
@@ -706,13 +708,6 @@ func scan(l log15.Logger, f *ackForwarder, rawq *tcp.Ring, c net.Conn, tout time
 	scanner := bufio.NewScanner(c)
 	scanner.Split(utils.RelpSplit)
 	scanner.Buffer(make([]byte, 0, 132000), 132000)
-
-	defer func() {
-		err = scanner.Err()
-		if err != nil {
-			l.Info("Scanner error", "error", err)
-		}
-	}()
 
 	for scanner.Scan() {
 		splits = bytes.SplitN(scanner.Bytes(), sp, 3)
@@ -750,9 +745,10 @@ func scan(l log15.Logger, f *ackForwarder, rawq *tcp.Ring, c net.Conn, tout time
 				return
 			case fsm.NoTransitionError:
 				// syslog does not change opened/closed state
-			case closedError:
-				return
 			default:
+				if err == errClosed {
+					return
+				}
 				l.Error("Unexpected error", "error", err)
 				return
 			}
@@ -761,7 +757,10 @@ func scan(l log15.Logger, f *ackForwarder, rawq *tcp.Ring, c net.Conn, tout time
 			_ = c.SetReadDeadline(time.Now().Add(tout))
 		}
 	}
+	return scanner.Err()
 }
+
+var errClosed = eerrors.WithTypes(eerrors.New("Closed RELP connection"), "Closed")
 
 func newMachine(l log15.Logger, fwder *ackForwarder, rawq *tcp.Ring, conn io.Writer, confID, connID utils.MyULID, msiz int, lport int32, dc conf.DecoderBaseConfig, lports, path, clt string, p *sync.Pool) *fsm.FSM {
 	// TODO: PERF: fsm protects internal variables (states, events) with mutexes. We don't really need the mutexes here.
@@ -807,7 +806,7 @@ func newMachine(l log15.Logger, fwder *ackForwarder, rawq *tcp.Ring, conn io.Wri
 				txnr := e.Args[0].(int32)
 				fmt.Fprintf(conn, "%d rsp 0\n0 serverclose 0\n", txnr)
 				l.Debug("Received 'close' command")
-				e.Err = closedError{}
+				e.Err = errClosed
 			},
 			"enter_opened": func(e *fsm.Event) {
 				txnr := e.Args[0].(int32)

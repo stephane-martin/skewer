@@ -10,6 +10,7 @@ import (
 	"github.com/stephane-martin/skewer/encoders"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 )
 
 type RedisDestination struct {
@@ -81,6 +82,6 @@ func (d *RedisDestination) sendOne(ctx context.Context, msg *model.FullMessage, 
 	return err
 }
 
-func (d *RedisDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
-	return d.ForEachWithTopic(ctx, d.sendOne, d.ACK, msgs)
+func (d *RedisDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err eerrors.ErrorSlice) {
+	return d.ForEachWithTopic(ctx, d.sendOne, true, true, msgs)
 }

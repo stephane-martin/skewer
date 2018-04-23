@@ -20,7 +20,7 @@ var printStoreCmd = &cobra.Command{
 
 		var err error
 		var c conf.BaseConfig
-		var st store.Store
+		var st *store.MessageStore
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		logger := log15.New()

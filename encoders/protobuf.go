@@ -15,14 +15,14 @@ func encodePB(v interface{}, w io.Writer) error {
 	case *model.FullMessage:
 		buf, err := proto.Marshal(val)
 		if err != nil {
-			return err
+			return EncodingError(err)
 		}
 		_, err = w.Write(buf)
 		return err
 	case *model.SyslogMessage:
 		buf, err := proto.Marshal(val)
 		if err != nil {
-			return err
+			return EncodingError(err)
 		}
 		_, err = w.Write(buf)
 		return err

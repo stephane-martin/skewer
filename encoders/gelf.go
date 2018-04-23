@@ -53,7 +53,7 @@ func encodeGELF(v interface{}, w io.Writer) (err error) {
 		buf := bytes.NewBuffer(nil)
 		err = FullToGelfMessage(val).MarshalJSONBuf(buf)
 		if err != nil {
-			return err
+			return EncodingError(err)
 		}
 		_, err = w.Write(buf.Bytes())
 		return err
@@ -61,7 +61,7 @@ func encodeGELF(v interface{}, w io.Writer) (err error) {
 		buf := bytes.NewBuffer(nil)
 		err = SyslogToGelfMessage(val).MarshalJSONBuf(buf)
 		if err != nil {
-			return err
+			return EncodingError(err)
 		}
 		_, err = w.Write(buf.Bytes())
 		return err

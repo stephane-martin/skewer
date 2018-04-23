@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -23,6 +22,7 @@ import (
 	"github.com/stephane-martin/skewer/sys/kring"
 	"github.com/stephane-martin/skewer/sys/namespaces"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 	"github.com/stephane-martin/skewer/utils/queue"
 )
 
@@ -37,7 +37,7 @@ var SHUTDOWN = []byte("shutdown")
 var STARTERROR = []byte("starterror")
 var GATHER = []byte("gathermetrics")
 var METRICS = []byte("metrics")
-var NOLISTENER = errors.New("")
+var NOLISTENER = eerrors.New("no listener")
 
 // PluginController launches and controls the plugins services
 type PluginController struct {
@@ -126,9 +126,9 @@ func (f *CFactory) NewStore(loggerHandle uintptr) *StorePlugin {
 func (s *PluginController) W(header []byte, message []byte) (err error) {
 	s.stdinMu.Lock()
 	if s.stdinWriter != nil {
-		err = s.stdinWriter.WriteWithHeader(header, message)
+		err = eerrors.Wrap(s.stdinWriter.WriteWithHeader(header, message), "error writing to child stdin pipe")
 	} else {
-		err = fmt.Errorf("stdin is nil")
+		err = eerrors.New("stdin is nil")
 	}
 	s.stdinMu.Unlock()
 	return err
@@ -139,20 +139,24 @@ func (s *PluginController) Gather() (m []*dto.MetricFamily, err error) {
 	m = make([]*dto.MetricFamily, 0)
 	select {
 	case <-s.ShutdownChan:
-		return
+		return nil, nil
 	default:
 		s.startedMu.Lock()
-		defer s.startedMu.Unlock()
-		if !s.started {
-			return
+		started := s.started
+		s.startedMu.Unlock()
+		if !started {
+			return nil, nil
 		}
 		if s.W(GATHER, utils.NOW) != nil {
-			return
+			return nil, nil
 		}
 
 		select {
+		case <-s.ShutdownChan:
+			return nil, nil
 		case <-time.After(2 * time.Second):
-			return
+			s.logger.Debug("Child did not respond to metrics request after timeout", "type", s.typ)
+			return nil, nil
 		case metrics, more := <-s.metricsChan:
 			if !more || metrics == nil {
 				return
@@ -163,65 +167,70 @@ func (s *PluginController) Gather() (m []*dto.MetricFamily, err error) {
 }
 
 // Stop kindly asks the controlled plugin to stop activity
-func (s *PluginController) Stop() {
+func (s *PluginController) Stop() error {
 	// in case the plugin was in fact never created...
 	s.createdMu.Lock()
-	if !s.created {
-		s.createdMu.Unlock()
-		return
-	}
+	created := s.created
 	s.createdMu.Unlock()
+	if !created {
+		return nil
+	}
 
 	select {
 	case <-s.ShutdownChan:
+		return nil
 	case <-s.StopChan:
+		return nil
 	default:
-		err := s.W(STOP, utils.NOW)
-		if err != nil {
-			s.logger.Warn("Error writing stop to plugin stdin", "error", err)
-		} else {
-			<-s.StopChan
-		}
 	}
+	err := s.W(STOP, utils.NOW)
+	if err != nil {
+		return eerrors.Wrapf(err, "Error sending 'stop' message to plugin '%s'", s.name)
+	}
+	<-s.StopChan
+	return nil
 }
 
 // Shutdown demands that the controlled plugin shutdowns now. After killTimeOut, it kills the plugin.
-func (s *PluginController) Shutdown(killTimeOut time.Duration) {
+func (s *PluginController) Shutdown(killTimeOut time.Duration) (killed bool) {
 	// in case the plugin process was in fact never created...
 	s.createdMu.Lock()
-	if !s.created {
-		s.createdMu.Unlock()
-		return
-	}
+	created := s.created
 	s.createdMu.Unlock()
+	if !created {
+		return false
+	}
 
 	select {
 	case <-s.ShutdownChan:
 		// the plugin process is already dead
 		<-s.StopChan
+		return false
 	default:
 		// ask to shutdown
 		s.logger.Debug("Controller is asked to shutdown", "type", s.name)
 		err := s.W(SHUTDOWN, utils.NOW)
 		if err != nil {
-			s.logger.Warn("Error writing shutdown to plugin stdin. Kill brutally.", "error", err, "type", s.name)
+			s.logger.Warn("Error writing shutdown to plugin stdin. Let's kill it brutally.", "error", err, "type", s.name)
 			killTimeOut = time.Second
 		}
 		// wait for plugin process termination
 		if killTimeOut == 0 {
 			<-s.ShutdownChan
 			<-s.StopChan
-		} else {
-			select {
-			case <-s.ShutdownChan:
-				<-s.StopChan
-			case <-time.After(killTimeOut):
-				// after timeout kill the process
-				s.logger.Warn("Plugin failed to shutdown before timeout", "type", s.name)
-				_ = s.kill(false)
-				<-s.ShutdownChan
-				<-s.StopChan
-			}
+			return false
+		}
+		select {
+		case <-s.ShutdownChan:
+			<-s.StopChan
+			return false
+		case <-time.After(killTimeOut):
+			// after timeout kill the process
+			s.logger.Warn("Plugin failed to shutdown before timeout", "type", s.name)
+			_ = s.kill(false)
+			<-s.ShutdownChan
+			<-s.StopChan
+			return true
 		}
 	}
 
@@ -249,48 +258,42 @@ type infosAndError struct {
 }
 
 // listen for the encrypted messages that the plugin produces
-func (s *PluginController) listenpipe(secret *memguard.LockedBuffer) {
+func (s *PluginController) listenpipe(secret *memguard.LockedBuffer) (err error) {
 	defer func() {
-		if e := recover(); e != nil {
-			errString := fmt.Sprintf("%s", e)
-			s.logger.Error("scanner panicked", "error", errString)
+		if e := eerrors.Err(recover()); e != nil {
+			err = eerrors.Wrapf(err, "scanner panicked in plugin '%s' controller listening pipe", s.name)
 		}
 	}()
-	if s.pipe == nil {
-		return
-	}
-	switch s.typ {
-	case base.Store, base.Configuration:
-		return
-	default:
+	if s.pipe == nil || s.typ == base.Store || s.typ == base.Configuration {
+		return nil
 	}
 	scanner := bufio.NewScanner(s.pipe)
 	scanner.Split(utils.MakeDecryptSplit(secret))
 	scanner.Buffer(make([]byte, 0, 132000), 132000)
 
-	var err error
 	var message *model.FullMessage
 
 	for scanner.Scan() {
 		message, err = model.FromBuf(scanner.Bytes())
 		if err != nil {
-			s.logger.Error("Unexpected error decrypting message from the plugin pipe", "type", s.name, "error", err)
-			return
+			return eerrors.Wrapf(err, "Unexpected error decrypting message from the plugin '%s' pipe", s.name)
 		}
 		err = s.stasher.Stash(message) // send message to the Store controller
 		model.FullFree(message)
 		if err != nil {
-			s.logger.Error("Error stashing message", "error", err)
-			return
+			return eerrors.Wrap(err, "Error stashing message")
 		}
 
 	}
 	err = scanner.Err()
-	if utils.IsFileClosed(err) {
-		s.logger.Debug("listenpipe stops", "type", s.typ)
-	} else if err != nil {
-		s.logger.Error("Unexpected error when listening to the plugin pipe", "type", s.name, "error", err)
+	if err == nil || eerrors.HasFileClosed(err) {
+		s.logger.Debug("listenpipe stops", "type", s.name)
+		return nil
 	}
+	if err != nil {
+		return eerrors.Wrapf(err, "Unexpected error when listening to the plugin '%s' pipe", s.name)
+	}
+	return nil
 }
 
 func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndError {
@@ -313,13 +316,13 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 		normalStop := false
 
 		defer func() {
-			if e := recover(); e != nil {
-				errString := fmt.Sprintf("%s", e)
-				s.logger.Error("Scanner panicked in plugin control", "error", errString)
+			err := eerrors.Err(recover())
+			if err != nil {
+				s.logger.Error("Scanner panicked in plugin control", "error", err)
 			}
 
 			s.logger.Debug("Plugin controller is stopping", "type", s.name)
-			startError(fmt.Errorf("unexpected end of plugin before it was initialized"), nil)
+			startError(eerrors.New("unexpected end of plugin before it was initialized"), nil)
 
 			s.createdMu.Lock()
 			s.startedMu.Lock()
@@ -369,9 +372,9 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 				// in the general case the plugin should rather use the dedicated message pipe
 				if len(parts) == 2 {
 					if !initialized {
-						msg := "plugin sent a syslog message before being initialized"
-						s.logger.Error(msg)
-						startError(fmt.Errorf(msg), nil)
+						err := eerrors.New("plugin sent a syslog message before being initialized")
+						s.logger.Error(err.Error())
+						startError(err, nil)
 						kill = true
 						return
 					}
@@ -400,19 +403,25 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 						initialized = true
 						startError(nil, inf)
 					} else {
-						s.logger.Warn("Plugin sent a badly encoded JSON listener info", "error", err)
+						err = eerrors.Wrap(err, "Plugin sent a badly encoded JSON listener info")
+						s.logger.Warn(err.Error())
 						startError(err, nil)
 						kill = true
 						return
 					}
 				}
 			case "infos":
+				// the RELP plugin can sen notification about its listeners long after starting up
 				if len(parts) == 2 {
 					newinfos := make([]model.ListenerInfo, 0)
 					err := json.Unmarshal([]byte(parts[1]), &newinfos)
-					if err == nil {
+					if err != nil {
+						err = eerrors.Wrap(err, "Can't JSON decode listener info")
+						s.logger.Warn(err.Error())
+					} else {
 						s.logger.Info("reported infos", "infos", newinfos, "type", s.name)
 						if s.registry != nil {
+							// register the listeners in consul
 							for _, i := range infos {
 								s.registry.UnregisterTcpListener(i.BindAddr, i.Protocol, i.Port)
 							}
@@ -424,10 +433,11 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 					}
 				}
 			case "stopped":
+				// plugin child says it has stopped, but the child process stays alive (useful for systemd child)
 				normalStop = true
 				return
 			case "shutdown":
-				// plugin child is shutting down, eventually the scanner will return normally, we just wait for that
+				// plugin child says it is shutting down, eventually the scanner will return normally, we just wait for that
 			case "starterror":
 				if len(parts) == 2 {
 					err := fmt.Errorf(string(parts[1]))
@@ -435,8 +445,15 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 				}
 			case "conferror":
 				if len(parts) == 2 {
-					err := fmt.Errorf(string(parts[1]))
+					err := eerrors.Errorf("Plugin reports a configuration error: %s", string(parts[1]))
+					s.logger.Warn(err.Error())
 					startError(err, nil)
+					// TODO: kill ?
+				} else {
+					err := eerrors.New("Plugin reports a configuration error, but the error is badly formatted")
+					s.logger.Warn(err.Error())
+					startError(err, nil)
+					// TODO: kill ?
 				}
 			case "nolistenererror":
 				startError(NOLISTENER, nil)
@@ -453,34 +470,38 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 						return
 					}
 				} else {
-					s.logger.Error("Plugin returned empty metrics")
+					s.logger.Error("Plugin returned badly formatted metrics")
 					close(s.metricsChan)
 					kill = true
 					return
 				}
 			default:
-				err := fmt.Errorf("unexpected message from plugin")
-				s.logger.Error("Unexpected message from plugin", "command", command)
+				err := eerrors.New("unexpected message from plugin")
+				s.logger.Error(err.Error(), "command", command)
 				startError(err, nil)
 				kill = true
 				return
 			}
 		}
 		err := scanner.Err()
-		s.logger.Debug("Plugin scanner returned", "type", s.name)
 		if err == nil {
+			err = eerrors.Errorf("Plugin scanner returned: %s", s.name)
+			s.logger.Debug(err.Error())
+			startError(err, nil)
 			// 'scanner' has returned without error.
-			// It means that the plugin child stdout is EOF = closed.
 			// So we know that the plugin child has exited
 			// Let's wait that the shutdown channel has been closed before executing the defer()
 			<-s.ShutdownChan
 		} else {
-			// plugin has sent an invalid message that could not be interpreted by scanner
-			startError(err, nil)
-			if utils.IsFileClosed(err) {
+			if eerrors.HasFileClosed(err) {
+				err = eerrors.Wrapf(err, "Plugin scanner returned: %s", s.name)
+				startError(err, nil)
 				<-s.ShutdownChan
 			} else {
-				s.logger.Warn("Plugin scanner error", "type", s.name, "error", err)
+				// plugin has sent an invalid message that could not be interpreted by scanner
+				err = eerrors.Wrapf(err, "Plugin scanner error: %s", s.name)
+				startError(err, nil)
+				s.logger.Warn(err.Error())
 				kill = true
 			}
 		}
@@ -495,12 +516,12 @@ func (s *PluginController) Start() (infos []model.ListenerInfo, err error) {
 	if !s.created {
 		s.startedMu.Unlock()
 		s.createdMu.Unlock()
-		return nil, fmt.Errorf("can not start, plugin '%s' has not been created", s.name)
+		return nil, eerrors.Errorf("can not start, plugin '%s' has not been created", s.name)
 	}
 	if s.started {
 		s.startedMu.Unlock()
 		s.createdMu.Unlock()
-		return nil, fmt.Errorf("plugin already started: '%s'", s.name)
+		return nil, eerrors.Errorf("plugin already started: '%s'", s.name)
 	}
 	s.StopChan = make(chan struct{})
 
@@ -510,10 +531,15 @@ func (s *PluginController) Start() (infos []model.ListenerInfo, err error) {
 		s.logger.Debug("Decrypting messages from plugin", "type", s.name)
 		secret, err = s.ring.GetBoxSecret()
 		if err != nil {
-			return nil, err
+			return nil, eerrors.Wrapf(err, "Can't get box secret")
 		}
 	}
-	go s.listenpipe(secret)
+	go func() {
+		err := s.listenpipe(secret)
+		if err != nil {
+			s.logger.Error("listenpipe error", "err", err.Error(), "type", s.name)
+		}
+	}()
 
 	// the s.conf is filtered so that only the needed parameters
 	// are transmitted to the provider
@@ -531,7 +557,7 @@ func (s *PluginController) Start() (infos []model.ListenerInfo, err error) {
 			infos = infoserr.infos
 		case <-time.After(60 * time.Second):
 			close(s.StopChan)
-			rerr = fmt.Errorf("plugin '%s' failed to start before timeout", s.name)
+			rerr = eerrors.Errorf("plugin '%s' failed to start before timeout", s.name)
 		}
 	}
 
@@ -650,7 +676,7 @@ func (s *PluginController) Create(optsfuncs ...func(*PluginCreateOpts)) error {
 		if err != nil {
 			close(s.ShutdownChan)
 			s.createdMu.Unlock()
-			return err
+			return eerrors.Wrap(err, "Error creating plugin pipe")
 		}
 		s.pipe = piper
 
@@ -671,7 +697,7 @@ func (s *PluginController) Create(optsfuncs ...func(*PluginCreateOpts)) error {
 				_ = pipew.Close()
 				close(s.ShutdownChan)
 				s.createdMu.Unlock()
-				return err
+				return eerrors.Wrapf(err, "Error setting up the execution environment for plugin: %s", s.name)
 			}
 			err = s.cmd.Namespaced().
 				Dumpable(opts.dumpable).
@@ -714,7 +740,7 @@ func (s *PluginController) Create(optsfuncs ...func(*PluginCreateOpts)) error {
 		if err != nil {
 			close(s.ShutdownChan)
 			s.createdMu.Unlock()
-			return err
+			return eerrors.Wrap(err, "Error creating plugin pipe")
 		}
 		s.pipe = pipew
 		//noinspection GoBoolExpressions
@@ -761,7 +787,7 @@ func (s *PluginController) Create(optsfuncs ...func(*PluginCreateOpts)) error {
 				_ = pipew.Close()
 				close(s.ShutdownChan)
 				s.createdMu.Unlock()
-				return err
+				return eerrors.Wrapf(err, "Error setting up the execution environment for plugin: %s", s.name)
 			}
 			err = s.cmd.Start()
 		}
@@ -788,7 +814,7 @@ func (s *PluginController) Create(optsfuncs ...func(*PluginCreateOpts)) error {
 	if err != nil {
 		close(s.ShutdownChan)
 		s.createdMu.Unlock()
-		return err
+		return eerrors.Wrapf(err, "Plugin failed to start: %s", s.name)
 	}
 	s.stdinWriter = utils.NewSignatureWriter(s.cmd.Stdin, s.signKey)
 	s.created = true
@@ -800,18 +826,16 @@ func (s *PluginController) Create(optsfuncs ...func(*PluginCreateOpts)) error {
 		if err == nil {
 			s.logger.Debug("Plugin process has exited without reporting error", "type", s.name)
 			s.ExitCode = 0
-		} else if e, ok := err.(*exec.ExitError); ok {
-			s.logger.Error("Plugin process has shutdown with error", "stderr", string(e.Stderr), "type", s.name, "error", e.Error())
-			status := e.ProcessState.Sys()
-			if cstatus, ok := status.(syscall.WaitStatus); ok {
-				s.ExitCode = cstatus.ExitStatus()
-				s.logger.Error("Plugin process return code", "type", s.name, "code", s.ExitCode)
-			} else {
-				s.ExitCode = -1
-				s.logger.Warn("Could not interpret plugin process return code", "type", s.name)
-			}
 		} else {
-			s.logger.Error("Plugin process has exited abnormally, but the error could not be interpreted", "type", s.name, "error", err.Error())
+			s.logger.Error("Plugin process has shutdown with error", "type", s.name, "error", err.Error())
+			if e, ok := err.(*exec.ExitError); ok {
+				status := e.ProcessState.Sys()
+				s.ExitCode = 1
+				if cstatus, ok := status.(syscall.WaitStatus); ok {
+					s.ExitCode = cstatus.ExitStatus()
+					s.logger.Error("Plugin process return code", "type", s.name, "code", s.ExitCode)
+				}
+			}
 		}
 		close(s.ShutdownChan)
 		// after some client has waited ShutdownChan to be closed, it can safely read ExitCode
@@ -897,9 +921,9 @@ func (s *StorePlugin) Stash(m *model.FullMessage) (err error) {
 		_, err = m.MarshalTo(b)
 	}
 	if err != nil {
-		return err
+		return eerrors.Wrap(err, "Failed to protobuf-marshal message to be sent to the Store")
 	}
-	return s.q.PutSlice(b)
+	return eerrors.Wrap(s.q.PutSlice(b), "Failed to enqueue message to be sent to the Store")
 }
 
 func (s *StorePlugin) Start() (infos []model.ListenerInfo, err error) {

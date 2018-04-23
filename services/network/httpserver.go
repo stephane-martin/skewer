@@ -10,7 +10,6 @@ import (
 	"runtime"
 	"strconv"
 	"sync"
-	"sync/atomic"
 
 	"github.com/inconshreveable/log15"
 	dto "github.com/prometheus/client_model/go"
@@ -20,8 +19,10 @@ import (
 	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 	"github.com/stephane-martin/skewer/utils/queue/tcp"
 	"github.com/valyala/bytebufferpool"
+	"go.uber.org/atomic"
 )
 
 var requestBodyPool bytebufferpool.Pool
@@ -47,27 +48,27 @@ func initHTTPRegistry() {
 
 func newTracker(count int64, callbackOK func(), callbackFail func()) *requestTracker {
 	r := requestTracker{
-		count:        count,
 		connID:       utils.NewUid(),
 		callbackOK:   callbackOK,
 		callbackFail: callbackFail,
 	}
+	r.count.Store(count)
 	r.Lock()
 	return &r
 }
 
 type requestTracker struct {
-	count        int64
+	count        atomic.Int64
 	callbackOK   func()
 	callbackFail func()
 	connID       utils.MyULID
-	failed       int32
+	failed       atomic.Bool
 	sync.Mutex
 	sync.Once
 }
 
 func (r *requestTracker) done() {
-	if atomic.AddInt64(&r.count, -1) == 0 && atomic.LoadInt32(&r.failed) == 0 {
+	if r.count.Dec() == 0 && !r.failed.Load() {
 		r.finish(true)
 	}
 }
@@ -84,8 +85,8 @@ func (r *requestTracker) finish(ok bool) {
 }
 
 func (r *requestTracker) fail() {
-	atomic.AddInt64(&r.count, -1)
-	if atomic.CompareAndSwapInt32(&r.failed, 0, 1) {
+	r.count.Dec()
+	if r.failed.CAS(false, true) {
 		r.finish(false)
 	}
 }
@@ -301,14 +302,15 @@ func (s *HTTPServiceImpl) handler(config conf.HTTPServerSourceConfig) func(http.
 				defer model.FullFree(full)
 				full.Uid = utils.NewUid()
 
-				fatal, nonfatal := s.reporter.Stash(full)
-				if fatal != nil {
+				err := s.reporter.Stash(full)
+				if eerrors.Is("Fatal", err) {
 					w.WriteHeader(http.StatusInternalServerError)
-					s.logger.Error("Fatal error stashing HTTP message", "error", fatal)
+					s.logger.Error("Fatal error stashing HTTP message", "error", err)
 					close(s.fatalErrorChan)
 					return
-				} else if nonfatal != nil {
-					s.logger.Warn("Non-fatal error stashing HTTP message", "error", nonfatal)
+				}
+				if err != nil {
+					s.logger.Warn("Non-fatal error stashing HTTP message", "error", err)
 				}
 			}
 			//base.IncomingMsgsCounter.WithLabelValues("kafka", raw.Brokers, "", "").Inc()
@@ -408,15 +410,16 @@ func (s *HTTPServiceImpl) parseAndEnqueue(gen *utils.Generator, raw *model.RawTc
 		defer model.FullFree(full)
 		full.Uid = gen.Uid()
 
-		fatal, nonfatal := s.reporter.Stash(full)
+		err := s.reporter.Stash(full)
 
-		if fatal != nil {
-			logger.Error("Fatal error stashing HTTP message", "error", fatal)
+		if eerrors.Is("Fatal", err) {
+			logger.Error("Fatal error stashing HTTP message", "error", err)
 			s.fail(raw.ConnID)
 			s.dofatal()
-			return fatal
-		} else if nonfatal != nil {
-			logger.Warn("Non-fatal error stashing HTTP message", "error", nonfatal)
+			return err
+		}
+		if err != nil {
+			logger.Warn("Non-fatal error stashing HTTP message", "error", err)
 			// TODO/ think about non-fatal handling
 		}
 	}
@@ -450,8 +453,11 @@ func (s *HTTPServiceImpl) parseOne(raw *model.RawTcpMessage) (fulls []*model.Ful
 			continue
 		}
 		full = model.FullFactoryFrom(syslogMsg)
+		full.SourceType = "httpserver"
+		full.SourcePort = raw.LocalPort
+		full.ClientAddr = raw.Client
 		full.ConfId = raw.ConfID
-		full.ConnId = raw.ConnID
+		//full.ConnId = raw.ConnID
 		fulls = append(fulls, full)
 	}
 	return fulls, nil

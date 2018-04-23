@@ -6,10 +6,9 @@ import (
 
 	"github.com/stephane-martin/skewer/clients"
 	"github.com/stephane-martin/skewer/conf"
-	"github.com/stephane-martin/skewer/encoders"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
-	"github.com/uber-go/multierr"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 )
 
 var sp = []byte(" ")
@@ -92,7 +91,7 @@ func (d *TCPDestination) sendOne(ctx context.Context, message *model.FullMessage
 		d.previousUid = message.Uid
 		return nil
 	}
-	if encoders.IsEncodingError(err) {
+	if IsEncodingError(err) {
 		d.PermError(message.Uid)
 		return err
 	}
@@ -109,24 +108,24 @@ func (d *TCPDestination) Close() error {
 	return d.clt.Close()
 }
 
-func (d *TCPDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
+func (d *TCPDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err eerrors.ErrorSlice) {
 	var msg *model.FullMessage
-	var e error
-
+	var curErr error
+	c := eerrors.ChainErrors()
 	for len(msgs) > 0 {
 		msg = msgs[0].Message
 		msgs = msgs[1:]
-		e = d.sendOne(ctx, msg)
+		// ACK, NACK and PermError for current message are handled by sendOne
+		curErr = d.sendOne(ctx, msg)
 		model.FullFree(msg)
-		if e != nil {
-			err = multierr.Append(err, e)
-			if !encoders.IsEncodingError(e) {
+		if curErr != nil {
+			c.Append(curErr)
+			if !IsEncodingError(curErr) {
 				d.NACKRemaining(msgs)
 				d.dofatal()
-				return err
+				return c.Sum()
 			}
-			// ACK, NACK and PermError for current message are handled by sendOne
 		}
 	}
-	return err
+	return c.Sum()
 }

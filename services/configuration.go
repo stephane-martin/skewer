@@ -23,6 +23,7 @@ import (
 	"github.com/stephane-martin/skewer/sys/kring"
 	"github.com/stephane-martin/skewer/sys/namespaces"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 )
 
 var confStdoutMu sync.Mutex
@@ -32,7 +33,7 @@ func WConf(header []byte, message []byte) (err error) {
 	confStdoutMu.Lock()
 	err = confStdoutWriter.WriteWithHeader(header, message)
 	confStdoutMu.Unlock()
-	return err
+	return eerrors.Wrap(err, "child failed to write to its stdout pipe")
 }
 
 type ConfigurationService struct {
@@ -57,7 +58,7 @@ func NewConfigurationService(ring kring.Ring, signKey *memguard.LockedBuffer, ch
 	}
 	boxsec, err := ring.GetBoxSecret()
 	if err != nil {
-		return nil, err
+		return nil, eerrors.Wrap(err, "Can't get the box secret")
 	}
 	c.boxsec = boxsec
 	return &c, nil
@@ -71,9 +72,9 @@ func (c *ConfigurationService) W(header []byte, message []byte) (err error) {
 	c.stdinMu.Lock()
 	defer c.stdinMu.Unlock()
 	if c.stdinWriter != nil {
-		err = c.stdinWriter.WriteWithHeader(header, message)
+		err = eerrors.Wrap(c.stdinWriter.WriteWithHeader(header, message), "Error writing to the configuration stdin pipe")
 	} else {
-		err = fmt.Errorf("stdin is nil")
+		err = eerrors.New("stdin is nil")
 	}
 	return err
 }
@@ -86,22 +87,22 @@ func (c *ConfigurationService) SetConsulParams(params consul.ConnParams) {
 	c.params = params
 }
 
-func (c *ConfigurationService) Stop() {
+func (c *ConfigurationService) Stop() error {
 	err := c.W([]byte("stop"), utils.NOW)
-	if err == nil {
-		for range c.output {
-
-		}
-	} else {
-		c.logger.Warn("Error asking the configuration plugin to stop", "error", err)
+	if err != nil {
+		return eerrors.Wrap(err, "Error asking the configuration plugin to stop")
 	}
+	for range c.output {
+	}
+	return nil
 }
 
-func (c *ConfigurationService) Reload() {
+func (c *ConfigurationService) Reload() error {
 	err := c.W([]byte("reload"), utils.NOW)
 	if err != nil {
-		c.logger.Warn("Error asking the configuration plugin to reload", "error", err)
+		return eerrors.Wrap(err, "Error asking the configuration plugin to reload")
 	}
+	return nil
 }
 
 func (c *ConfigurationService) Chan() chan *conf.BaseConfig {
@@ -114,11 +115,7 @@ func (c *ConfigurationService) Start(r kring.Ring) error {
 	c.output = make(chan *conf.BaseConfig)
 
 	if capabilities.CapabilitiesSupported {
-		cmd, err = namespaces.SetupCmd(
-			"confined-skewer-conf",
-			r,
-			namespaces.LoggerHandle(c.loggerHandle),
-		)
+		cmd, err = namespaces.SetupCmd("confined-skewer-conf", r, namespaces.LoggerHandle(c.loggerHandle))
 		if err != nil {
 			close(c.output)
 			return err
@@ -129,14 +126,10 @@ func (c *ConfigurationService) Start(r kring.Ring) error {
 		c.logger.Warn("Starting configuration service in user namespace has failed", "error", err)
 	}
 	if err != nil || !capabilities.CapabilitiesSupported {
-		cmd, err = namespaces.SetupCmd(
-			"skewer-conf",
-			r,
-			namespaces.LoggerHandle(c.loggerHandle),
-		)
+		cmd, err = namespaces.SetupCmd("skewer-conf", r, namespaces.LoggerHandle(c.loggerHandle))
 		if err != nil {
 			close(c.output)
-			return err
+			return eerrors.Wrap(err, "error creating the execution environment for configuration child")
 		}
 		err = cmd.Cmd.Start()
 	}
@@ -144,7 +137,7 @@ func (c *ConfigurationService) Start(r kring.Ring) error {
 		_ = cmd.Stdin.Close()
 		_ = cmd.Stdout.Close()
 		close(c.output)
-		return err
+		return eerrors.Wrap(err, "error starting the configuration child")
 	}
 	c.stdin = cmd.Stdin
 	c.stdinWriter = utils.NewSignatureWriter(cmd.Stdin, c.signKey)
@@ -155,14 +148,14 @@ func (c *ConfigurationService) Start(r kring.Ring) error {
 		kill := false
 		once := &sync.Once{}
 		defer func() {
-			if e := recover(); e != nil {
-				errString := fmt.Sprintf("%s", e)
-				c.logger.Error("Scanner panicked in configuration controller", "error", errString)
+			err := eerrors.Err(recover())
+			if err != nil {
+				c.logger.Error("Scanner panicked in configuration controller", "error", err)
 			}
 			c.logger.Debug("Configuration service is stopping")
 
 			once.Do(func() {
-				startedChan <- fmt.Errorf("unexpected end of configuration service")
+				startedChan <- eerrors.New("unexpected end of configuration service")
 				close(startedChan)
 			})
 
@@ -179,8 +172,6 @@ func (c *ConfigurationService) Start(r kring.Ring) error {
 				close(errChan)
 			}()
 
-			var err error
-
 			select {
 			case err = <-errChan:
 			case <-time.After(3 * time.Second):
@@ -196,7 +187,6 @@ func (c *ConfigurationService) Start(r kring.Ring) error {
 			} else {
 				c.logger.Error("Configuration process has ended with error", "error", err.Error())
 				if e, ok := err.(*exec.ExitError); ok {
-					c.logger.Error("Configuration process stderr", "stderr", string(e.Stderr))
 					status := e.Sys()
 					if cstatus, ok := status.(syscall.WaitStatus); ok {
 						c.logger.Error("Configuration process exit code", "code", cstatus.ExitStatus())
@@ -235,23 +225,29 @@ func (c *ConfigurationService) Start(r kring.Ring) error {
 				once.Do(func() { close(startedChan) })
 
 			case "starterror":
-				msg := ""
+				var err error
 				if len(parts) == 2 {
-					msg = parts[1]
+					err = eerrors.Errorf("Configuration child failed to start: %s", parts[1])
 				} else {
-					msg = "Received empty starterror from child"
+					err = eerrors.New("Unexpected empty start error from configuration child")
 					kill = true
 				}
-				c.logger.Error(msg)
-				once.Do(func() { startedChan <- fmt.Errorf(msg); close(startedChan) })
+				c.logger.Error(err.Error())
+				once.Do(func() {
+					startedChan <- err
+					close(startedChan)
+				})
 				return
 			case "reloaded":
 				c.logger.Debug("Configuration child has been reloaded")
 			default:
-				msg := "Unknown command received from configuration child"
-				c.logger.Error(msg, "command", command)
+				err := eerrors.Errorf("Unknown command received from configuration child: %s", command)
+				c.logger.Warn(err.Error())
 				kill = true
-				once.Do(func() { startedChan <- fmt.Errorf(msg + ": " + command); close(startedChan) })
+				once.Do(func() {
+					startedChan <- err
+					close(startedChan)
+				})
 				return
 			}
 		}
@@ -263,7 +259,7 @@ func (c *ConfigurationService) Start(r kring.Ring) error {
 	}()
 
 	cparams, _ := json.Marshal(c.params)
-	c.logger.Info("Consul params", "params", string(cparams))
+	//c.logger.Info("Consul params", "params", string(cparams))
 
 	err = c.W([]byte("confdir"), []byte(c.confdir))
 	if err == nil {
@@ -276,10 +272,10 @@ func (c *ConfigurationService) Start(r kring.Ring) error {
 		}
 	}
 	if err != nil {
-		c.logger.Crit("Error starting configuration service", "error", err)
 		c.Stop()
+		return eerrors.Wrap(err, "Error starting the configuration service")
 	}
-	return err
+	return nil
 
 }
 
@@ -342,7 +338,7 @@ func start(confdir string, params consul.ConnParams, r kring.Ring, logger log15.
 	return cancel, nil
 }
 
-func LaunchConfProvider(r kring.Ring, confined bool, logger log15.Logger) (err error) {
+func LaunchConfProvider(ctx context.Context, r kring.Ring, confined bool, logger log15.Logger) (err error) {
 	defer func() {
 		if e := recover(); e != nil {
 			errString := fmt.Sprintf("%s", e)
@@ -364,7 +360,7 @@ func LaunchConfProvider(r kring.Ring, confined bool, logger log15.Logger) (err e
 	var confdir string
 	var params consul.ConnParams
 
-	scanner := bufio.NewScanner(os.Stdin)
+	scanner := utils.NewWrappedScanner(ctx, bufio.NewScanner(os.Stdin))
 	scanner.Split(utils.MakeSignSplit(sigpubkey))
 	var command string
 	var cancel context.CancelFunc
@@ -411,7 +407,7 @@ func LaunchConfProvider(r kring.Ring, confined bool, logger log15.Logger) (err e
 				newparams := consul.ConnParams{}
 				err := json.Unmarshal([]byte(parts[1]), &newparams)
 				if err == nil {
-					logger.Debug("Configuration child received consul params", "params", parts[1])
+					//logger.Debug("Configuration child received consul params", "params", parts[1])
 					params = newparams
 				} else {
 					return fmt.Errorf("error unmarshaling consulparams received from parent: %s", err.Error())

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -25,6 +26,7 @@ import (
 	"github.com/stephane-martin/skewer/sys/capabilities"
 	"github.com/stephane-martin/skewer/sys/kring"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 	"github.com/stephane-martin/skewer/utils/logging"
 )
 
@@ -68,40 +70,43 @@ func init() {
 func ExecuteChild() (err error) {
 	sessionID := strings.TrimSpace(os.Getenv("SKEWER_SESSION"))
 	if len(sessionID) == 0 {
-		return fmt.Errorf("empty session ID")
+		return eerrors.New("empty session ID")
 	}
 	ringSecretPipe := os.NewFile(uintptr(len(base.Handles)+3), "ringsecretpipe")
 	var ringSecret *memguard.LockedBuffer
 	buf := make([]byte, 32)
 	_, err = ringSecretPipe.Read(buf)
 	if err != nil {
-		return err
+		return eerrors.Wrap(err, "Error reading ring secret")
 	}
 	ringSecret, err = memguard.NewImmutableFromBytes(buf)
 	if err != nil {
-		return err
+		return eerrors.Wrap(err, "Error making memory guard")
 	}
 	creds := kring.RingCreds{Secret: ringSecret, SessionID: utils.MyULID(ulid.MustParse(sessionID))}
 	ring := kring.GetRing(creds)
 	secret, err := ring.GetBoxSecret()
 	if err != nil {
-		return err
+		return eerrors.Wrap(err, "Error creating box secret")
 	}
 	ch, err := newServeChild(ring)
 	if err != nil {
-		return fmt.Errorf("fatal error initializing main child: %s", err)
+		return eerrors.Wrap(err, "fatal error initializing main child")
 	}
 	err = ch.init()
 	if err != nil {
-		return fmt.Errorf("fatal error initializing Serve: %s", err)
+		return eerrors.Wrap(err, "fatal error initializing Serve()")
 	}
 	defer func() {
-		ch.cleanup()
+		e := ch.cleanup()
+		if e != nil {
+			ch.logger.Warn("Serve() cleanup error", "error", e.Error())
+		}
 		secret.Destroy()
 	}()
 	err = ch.Serve()
 	if err != nil {
-		return fmt.Errorf("fatal error executing Serve: %s", err)
+		return eerrors.Wrap(err, "Fatal error executing Serve()")
 	}
 	return nil
 }
@@ -129,12 +134,12 @@ type serveChild struct {
 func newServeChild(ring kring.Ring) (*serveChild, error) {
 	secret, err := ring.GetBoxSecret()
 	if err != nil {
-		return nil, err
+		return nil, eerrors.Wrap(err, "Error getting box secret")
 	}
 	childLoggerHdl := base.HandlesMap[base.ServiceHandle{Service: "child", Type: base.Logger}]
 	conn, err := net.FileConn(os.NewFile(childLoggerHdl, "logger"))
 	if err != nil {
-		return nil, err
+		return nil, eerrors.Wrap(err, "Can't make connection to parent logger")
 	}
 	c := serveChild{ring: ring}
 	c.globalCtx, c.globalCancel = context.WithCancel(context.Background())
@@ -151,22 +156,22 @@ func newServeChild(ring kring.Ring) (*serveChild, error) {
 func (ch *serveChild) init() error {
 	err := ch.setupConsulRegistry()
 	if err != nil {
-		return err
+		return eerrors.Wrap(err, "Error setting up consul registry")
 	}
 
 	err = ch.setupSignKey()
 	if err != nil {
-		return err
+		return eerrors.Wrap(err, "Error setting up signature key")
 	}
 
 	err = ch.setupConfiguration()
 	if err != nil {
-		return err
+		return eerrors.Wrap(err, "Error setting up configuration service")
 	}
 
 	st, err := ch.setupStore()
 	if err != nil {
-		return err
+		return eerrors.Wrap(err, "Error setting up the store")
 	}
 	ch.store = st
 
@@ -175,8 +180,11 @@ func (ch *serveChild) init() error {
 	return nil
 }
 
-func (ch *serveChild) cleanup() {
-	ch.ShutdownControllers()
+func (ch *serveChild) cleanup() (err error) {
+	errs := ch.ShutdownControllers()
+	if !errs.Empty() {
+		err = errs.Wrap("Error shutting down controllers")
+	}
 	ch.cancelLogger()
 	ch.shutdown()
 	ch.globalCancel()
@@ -184,27 +192,26 @@ func (ch *serveChild) cleanup() {
 		ch.signPrivKey.Destroy()
 	}
 	_ = ch.ring.Destroy()
+	return err
 }
 
 // ShutdownControllers definitely shutdowns the plugin processes.
-func (ch *serveChild) ShutdownControllers() {
+func (ch *serveChild) ShutdownControllers() eerrors.ErrorSlice {
 	funcs := make([]utils.Func, 0, len(base.Names2Types))
-	for _, t := range base.Names2Types {
+	for n, t := range base.Names2Types {
 		typ := t
+		name := n
 		switch typ {
 		case base.Store, base.Configuration:
 			// shutdown them later
 		default:
 			funcs = append(funcs, func() error {
-				ch.StopController(typ, true)
-				return nil
+				return eerrors.Wrapf(ch.StopController(typ, true), "Error shutting down controller '%s'", name)
 			})
 		}
 	}
-	err := utils.Parallel(funcs...)
-	if err != nil {
-		ch.logger.Error("Error shutting down controllers", "error", err)
-	}
+	errs := utils.Parallel(funcs...)
+
 	/*
 		ch.logger.Debug("The RELP service has been stopped")
 		ch.logger.Debug("Stopped accounting service")
@@ -219,23 +226,24 @@ func (ch *serveChild) ShutdownControllers() {
 		ch.consulRegistry.WaitFinished() // wait that the services have been unregistered from Consul
 	}
 	ch.confService.Stop()
+	return errs
 }
 
 func (ch *serveChild) setupConfiguration() error {
 	confService, err := services.NewConfigurationService(ch.ring, ch.signPrivKey, base.LoggerHdl(base.Configuration), ch.logger)
 	if err != nil {
-		return err
+		return eerrors.Wrap(err, "Error creating configuration service")
 	}
 	ch.confService = confService
 	ch.confService.SetConfDir(configDirName)
 	ch.confService.SetConsulParams(ch.consulParams)
 	err = ch.confService.Start(ch.ring)
 	if err != nil {
-		return fmt.Errorf("error starting the configuration service: %s", err)
+		return eerrors.Wrap(err, "error starting the configuration service")
 	}
 	ch.confChan = ch.confService.Chan()
 	if ch.confChan == nil {
-		return fmt.Errorf("error starting the configuration service")
+		return eerrors.New("Error starting the configuration service: conf channel is nil")
 	}
 	ch.conf = <-ch.confChan
 	ch.conf.Store.Dirname = storeDirname
@@ -259,7 +267,7 @@ func (ch *serveChild) setupConsulRegistry() error {
 	if consulRegisterFlag {
 		ch.consulRegistry, err = consul.NewRegistry(ch.globalCtx, ch.consulParams, consulServiceName, ch.logger)
 		if err != nil {
-			return err
+			return eerrors.Wrap(err, "Error building consul registry")
 		}
 	}
 	return nil
@@ -288,16 +296,12 @@ func (ch *serveChild) setupStore() (st *services.StorePlugin, err error) {
 		services.ProfileOpt(profile),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("can't create the message Store: %s", err)
+		return nil, eerrors.Wrap(err, "can't create the store")
 	}
-	go func() {
-		<-st.ShutdownChan
-		ch.logger.Info("Store has shutdown: aborting all operations")
-		ch.shutdown()
-	}()
+
 	_, err = st.Start()
 	if err != nil {
-		return nil, fmt.Errorf("can't start the forwarder: %s", err)
+		return nil, eerrors.Wrap(err, "can't start the forwarders")
 	}
 	return st, nil
 }
@@ -306,7 +310,7 @@ func (ch *serveChild) setupSignKey() error {
 	ch.logger.Debug("Generating signature keys")
 	privkey, err := ch.ring.NewSignaturePubkey()
 	if err != nil {
-		return fmt.Errorf("error generating signature keys: %s", err)
+		return eerrors.Wrap(err, "Error generating signature keys")
 	}
 	ch.signPrivKey = privkey
 	return nil
@@ -335,15 +339,16 @@ func (ch *serveChild) setupControllers() {
 }
 
 // StartControllers starts all the processes that produce syslog messages.
-func (ch *serveChild) StartControllers() error {
+func (ch *serveChild) StartControllers() eerrors.ErrorSlice {
 	funcs := make([]utils.Func, 0, len(base.Types2Names))
-	for t := range base.Types2Names {
+	for t, n := range base.Types2Names {
 		typ := t
+		name := n
 		switch typ {
 		case base.Store, base.Configuration:
 		default:
-			funcs = append(funcs, func() error {
-				return ch.StartController(typ)
+			funcs = append(funcs, func() (err error) {
+				return eerrors.Wrapf(ch.StartController(typ), "Error starting controller '%s'", name)
 			})
 		}
 	}
@@ -394,12 +399,12 @@ func (ch *serveChild) StartHTTPServer() error {
 	)
 
 	if err != nil {
-		return fmt.Errorf("error creating HTTP server plugin: %s", err)
+		return eerrors.Wrap(err, "Error creating HTTP server controller")
 	}
 	ctl.SetConf(*ch.conf)
 	_, err = ctl.Start()
 	if err != nil {
-		return fmt.Errorf("error starting HTTP server plugin: %s", err)
+		return eerrors.Wrap(err, "Error starting HTTP server controller")
 	}
 	ch.logger.Debug("HTTP server plugin has been started")
 	return nil
@@ -422,12 +427,12 @@ func (ch *serveChild) StartFSPoll() error {
 			services.PollDirectories(dirs),
 		)
 		if err != nil {
-			return fmt.Errorf("error creating the fspoll plugin: %s", err)
+			return eerrors.Wrap(err, "Error creating fspoll controller")
 		}
 		ch.controllers[base.Filesystem].SetConf(*ch.conf)
 		_, err = ch.controllers[base.Filesystem].Start()
 		if err != nil {
-			return fmt.Errorf("error starting fspoll plugin: %s", err)
+			return eerrors.Wrap(err, "Error starting fspoll controller")
 		}
 		ch.logger.Debug("fspoll plugin has been started")
 	}
@@ -446,12 +451,12 @@ func (ch *serveChild) StartKafkaSource() error {
 			services.CertPathsOpt(certpaths),
 		)
 		if err != nil {
-			return fmt.Errorf("error creating the kafka source plugin: %s", err)
+			return eerrors.Wrap(err, "Error creating Kafka controller")
 		}
 		ch.controllers[base.KafkaSource].SetConf(*ch.conf)
 		_, err = ch.controllers[base.KafkaSource].Start()
 		if err != nil {
-			return fmt.Errorf("error starting the kafka source plugin: %s", err)
+			return eerrors.Wrap(err, "Error starting Kafka controller")
 		}
 		ch.logger.Debug("Kafka source plugin has been started")
 	}
@@ -467,12 +472,12 @@ func (ch *serveChild) StartAccounting() error {
 			services.AccountingPathOpt(ch.conf.Accounting.Path),
 		)
 		if err != nil {
-			return fmt.Errorf("error creating the accounting plugin: %s", err)
+			return eerrors.Wrap(err, "Error creating accounting controller")
 		}
 		ch.controllers[base.Accounting].SetConf(*ch.conf)
 		_, err = ch.controllers[base.Accounting].Start()
 		if err != nil {
-			return fmt.Errorf("error starting accounting plugin: %s", err)
+			return eerrors.Wrap(err, "Error starting accounting controller")
 		}
 		ch.logger.Debug("Accounting plugin has been started")
 	}
@@ -487,12 +492,12 @@ func (ch *serveChild) StartMacOS() error {
 			services.DumpableOpt(DumpableFlag),
 		)
 		if err != nil {
-			return fmt.Errorf("error creating the macos plugin: %s", err)
+			return eerrors.Wrap(err, "Error creating macos controller")
 		}
 		ch.controllers[base.MacOS].SetConf(*ch.conf)
 		_, err = ch.controllers[base.MacOS].Start()
 		if err != nil {
-			return fmt.Errorf("error starting macos plugin: %s", err)
+			return eerrors.Wrap(err, "Error starting macos controller")
 		}
 		ch.logger.Debug("macos plugin has been started")
 	}
@@ -511,12 +516,12 @@ func (ch *serveChild) StartJournal() error {
 				services.DumpableOpt(DumpableFlag),
 			)
 			if err != nil {
-				return fmt.Errorf("error creating Journald plugin: %s", err)
+				return eerrors.Wrap(err, "Error creating journald controller")
 			}
 			ctl.SetConf(*ch.conf)
 			_, err = ctl.Start()
 			if err != nil {
-				return fmt.Errorf("error starting Journald plugin: %s", err)
+				return eerrors.Wrap(err, "Error starting journald controller")
 			}
 			ch.logger.Debug("Journald plugin has been started")
 		} else {
@@ -544,12 +549,12 @@ func (ch *serveChild) StartRelp() error {
 	)
 
 	if err != nil {
-		return fmt.Errorf("error creating RELP plugin: %s", err)
+		return eerrors.Wrap(err, "Error creating RELP controller")
 	}
 	ctl.SetConf(*ch.conf)
 	_, err = ctl.Start()
 	if err != nil {
-		return fmt.Errorf("error starting RELP plugin: %s", err)
+		return eerrors.Wrap(err, "Error starting RELP controller")
 	}
 	ch.logger.Debug("RELP plugin has been started")
 	return nil
@@ -571,12 +576,12 @@ func (ch *serveChild) StartDirectRelp() error {
 	)
 
 	if err != nil {
-		return fmt.Errorf("error creating DirectRELP plugin: %s", err)
+		return eerrors.Wrap(err, "Error creating DirectRELP controller")
 	}
 	ctl.SetConf(*ch.conf)
 	_, err = ctl.Start()
 	if err != nil {
-		return fmt.Errorf("error starting DirectRELP plugin: %s", err)
+		return eerrors.Wrap(err, "Error starting DirectRELP controller")
 	}
 	ch.logger.Debug("DirectRELP plugin has been started")
 	return nil
@@ -598,14 +603,14 @@ func (ch *serveChild) StartTcp() error {
 	)
 
 	if err != nil {
-		return fmt.Errorf("error creating TCP plugin: %s", err)
+		return eerrors.Wrap(err, "Error creating TCP controller")
 	}
 	ctl.SetConf(*ch.conf)
 	tcpinfos, err := ctl.Start()
 	if err == services.NOLISTENER {
 		ch.logger.Info("TCP plugin not started")
 	} else if err != nil {
-		return fmt.Errorf("error starting TCP plugin: %s", err)
+		return eerrors.Wrap(err, "Error starting TCP controller")
 	} else if len(tcpinfos) == 0 {
 		ch.logger.Info("TCP plugin not started")
 	} else {
@@ -625,6 +630,7 @@ func (ch *serveChild) StartUdp() error {
 	)
 
 	if err != nil {
+		return eerrors.Wrap(err, "Error creating UDP controller")
 		return fmt.Errorf("error creating UDP plugin: %s", err)
 	}
 	ctl.SetConf(*ch.conf)
@@ -632,7 +638,7 @@ func (ch *serveChild) StartUdp() error {
 	if err == services.NOLISTENER {
 		ch.logger.Info("UDP plugin not started")
 	} else if err != nil {
-		return fmt.Errorf("error starting UDP plugin: %s", err)
+		return eerrors.Wrap(err, "Error starting UDP controller")
 	} else if len(udpinfos) == 0 {
 		ch.logger.Info("UDP plugin not started")
 	} else {
@@ -652,6 +658,7 @@ func (ch *serveChild) StartGraylog() error {
 	)
 
 	if err != nil {
+		return eerrors.Wrap(err, "Error creating Graylog controller")
 		return fmt.Errorf("error creating Graylog plugin: %s", err)
 	}
 	ctl.SetConf(*ch.conf)
@@ -659,7 +666,7 @@ func (ch *serveChild) StartGraylog() error {
 	if err == services.NOLISTENER {
 		ch.logger.Info("Graylog plugin not started")
 	} else if err != nil {
-		return fmt.Errorf("error starting Graylog plugin: %s", err)
+		return eerrors.Wrap(err, "Error starting Graylog controller")
 	} else if len(infos) == 0 {
 		ch.logger.Info("Graylog plugin not started")
 	} else {
@@ -669,24 +676,28 @@ func (ch *serveChild) StartGraylog() error {
 }
 
 // StopController stops a process of specified type.
-func (ch *serveChild) StopController(typ base.Types, doShutdown bool) {
+func (ch *serveChild) StopController(typ base.Types, doShutdown bool) error {
 	switch typ {
 	case base.Store, base.Configuration:
-		return
+		return nil
 	case base.Journal:
 		if journald.Supported {
 			if doShutdown {
-				ch.controllers[base.Journal].Shutdown(5 * time.Second)
-			} else {
-				// we keep the same instance of the journald plugin, so
-				// that we can continue to fetch messages from a
-				// consistent position in journald
-				ch.controllers[base.Journal].Stop()
+				if ch.controllers[base.Journal].Shutdown(5 * time.Second) {
+					return eerrors.Errorf("Controller '%s' has been killed", base.Types2Names[typ])
+				}
+				return nil
 			}
+			// we keep the same instance of the journald plugin, so
+			// that we can continue to fetch messages from a
+			// consistent position in journald
+			return ch.controllers[base.Journal].Stop()
 		}
-	default:
-		ch.controllers[typ].Shutdown(5 * time.Second)
 	}
+	if ch.controllers[typ].Shutdown(5 * time.Second) {
+		return eerrors.Errorf("Controller '%s' has been killed", base.Types2Names[typ])
+	}
+	return nil
 }
 
 // Reload restarts all the plugin processes.
@@ -704,20 +715,24 @@ func (ch *serveChild) Reload() (err error) {
 		return err
 	}
 	funcs := make([]utils.Func, 0, len(base.Types2Names))
-	for t := range base.Types2Names {
+	for t, n := range base.Types2Names {
 		typ := t
+		name := n
 		switch typ {
 		case base.Store, base.Configuration:
 		default:
-			funcs = append(funcs, func() error {
-				ch.StopController(typ, false)
-				return ch.StartController(typ)
+			funcs = append(funcs, func() (err error) {
+				err = ch.StopController(typ, false)
+				if err != nil {
+					ch.logger.Warn("Error stopping controller", "type", name)
+				}
+				return eerrors.Wrapf(ch.StartController(typ), "Error restarting controller '%s'", name)
 			})
 		}
 	}
-	err = utils.All(funcs...)
-	if err != nil {
-		return err
+	errs := utils.All(funcs...)
+	if !errs.Empty() {
+		return errs
 	}
 
 	ch.setupMetrics(ch.logger)
@@ -750,25 +765,37 @@ func (ch *serveChild) Serve() error {
 	sigChan := make(chan os.Signal, 10)
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 
-	err := ch.StartControllers()
-	if err != nil {
-		return fmt.Errorf("error starting a controller: %s", err)
+	errs := ch.StartControllers()
+	if !errs.Empty() {
+		return errs.Wrap("Error starting controllers")
 	}
+
+	ch.logger.Debug("Main loop is starting")
+	c := eerrors.ChainErrors()
 
 	go func() {
 		// if parent disappears for any reason, we shutdown
 		deadManPipe := os.NewFile(uintptr(len(base.Handles)+4), "deadmanpipe")
 		dummy := make([]byte, 1)
 		deadManPipe.Read(dummy)
-		fmt.Fprintln(os.Stderr, "Parent has gone!!! Shutting down")
+		c.Append(eerrors.New("Parent has gone!!! Shutting down"))
 		ch.shutdown()
 	}()
 
-	ch.logger.Debug("Main loop is starting")
+	go func() {
+		<-ch.store.ShutdownChan
+		c.Append(errors.New("Store has shutdown: aborting all operations"))
+		ch.shutdown()
+	}()
+
 	for {
 		select {
 		case <-ch.shutdownCtx.Done():
 			ch.logger.Info("Shutting down")
+			errs := c.Sum()
+			if !errs.Empty() {
+				return errs
+			}
 			return nil
 		default:
 		}
@@ -784,7 +811,7 @@ func (ch *serveChild) Serve() error {
 				ch.conf = newConf
 				err := ch.Reload()
 				if err != nil {
-					ch.logger.Crit("Fatal error when reloading configuration", "error", err)
+					c.Append(eerrors.Wrap(err, "Fatal error when restarting services"))
 					ch.shutdown()
 				}
 			} else {
@@ -801,9 +828,13 @@ func (ch *serveChild) Serve() error {
 				case <-ch.shutdownCtx.Done():
 				default:
 					ch.logger.Info("SIGHUP received: reloading configuration")
-					ch.confService.Reload()
+					err := ch.confService.Reload()
 					sigChan = make(chan os.Signal, 10)
 					signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+					if err != nil {
+						c.Append(eerrors.Wrap(err, "Error reloading configuration service"))
+						ch.shutdown()
+					}
 				}
 			case syscall.SIGTERM, syscall.SIGINT:
 				signal.Stop(sigChan)

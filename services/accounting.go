@@ -2,7 +2,6 @@ package services
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -18,6 +17,7 @@ import (
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 )
 
 func initAccountingRegistry() {
@@ -99,7 +99,7 @@ func (s *AccountingService) makeMessage(buf []byte, tick int64, hostname string,
 	return full
 }
 
-var ErrTruncated = errors.New("file has been truncated")
+var ErrTruncated = eerrors.New("file has been truncated")
 
 func (s *AccountingService) readFile(f *os.File, tick int64, hostname string, size int) (err error) {
 	var offset int64
@@ -127,21 +127,22 @@ func (s *AccountingService) readFile(f *os.File, tick int64, hostname string, si
 				return ErrTruncated
 			}
 			return nil
-		} else if err != nil {
-			return fmt.Errorf("unexpected error while reading the accounting file: %s", err)
-		} else {
-			full = s.makeMessage(buf, tick, hostname, gen)
-			f, nf := s.stasher.Stash(full)
-			model.FullFree(full)
-			if nf != nil {
-				s.logger.Warn("Non-fatal error stashing accounting message", "error", nf)
-			} else if f != nil {
-				s.logger.Error("Fatal error stashing accounting message", "error", f)
-				return f
-			} else {
-				base.IncomingMsgsCounter.WithLabelValues("accounting", hostname, "", "").Inc()
-			}
 		}
+		if err != nil {
+			return fmt.Errorf("unexpected error while reading the accounting file: %s", err)
+		}
+		full = s.makeMessage(buf, tick, hostname, gen)
+		err := s.stasher.Stash(full)
+		model.FullFree(full)
+		if eerrors.Is("Fatal", err) {
+			s.logger.Error("Fatal error stashing accounting message", "error", err)
+			return err
+		}
+		if err != nil {
+			s.logger.Warn("Non-fatal error stashing accounting message", "error", err)
+			continue
+		}
+		base.IncomingMsgsCounter.WithLabelValues("accounting", hostname, "", "").Inc()
 	}
 }
 

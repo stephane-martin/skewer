@@ -7,6 +7,7 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 	"github.com/valyala/bytebufferpool"
 )
 
@@ -78,6 +79,6 @@ func (d *KafkaDestination) Close() error {
 	return nil
 }
 
-func (d *KafkaDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
-	return d.ForEachWithTopic(ctx, d.sendOne, nil, msgs)
+func (d *KafkaDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err eerrors.ErrorSlice) {
+	return d.ForEachWithTopic(ctx, d.sendOne, false, true, msgs)
 }

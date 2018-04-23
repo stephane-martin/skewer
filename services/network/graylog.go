@@ -18,7 +18,6 @@ import (
 	"github.com/stephane-martin/skewer/decoders"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/base"
-	"github.com/stephane-martin/skewer/services/errors"
 	"github.com/stephane-martin/skewer/utils"
 	"gopkg.in/Graylog2/go-gelf.v2/gelf"
 )
@@ -88,7 +87,7 @@ func (s *GraylogSvcImpl) Start() (infos []model.ListenerInfo, err error) {
 	s.LockStatus()
 	defer s.UnlockStatus()
 	if s.status != GraylogStopped {
-		return nil, errors.ServerNotStopped
+		return nil, ServerNotStopped
 	}
 	s.fatalErrorChan = make(chan struct{})
 	s.fatalOnce = &sync.Once{}
@@ -281,15 +280,10 @@ func (s *GraylogSvcImpl) handleConnection(conn net.PacketConn, config conf.Grayl
 
 		full.Uid = gen.Uid()
 		full.ConfId = config.ConfID
-		if localPortS != "" {
-			full.Fields.SetProperty("skewer", "localport", localPortS)
-		}
-		if path != "" {
-			full.Fields.SetProperty("skewer", "socketpath", path)
-		}
-		if client != "" {
-			full.Fields.SetProperty("skewer", "client", client)
-		}
+		full.SourceType = "graylog"
+		full.SourcePath = path
+		full.SourcePort = localPort
+		full.ClientAddr = client
 		s.stasher.Stash(full)
 		base.IncomingMsgsCounter.WithLabelValues("graylog", client, localPortS, path).Inc()
 		model.FullFree(full)

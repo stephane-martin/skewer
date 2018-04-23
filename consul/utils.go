@@ -1,18 +1,17 @@
 package consul
 
 import (
-	"fmt"
 	"net"
 	"strings"
 
 	"github.com/hashicorp/consul/api"
-	"github.com/hashicorp/errwrap"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 )
 
 func LocalIP() (net.IP, error) {
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
-		return nil, err
+		return nil, eerrors.Wrap(err, "Error retrieving interfaces")
 	}
 	for _, addr := range addrs {
 		if ipnet, ok := addr.(*net.IPNet); ok && ipnet.IP.IsGlobalUnicast() {
@@ -55,7 +54,7 @@ func NewClient(params ConnParams) (*api.Client, error) {
 			InsecureSkipVerify: params.Insecure,
 		}
 	} else {
-		return nil, fmt.Errorf("consul addr must start with 'http://' or 'https://'")
+		return nil, eerrors.New("consul addr must start with 'http://' or 'https://'")
 	}
 	config.Address = addr
 	config.Token = strings.TrimSpace(params.Token)
@@ -63,7 +62,7 @@ func NewClient(params ConnParams) (*api.Client, error) {
 
 	client, err := api.NewClient(&config)
 	if err != nil {
-		return nil, errwrap.Wrapf("Error creating the consul client: {{err}}", err)
+		return nil, eerrors.Wrap(err, "Error creating the consul client")
 	}
 	return client, nil
 }

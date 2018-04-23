@@ -1,8 +1,9 @@
 package base
 
 import (
-	"errors"
 	"strings"
+
+	"github.com/stephane-martin/skewer/utils/eerrors"
 )
 
 type Types int
@@ -39,7 +40,7 @@ var Names2Types = map[string]Types{
 	"skewer-macos":       MacOS,
 }
 
-var ErrNotFound = errors.New("not found")
+var ErrNotFound = eerrors.New("not found")
 
 func Name(t Types, cfnd bool) (string, error) {
 	if cfnd {

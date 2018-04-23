@@ -8,6 +8,7 @@ import (
 	"github.com/awnumar/memguard"
 	"github.com/spaolacci/murmur3"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 	"github.com/stephane-martin/skewer/utils/sbox"
 	"github.com/zond/gotomic"
 )
@@ -92,15 +93,15 @@ func (s *StoreConfig) GetSecretB(m *memguard.LockedBuffer) (secretb *memguard.Lo
 
 	n := base64.URLEncoding.DecodedLen(len(locked.Buffer()))
 	if n < 32 {
-		return nil, ConfigurationCheckError{ErrString: "Store secret is too short"}
+		return nil, confCheckError(eerrors.New("Store secret is too short"))
 	}
 	secret := make([]byte, n)
 	n, err = base64.URLEncoding.Decode(secret, locked.Buffer())
 	if err != nil {
-		return nil, ConfigurationCheckError{ErrString: "Error decoding store secret", Err: err}
+		return nil, confCheckError(eerrors.Wrap(err, "Error decoding store secret"))
 	}
 	if n < 32 {
-		return nil, ConfigurationCheckError{ErrString: "Store secret is too short"}
+		return nil, confCheckError(eerrors.New("Store secret is too short"))
 	}
 	secret = secret[:32]
 	secretb, err = memguard.NewImmutableFromBytes(secret)

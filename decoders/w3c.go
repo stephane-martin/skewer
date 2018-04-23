@@ -22,7 +22,7 @@ func W3CDecoder(fieldNames string) func([]byte) ([]*model.SyslogMessage, error) 
 		for {
 			line, err = parser.Next()
 			if err != nil && err != io.EOF {
-				return nil, err
+				return nil, W3CDecodingError(err)
 			}
 			if line == nil {
 				break

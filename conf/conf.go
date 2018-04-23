@@ -7,7 +7,6 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"hash/fnv"
 	"net"
@@ -23,13 +22,13 @@ import (
 	"github.com/nats-io/go-nats"
 
 	"github.com/BurntSushi/toml"
-	"github.com/hashicorp/errwrap"
 	"github.com/inconshreveable/log15"
 	"github.com/spf13/viper"
 	"github.com/stephane-martin/skewer/consul"
 	"github.com/stephane-martin/skewer/decoders/base"
 	"github.com/stephane-martin/skewer/sys/kring"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 )
 
 var Version string
@@ -71,11 +70,11 @@ func Default() (BaseConfig, error) {
 	baseConf := NewBaseConf()
 	err := v.Unmarshal(&baseConf)
 	if err != nil {
-		return baseConf, ConfigurationSyntaxError{Err: err}
+		return baseConf, confSyntaxError(err, "")
 	}
 	err = baseConf.Complete(nil)
 	if err != nil {
-		return baseConf, ConfigurationSyntaxError{Err: err}
+		return baseConf, confSyntaxError(err, "")
 	}
 	return baseConf, nil
 }
@@ -124,7 +123,12 @@ func ParseVersion(v string) (skv sarama.KafkaVersion, e error) {
 	for i, n := range strings.SplitN(v, ".", 4) {
 		ver[i], e = strconv.Atoi(n)
 		if e != nil {
-			return skv, ConfigurationCheckError{ErrString: fmt.Sprintf("Kafka Version has invalid format: '%s'", v)}
+			return skv, confCheckError(
+				eerrors.WithTags(
+					eerrors.Wrap(e, "Invalid format for kafka version"),
+					"version", v,
+				),
+			)
 		}
 	}
 	return ver.ToSaramaVersion()
@@ -164,7 +168,7 @@ func (l KafkaVersion) ToSaramaVersion() (v sarama.KafkaVersion, e error) {
 	if l.Greater(V0_8_2_0) {
 		return sarama.V0_8_2_0, nil
 	}
-	return v, ConfigurationCheckError{ErrString: "Minimal Kafka version is 0.8.2.0"}
+	return v, confCheckError(eerrors.New("Minimal Kafka version is 0.8.2.0"))
 }
 
 func (l KafkaVersion) Greater(r KafkaVersion) bool {
@@ -471,7 +475,7 @@ func (c *KafkaSourceConfig) GetSaramaConsumerConfig(confined bool) (*cluster.Con
 			s.Net.TLS.Enable = true
 			s.Net.TLS.Config = tlsConf
 		} else {
-			return nil, errwrap.Wrapf("Error building the TLS configuration for Kafka: {{err}}", err)
+			return nil, eerrors.Wrap(err, "Error building the TLS configuration for Kafka")
 		}
 
 	}
@@ -532,7 +536,7 @@ func (c *KafkaDestConfig) GetSaramaProducerConfig(confined bool) (*sarama.Config
 			s.Net.TLS.Enable = true
 			s.Net.TLS.Config = tlsConf
 		} else {
-			return nil, errwrap.Wrapf("Error building the TLS configuration for Kafka: {{err}}", err)
+			return nil, eerrors.Wrap(err, "Error building the TLS configuration for Kafka")
 		}
 
 	}
@@ -558,10 +562,10 @@ func (c *KafkaDestConfig) GetAsyncProducer(confined bool) (sarama.AsyncProducer,
 		return nil, err
 	}
 	p, err := sarama.NewAsyncProducer(c.Brokers, conf)
-	if err == nil {
-		return p, nil
+	if err != nil {
+		return nil, err
 	}
-	return nil, KafkaError{Err: err}
+	return p, nil
 }
 
 func (c *KafkaDestConfig) GetClient(confined bool) (sarama.Client, error) {
@@ -570,10 +574,10 @@ func (c *KafkaDestConfig) GetClient(confined bool) (sarama.Client, error) {
 		return nil, err
 	}
 	cl, err := sarama.NewClient(c.Brokers, conf)
-	if err == nil {
-		return cl, nil
+	if err != nil {
+		return nil, err
 	}
-	return nil, KafkaError{Err: err}
+	return cl, nil
 }
 
 func (c *KafkaSourceConfig) GetClient(confined bool) (*cluster.Consumer, error) {
@@ -582,10 +586,10 @@ func (c *KafkaSourceConfig) GetClient(confined bool) (*cluster.Consumer, error) 
 		return nil, err
 	}
 	cl, err := cluster.NewConsumer(c.Brokers, c.GroupID, c.Topics, conf)
-	if err == nil {
-		return cl, nil
+	if err != nil {
+		return nil, err
 	}
-	return nil, KafkaError{Err: err}
+	return cl, nil
 }
 
 func getViper(confDir string) (v *viper.Viper, err error) {
@@ -610,17 +614,8 @@ func getViper(confDir string) (v *viper.Viper, err error) {
 func InitLoad(ctx context.Context, confDir string, p consul.ConnParams, r kring.Ring, l log15.Logger) (c BaseConfig, updates chan *BaseConfig, err error) {
 	defer func() {
 		// sometimes viper panics... let's catch that
-		if recovered := recover(); recovered != nil {
-			// find out exactly what the error was and set err
-			switch x := recovered.(type) {
-			case string:
-				err = errors.New(x)
-			case error:
-				err = x
-			default:
-				err = fmt.Errorf("%s", recovered)
-			}
-			l.Warn("Panic recovered in conf.InitLoad()", "error", err)
+		if e := eerrors.Err(recover()); e != nil {
+			l.Warn("Panic recovered in conf.InitLoad()", "error", e.Error())
 		}
 		if err != nil {
 			c = NewBaseConf()
@@ -637,7 +632,7 @@ func InitLoad(ctx context.Context, confDir string, p consul.ConnParams, r kring.
 		case viper.ConfigFileNotFoundError:
 			l.Info("No configuration file was found")
 		default:
-			return c, nil, ConfigurationReadError{err}
+			return c, nil, confReadError(err, confDir)
 		}
 	}
 
@@ -684,7 +679,7 @@ func InitLoad(ctx context.Context, confDir string, p consul.ConnParams, r kring.
 
 	err = v.Unmarshal(&c)
 	if err != nil {
-		return NewBaseConf(), nil, ConfigurationSyntaxError{Err: err, Filename: v.ConfigFileUsed()}
+		return NewBaseConf(), nil, confSyntaxError(err, v.ConfigFileUsed())
 	}
 
 	err = c.Complete(r)
@@ -749,16 +744,8 @@ func getFirstValue(m map[string]string) (val string) {
 func FromConsul(v *viper.Viper, confStr string) (err error) {
 	defer func() {
 		// sometimes viper panics... let's catch that
-		if r := recover(); r != nil {
-			// find out exactly what the error was and set err
-			switch x := r.(type) {
-			case string:
-				err = errors.New(x)
-			case error:
-				err = x
-			default:
-				err = fmt.Errorf("%s", r)
-			}
+		if e := eerrors.Err(recover()); e != nil {
+			err = e
 		}
 	}()
 	return v.MergeConfig(strings.NewReader(confStr))
@@ -779,17 +766,17 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 	for _, parserConf := range c.Parsers {
 		name := strings.TrimSpace(parserConf.Name)
 		if base.ParseFormat(parserConf.Name) != -1 {
-			return ConfigurationCheckError{ErrString: "Parser configuration must not use a reserved name"}
+			return confCheckError(eerrors.New("Parser configuration must not use a reserved name"))
 		}
 		if name == "" {
-			return ConfigurationCheckError{ErrString: "Empty parser name"}
+			return confCheckError(eerrors.New("Empty parser name"))
 		}
 		if _, ok := parsersNames[name]; ok {
-			return ConfigurationCheckError{ErrString: "The same parser name is used multiple times"}
+			return confCheckError(eerrors.New("The same parser name is used multiple times"))
 		}
 		f := strings.TrimSpace(parserConf.Func)
 		if len(f) == 0 {
-			return ConfigurationCheckError{ErrString: "Empty parser func"}
+			return confCheckError(eerrors.New("Empty parser func"))
 		}
 		parsersNames[name] = true
 	}
@@ -806,12 +793,16 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 
 	_, err = ParseVersion(c.KafkaDest.Version)
 	if err != nil {
-		return ConfigurationCheckError{ErrString: "Kafka version can't be parsed", Err: err}
+		return confCheckError(
+			eerrors.Wrap(err, "Kafka version can not be parsed"),
+		)
 	}
 
 	if len(c.NATSDest.NServers) == 0 {
 		if c.NATSDest.TLSEnabled {
-			return ConfigurationCheckError{ErrString: "Explicitly configure NATS servers for TLS"}
+			return confCheckError(
+				eerrors.New("NATS servers must be explicitly configured when TLS is enabled"),
+			)
 		}
 		c.NATSDest.NServers = []string{nats.DefaultURL}
 	}
@@ -819,13 +810,13 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 	for i := range c.NATSDest.NServers {
 		c.NATSDest.NServers[i] = strings.TrimSpace(c.NATSDest.NServers[i])
 		if !strings.HasPrefix(c.NATSDest.NServers[i], "tls://") && !strings.HasPrefix(c.NATSDest.NServers[i], "nats://") {
-			return ConfigurationCheckError{ErrString: "Every NATS server must start with tls:// or nats://"}
+			return confCheckError(eerrors.New("Every NATS server must start with tls:// or nats://"))
 		}
 		if c.NATSDest.TLSEnabled && !strings.HasPrefix(c.NATSDest.NServers[i], "tls") {
-			return ConfigurationCheckError{ErrString: "TLS is required for NATS, but a server lacks the tls:// prefix"}
+			return confCheckError(eerrors.New("TLS is enabled for NATS, but a server lacks the tls:// prefix"))
 		}
 		if !c.NATSDest.TLSEnabled && !strings.HasPrefix(c.NATSDest.NServers[i], "nats") {
-			return ConfigurationCheckError{ErrString: "TLS is not required for NATS, but a server lacks the nats:// prefix"}
+			return confCheckError(eerrors.New("TLS is not enabled for NATS, but a server lacks the nats:// prefix"))
 		}
 	}
 
@@ -929,16 +920,9 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 			}
 			_, err = listeners.GetListenAddrs()
 			if err != nil {
-				return ConfigurationCheckError{Err: err}
+				return confCheckError(err)
 			}
 
-			/*
-				if decoders.ParseFormat(listeners.Format) == -1 {
-					if _, ok := parsersNames[listeners.Format]; !ok {
-						return ConfigurationCheckError{ErrString: fmt.Sprintf("Unknown parser: '%s'", listeners.Format)}
-					}
-				}
-			*/
 		}
 		if filtering != nil {
 			if filtering.TopicTmpl == "" {
@@ -951,13 +935,17 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 			if len(filtering.TopicTmpl) > 0 {
 				_, err = template.New("topic").Parse(filtering.TopicTmpl)
 				if err != nil {
-					return ConfigurationCheckError{ErrString: "Error compiling the topic template", Err: err}
+					return confCheckError(
+						eerrors.Wrap(err, "Error compiling topic template"),
+					)
 				}
 			}
 			if len(filtering.PartitionTmpl) > 0 {
 				_, err = template.New("partition").Parse(filtering.PartitionTmpl)
 				if err != nil {
-					return ConfigurationCheckError{ErrString: "Error compiling the partition key template", Err: err}
+					return confCheckError(
+						eerrors.Wrap(err, "Error compiling the partition key template"),
+					)
 				}
 			}
 			sourceConf.SetConfID()
@@ -988,7 +976,7 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 		}
 		_, err = ParseVersion(conf.Version)
 		if err != nil {
-			return ConfigurationCheckError{ErrString: "Kafka version can't be parsed", Err: err}
+			return confCheckError(eerrors.Wrap(err, "Kafka version can not be parsed"))
 		}
 		if conf.ChannelBufferSize == 0 {
 			conf.ChannelBufferSize = 256
@@ -1044,12 +1032,12 @@ func (c *BaseConfig) Complete(r kring.Ring) (err error) {
 	if r != nil {
 		m, err := r.GetBoxSecret()
 		if err != nil {
-			return ConfigurationCheckError{ErrString: "Failed to retrieve the current session encryption secret", Err: err}
+			return eerrors.Wrap(err, "Failed to retrieve the current session encryption secret")
 		}
 		defer m.Destroy()
 		err = c.Store.EncryptSecret(m)
 		if err != nil {
-			return ConfigurationCheckError{ErrString: "Failed to encrypt the Store secret", Err: err}
+			return eerrors.Wrap(err, "Failed to encrypt the Store secret")
 		}
 	} else {
 		c.Store.Secret = ""

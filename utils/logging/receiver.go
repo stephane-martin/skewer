@@ -11,6 +11,7 @@ import (
 	"github.com/awnumar/memguard"
 	"github.com/gogo/protobuf/proto"
 	"github.com/inconshreveable/log15"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 	"github.com/stephane-martin/skewer/utils/sbox"
 )
 
@@ -35,14 +36,8 @@ Listen:
 			r := Record{}
 			_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
 			n, _, err = c.ReadFrom(enc[:])
-			if err != nil {
-				if e, ok := err.(net.Error); ok {
-					if !e.Timeout() {
-						l.Info("Error receiving logs", "error", err)
-					}
-				} else {
-					l.Info("Error receiving logs", "error", err)
-				}
+			if err != nil && !eerrors.IsTimeout(err) {
+				l.Info("Error receiving logs", "error", err)
 				continue Listen
 			}
 			if n == 0 {

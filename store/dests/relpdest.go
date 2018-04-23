@@ -8,6 +8,7 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 	"github.com/stephane-martin/skewer/utils/queue"
 )
 
@@ -108,6 +109,6 @@ func (d *RELPDestination) Close() (err error) {
 	return d.clt.Close()
 }
 
-func (d *RELPDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
-	return d.ForEach(ctx, d.clt.Send, nil, msgs)
+func (d *RELPDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err eerrors.ErrorSlice) {
+	return d.ForEach(ctx, d.clt.Send, false, true, msgs)
 }

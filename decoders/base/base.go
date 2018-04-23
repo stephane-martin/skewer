@@ -39,5 +39,3 @@ func ParseFormat(format string) Format {
 	}
 	return -1
 }
-
-//type Parser func(m []byte) ([]*model.SyslogMessage, error)

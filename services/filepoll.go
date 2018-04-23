@@ -18,6 +18,7 @@ import (
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 )
 
 func initPollingRegistry() {
@@ -203,17 +204,17 @@ func (s *FilePollingService) parseOne(raw *model.RawFileMessage, gen *utils.Gene
 		full = model.FullFactoryFrom(syslogMsg)
 		full.Uid = gen.Uid()
 		full.ConfId = raw.ConfID
-
-		fatal, nonfatal := s.stasher.Stash(full)
-
-		if fatal != nil {
-			makeFLogger(s.logger, raw).Error("Fatal error stashing filepoll message", "error", fatal)
-			s.dofatal()
-			return fatal
-		} else if nonfatal != nil {
-			makeFLogger(s.logger, raw).Warn("Non-fatal error stashing filepoll message", "error", nonfatal)
-		}
+		err := s.stasher.Stash(full)
 		model.FullFree(full)
+
+		if eerrors.Is("Fatal", err) {
+			makeFLogger(s.logger, raw).Error("Fatal error stashing filepoll message", "error", err)
+			s.dofatal()
+			return err
+		}
+		if err != nil {
+			makeFLogger(s.logger, raw).Warn("Non-fatal error stashing filepoll message", "error", err)
+		}
 	}
 	return nil
 }

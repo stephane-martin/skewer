@@ -9,8 +9,8 @@ import (
 
 	"github.com/dop251/goja"
 	"github.com/inconshreveable/log15"
-	"github.com/stephane-martin/skewer/decoders/base"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 )
 
 var jsSyslogMessage string = `function SyslogMessage(p, f, s, v, timer, timeg, host, app, proc, msgid, structured, msg, props) {
@@ -121,7 +121,7 @@ func (p *ConcreteParser) Parse(rawMessage []byte) ([]*model.SyslogMessage, error
 	var err error
 	jsParser, ok := p.env.jsParsers[p.name]
 	if !ok {
-		return nil, &base.UnknownFormatError{}
+		return nil, ErrorUnknownFormat(p.name)
 	}
 
 	rawMessage = bytes.Trim(rawMessage, "\r\n ")
@@ -134,7 +134,7 @@ func (p *ConcreteParser) Parse(rawMessage []byte) ([]*model.SyslogMessage, error
 		if jserr, ok := err.(*goja.Exception); ok {
 			message, ok := jserr.Value().Export().(string)
 			if ok {
-				return nil, &JSParsingError{ParserName: p.name, Message: message}
+				return nil, jsDecodingError(message, p.name)
 			}
 			return nil, err
 		}
@@ -231,11 +231,11 @@ func (e *Environment) AddParser(name string, parserFunc string) error {
 	}
 	v := e.runtime.Get(name)
 	if v == nil {
-		return &ObjectNotFoundError{name}
+		return objectNotFoundError(name)
 	}
 	parser, b := goja.AssertFunction(v)
 	if !b {
-		return &NotAFunctionError{name}
+		return notAFunctionError(name)
 	}
 	e.jsParsers[name] = parser
 	return nil
@@ -248,11 +248,11 @@ func (e *Environment) setTopicFunc(f string) error {
 	}
 	v := e.runtime.Get("Topic")
 	if v == nil {
-		return &ObjectNotFoundError{"Topic"}
+		return objectNotFoundError("Topic")
 	}
 	jsTopic, b := goja.AssertFunction(v)
 	if !b {
-		return &NotAFunctionError{"Topic"}
+		return notAFunctionError("Topic")
 	}
 	e.jsTopic = jsTopic
 	return nil
@@ -265,11 +265,11 @@ func (e *Environment) setPartitionKeyFunc(f string) error {
 	}
 	v := e.runtime.Get("PartitionKey")
 	if v == nil {
-		return &ObjectNotFoundError{"PartitionKey"}
+		return objectNotFoundError("PartitionKey")
 	}
 	jsPartitionKey, b := goja.AssertFunction(v)
 	if !b {
-		return &NotAFunctionError{"PartitionKey"}
+		return notAFunctionError("PartitionKey")
 	}
 	e.jsPartitionKey = jsPartitionKey
 	return nil
@@ -282,11 +282,11 @@ func (e *Environment) setPartitionNumberFunc(f string) error {
 	}
 	v := e.runtime.Get("PartitionNumber")
 	if v == nil {
-		return &ObjectNotFoundError{"PartitionNumber"}
+		return objectNotFoundError("PartitionNumber")
 	}
 	jsPartitionNumber, b := goja.AssertFunction(v)
 	if !b {
-		return &NotAFunctionError{"PartitionNumber"}
+		return notAFunctionError("PartitionNumber")
 	}
 	e.jsPartitionNumber = jsPartitionNumber
 	return nil
@@ -299,19 +299,18 @@ func (e *Environment) setFilterMessagesFunc(f string) error {
 	}
 	v := e.runtime.Get("FilterMessages")
 	if v == nil {
-		return &ObjectNotFoundError{"FilterMessages"}
+		return objectNotFoundError("FilterMessages")
 	}
 	jsFilter, b := goja.AssertFunction(v)
 	if !b {
-		return &NotAFunctionError{"FilterMessages"}
+		return notAFunctionError("FilterMessages")
 	}
 	e.jsFilterMessages = jsFilter
 	return nil
 }
 
-func (e *Environment) Topic(m *model.SyslogMessage) (topic string, errs []error) {
-	var err error
-	errs = []error{}
+func (e *Environment) Topic(m *model.SyslogMessage) (topic string, err error) {
+	errs := make([]error, 0, 0)
 
 	if e.jsTopic != nil {
 		var jsMessage goja.Value
@@ -322,10 +321,10 @@ func (e *Environment) Topic(m *model.SyslogMessage) (topic string, errs []error)
 			if err == nil {
 				topic = jsTopic.String()
 			} else {
-				errs = append(errs, ExecutingJSErrorFactory(err, "Topic"))
+				errs = append(errs, executingJSErrorFactory(err, "Topic"))
 			}
 		} else {
-			errs = append(errs, &ConversionGoJsError{ExecutingJSErrorFactory(err, "NewSyslogMessage")})
+			errs = append(errs, go2jsError(executingJSErrorFactory(err, "NewSyslogMessage")))
 		}
 	}
 	if len(topic) == 0 && e.topicTmpl != nil {
@@ -339,16 +338,15 @@ func (e *Environment) Topic(m *model.SyslogMessage) (topic string, errs []error)
 	}
 	if len(topic) > 0 {
 		if !TopicNameIsValid(topic) {
-			errs = append(errs, &base.InvalidTopic{Topic: topic})
-			return "", errs
+			errs = append(errs, InvalidTopicError(topic))
+			return "", eerrors.Combine(errs...)
 		}
 	}
-	return topic, errs
+	return topic, eerrors.Combine(errs...)
 }
 
-func (e *Environment) PartitionKey(m *model.SyslogMessage) (partitionKey string, errs []error) {
-	errs = []error{}
-	var err error
+func (e *Environment) PartitionKey(m *model.SyslogMessage) (partitionKey string, err error) {
+	errs := make([]error, 0, 0)
 	var jsMessage goja.Value
 	var jsPartitionKey goja.Value
 
@@ -359,10 +357,10 @@ func (e *Environment) PartitionKey(m *model.SyslogMessage) (partitionKey string,
 			if err == nil {
 				partitionKey = jsPartitionKey.String()
 			} else {
-				errs = append(errs, ExecutingJSErrorFactory(err, "PartitionKey"))
+				errs = append(errs, executingJSErrorFactory(err, "PartitionKey"))
 			}
 		} else {
-			errs = append(errs, &ConversionGoJsError{ExecutingJSErrorFactory(err, "NewSyslogMessage")})
+			errs = append(errs, go2jsError(executingJSErrorFactory(err, "NewSyslogMessage")))
 		}
 	}
 	if len(partitionKey) == 0 && e.partitionKeyTmpl != nil {
@@ -374,12 +372,11 @@ func (e *Environment) PartitionKey(m *model.SyslogMessage) (partitionKey string,
 			errs = append(errs, err)
 		}
 	}
-	return partitionKey, errs
+	return partitionKey, eerrors.Combine(errs...)
 }
 
-func (e *Environment) PartitionNumber(m *model.SyslogMessage) (partitionNumber int32, errs []error) {
-	errs = []error{}
-	var err error
+func (e *Environment) PartitionNumber(m *model.SyslogMessage) (partitionNumber int32, err error) {
+	errs := make([]error, 0, 0)
 	var jsMessage goja.Value
 	var jsPartitionNumber goja.Value
 
@@ -390,13 +387,13 @@ func (e *Environment) PartitionNumber(m *model.SyslogMessage) (partitionNumber i
 			if err == nil {
 				partitionNumber = int32(jsPartitionNumber.ToInteger())
 			} else {
-				errs = append(errs, ExecutingJSErrorFactory(err, "PartitionNumber"))
+				errs = append(errs, executingJSErrorFactory(err, "PartitionNumber"))
 			}
 		} else {
-			errs = append(errs, &ConversionGoJsError{ExecutingJSErrorFactory(err, "NewSyslogMessage")})
+			errs = append(errs, go2jsError(executingJSErrorFactory(err, "NewSyslogMessage")))
 		}
 	}
-	return
+	return partitionNumber, eerrors.Combine(errs...)
 }
 
 func (e *Environment) FilterMessage(m *model.SyslogMessage) (filterResult FilterResult, err error) {
@@ -412,11 +409,11 @@ func (e *Environment) FilterMessage(m *model.SyslogMessage) (filterResult Filter
 	}
 	jsMessage, err = e.toJsMessage(m)
 	if err != nil {
-		return FILTER_ERROR, &ConversionGoJsError{ExecutingJSErrorFactory(err, "NewSyslogMessage")}
+		return FILTER_ERROR, go2jsError(executingJSErrorFactory(err, "NewSyslogMessage"))
 	}
 	resJsMessage, err = e.jsFilterMessages(nil, jsMessage)
 	if err != nil {
-		return FILTER_ERROR, ExecutingJSErrorFactory(err, "FilterMessages")
+		return FILTER_ERROR, executingJSErrorFactory(err, "FilterMessages")
 	}
 
 	filterResult = FilterResult(resJsMessage.ToInteger())
@@ -430,7 +427,7 @@ func (e *Environment) FilterMessage(m *model.SyslogMessage) (filterResult Filter
 	case PASS:
 		result, err = e.fromJsMessage(jsMessage)
 		if err != nil {
-			return FILTER_ERROR, &ConversionJsGoError{Err: err}
+			return FILTER_ERROR, js2goError(err)
 		}
 		if result != nil {
 			*m = *result
@@ -439,7 +436,7 @@ func (e *Environment) FilterMessage(m *model.SyslogMessage) (filterResult Filter
 		return PASS, nil
 
 	default:
-		return FILTER_ERROR, fmt.Errorf("JS filter function returned an invalid result: %d", int64(filterResult))
+		return FILTER_ERROR, jsvmError(eerrors.Errorf("JS filter function returned an invalid result: %d", int64(filterResult)))
 	}
 
 }
@@ -473,7 +470,7 @@ func (e *Environment) fromJsMessage(sm goja.Value) (m *model.SyslogMessage, err 
 	var smToGo goja.Value
 	smToGo, err = e.jsSyslogMessageToGo(nil, sm)
 	if err != nil {
-		return m, ExecutingJSErrorFactory(err, "SyslogMessageToGo")
+		return m, executingJSErrorFactory(err, "SyslogMessageToGo")
 	}
 	imsg := iSyslogMessage{}
 	err = e.runtime.ExportTo(smToGo, &imsg)

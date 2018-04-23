@@ -2,10 +2,8 @@ package store
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
-	"sync/atomic"
 
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/conf"
@@ -14,20 +12,22 @@ import (
 	"github.com/stephane-martin/skewer/store/dests"
 	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
+	"go.uber.org/atomic"
 )
 
 type Forwarder struct {
 	logger     log15.Logger
 	binder     binder.Client
 	once       sync.Once
-	store      Store
+	store      *MessageStore
 	conf       conf.BaseConfig
 	desttype   conf.DestinationType
 	outputMsgs []model.OutputMsg
 	dest       dests.Destination
 }
 
-func NewForwarder(desttype conf.DestinationType, st Store, bc conf.BaseConfig, logger log15.Logger, bindr binder.Client) *Forwarder {
+func NewForwarder(desttype conf.DestinationType, st *MessageStore, bc conf.BaseConfig, logger log15.Logger, bindr binder.Client) *Forwarder {
 	f := Forwarder{
 		logger:   logger.New("class", "forwarder"),
 		binder:   bindr,
@@ -54,7 +54,7 @@ func (fwder *Forwarder) CreateDestination(ctx context.Context) (err error) {
 	}
 	select {
 	case <-ctx.Done():
-		return errors.New("shutdown")
+		return eerrors.New("shutdown")
 	default:
 		fwder.dest = dest
 	}
@@ -68,8 +68,10 @@ func (fwder *Forwarder) Forward(ctx context.Context) (err error) {
 
 	defer func() {
 		// be sure to Close the destination when we are done
-		_ = fwder.dest.Close()
-		fwder.dest = nil
+		if fwder.dest != nil {
+			_ = fwder.dest.Close()
+			fwder.dest = nil
+		}
 	}()
 
 	fwder.outputMsgs = make([]model.OutputMsg, fwder.conf.Store.BatchSize)
@@ -78,16 +80,16 @@ func (fwder *Forwarder) Forward(ctx context.Context) (err error) {
 
 	var more bool
 	var messages []*model.FullMessage
-	var stopping int32
+	var stopping atomic.Bool
 	shutdown := false
 
 	go func() {
 		select {
 		case <-ctx.Done():
 			shutdown = true
-			atomic.StoreInt32(&stopping, 1)
+			stopping.Store(true)
 		case <-fwder.dest.Fatal():
-			atomic.StoreInt32(&stopping, 1)
+			stopping.Store(true)
 		}
 	}()
 
@@ -102,7 +104,7 @@ func (fwder *Forwarder) Forward(ctx context.Context) (err error) {
 			if !more || messages == nil {
 				return nil
 			}
-			if atomic.LoadInt32(&stopping) == 1 {
+			if stopping.Load() {
 				fwder.dest.NACKAllSlice(messages)
 				if shutdown {
 					return nil
@@ -110,30 +112,31 @@ func (fwder *Forwarder) Forward(ctx context.Context) (err error) {
 				return fmt.Errorf("Fatal error in destination: %d", fwder.desttype)
 			}
 
-			err = fwder.fwdMsgs(ctx, messages, jsenvs, fwder.dest)
-			if err != nil {
-				fwder.logger.Warn("Error forwarding messages", "error", err)
+			errs := fwder.fwdMsgs(ctx, messages, jsenvs, fwder.dest)
+			if errs != nil {
+				fwder.logger.Warn("Errors forwarding messages", "errors", errs)
 			}
 		}
 	}
 }
 
-func (fwder *Forwarder) fwdMsgs(ctx context.Context, msgs []*model.FullMessage, envs map[utils.MyULID]*javascript.Environment, dest dests.Destination) (err error) {
-	var errs []error
-	var config *conf.FilterSubConfig
+func (fwder *Forwarder) fwdMsgs(ctx context.Context, msgs []*model.FullMessage, envs map[utils.MyULID]*javascript.Environment, dest dests.Destination) (err eerrors.ErrorSlice) {
+	var joinedErr error
 	var topic, partitionKey string
 	var partitionNumber int32
-	var filterResult javascript.FilterResult
 	var m *model.FullMessage
 	var i int
 
 Loop:
 	for _, m = range msgs {
+		if m == nil || m.Fields == nil {
+			continue Loop
+		}
 		env, ok := envs[m.ConfId]
 		if !ok {
 			// create the environment for the javascript virtual machine
-			config, err = fwder.store.GetSyslogConfig(m.ConfId)
-			if err != nil {
+			config, e := fwder.store.GetSyslogConfig(m.ConfId)
+			if e != nil {
 				fwder.logger.Warn(
 					"could not find the stored configuration for a message",
 					"confId", utils.MyULID(m.ConfId).String(),
@@ -154,35 +157,36 @@ Loop:
 			env = envs[m.ConfId]
 		}
 
+		topic = ""
+		partitionKey = ""
+		partitionNumber = 0
+
 		_, ok1 := dest.(*dests.KafkaDestination)
 		_, ok2 := dest.(*dests.NATSDestination)
 		_, ok3 := dest.(*dests.RedisDestination)
+
 		if ok1 || ok2 || ok3 {
 			// only calculate proper Topic, PartitionKey and PartitionNumber if we are sending to Kafka or NATS
-			topic, errs = env.Topic(m.Fields)
-			for _, err = range errs {
-				fwder.logger.Info("Error calculating topic", "error", err, "uid", m.Uid)
+			topic, joinedErr = env.Topic(m.Fields)
+			if joinedErr != nil {
+				fwder.logger.Info("Error calculating topic", "error", joinedErr.Error(), "uid", m.Uid)
 			}
 			if len(topic) == 0 {
 				topic = "default-topic"
 			}
-			partitionKey, errs = env.PartitionKey(m.Fields)
-			for _, err := range errs {
+			partitionKey, joinedErr = env.PartitionKey(m.Fields)
+			if joinedErr != nil {
 				fwder.logger.Info("Error calculating the partition key", "error", err, "uid", m.Uid)
 			}
-			partitionNumber, errs = env.PartitionNumber(m.Fields)
-			for _, err := range errs {
+			partitionNumber, joinedErr = env.PartitionNumber(m.Fields)
+			if joinedErr != nil {
 				fwder.logger.Info("Error calculating the partition number", "error", err, "uid", m.Uid)
 			}
-		} else {
-			topic = ""
-			partitionKey = ""
-			partitionNumber = 0
 		}
 
-		filterResult, err = env.FilterMessage(m.Fields)
-		if err != nil {
-			fwder.logger.Warn("Error happened filtering message", "error", err)
+		filterResult, e := env.FilterMessage(m.Fields)
+		if e != nil {
+			fwder.logger.Warn("Error happened filtering message", "error", e)
 			continue Loop
 		}
 

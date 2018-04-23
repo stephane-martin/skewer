@@ -3,7 +3,6 @@ package dests
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -18,6 +17,7 @@ import (
 	"github.com/stephane-martin/skewer/encoders"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 	"github.com/stephane-martin/skewer/utils/es"
 	"github.com/valyala/bytebufferpool"
 	"github.com/zond/gotomic"
@@ -120,7 +120,7 @@ func NewElasticDestination(ctx context.Context, e *Env) (Destination, error) {
 	}
 	if resp.Status != "green" && resp.Status != "yellow" {
 		connCounter.WithLabelValues("elasticsearch", "fail").Inc()
-		return nil, errors.New("Elasticsearch cluster had red status")
+		return nil, eerrors.New("Elasticsearch cluster had red status")
 	}
 
 	names, err := d.elasticClient.IndexNames()
@@ -219,7 +219,7 @@ func (d *ElasticDestination) sendOne(ctx context.Context, msg *model.FullMessage
 	err = d.indexNameTpl.Execute(indexBuf, msg.Fields)
 	if err != nil {
 		bytebufferpool.Put(indexBuf)
-		return encoders.ErrNonEncodable
+		return encoders.EncodingError(err)
 	}
 	indexName := indexBuf.String()
 	bytebufferpool.Put(indexBuf)
@@ -228,7 +228,7 @@ func (d *ElasticDestination) sendOne(ctx context.Context, msg *model.FullMessage
 	var buf string
 	buf, err = encoders.ChainEncode(d.encoder, msg)
 	if err != nil {
-		return encoders.ErrNonEncodable
+		return encoders.EncodingError(err)
 	}
 
 	// create index in ES if needed
@@ -269,6 +269,6 @@ func (d *ElasticDestination) sendOne(ctx context.Context, msg *model.FullMessage
 	return nil
 }
 
-func (d *ElasticDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
-	return d.ForEach(ctx, d.sendOne, nil, msgs)
+func (d *ElasticDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err eerrors.ErrorSlice) {
+	return d.ForEach(ctx, d.sendOne, false, true, msgs)
 }

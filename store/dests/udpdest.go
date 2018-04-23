@@ -7,6 +7,7 @@ import (
 	"github.com/stephane-martin/skewer/clients"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 )
 
 type UDPDestination struct {
@@ -61,6 +62,6 @@ func (d *UDPDestination) sendOne(ctx context.Context, msg *model.FullMessage) er
 	return d.clt.Send(msg)
 }
 
-func (d *UDPDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err error) {
-	return d.ForEach(ctx, d.sendOne, d.ACK, msgs)
+func (d *UDPDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err eerrors.ErrorSlice) {
+	return d.ForEach(ctx, d.sendOne, true, true, msgs)
 }

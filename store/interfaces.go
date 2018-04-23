@@ -1,13 +1,8 @@
 package store
 
-import (
-	"github.com/stephane-martin/skewer/conf"
-	"github.com/stephane-martin/skewer/model"
-	"github.com/stephane-martin/skewer/utils"
-)
-
+/*
 type Store interface {
-	Stash(uid utils.MyULID, b []byte) (error, error)
+	Stash(uid utils.MyULID, b []byte) error
 	Outputs(dest conf.DestinationType) chan []*model.FullMessage
 	ACK(uid utils.MyULID, dest conf.DestinationType)
 	NACK(uid utils.MyULID, dest conf.DestinationType)
@@ -20,3 +15,4 @@ type Store interface {
 	Destinations() []conf.DestinationType
 	Confined() bool
 }
+*/

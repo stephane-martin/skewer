@@ -8,7 +8,6 @@ import (
 	"net"
 	"runtime"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -18,8 +17,8 @@ import (
 	"github.com/stephane-martin/skewer/decoders"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/base"
-	"github.com/stephane-martin/skewer/services/errors"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 	"github.com/stephane-martin/skewer/utils/queue/tcp"
 )
 
@@ -75,7 +74,7 @@ func (s *TcpServiceImpl) Start() ([]model.ListenerInfo, error) {
 	s.LockStatus()
 	if s.status != TcpStopped {
 		s.UnlockStatus()
-		return nil, errors.ServerNotStopped
+		return nil, ServerNotStopped
 	}
 	s.statusChan = make(chan TcpServerStatus, 1)
 	s.fatalErrorChan = make(chan struct{})
@@ -179,29 +178,26 @@ func (s *TcpServiceImpl) parseOne(raw *model.RawTcpMessage, gen *utils.Generator
 		if syslogMsg == nil {
 			continue
 		}
-		if raw.Client != "" {
-			syslogMsg.SetProperty("skewer", "client", raw.Client)
-		}
-		if raw.UnixSocketPath != "" {
-			syslogMsg.SetProperty("skewer", "socketpath", raw.UnixSocketPath)
-		}
-		if raw.LocalPort != 0 {
-			syslogMsg.SetProperty("skewer", "localport", strconv.FormatInt(int64(raw.LocalPort), 10))
-		}
 
 		full = model.FullFactoryFrom(syslogMsg)
 		full.Uid = gen.Uid()
 		full.ConfId = raw.ConfID
-		fatal, nonfatal := s.reporter.Stash(full)
+		full.SourceType = "tcp"
+		full.ClientAddr = raw.Client
+		full.SourcePath = raw.UnixSocketPath
+		full.SourcePort = raw.LocalPort
 
-		if fatal != nil {
-			makeLogger(s.Logger, raw).Error("Fatal error stashing TCP message", "error", fatal)
-			s.dofatal()
-			return fatal
-		} else if nonfatal != nil {
-			makeLogger(s.Logger, raw).Warn("Non-fatal error stashing TCP message", "error", nonfatal)
-		}
+		err := s.reporter.Stash(full)
 		model.FullFree(full)
+
+		if eerrors.Is("Fatal", err) {
+			makeLogger(s.Logger, raw).Error("Fatal error stashing TCP message", "error", err)
+			s.dofatal()
+			return err
+		}
+		if err != nil {
+			makeLogger(s.Logger, raw).Warn("Non-fatal error stashing TCP message", "error", err)
+		}
 	}
 	return nil
 }
@@ -242,32 +238,11 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TCPSourceConfig)
 		s.wg.Done()
 	}()
 
-	client := ""
-	path := ""
-	remote := conn.RemoteAddr()
-	localPort := ""
-	var localPortInt int32
+	lport, lports, client, path := props(conn)
 
-	if remote == nil {
-		client = "localhost"
-		path = conn.LocalAddr().String()
-	} else {
-		client = strings.Split(remote.String(), ":")[0]
-		local := conn.LocalAddr()
-		if local != nil {
-			s := strings.Split(local.String(), ":")
-			localPortInt, _ = utils.Atoi32(s[len(s)-1])
-			if localPortInt > 0 {
-				localPort = strconv.FormatInt(int64(localPortInt), 10)
-			}
-		}
-	}
-	client = strings.TrimSpace(client)
-	path = strings.TrimSpace(path)
-
-	logger := s.Logger.New("protocol", "tcp", "client", client, "local_port", localPort, "unix_socket_path", path, "format", config.Format)
+	logger := s.Logger.New("protocol", "tcp", "client", client, "local_port", lports, "unix_socket_path", path, "format", config.Format)
 	logger.Info("New client")
-	base.ClientConnectionCounter.WithLabelValues("tcp", client, localPort, path).Inc()
+	base.ClientConnectionCounter.WithLabelValues("tcp", client, lports, path).Inc()
 
 	timeout := config.Timeout
 	if timeout > 0 {
@@ -297,7 +272,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TCPSourceConfig)
 		}
 		rawmsg = s.Pool.Get().(*model.RawTcpMessage)
 		rawmsg.Client = client
-		rawmsg.LocalPort = localPortInt
+		rawmsg.LocalPort = lport
 		rawmsg.UnixSocketPath = path
 		rawmsg.ConfID = config.ConfID
 		rawmsg.Decoder = config.DecoderBaseConfig
@@ -309,7 +284,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TCPSourceConfig)
 			logger.Warn("Error queueing TCP raw message", "error", err)
 			return
 		}
-		base.IncomingMsgsCounter.WithLabelValues("tcp", client, localPort, path).Inc()
+		base.IncomingMsgsCounter.WithLabelValues("tcp", client, lports, path).Inc()
 	}
 	logger.Info("End of TCP client connection", "error", scanner.Err())
 }

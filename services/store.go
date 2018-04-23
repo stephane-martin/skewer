@@ -21,6 +21,7 @@ import (
 	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/sys/kring"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 	"github.com/stephane-martin/skewer/utils/httpserver"
 )
 
@@ -31,7 +32,9 @@ type storeServiceImpl struct {
 	binder           binder.Client
 	shutdownStore    context.CancelFunc
 	shutdownCtx      context.Context
+	pipeCtx          context.Context
 	cancelForwarders context.CancelFunc
+	cancelPipe       context.CancelFunc
 	fwdersWg         sync.WaitGroup
 	mu               sync.Mutex
 	ingestwg         sync.WaitGroup
@@ -60,6 +63,7 @@ func NewStoreService(env *base.ProviderEnv) (base.Provider, error) {
 		confined: env.Confined,
 	}
 	impl.shutdownCtx, impl.shutdownStore = context.WithCancel(context.Background())
+	impl.pipeCtx, impl.cancelPipe = context.WithCancel(impl.shutdownCtx)
 
 	if env.Profile {
 		httpserver.ProfileServer(env.Binder)
@@ -103,62 +107,68 @@ func (s *storeServiceImpl) Start() ([]model.ListenerInfo, error) {
 	return nil, nil
 }
 
-func (s *storeServiceImpl) create() error {
-	destinations, err := s.config.Main.GetDestinations()
+func (s *storeServiceImpl) create() (err error) {
+	var destinations conf.DestinationType
+	destinations, err = s.config.Main.GetDestinations()
 	if err != nil {
-		return err
+		return eerrors.Wrap(err, "Error getting destinations")
 	}
 	s.store, err = store.NewStore(s.shutdownCtx, s.config.Store, s.ring, destinations, s.confined, s.logger)
 	if err != nil {
-		return err
+		return eerrors.Wrap(err, "Error creating the Store")
 	}
 	err = s.store.StoreAllSyslogConfigs(s.config)
 	if err != nil {
-		return err
+		return eerrors.Wrap(err, "Error storing configurations in store")
 	}
 	// receive syslog messages on the pipe
 	s.ingestwg.Add(1)
 	go func() {
 		defer func() {
-			if e := recover(); e != nil {
-				errString := fmt.Sprintf("%s", e)
-				s.logger.Error("Scanner panicked in store service", "error", errString)
+			if e := eerrors.Err(recover()); e != nil {
+				err := eerrors.Wrap(e, "Scanner panicked in store service")
+				s.logger.Error(err.Error())
 			}
 			s.ingestwg.Done()
 		}()
 
-		scanner := bufio.NewScanner(s.pipe)
+		scanner := utils.NewWrappedScanner(s.pipeCtx, bufio.NewScanner(s.pipe))
 		scanner.Split(utils.MakeDecryptSplit(s.secret))
 		var err error
 		var message *model.FullMessage
 		var msgBytes []byte
 		var uid utils.MyULID
 
-		for scanner.Scan() {
-			msgBytes = scanner.Bytes()
-			message, err = model.FromBuf(msgBytes) // we need to parse to get the message uid
-			if err == nil {
+		for {
+			for scanner.Scan() {
+				msgBytes = scanner.Bytes()
+				message, err = model.FromBuf(msgBytes) // we need to parse to get the message uid
+				if err != nil {
+					model.FullFree(message)
+					s.logger.Error("Unexpected error decoding message from the Store pipe", "error", err)
+					go func() { s.Shutdown() }()
+					return
+				}
 				uid = message.Uid
 				model.FullFree(message)
-				err, _ = s.store.Stash(uid, msgBytes)
+				err = s.store.Stash(uid, msgBytes)
 				if err != nil {
 					s.logger.Error("Error pushing message to the store queue", "error", err)
 					go func() { s.Shutdown() }()
 					return
 				}
-			} else {
-				model.FullFree(message)
-				s.logger.Error("Unexpected error decoding message from the Store pipe", "error", err)
-				go func() { s.Shutdown() }()
-				return
 			}
-		}
 
-		err = scanner.Err()
-		if utils.IsFileClosed(err) {
-			s.logger.Debug("Stopped to read the ingestion store pipe")
-		} else if err != nil {
-			s.logger.Warn("Unexpected error decoding message from the Store pipe", "error", err)
+			err = scanner.Err()
+			if eerrors.IsTimeout(err) {
+				continue
+			}
+			if err == nil || eerrors.HasFileClosed(err) {
+				s.logger.Debug("Stopped to read the ingestion store pipe")
+				return
+			} else if err != nil {
+				s.logger.Warn("Unexpected error decoding message from the Store pipe", "error", err)
+			}
 		}
 	}()
 	return nil
@@ -285,7 +295,7 @@ func (s *storeServiceImpl) doStop(mu *sync.Mutex) {
 	s.status = false
 }
 
-// Shutdown stops the kafka forwarder and shutdowns the Store
+// Shutdown stops the forwarders and shutdowns the Store
 func (s *storeServiceImpl) Shutdown() {
 	select {
 	case <-s.shutdownCtx.Done():
@@ -294,6 +304,7 @@ func (s *storeServiceImpl) Shutdown() {
 	default:
 	}
 	s.Stop()
+	s.cancelPipe()
 	s.ingestwg.Wait() // wait until we are done ingesting new messages
 	s.shutdownStore()
 	s.logger.Debug("Store service waits for end of store goroutines")

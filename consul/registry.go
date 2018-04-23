@@ -9,8 +9,8 @@ import (
 	"sync"
 
 	"github.com/hashicorp/consul/api"
-	"github.com/hashicorp/errwrap"
 	"github.com/inconshreveable/log15"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 )
 
 type ServiceActionType bool
@@ -49,7 +49,7 @@ func NewService(ip string, port int, check string, tags []string) (*Service, err
 
 	localIP, err := LocalIP()
 	if err != nil {
-		return nil, errwrap.Wrapf("Error when trying to get a local IP: {{err}}", err)
+		return nil, err
 	}
 
 	var parsedIP net.IP
@@ -70,7 +70,7 @@ func NewService(ip string, port int, check string, tags []string) (*Service, err
 
 	hostname, err := os.Hostname()
 	if err != nil {
-		return nil, errwrap.Wrapf("Error trying to get the hostname: {{err}}", err)
+		return nil, eerrors.Wrap(err, "Error getting hostname")
 	}
 
 	s.ID = fmt.Sprintf("skewer-%s-%s-%d", hostname, s.parsedIP.String(), port)

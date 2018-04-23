@@ -13,8 +13,8 @@ import (
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 	"github.com/stephane-martin/skewer/utils/queue/message"
-	"github.com/uber-go/multierr"
 )
 
 var Registry *prometheus.Registry
@@ -204,58 +204,64 @@ func (base *baseDestination) NACKRemaining(msgs []model.OutputMsg) {
 	}
 }
 
-func (base *baseDestination) ForEach(ctx context.Context, f func(context.Context, *model.FullMessage) error, ackf func(utils.MyULID), msgs []model.OutputMsg) (err error) {
+func (base *baseDestination) ForEach(ctx context.Context, f func(context.Context, *model.FullMessage) error, ackf, free bool, msgs []model.OutputMsg) (err eerrors.ErrorSlice) {
 	var msg *model.FullMessage
-	var e error
+	var curErr error
+	c := eerrors.ChainErrors()
 	var uid utils.MyULID
 	for len(msgs) > 0 {
 		msg = msgs[0].Message
 		uid = msg.Uid
-		e = f(ctx, msg)
+		curErr = f(ctx, msg)
 		msgs = msgs[1:]
-		model.FullFree(msg)
-		if e != nil {
-			err = multierr.Append(err, e)
-			if encoders.IsEncodingError(e) {
+		if free {
+			model.FullFree(msg)
+		}
+		if curErr != nil {
+			c.Append(curErr)
+			if IsEncodingError(curErr) {
 				base.PermError(uid)
 			} else {
 				base.NACK(uid)
 				base.NACKRemaining(msgs)
 				base.dofatal()
-				return err
+				return c.Sum()
 			}
-		} else if ackf != nil {
-			ackf(uid)
+		} else if ackf {
+			base.ACK(uid)
 		}
 	}
-	return err
+	return c.Sum()
 }
 
-func (base *baseDestination) ForEachWithTopic(ctx context.Context, f func(context.Context, *model.FullMessage, string, string, int32) error, ackf func(utils.MyULID), msgs []model.OutputMsg) (err error) {
+func (base *baseDestination) ForEachWithTopic(ctx context.Context, f func(context.Context, *model.FullMessage, string, string, int32) error, ackf, free bool, msgs []model.OutputMsg) (err eerrors.ErrorSlice) {
 	var msg *model.FullMessage
-	var e error
+	var curErr error
+	c := eerrors.ChainErrors()
 	var uid utils.MyULID
 	for len(msgs) > 0 {
 		msg = msgs[0].Message
 		uid = msg.Uid
-		e = f(ctx, msg, msgs[0].Topic, msgs[0].PartitionKey, msgs[0].PartitionNumber)
+		curErr = f(ctx, msg, msgs[0].Topic, msgs[0].PartitionKey, msgs[0].PartitionNumber)
 		msgs = msgs[1:]
-		model.FullFree(msg)
-		if e != nil {
-			err = multierr.Append(err, e)
-			if encoders.IsEncodingError(e) {
+		if free {
+			model.FullFree(msg)
+		}
+		if curErr != nil {
+			c.Append(curErr)
+			if IsEncodingError(curErr) {
 				base.PermError(uid)
 			} else {
 				base.NACK(uid)
 				base.NACKRemaining(msgs)
 				base.dofatal()
-				return err
+				return c.Sum()
 			}
-		} else if ackf != nil {
-			ackf(uid)
+		} else if ackf {
+			base.ACK(uid)
 		}
 	}
-	return err
+	return c.Sum()
 }
 
 func (base *baseDestination) getEncoder(format string) (frmt baseenc.Format, encoder encoders.Encoder, err error) {
@@ -289,6 +295,14 @@ func (base *baseDestination) dofatal() {
 		fatalCounter.WithLabelValues(base.codename).Inc()
 		close(base.fatal)
 	})
+}
+
+// IsEncodingError returns true when the given error is a message encoding error
+func IsEncodingError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return eerrors.Is("Encoding", err)
 }
 
 // TODO: destinations should free the given syslog message when they are sure they dont need it anymore

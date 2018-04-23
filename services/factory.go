@@ -1,7 +1,6 @@
 package services
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/inconshreveable/log15"
@@ -13,6 +12,7 @@ import (
 	"github.com/stephane-martin/skewer/services/network"
 	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/sys/kring"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 )
 
 func Configure(t base.Types, c conf.BaseConfig) (res conf.BaseConfig) {
@@ -64,13 +64,22 @@ func Configure(t base.Types, c conf.BaseConfig) (res conf.BaseConfig) {
 }
 
 func ConfigureAndStartService(s base.Provider, c conf.BaseConfig) ([]model.ListenerInfo, error) {
-	switch s.Type() {
-	case base.Store:
-		return s.(*storeServiceImpl).SetConfAndRestart(c)
-	default:
-		s.SetConf(c)
-		return s.Start()
+	t := s.Type()
+
+	if t == base.Store {
+		infos, err := s.(*storeServiceImpl).SetConfAndRestart(c)
+		if err != nil {
+			return nil, eerrors.Wrap(err, "Error restarting the Store")
+		}
+		return infos, nil
 	}
+
+	s.SetConf(c)
+	infos, err := s.Start()
+	if err != nil {
+		return nil, eerrors.Wrapf(err, "Error starting provider '%s'", base.Types2Names[t])
+	}
+	return infos, nil
 }
 
 func SetConfined(confined bool) func(e *base.ProviderEnv) {
@@ -146,10 +155,10 @@ func ProviderFactory(t base.Types, env *base.ProviderEnv) (base.Provider, error)
 	case base.MacOS:
 		provider, err = macos.NewMacOSLogsService(env)
 	default:
-		return nil, fmt.Errorf("unknown provider type: %d", t)
+		return nil, eerrors.Errorf("Unknown provider type: %d", t)
 	}
 	if err != nil {
-		return nil, err
+		return nil, eerrors.Wrapf(err, "Error building provider '%s'", base.Types2Names[t])
 	}
 	return provider, nil
 }

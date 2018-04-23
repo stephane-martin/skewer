@@ -7,25 +7,14 @@ import (
 	"time"
 
 	"github.com/pquerna/ffjson/ffjson"
-	"github.com/stephane-martin/skewer/decoders/base"
 	"github.com/stephane-martin/skewer/model"
-	"gopkg.in/Graylog2/go-gelf.v2/gelf"
 )
-
-func pGELF(m []byte) ([]*model.SyslogMessage, error) {
-	gelfMsg := &gelf.Message{}
-	err := gelfMsg.UnmarshalJSON(m)
-	if err != nil {
-		return nil, &base.UnmarshalingJsonError{err}
-	}
-	return []*model.SyslogMessage{FromGelfMessage(gelfMsg)}, nil
-}
 
 func pJSON(m []byte) ([]*model.SyslogMessage, error) {
 	sourceMsg := model.RegularSyslog{}
 	err := ffjson.Unmarshal(m, &sourceMsg)
 	if err != nil {
-		return nil, &base.UnmarshalingJsonError{err}
+		return nil, UnmarshalJsonError(err)
 	}
 	return []*model.SyslogMessage{sourceMsg.Internal()}, nil
 }
@@ -34,12 +23,12 @@ func pRsyslogJSON(m []byte) ([]*model.SyslogMessage, error) {
 	sourceMsg := model.JsonRsyslogMessage{}
 	err := ffjson.Unmarshal(m, &sourceMsg)
 	if err != nil {
-		return nil, &base.UnmarshalingJsonError{err}
+		return nil, UnmarshalJsonError(err)
 	}
 
 	pri, err := strconv.Atoi(sourceMsg.Priority)
 	if err != nil {
-		return nil, &base.InvalidPriorityError{}
+		return nil, ErrInvalidPriority
 	}
 
 	n := time.Now()
@@ -49,7 +38,7 @@ func pRsyslogJSON(m []byte) ([]*model.SyslogMessage, error) {
 	if sourceMsg.TimeReported != "-" && len(sourceMsg.TimeReported) > 0 {
 		r, err := time.Parse(time.RFC3339Nano, sourceMsg.TimeReported)
 		if err != nil {
-			return nil, &base.TimeError{}
+			return nil, ErrInvalidTimestamp
 		}
 		reported = r
 	}
@@ -57,7 +46,7 @@ func pRsyslogJSON(m []byte) ([]*model.SyslogMessage, error) {
 	if sourceMsg.TimeGenerated != "-" && len(sourceMsg.TimeGenerated) > 0 {
 		g, err := time.Parse(time.RFC3339Nano, sourceMsg.TimeGenerated)
 		if err != nil {
-			return nil, &base.TimeError{}
+			return nil, ErrInvalidTimestamp
 		}
 		generated = g
 	}
