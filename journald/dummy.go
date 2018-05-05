@@ -17,6 +17,7 @@ func NewReader(stasher base.Stasher, logger log15.Logger) (*DummyReader, error) 
 	return new(DummyReader), nil
 }
 
-func (r *DummyReader) Start(utils.MyULID) {}
-func (r *DummyReader) Stop()              {}
-func (r *DummyReader) Shutdown()          {}
+func (r *DummyReader) Start(utils.MyULID)        {}
+func (r *DummyReader) Stop()                     {}
+func (r *DummyReader) Shutdown()                 {}
+func (r *DummyReader) FatalError() chan struct{} { return nil }

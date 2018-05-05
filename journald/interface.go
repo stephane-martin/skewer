@@ -6,4 +6,5 @@ type JournaldReader interface {
 	Start(utils.MyULID)
 	Stop()
 	Shutdown()
+	FatalError() chan struct{}
 }
