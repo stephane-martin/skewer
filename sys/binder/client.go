@@ -15,6 +15,7 @@ import (
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/eerrors"
+	"github.com/stephane-martin/skewer/utils/eerrors/erroradapters"
 )
 
 func IsStream(lnet string) bool {
@@ -370,7 +371,7 @@ func (l *Listener) Close() error {
 
 func (l *Listener) Accept() (net.Conn, error) {
 	ichan := l.client.newConns.get(l.addr, false)
-	notListenErr := &net.OpError{Err: errors.New("Not listening on that address"), Addr: l.Addr(), Op: "Accept"}
+	notListenErr := &net.OpError{Err: erroradapters.ErrNetClosing, Addr: l.Addr(), Op: "Accept"}
 	if ichan == nil {
 		return nil, notListenErr
 	}

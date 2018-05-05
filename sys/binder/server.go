@@ -13,6 +13,7 @@ import (
 	"github.com/awnumar/memguard"
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 )
 
 type ExternalConn struct {
@@ -61,8 +62,12 @@ func listen(ctx context.Context, wg *sync.WaitGroup, logger log15.Logger, schan 
 				uids := utils.NewUidString()
 				logger.Debug("New accepted connection", "uid", uids, "addr", addr)
 				schan <- &ExternalConn{Uid: uids, Conn: c, Addr: addr}
+			} else if eerrors.HasFileClosed(err) {
+				logger.Debug("Accept has been closed", "error", err, "addr", addr)
+				cancel()
+				return
 			} else {
-				logger.Debug("Accept error", "error", err, "addr", addr)
+				logger.Warn("Accept error", "error", err, "addr", addr)
 				cancel()
 				return
 			}
