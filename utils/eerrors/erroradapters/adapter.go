@@ -1,12 +1,19 @@
 package erroradapters
 
 import (
+	"errors"
 	"os"
 	"syscall"
 )
 
+var ErrNetClosing = errors.New("use of closed network connection")
+var ErrFileClosing = errors.New("use of closed file")
+var ErrNoDeadline = errors.New("file type does not support deadline")
+
 func Adapt(err error) (error, bool) {
 	switch e := err.(type) {
+	case *invalidError, *closedError, *existError, *notExistError, *noDeadlineError, *permissionError, *pathError, *linkError, *syscallError, *errnoError:
+		return err, true
 	case *os.PathError:
 		return &pathError{e}, true
 	case *os.LinkError:
@@ -29,6 +36,13 @@ func Adapt(err error) (error, bool) {
 		return &noDeadlineError{err}, true
 	case os.ErrPermission:
 		return &permissionError{err}, true
+	}
+	s := err.Error()
+	if s == ErrFileClosing.Error() {
+		return &closedError{err}, true
+	}
+	if s == ErrNetClosing.Error() {
+		return &closedError{err}, true
 	}
 	return err, false
 }

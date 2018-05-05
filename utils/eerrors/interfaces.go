@@ -7,3 +7,7 @@ type causes interface {
 type cause interface {
 	Cause() error
 }
+
+type types interface {
+	Types() []string
+}

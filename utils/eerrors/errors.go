@@ -4,6 +4,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"reflect"
 	"syscall"
 
 	errors "github.com/segmentio/errors-go"
@@ -88,6 +89,30 @@ func WithTags(err error, tags ...string) error {
 	return errors.WithTags(err, etags...)
 }
 
+func is(typ string, err error) (state bool, ok bool) {
+	if err == nil {
+		return false, true
+	}
+
+	if e, ok := err.(types); ok {
+		for _, t := range e.Types() {
+			if t == typ {
+				return true, true
+			}
+		}
+	}
+	err = errors.Adapt(err)
+	v := reflect.ValueOf(err)
+	m := v.MethodByName(typ)
+
+	if m.IsValid() {
+		if f, ok := m.Interface().(func() bool); ok {
+			return f(), true
+		}
+	}
+	return false, false
+}
+
 func Is(typ string, err error) bool {
 	return errors.Is(typ, err)
 }
@@ -110,4 +135,8 @@ func Wrap(err error, msg string) error {
 
 func Wrapf(err error, msg string, args ...interface{}) error {
 	return errors.Wrapf(err, msg, args...)
+}
+
+func Fatal(err error) error {
+	return errors.WithTypes(err, "Fatal")
 }

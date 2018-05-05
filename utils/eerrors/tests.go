@@ -20,6 +20,10 @@ func IsTimeout(err error) bool {
 	return errors.Is("Timeout", errors.Adapt(err))
 }
 
+func IsFatal(err error) bool {
+	return errors.Is("Fatal", err)
+}
+
 func HasErrno(err error, errno syscall.Errno) bool {
 	err = RootCause(err)
 	if err == nil {
@@ -45,13 +49,20 @@ func HasConnRefused(err error) bool {
 }
 
 func HasFileClosed(err error) bool {
-	err = RootCause(err)
 	if err == nil {
 		return false
 	}
+
+	err = RootCause(err)
+
 	if err == io.EOF || err == io.ErrClosedPipe || err == io.ErrUnexpectedEOF || err == os.ErrClosed {
 		return true
 	}
+
+	if has, ok := is("Closed", err); has && ok {
+		return true
+	}
+
 	for _, cause := range errors.Causes(err) {
 		if HasFileClosed(cause) {
 			return true
