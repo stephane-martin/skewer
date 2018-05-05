@@ -181,31 +181,32 @@ func (c *SyslogTCPClient) Connect(ctx context.Context) (err error) {
 	}
 	c.conn = conn
 	if c.flushPeriod > 0 {
-		// TODO: 4096 ?
-		c.writer = concurrent.NewWriterAutoFlush(c.conn, 4096, 0.75)
+		// if we assume we are forwarding logs on a local network,
+		// MTU should be 65536.
+		c.writer = concurrent.NewWriterAutoFlush(c.conn, 65536, 0.75)
 		c.ticker = time.NewTicker(c.flushPeriod)
 
+		// regularly flush buffers
 		go func() {
 			var err error
 			for range c.ticker.C {
 				err = c.Flush()
-				if err != nil {
-					if eerrors.HasBrokenPipe(err) || eerrors.HasFileClosed(err) {
-						_ = c.conn.Close()
-						c.logger.Warn("Broken pipe detected when flushing buffers", "error", err)
-						c.errorPrev = err
-						c.errorFlag.Store(true)
-						return
-					}
-					if eerrors.IsTimeout(err) {
-						_ = c.conn.Close()
-						c.logger.Warn("Timeout detected when flushing buffers", "error", err)
-						c.errorPrev = err
-						c.errorFlag.Store(true)
-						return
-					}
-					c.logger.Warn("Unexpected error flushing buffers", "error", err)
+				if err == nil {
+					continue
 				}
+				if eerrors.HasBrokenPipe(err) || eerrors.HasFileClosed(err) {
+					err = eerrors.Wrap(err, "Broken pipe detected when flushing buffers")
+				} else if eerrors.IsTimeout(err) {
+					err = eerrors.Wrap(err, "Timeout detected when flushing buffers")
+				} else {
+					err = eerrors.Wrap(err, "Unexpected error flushing buffers")
+				}
+				c.logger.Warn(err.Error())
+				_ = c.conn.Close()
+				c.errorPrev = err
+				c.errorFlag.Store(true)
+				return
+
 			}
 		}()
 	} else {
