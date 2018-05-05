@@ -386,13 +386,26 @@ func (s *RelpServiceImpl) Start() ([]model.ListenerInfo, error) {
 	cpus := runtime.NumCPU()
 	for i := 0; i < cpus; i++ {
 		s.parsewg.Add(1)
-		go s.Parse()
+		go func() {
+			// Parse() returns an error if something fatal happened
+			// in that case we stop the RELP service (and try to restart it after)
+			err := s.Parse()
+			s.parsewg.Done()
+			if err != nil {
+				s.Logger.Error(err.Error())
+				go s.StopAndWait()
+			}
+		}()
 	}
 
 	s.status = Started
 	s.StatusChan <- Started
 
-	s.Listen()
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.Listen()
+	}()
 	return infos, nil
 }
 
@@ -444,6 +457,7 @@ func (s *RelpServiceImpl) doStop(final bool, wait bool) {
 	}
 
 	s.resetTCPListeners() // makes the listeners stop
+	s.CloseConnections()
 	// no more message will arrive in rawMessagesQueue
 	if s.rawQ != nil {
 		s.rawQ.Dispose()
@@ -483,29 +497,17 @@ func (s *RelpServiceImpl) SetConf(sc []conf.RELPSourceConfig, pc []conf.ParserCo
 }
 
 func (s *RelpServiceImpl) parseOne(raw *model.RawTcpMessage, gen *utils.Generator) error {
-
-	logger := s.Logger.New(
-		"protocol", "relp",
-		"client", raw.Client,
-		"local_port", raw.LocalPort,
-		"unix_socket_path", raw.UnixSocketPath,
-		"format", raw.Decoder.Format,
-		"txnr", raw.Txnr,
-	)
 	parser, err := s.parserEnv.GetParser(&raw.Decoder)
 	if parser == nil || err != nil {
-		s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
-		logger.Error("Unknown decoder", "name", raw.Decoder.Format)
-		return nil
+		return decoders.DecodingError(eerrors.Wrapf(err, "Unknown decoder: %s", raw.Decoder.Format))
 	}
 	defer parser.Release()
+
 	syslogMsgs, err := parser.Parse(raw.Message)
 	if err != nil {
-		logger.Warn("Parsing error", "error", err)
-		s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
-		base.ParsingErrorCounter.WithLabelValues("relp", raw.Client, raw.Decoder.Format).Inc()
-		return nil
+		return decoders.DecodingError(eerrors.Wrap(err, "Parsing error"))
 	}
+
 	var syslogMsg *model.SyslogMessage
 	var full *model.FullMessage
 
@@ -517,7 +519,6 @@ func (s *RelpServiceImpl) parseOne(raw *model.RawTcpMessage, gen *utils.Generato
 		full = model.FullFactoryFrom(syslogMsg)
 		full.Txnr = raw.Txnr
 		full.ConfId = raw.ConfID
-		//full.ConnId = raw.ConnID
 		full.Uid = gen.Uid()
 		full.SourceType = "relp"
 		full.ClientAddr = raw.Client
@@ -526,61 +527,64 @@ func (s *RelpServiceImpl) parseOne(raw *model.RawTcpMessage, gen *utils.Generato
 
 		err := s.reporter.Stash(full)
 		model.FullFree(full)
-		if eerrors.Is("Fatal", err) {
-			s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
-			logger.Error("Fatal error pushing RELP message to the Store", "err", err)
-			s.StopAndWait()
-			return err
-		}
 		if err != nil {
-			logger.Warn("Non fatal error pushing RELP message to the Store", "err", err)
+			// a non fatal error is typically an error marshalling the message to the communication pipe with the coordinator
+			// such an error is not supposed to happen. if it does, we just log and continue the processing of remaining syslogMsgs
+			logg(s.Logger, &raw.RawMessage).Warn("Error stashing RELP message", "error", err)
+			if eerrors.IsFatal(err) {
+				return eerrors.Wrap(err, "Fatal error pushing RELP message to the Store")
+			}
 		}
 	}
-	s.forwarder.ForwardSucc(raw.ConnID, raw.Txnr)
 	return nil
 }
 
-func (s *RelpServiceImpl) Parse() {
-	defer s.parsewg.Done()
-
-	var raw *model.RawTcpMessage
-	var err error
+func (s *RelpServiceImpl) Parse() error {
 	gen := utils.NewGenerator()
+	var (
+		raw *model.RawTcpMessage
+		err error
+	)
 
 	for {
 		raw, err = s.rawQ.Get()
 		if err != nil || raw == nil {
-			return
+			return nil
 		}
+
 		err = s.parseOne(raw, gen)
-		s.Pool.Put(raw)
 		if err != nil {
-			// TODO: check error type
-			return
+			s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
+			base.ParsingErrorCounter.WithLabelValues("relp", raw.Client, raw.Decoder.Format).Inc()
+			logg(s.Logger, &raw.RawMessage).Warn(err.Error())
+		} else {
+			s.forwarder.ForwardSucc(raw.ConnID, raw.Txnr)
+		}
+
+		s.Pool.Put(raw) // we can't use raw afterwards
+
+		if err != nil && eerrors.IsFatal(err) {
+			// stop processing when fatal error happens
+			return err
 		}
 	}
-
 }
 
-func (s *RelpServiceImpl) handleResponses(conn net.Conn, connID utils.MyULID, client string, logger log15.Logger) {
-	defer func() {
-		s.wg.Done()
-	}()
+func writeSuccess(conn net.Conn, txnr int32) (err error) {
+	_, err = fmt.Fprintf(conn, "%d rsp 6 200 OK\n", txnr)
+	return err
+}
 
+func writeFailure(conn net.Conn, txnr int32) (err error) {
+	_, err = fmt.Fprintf(conn, "%d rsp 6 500 KO\n", txnr)
+	return err
+}
+
+func (s *RelpServiceImpl) handleResponses(conn net.Conn, connID utils.MyULID, client string, logger log15.Logger) error {
 	successes := map[int32]bool{}
 	failures := map[int32]bool{}
 	var err error
 	var ok1, ok2 bool
-
-	writeSuccess := func(txnr int32) (err error) {
-		_, err = fmt.Fprintf(conn, "%d rsp 6 200 OK\n", txnr)
-		return err
-	}
-
-	writeFailure := func(txnr int32) (err error) {
-		_, err = fmt.Fprintf(conn, "%d rsp 6 500 KO\n", txnr)
-		return err
-	}
 
 	var next int32 = -1
 
@@ -588,7 +592,7 @@ func (s *RelpServiceImpl) handleResponses(conn net.Conn, connID utils.MyULID, cl
 		txnrSuccess, txnrFailure := s.forwarder.GetSuccAndFail(connID)
 
 		if txnrSuccess == -1 && txnrFailure == -1 {
-			return
+			return io.EOF
 		}
 
 		if txnrSuccess != -1 {
@@ -621,16 +625,14 @@ func (s *RelpServiceImpl) handleResponses(conn net.Conn, connID utils.MyULID, cl
 			}
 			//logger.Debug("Next to commit", "connid", connID, "txnr", next)
 			if successes[next] {
-				err = writeSuccess(next)
+				err = writeSuccess(conn, next)
 				if err == nil {
-					//logger.Debug("ACK to client", "connid", connID, "tnxr", next)
 					successes[next] = false
 					relpAnswersCounter.WithLabelValues("200", client).Inc()
 				}
 			} else if failures[next] {
-				err = writeFailure(next)
+				err = writeFailure(conn, next)
 				if err == nil {
-					//logger.Debug("NACK to client", "connid", connID, "txnr", next)
 					failures[next] = false
 					relpAnswersCounter.WithLabelValues("500", client).Inc()
 				}
@@ -640,14 +642,12 @@ func (s *RelpServiceImpl) handleResponses(conn net.Conn, connID utils.MyULID, cl
 
 			if err == nil {
 				next = -1
-			} else if err == io.EOF {
-				// client is gone
-				return
-			} else if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
-				logger.Info("Timeout error writing RELP response to client", "error", err)
+			} else if eerrors.HasFileClosed(err) {
+				return io.EOF // client is gone
+			} else if eerrors.IsTimeout(err) {
+				logger.Warn("Timeout error writing RELP response to client", "error", err)
 			} else {
-				logger.Warn("Unexpected error writing RELP response to client", "error", err)
-				return
+				return eerrors.Wrap(err, "Unexpected error writing RELP response to client")
 			}
 		}
 	}
@@ -657,43 +657,55 @@ type RelpHandler struct {
 	Server *RelpServiceImpl
 }
 
-func (h RelpHandler) HandleConnection(conn net.Conn, c conf.TCPSourceConfig) {
-	// TODO: return error
+func (h RelpHandler) HandleConnection(conn net.Conn, c conf.TCPSourceConfig) (err error) {
 	// http://www.rsyslog.com/doc/relp.html
 	config := conf.RELPSourceConfig(c)
 	s := h.Server
 	s.AddConnection(conn)
 	connID := s.forwarder.AddConn(s.QueueSize)
-	lport, lports, client, path := props(conn)
+	lport, lports, clt, path := props(conn)
 	l := s.Logger.New(
 		"ConnID", connID,
 		"protocol", "relp",
-		"client", client,
+		"client", clt,
 		"local_port", lport,
 		"unix_socket_path", path,
 		"format", config.Format,
 	)
 
-	defer func() {
-		if e := recover(); e != nil {
-			errString := fmt.Sprintf("%s", e)
-			l.Error("Scanner panicked in RELP service", "error", errString)
+	l.Info("New client")
+	defer l.Debug("Client gone away")
+	base.ClientConnectionCounter.WithLabelValues("relp", clt, lports, path).Inc()
+
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		e := s.handleResponses(conn, connID, clt, l)
+		if e != nil && !eerrors.HasFileClosed(e) {
+			s.Logger.Warn("Unexpected error in RELP handleResponses", "error", e, "connID", connID.String())
 		}
-		l.Info("Scanning the RELP stream has ended")
-		s.forwarder.RemoveConn(connID)
-		s.RemoveConnection(conn)
-		s.wg.Done()
 	}()
 
-	s.wg.Add(1)
-	go s.handleResponses(conn, connID, client, l)
-	scan(l, s.forwarder, s.rawQ, conn, config.Timeout, config.ConfID, connID, s.MaxMessageSize, lport, config.DecoderBaseConfig, lports, path, client, s.Pool)
+	wg.Add(1)
+	go func() {
+		defer func() {
+			s.forwarder.RemoveConn(connID) // this makes handleResponses return
+			s.RemoveConnection(conn)
+			wg.Done()
+		}()
+		e := scan(l, s.forwarder, s.rawQ, conn, config.Timeout, config.ConfID, connID, s.MaxMessageSize, lport, config.DecoderBaseConfig, lports, path, clt, s.Pool)
+		if e != nil && !eerrors.HasFileClosed(e) {
+			err = eerrors.Wrap(e, "RELP scanning error")
+		}
+	}()
+
+	wg.Wait()
+	return err
 }
 
 func scan(l log15.Logger, f *ackForwarder, rawq *tcp.Ring, c net.Conn, tout time.Duration, cfid, cnid utils.MyULID, msiz int, lport int32, dc conf.DecoderBaseConfig, lports, path, clt string, p *sync.Pool) (err error) {
-	l.Info("New client connection")
-	base.ClientConnectionCounter.WithLabelValues("relp", clt, lports, path).Inc()
-
 	var previous = int32(-1)
 	var command string
 	var txnr int32
@@ -709,18 +721,22 @@ func scan(l log15.Logger, f *ackForwarder, rawq *tcp.Ring, c net.Conn, tout time
 	scanner.Split(utils.RelpSplit)
 	scanner.Buffer(make([]byte, 0, 132000), 132000)
 
+	defer func() {
+		if e := eerrors.Err(recover()); e != nil {
+			err = eerrors.Wrap(e, "Scanner panicked in RELP service")
+		}
+	}()
+
 	for scanner.Scan() {
 		splits = bytes.SplitN(scanner.Bytes(), sp, 3)
 		txnr, err = utils.Atoi32(string(splits[0]))
 		if err != nil {
-			l.Warn("Bad TXNR", "txnr", string(splits[0]))
 			relpProtocolErrorsCounter.WithLabelValues(clt).Inc()
-			return
+			return eerrors.Wrap(err, "Badly formed TXNR")
 		}
 		if txnr <= previous {
-			l.Warn("TXNR did not increase", "previous", previous, "current", txnr)
 			relpProtocolErrorsCounter.WithLabelValues(clt).Inc()
-			return
+			return eerrors.Wrapf(err, "TXNR has not increased (previous = %d, current = %d)", previous, txnr)
 		}
 		previous = txnr
 		command = string(splits[1])
@@ -733,34 +749,34 @@ func scan(l log15.Logger, f *ackForwarder, rawq *tcp.Ring, c net.Conn, tout time
 		if err != nil {
 			switch err.(type) {
 			case fsm.UnknownEventError:
-				l.Warn("Unknown RELP command", "command", command, "error", err)
 				relpProtocolErrorsCounter.WithLabelValues(clt).Inc()
-				return
+				return eerrors.Wrapf(err, "Unknown RELP command: %s", command)
 			case fsm.InvalidEventError:
-				l.Warn("Invalid RELP command", "command", command, "error", err)
 				relpProtocolErrorsCounter.WithLabelValues(clt).Inc()
-				return
+				return eerrors.Wrapf(err, "Invalid RELP command: %s", command)
 			case fsm.InternalError:
-				l.Error("Internal machine error", "command", command, "error", err)
-				return
+				relpProtocolErrorsCounter.WithLabelValues(clt).Inc()
+				return eerrors.Wrap(err, "Internal RELP state machine error")
 			case fsm.NoTransitionError:
 				// syslog does not change opened/closed state
+				// nothing to do
 			default:
-				if err == errClosed {
-					return
+				if eerrors.HasFileClosed(err) {
+					return io.EOF
 				}
-				l.Error("Unexpected error", "error", err)
-				return
+				return err
 			}
 		}
 		if tout > 0 {
 			_ = c.SetReadDeadline(time.Now().Add(tout))
 		}
 	}
-	return scanner.Err()
+	err = scanner.Err()
+	if eerrors.HasFileClosed(err) {
+		return io.EOF
+	}
+	return err
 }
-
-var errClosed = eerrors.WithTypes(eerrors.New("Closed RELP connection"), "Closed")
 
 func newMachine(l log15.Logger, fwder *ackForwarder, rawq *tcp.Ring, conn io.Writer, confID, connID utils.MyULID, msiz int, lport int32, dc conf.DecoderBaseConfig, lports, path, clt string, p *sync.Pool) *fsm.FSM {
 	// TODO: PERF: fsm protects internal variables (states, events) with mutexes. We don't really need the mutexes here.
@@ -797,7 +813,7 @@ func newMachine(l log15.Logger, fwder *ackForwarder, rawq *tcp.Ring, conn io.Wri
 				copy(rawmsg.Message, data)
 				err := rawq.Put(rawmsg)
 				if err != nil {
-					e.Err = fmt.Errorf("Failed to enqueue new raw RELP message: %s", err.Error())
+					e.Err = eerrors.Fatal(eerrors.Wrap(err, "Failed to enqueue new raw RELP message"))
 					return
 				}
 				base.IncomingMsgsCounter.WithLabelValues("relp", clt, lports, path).Inc()
@@ -806,7 +822,7 @@ func newMachine(l log15.Logger, fwder *ackForwarder, rawq *tcp.Ring, conn io.Wri
 				txnr := e.Args[0].(int32)
 				fmt.Fprintf(conn, "%d rsp 0\n0 serverclose 0\n", txnr)
 				l.Debug("Received 'close' command")
-				e.Err = errClosed
+				e.Err = io.EOF
 			},
 			"enter_opened": func(e *fsm.Event) {
 				txnr := e.Args[0].(int32)

@@ -1,6 +1,7 @@
 package network
 
 import (
+	"io"
 	"net"
 	"runtime"
 	"strconv"
@@ -71,20 +72,24 @@ func (s *UdpServiceImpl) SetConf(c conf.BaseConfig) {
 }
 
 // Parse fetch messages from the raw queue, parse them, and push them to be sent.
-func (s *UdpServiceImpl) Parse() {
-	defer s.wg.Done()
-
+func (s *UdpServiceImpl) Parse() error {
 	gen := utils.NewGenerator()
 
 	for {
 		raw, err := s.rawMessagesQueue.Get()
 		if raw == nil || err != nil {
-			return
+			return nil
 		}
-		s.Pool.Put(raw)
 		err = s.ParseOne(raw, gen)
 		if err != nil {
-			return
+			base.ParsingErrorCounter.WithLabelValues("udp", raw.Client, raw.Decoder.Format).Inc()
+			logg(s.Logger, &raw.RawMessage).Warn(err.Error())
+		}
+		s.Pool.Put(raw)
+
+		if err != nil && eerrors.IsFatal(err) {
+			// stop processing when fatal error happens
+			return err
 		}
 	}
 }
@@ -101,17 +106,14 @@ func (s *UdpServiceImpl) ParseOne(raw *model.RawUdpMessage, gen *utils.Generator
 
 	parser, err := s.parserEnv.GetParser(&raw.Decoder)
 	if parser == nil || err != nil {
-		logger.Crit("Unknown parser")
-		return nil
+		return decoders.DecodingError(eerrors.Wrapf(err, "Unknown decoder: %s", raw.Decoder.Format))
 	}
 	defer parser.Release()
 
-	syslogMsgs, err := parser.Parse(raw.Message[:raw.Size])
+	raws := raw.Message[:raw.Size]
+	syslogMsgs, err := parser.Parse(raws)
 	if err != nil {
-		base.ParsingErrorCounter.WithLabelValues("udp", raw.Client, raw.Decoder.Format).Inc()
-		//logger.Info("Parsing error", "message", string(raw.Message), "error", err)
-		logger.Info("Parsing error", "error", err)
-		return nil
+		return decoders.DecodingError(eerrors.Wrap(err, "Parsing error"))
 	}
 
 	var syslogMsg *model.SyslogMessage
@@ -131,13 +133,11 @@ func (s *UdpServiceImpl) ParseOne(raw *model.RawUdpMessage, gen *utils.Generator
 		err := s.stasher.Stash(full)
 		model.FullFree(full)
 
-		if eerrors.Is("Fatal", err) {
-			logger.Error("Fatal error stashing UDP message", "error", err)
-			s.dofatal()
-			return err
-		}
 		if err != nil {
-			logger.Warn("Non-fatal error stashing UDP message", "error", err)
+			logger.Warn("Error stashing UDP message", "error", err)
+			if eerrors.IsFatal(err) {
+				return eerrors.Wrap(err, "Fatal error pushing UDP message to the Store")
+			}
 		}
 	}
 	return nil
@@ -160,11 +160,27 @@ func (s *UdpServiceImpl) Start() ([]model.ListenerInfo, error) {
 	cpus := runtime.NumCPU()
 	for i := 0; i < cpus; i++ {
 		s.wg.Add(1)
-		go s.Parse()
+		go func() {
+			defer s.wg.Done()
+			err := s.Parse()
+			if err != nil {
+				s.dofatal()
+				s.Logger.Error(err.Error())
+			}
+		}()
 	}
 
 	s.ClearConnections()
-	infos := s.ListenPacket()
+	c := make(chan model.ListenerInfo)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.ListenPacket(c)
+	}()
+	infos := make([]model.ListenerInfo, 0)
+	for i := range c {
+		infos = append(infos, i)
+	}
 	if len(infos) > 0 {
 		s.status = UdpStarted
 		s.Logger.Info("Listening on UDP", "nb_services", len(infos))
@@ -202,69 +218,84 @@ func (s *UdpServiceImpl) Stop() {
 	s.Logger.Debug("Udp server has stopped")
 }
 
-func (s *UdpServiceImpl) ListenPacket() []model.ListenerInfo {
-	udpinfos := []model.ListenerInfo{}
+func (s *UdpServiceImpl) ListenPacket(c chan model.ListenerInfo) {
+	var wg sync.WaitGroup
 	s.UnixSocketPaths = []string{}
+
 	for _, syslogConf := range s.UdpConfigs {
 		if len(syslogConf.UnixSocketPath) > 0 {
 			conn, err := s.Binder.ListenPacket("unixgram", syslogConf.UnixSocketPath, 65536)
 			if err != nil {
 				s.Logger.Warn("Listen unixgram error", "error", err)
-			} else {
-				s.Logger.Debug(
-					"Unixgram listener",
-					"protocol", "udp",
-					"path", syslogConf.UnixSocketPath,
-					"format", syslogConf.Format,
-				)
-				udpinfos = append(udpinfos, model.ListenerInfo{
-					UnixSocketPath: syslogConf.UnixSocketPath,
-					Protocol:       "udp",
-				})
-				s.UnixSocketPaths = append(s.UnixSocketPaths, syslogConf.UnixSocketPath)
-				s.wg.Add(1)
-				go s.handleConnection(conn, syslogConf)
+				continue
 			}
+			s.Logger.Debug(
+				"Unixgram listener",
+				"protocol", "udp",
+				"path", syslogConf.UnixSocketPath,
+				"format", syslogConf.Format,
+			)
+			c <- model.ListenerInfo{
+				UnixSocketPath: syslogConf.UnixSocketPath,
+				Protocol:       "udp",
+			}
+			s.UnixSocketPaths = append(s.UnixSocketPaths, syslogConf.UnixSocketPath)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				err := s.handleConnection(conn, syslogConf)
+				if err != nil && !eerrors.HasFileClosed(err) {
+					s.Logger.Warn("Unix datagram connection error", "error", err)
+				}
+			}()
 		} else {
-			listenAddrs, _ := syslogConf.GetListenAddrs()
+			listenAddrs, err := syslogConf.GetListenAddrs()
+			if err != nil {
+				s.Logger.Warn("Error getting listening address for UDP connection", "error", err)
+				continue
+			}
+		L:
 			for port, listenAddr := range listenAddrs {
 				conn, err := s.Binder.ListenPacket("udp", listenAddr, 65536)
 				if err != nil {
 					s.Logger.Warn("Listen UDP error", "error", err)
-				} else {
-					s.Logger.Debug(
-						"UDP listener",
-						"protocol", "udp",
-						"bind_addr", syslogConf.BindAddr,
-						"port", port,
-						"format", syslogConf.Format,
-					)
-					udpinfos = append(udpinfos, model.ListenerInfo{
-						BindAddr: syslogConf.BindAddr,
-						Port:     port,
-						Protocol: "udp",
-					})
-					s.wg.Add(1)
-					go s.handleConnection(conn, syslogConf)
+					continue L
 				}
+				s.Logger.Debug(
+					"UDP listener",
+					"protocol", "udp",
+					"bind_addr", syslogConf.BindAddr,
+					"port", port,
+					"format", syslogConf.Format,
+				)
+				c <- model.ListenerInfo{
+					BindAddr: syslogConf.BindAddr,
+					Port:     port,
+					Protocol: "udp",
+				}
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					err := s.handleConnection(conn, syslogConf)
+					if err != nil && !eerrors.HasFileClosed(err) {
+						s.Logger.Warn("UDP connection error", "error", err)
+					}
+				}()
 			}
 		}
 	}
-	return udpinfos
+	close(c)
+	wg.Wait()
 }
 
-func (s *UdpServiceImpl) handleConnection(conn net.PacketConn, config conf.UDPSourceConfig) {
+func (s *UdpServiceImpl) handleConnection(conn net.PacketConn, config conf.UDPSourceConfig) (err error) {
 	var localPort int32
 	var localPortS string
 	var path string
-	var err error
 
 	s.AddConnection(conn)
-
-	defer func() {
-		s.RemoveConnection(conn)
-		s.wg.Done()
-	}()
+	defer s.RemoveConnection(conn)
+	defer s.Logger.Debug("End of UDP connection")
 
 	local := conn.LocalAddr()
 	if local != nil {
@@ -278,8 +309,6 @@ func (s *UdpServiceImpl) handleConnection(conn net.PacketConn, config conf.UDPSo
 		}
 	}
 
-	logger := s.Logger.New("protocol", "udp", "local_port", localPortS, "unix_socket_path", path)
-
 	// Syslog UDP server
 	var remote net.Addr
 	var rawmsg *model.RawUdpMessage
@@ -288,9 +317,11 @@ func (s *UdpServiceImpl) handleConnection(conn net.PacketConn, config conf.UDPSo
 		rawmsg = s.Pool.Get().(*model.RawUdpMessage)
 		rawmsg.Size, remote, err = conn.ReadFrom(rawmsg.Message[:])
 		if err != nil {
-			logger.Debug("Error reading UDP", "error", err)
 			s.Pool.Put(rawmsg)
-			return
+			if eerrors.HasFileClosed(err) {
+				return io.EOF
+			}
+			return eerrors.Wrap(err, "Error reading UDP socket")
 		}
 		if rawmsg.Size == 0 {
 			s.Pool.Put(rawmsg)
@@ -302,16 +333,13 @@ func (s *UdpServiceImpl) handleConnection(conn net.PacketConn, config conf.UDPSo
 		rawmsg.ConfID = config.ConfID
 		rawmsg.Client = ""
 		if remote == nil {
-			// unix socket
-			rawmsg.Client = "localhost"
+			rawmsg.Client = "localhost" // unix socket
 		} else {
 			rawmsg.Client = strings.Split(remote.String(), ":")[0]
 		}
-
 		err := s.rawMessagesQueue.Put(rawmsg)
 		if err != nil {
-			logger.Warn("Error queueing UDP message", "error", err)
-			return
+			return eerrors.WithTypes(eerrors.Wrap(err, "Failed to enqueue new raw UDP message"))
 		}
 		base.IncomingMsgsCounter.WithLabelValues("udp", rawmsg.Client, localPortS, path).Inc()
 	}

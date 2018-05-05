@@ -9,10 +9,11 @@ import (
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 )
 
 type StreamHandler interface {
-	HandleConnection(conn net.Conn, config conf.TCPSourceConfig)
+	HandleConnection(conn net.Conn, config conf.TCPSourceConfig) error
 }
 
 type TCPListenerConf struct {
@@ -117,44 +118,39 @@ func (s *StreamingService) resetTCPListeners() {
 	}
 }
 
-func (s *StreamingService) handleConnection(conn net.Conn, config conf.TCPSourceConfig) {
-	s.handler.HandleConnection(conn, config)
+func (s *StreamingService) handleConnection(conn net.Conn, config conf.TCPSourceConfig) error {
+	return s.handler.HandleConnection(conn, config)
 }
 
-func (s *StreamingService) AcceptUnix(lc UnixListenerConf) {
-	defer s.wg.Done()
-	defer s.acceptsWg.Done()
+func (s *StreamingService) AcceptUnix(lc UnixListenerConf) error {
+	var wg sync.WaitGroup
+	defer wg.Wait()
+
 	for {
 		conn, err := lc.Listener.Accept()
 		if err != nil {
-			switch err.(type) {
-			case *net.OpError:
-				s.Logger.Info("AcceptUnix() OpError", "error", err)
-			default:
-				s.Logger.Warn("AcceptUnix() error", "error", err)
-			}
-			return
-		} else if conn != nil {
-			s.wg.Add(1)
-			go s.handleConnection(conn, lc.Conf)
+			return eerrors.Wrap(err, "Accept() error")
 		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := s.handleConnection(conn, lc.Conf)
+			if err != nil && !eerrors.HasFileClosed(err) {
+				s.Logger.Warn("Unix connection error", "error", err)
+			}
+		}()
 	}
 
 }
 
-func (s *StreamingService) AcceptTCP(lc TCPListenerConf) {
-	defer s.wg.Done()
-	defer s.acceptsWg.Done()
+func (s *StreamingService) AcceptTCP(lc TCPListenerConf) error {
+	var wg sync.WaitGroup
+	defer wg.Wait()
+
 	for {
 		c, err := lc.Listener.Accept()
 		if err != nil {
-			switch err.(type) {
-			case *net.OpError:
-				s.Logger.Info("AcceptTCP() OpError", "error", err)
-			default:
-				s.Logger.Warn("AcceptTCP() error", "error", err)
-			}
-			return
+			return eerrors.Wrap(err, "Accept() error")
 		}
 		if lc.Conf.TLSEnabled {
 			// upgrade connection to TLS
@@ -166,30 +162,41 @@ func (s *StreamingService) AcceptTCP(lc TCPListenerConf) {
 			tlsConf.ClientAuth = lc.Conf.GetClientAuthType()
 			c = tls.Server(c, tlsConf)
 		}
-		s.wg.Add(1)
-		go s.handleConnection(c, lc.Conf)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := s.handleConnection(c, lc.Conf)
+			if err != nil && !eerrors.HasFileClosed(err) {
+				s.Logger.Warn("TCP connection error", "error", err)
+			}
+		}()
 	}
 }
 
-func (s *StreamingService) Listen() {
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		for _, lc := range s.TcpListeners {
-			s.acceptsWg.Add(1)
-			s.wg.Add(1)
-			go s.AcceptTCP(lc)
-		}
-		for _, lc := range s.UnixListeners {
-			s.acceptsWg.Add(1)
-			s.wg.Add(1)
-			go s.AcceptUnix(lc)
-		}
-		// wait until the listeners stop and return
-		s.acceptsWg.Wait()
-		// close the client connections
-		s.CloseConnections()
-	}()
+func (s *StreamingService) Listen() (err error) {
+	c := eerrors.ChainErrors()
+	var wg sync.WaitGroup
+
+	for _, lc := range s.TcpListeners {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c.Append(s.AcceptTCP(lc))
+		}()
+	}
+	for _, lc := range s.UnixListeners {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c.Append(s.AcceptUnix(lc))
+		}()
+	}
+	wg.Wait()
+	errs := c.Sum()
+	if len(errs) > 0 {
+		return errs
+	}
+	return nil
 }
 
 func (s *StreamingService) SetConf(sc []conf.TCPSourceConfig, pc []conf.ParserConfig, queueSize uint64, messageSize int) {

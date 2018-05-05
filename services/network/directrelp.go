@@ -1,7 +1,6 @@
 package network
 
 import (
-	"fmt"
 	"io"
 	"net"
 	"runtime"
@@ -20,6 +19,7 @@ import (
 	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/utils"
+	"github.com/stephane-martin/skewer/utils/eerrors"
 	"github.com/stephane-martin/skewer/utils/queue/message"
 	"github.com/stephane-martin/skewer/utils/queue/tcp"
 )
@@ -272,7 +272,11 @@ func (s *DirectRelpServiceImpl) Start() ([]model.ListenerInfo, error) {
 	s.status = Started
 	s.StatusChan <- Started
 
-	s.Listen()
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.Listen()
+	}()
 	return infos, nil
 }
 
@@ -479,33 +483,18 @@ func (s *DirectRelpServiceImpl) handleKafkaResponses() {
 
 }
 
-func (s *DirectRelpServiceImpl) handleResponses(conn net.Conn, connID utils.MyULID, client string, logger log15.Logger) {
-	defer func() {
-		s.wg.Done()
-	}()
-
+func (s *DirectRelpServiceImpl) handleResponses(conn net.Conn, connID utils.MyULID, client string, logger log15.Logger) error {
 	successes := map[int32]bool{}
 	failures := map[int32]bool{}
 	var err error
 	var ok1, ok2 bool
-
-	writeSuccess := func(txnr int32) (err error) {
-		_, err = fmt.Fprintf(conn, "%d rsp 6 200 OK\n", txnr)
-		return err
-	}
-
-	writeFailure := func(txnr int32) (err error) {
-		_, err = fmt.Fprintf(conn, "%d rsp 6 500 KO\n", txnr)
-		return err
-	}
-
-	var next int32 = -1
+	var next = int32(-1)
 
 	for {
 		txnrSuccess, txnrFailure := s.forwarder.GetSuccAndFail(connID)
 
 		if txnrSuccess == -1 && txnrFailure == -1 {
-			return
+			return io.EOF
 		}
 
 		if txnrSuccess != -1 {
@@ -536,19 +525,16 @@ func (s *DirectRelpServiceImpl) handleResponses(conn net.Conn, connID utils.MyUL
 			if next == -1 {
 				break Cooking
 			}
-			//logger.Debug("Next to commit", "connid", connID, "txnr", next)
 			if successes[next] {
-				err = writeSuccess(next)
+				err = writeSuccess(conn, next)
 				if err == nil {
-					//logger.Debug("ACK to client", "connid", connID, "tnxr", next)
 					successes[next] = false
 					relpAnswersCounter.WithLabelValues("200", client).Inc()
 					ackCounter.WithLabelValues("directrelp", "ack").Inc()
 				}
 			} else if failures[next] {
-				err = writeFailure(next)
+				err = writeFailure(conn, next)
 				if err == nil {
-					//logger.Debug("NACK to client", "connid", connID, "txnr", next)
 					failures[next] = false
 					relpAnswersCounter.WithLabelValues("500", client).Inc()
 					ackCounter.WithLabelValues("directrelp", "nack").Inc()
@@ -560,13 +546,11 @@ func (s *DirectRelpServiceImpl) handleResponses(conn net.Conn, connID utils.MyUL
 			if err == nil {
 				next = -1
 			} else if err == io.EOF {
-				// client is gone
-				return
+				return io.EOF
 			} else if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
 				logger.Info("Timeout error writing RELP response to client", "error", err)
 			} else {
-				logger.Warn("Unexpected error writing RELP response to client", "error", err)
-				return
+				return eerrors.Wrap(err, "Unexpected error writing Direct RELP response to client")
 			}
 		}
 	}
@@ -679,8 +663,7 @@ type DirectRelpHandler struct {
 	Server *DirectRelpServiceImpl
 }
 
-func (h DirectRelpHandler) HandleConnection(conn net.Conn, c conf.TCPSourceConfig) {
-
+func (h DirectRelpHandler) HandleConnection(conn net.Conn, c conf.TCPSourceConfig) (rerr error) {
 	config := conf.DirectRELPSourceConfig(c)
 	s := h.Server
 	s.AddConnection(conn)
@@ -695,18 +678,34 @@ func (h DirectRelpHandler) HandleConnection(conn net.Conn, c conf.TCPSourceConfi
 		"format", config.Format,
 	)
 
-	defer func() {
-		if e := recover(); e != nil {
-			errString := fmt.Sprintf("%s", e)
-			l.Error("Scanner panicked in Direct RELP service", "error", errString)
+	l.Info("New client")
+	defer l.Debug("Client gone away")
+	base.ClientConnectionCounter.WithLabelValues("directrelp", client, lports, path).Inc()
+
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		err := s.handleResponses(conn, connID, client, l)
+		if err != nil && !eerrors.HasFileClosed(err) {
+			s.Logger.Warn("Unexpected error in Direct RELP handleResponses", "error", err, "connID", connID.String())
 		}
-		l.Info("Scanning the Direct RELP stream has ended")
-		s.forwarder.RemoveConn(connID)
-		s.RemoveConnection(conn)
-		s.wg.Done()
 	}()
 
-	s.wg.Add(1)
-	go s.handleResponses(conn, connID, client, l)
-	scan(l, s.forwarder, s.rawQ, conn, config.Timeout, config.ConfID, connID, s.MaxMessageSize, lport, config.DecoderBaseConfig, lports, path, client, s.Pool)
+	wg.Add(1)
+	go func() {
+		defer func() {
+			s.forwarder.RemoveConn(connID) // this makes handleResponses return
+			s.RemoveConnection(conn)
+			wg.Done()
+		}()
+		err := scan(l, s.forwarder, s.rawQ, conn, config.Timeout, config.ConfID, connID, s.MaxMessageSize, lport, config.DecoderBaseConfig, lports, path, client, s.Pool)
+		if err != nil && !eerrors.HasFileClosed(err) {
+			rerr = eerrors.Wrapf(err, "Error scanning Direct RELP stream: %s", connID.String())
+		}
+	}()
+
+	wg.Wait()
+	return rerr
 }

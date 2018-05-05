@@ -3,7 +3,6 @@ package network
 import (
 	"bufio"
 	"bytes"
-	"fmt"
 	"io"
 	"net"
 	"runtime"
@@ -84,13 +83,31 @@ func (s *TcpServiceImpl) Start() ([]model.ListenerInfo, error) {
 	infos := s.initTCPListeners()
 	if len(infos) > 0 {
 		s.status = TcpStarted
-		s.Listen()
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			err := s.Listen()
+			if err != nil {
+				if eerrors.HasFileClosed(err) {
+					s.Logger.Debug("Closed TCP listener", "error", err)
+				} else {
+					s.Logger.Warn("TCP listen error", "error", err)
+				}
+			}
+		}()
 		s.Logger.Info("Listening on TCP", "nb_services", len(infos))
 		// start the parsers
 		cpus := runtime.NumCPU()
 		for i := 0; i < cpus; i++ {
 			s.wg.Add(1)
-			go s.parse()
+			go func() {
+				defer s.wg.Done()
+				err := s.parse()
+				if err != nil {
+					s.dofatal()
+					s.Logger.Error(err.Error())
+				}
+			}()
 		}
 	} else {
 		s.Logger.Debug("TCP Server not started: no listener")
@@ -120,7 +137,8 @@ func (s *TcpServiceImpl) Stop() {
 		s.UnlockStatus()
 		return
 	}
-	s.resetTCPListeners() // close the listeners. This will make Listen to return and close all current connections.
+	s.resetTCPListeners() // close the listeners
+	s.CloseConnections()  // close all current connections.
 	if s.rawMessagesQueue != nil {
 		s.rawMessagesQueue.Dispose()
 	}
@@ -144,31 +162,28 @@ func (s *TcpServiceImpl) SetConf(c conf.BaseConfig) {
 	s.parserEnv = decoders.NewParsersEnv(s.ParserConfigs, s.Logger)
 }
 
-func makeLogger(logger log15.Logger, raw *model.RawTcpMessage) log15.Logger {
-	// used to avoid to call logger.New in the critical parseOne
+func logg(logger log15.Logger, raw *model.RawMessage) log15.Logger {
+	// used to avoid to call logger.New in the hot path of parseOne
 	return logger.New(
 		"protocol", "tcp",
 		"client", raw.Client,
 		"local_port", raw.LocalPort,
 		"unix_socket_path", raw.UnixSocketPath,
 		"format", raw.Decoder.Format,
+		"confid", raw.ConfID.String(),
 	)
 }
 
 func (s *TcpServiceImpl) parseOne(raw *model.RawTcpMessage, gen *utils.Generator) error {
 	parser, err := s.parserEnv.GetParser(&raw.Decoder)
-
 	if parser == nil || err != nil {
-		makeLogger(s.Logger, raw).Error("Unknown parser")
-		return nil
+		return decoders.DecodingError(eerrors.Wrapf(err, "Unknown decoder: %s", raw.Decoder.Format))
 	}
 	defer parser.Release()
 
 	syslogMsgs, err := parser.Parse(raw.Message)
 	if err != nil {
-		base.ParsingErrorCounter.WithLabelValues("tcp", raw.Client, raw.Decoder.Format).Inc()
-		makeLogger(s.Logger, raw).Info("Parsing error", "error", err)
-		return nil
+		return decoders.DecodingError(eerrors.Wrap(err, "Parsing error"))
 	}
 
 	var syslogMsg *model.SyslogMessage
@@ -189,34 +204,40 @@ func (s *TcpServiceImpl) parseOne(raw *model.RawTcpMessage, gen *utils.Generator
 
 		err := s.reporter.Stash(full)
 		model.FullFree(full)
-
-		if eerrors.Is("Fatal", err) {
-			makeLogger(s.Logger, raw).Error("Fatal error stashing TCP message", "error", err)
-			s.dofatal()
-			return err
-		}
 		if err != nil {
-			makeLogger(s.Logger, raw).Warn("Non-fatal error stashing TCP message", "error", err)
+			logg(s.Logger, &raw.RawMessage).Warn("Error stashing TCP message", "error", err)
+			if eerrors.IsFatal(err) {
+				return eerrors.Wrap(err, "Fatal error pushing TCP message to the Store")
+			}
 		}
 	}
 	return nil
 }
 
 // parse fetch messages from the raw queue, parse them, and push them to be sent.
-func (s *TcpServiceImpl) parse() {
-	defer s.wg.Done()
-
+func (s *TcpServiceImpl) parse() error {
 	gen := utils.NewGenerator()
+	var (
+		raw *model.RawTcpMessage
+		err error
+	)
 
 	for {
-		raw, err := s.rawMessagesQueue.Get()
+		raw, err = s.rawMessagesQueue.Get()
 		if raw == nil || err != nil {
-			return
+			return nil
 		}
 		err = s.parseOne(raw, gen)
-		s.Pool.Put(raw)
 		if err != nil {
-			return
+			base.ParsingErrorCounter.WithLabelValues("tcp", raw.Client, raw.Decoder.Format).Inc()
+			logg(s.Logger, &raw.RawMessage).Warn(err.Error())
+		}
+
+		s.Pool.Put(raw)
+
+		if err != nil && eerrors.IsFatal(err) {
+			// stop processing when fatal error happens
+			return err
 		}
 	}
 }
@@ -225,23 +246,17 @@ type tcpHandler struct {
 	Server *TcpServiceImpl
 }
 
-func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TCPSourceConfig) {
+func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TCPSourceConfig) (err error) {
 	s := h.Server
 	s.AddConnection(conn)
-
-	defer func() {
-		if e := recover(); e != nil {
-			errString := fmt.Sprintf("%s", e)
-			s.Logger.Error("Scanner panicked in TCP service", "error", errString)
-		}
-		s.RemoveConnection(conn)
-		s.wg.Done()
-	}()
+	defer s.RemoveConnection(conn)
 
 	lport, lports, client, path := props(conn)
 
 	logger := s.Logger.New("protocol", "tcp", "client", client, "local_port", lports, "unix_socket_path", path, "format", config.Format)
 	logger.Info("New client")
+	defer logger.Debug("Client gone away")
+
 	base.ClientConnectionCounter.WithLabelValues("tcp", client, lports, path).Inc()
 
 	timeout := config.Timeout
@@ -255,8 +270,16 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TCPSourceConfig)
 	} else {
 		scanner.Split(TcpSplit)
 	}
-	var rawmsg *model.RawTcpMessage
-	var buf []byte
+	var (
+		rawmsg *model.RawTcpMessage
+		buf    []byte
+	)
+
+	defer func() {
+		if e := eerrors.Err(recover()); e != nil {
+			err = eerrors.Wrap(e, "Scanner panicked in TCP service")
+		}
+	}()
 
 	for scanner.Scan() {
 		if timeout > 0 {
@@ -267,8 +290,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TCPSourceConfig)
 			continue
 		}
 		if s.MaxMessageSize > 0 && len(buf) > s.MaxMessageSize {
-			logger.Warn("Message too large", "max", s.MaxMessageSize, "length", len(buf))
-			return
+			return eerrors.Fatal(eerrors.Errorf("Raw TCP message too large: %d > %d", len(buf), s.MaxMessageSize))
 		}
 		rawmsg = s.Pool.Get().(*model.RawTcpMessage)
 		rawmsg.Client = client
@@ -278,15 +300,17 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TCPSourceConfig)
 		rawmsg.Decoder = config.DecoderBaseConfig
 		rawmsg.Message = rawmsg.Message[:len(buf)]
 		copy(rawmsg.Message, buf)
-		err := s.rawMessagesQueue.Put(rawmsg)
+		err = s.rawMessagesQueue.Put(rawmsg)
 		if err != nil {
-			// rawMessagesQueue has been disposed
-			logger.Warn("Error queueing TCP raw message", "error", err)
-			return
+			return eerrors.Fatal(eerrors.Wrap(err, "Failed to enqueue new raw TCP message"))
 		}
 		base.IncomingMsgsCounter.WithLabelValues("tcp", client, lports, path).Inc()
 	}
-	logger.Info("End of TCP client connection", "error", scanner.Err())
+	err = scanner.Err()
+	if eerrors.HasFileClosed(err) {
+		return io.EOF
+	}
+	return eerrors.Wrap(err, "TCP scanning error")
 }
 
 func makeLFTCPSplit(delimiter string) func(d []byte, a bool) (int, []byte, error) {
