@@ -23,12 +23,14 @@ import (
 var Supported = true
 
 type Reader struct {
-	journal      *sdjournal.Journal
-	stopchan     chan struct{}
-	shutdownchan chan struct{}
-	wgroup       *sync.WaitGroup
-	logger       log15.Logger
-	stasher      base.Stasher
+	journal        *sdjournal.Journal
+	stopchan       chan struct{}
+	shutdownchan   chan struct{}
+	wgroup         sync.WaitGroup
+	logger         log15.Logger
+	stasher        base.Stasher
+	fatalErrorChan chan struct{}
+	fatalOnce      sync.Once
 }
 
 type Converter func(map[string]string) *model.FullMessage
@@ -111,9 +113,22 @@ func makeMapConverter(coding string, confID utils.MyULID) Converter {
 	}
 }
 
+func (r *Reader) FatalError() chan struct{} {
+	return r.fatalErrorChan
+}
+
+func (r *Reader) dofatal() {
+	r.fatalOnce.Do(func() { close(r.fatalErrorChan) })
+}
+
 func NewReader(stasher base.Stasher, logger log15.Logger) (*Reader, error) {
 	var err error
-	r := &Reader{logger: logger, stasher: stasher}
+	r := &Reader{
+		logger:         logger,
+		stasher:        stasher,
+		shutdownchan:   make(chan struct{}),
+		fatalErrorChan: make(chan struct{}),
+	}
 	r.journal, err = sdjournal.NewJournal()
 	if err != nil {
 		return nil, err
@@ -128,8 +143,6 @@ func NewReader(stasher base.Stasher, logger log15.Logger) (*Reader, error) {
 		r.journal.Close()
 		return nil, err
 	}
-	r.wgroup = &sync.WaitGroup{}
-	r.shutdownchan = make(chan struct{})
 	return r, nil
 }
 
@@ -159,7 +172,7 @@ func (r *Reader) wait() chan struct{} {
 					close(events)
 					return
 				} else if ev != 0 {
-					r.logger.Debug("journal.Wait event", "code", ev)
+					// r.logger.Debug("journal.Wait event", "code", ev)
 				}
 			}
 		}
@@ -212,8 +225,8 @@ func (r *Reader) Start(confID utils.MyULID) {
 					err = r.stasher.Stash(converter(entry.Fields))
 					if eerrors.Is("Fatal", err) {
 						r.logger.Error("Fatal error stashing journal message", "error", err)
-						continue
-						// TODO: fix
+						r.dofatal()
+						return
 					}
 					if err != nil {
 						r.logger.Warn("Non-fatal error stashing journal message", "error", err)
@@ -235,19 +248,24 @@ func (r *Reader) Start(confID utils.MyULID) {
 	}()
 }
 
+func (r *Reader) WaitFinished() {
+	r.wgroup.Wait()
+}
+
 func (r *Reader) Stop() {
 	if r.stopchan != nil {
 		close(r.stopchan)
-		r.wgroup.Wait()
+		r.WaitFinished()
 	}
 }
 
 func (r *Reader) Shutdown() {
 	close(r.shutdownchan)
-	r.wgroup.Wait()
+	r.WaitFinished()
 	if r.stopchan != nil {
 		close(r.stopchan)
 	}
+	// async close the low level journald reader
 	go func() {
 		r.journal.Close()
 	}()

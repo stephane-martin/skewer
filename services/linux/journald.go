@@ -1,8 +1,6 @@
 package linux
 
 import (
-	"sync"
-
 	"github.com/inconshreveable/log15"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
@@ -19,13 +17,10 @@ func initJournalRegistry() {
 }
 
 type JournalService struct {
-	stasher        base.Stasher
-	reader         journald.JournaldReader
-	logger         log15.Logger
-	Conf           conf.JournaldConfig
-	wgroup         *sync.WaitGroup
-	fatalErrorChan chan struct{}
-	fatalOnce      *sync.Once
+	stasher base.Stasher
+	reader  journald.JournaldReader
+	logger  log15.Logger
+	Conf    conf.JournaldConfig
 }
 
 func NewJournalService(env *base.ProviderEnv) (base.Provider, error) {
@@ -33,7 +28,11 @@ func NewJournalService(env *base.ProviderEnv) (base.Provider, error) {
 	s := JournalService{
 		stasher: env.Reporter,
 		logger:  env.Logger.New("class", "journald"),
-		wgroup:  &sync.WaitGroup{},
+	}
+	var err error
+	s.reader, err = journald.NewReader(s.stasher, s.logger)
+	if err != nil {
+		return nil, eerrors.Wrap(err, "Error creating the journald reader")
 	}
 	return &s, nil
 }
@@ -47,38 +46,22 @@ func (s *JournalService) Gather() ([]*dto.MetricFamily, error) {
 }
 
 func (s *JournalService) FatalError() chan struct{} {
-	return s.fatalErrorChan
-}
-
-func (s *JournalService) dofatal() {
-	s.fatalOnce.Do(func() { close(s.fatalErrorChan) })
+	return s.reader.FatalError()
 }
 
 func (s *JournalService) Start() (infos []model.ListenerInfo, err error) {
 	infos = make([]model.ListenerInfo, 0)
-
-	if s.reader == nil {
-		// create the low level journald reader if needed
-		s.reader, err = journald.NewReader(s.stasher, s.logger)
-		if err != nil {
-			return infos, eerrors.Wrap(err, "Error creating the journald reader")
-		}
-	}
 	s.reader.Start(s.Conf.ConfID)
-	s.fatalErrorChan = make(chan struct{})
-	s.fatalOnce = &sync.Once{}
 	s.logger.Debug("Journald service has started")
 	return infos, nil
 }
 
 func (s *JournalService) Stop() {
 	s.reader.Stop() // ask the low-level journal reader to stop sending events to Entries()
-	s.wgroup.Wait()
 }
 
 func (s *JournalService) Shutdown() {
 	s.reader.Shutdown()
-	s.wgroup.Wait()
 }
 
 func (s *JournalService) SetConf(c conf.BaseConfig) {
