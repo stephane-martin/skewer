@@ -1,7 +1,6 @@
 package decoders
 
 import (
-	"fmt"
 	"sync"
 
 	"github.com/inconshreveable/log15"
@@ -112,7 +111,7 @@ func (e *ParsersEnv) GetParser(c *conf.DecoderBaseConfig) (p Parser, err error) 
 
 func (e *ParsersEnv) getJSParser(funcName string) (*jsParser, error) {
 	if _, ok := e.jsFuncs[funcName]; !ok {
-		return nil, fmt.Errorf("Unknown JS function: '%s'", funcName)
+		return nil, DecodingError(eerrors.Errorf("Unknown decoder: '%s'", funcName))
 	}
 	jsEnv := e.getJSEnv()
 	baseParser, err := jsEnv.GetParser(funcName)
@@ -139,7 +138,7 @@ func (e *ParsersEnv) getNonJSParser(frmt base.Format, c *conf.DecoderBaseConfig)
 	if frmt == base.W3C {
 		// W3C parsed is parametrized
 		if len(c.W3CFields) == 0 {
-			return nil, eerrors.New("No fields specified for W3C Extended Log Format decoder")
+			return nil, DecodingError(eerrors.New("No fields specified for W3C Extended Log Format decoder"))
 		}
 		p = W3CDecoder(c.W3CFields)
 	} else {
