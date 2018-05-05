@@ -284,6 +284,7 @@ func (m *SyslogMessage) Avro() *avro.SyslogMessage {
 		Appname:       m.AppName,
 		Procid:        m.ProcId,
 		Msgid:         m.MsgId,
+		Message:       m.Message,
 		Properties:    m.GetAllProperties(),
 	}
 }
@@ -306,6 +307,7 @@ func (m *SyslogMessage) NativeAvro() map[string]interface{} {
 		"Appname":       m.AppName,
 		"Procid":        m.ProcId,
 		"Msgid":         m.MsgId,
+		"Message":       m.Message,
 		"Properties":    nprops,
 	}
 }
