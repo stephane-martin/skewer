@@ -252,6 +252,10 @@ func readSyslogMessage(r io.Reader) (*SyslogMessage, error) {
 	if err != nil {
 		return nil, err
 	}
+	str.Message, err = readString(r)
+	if err != nil {
+		return nil, err
+	}
 	str.Properties, err = readMapMapString(r)
 	if err != nil {
 		return nil, err
@@ -384,6 +388,10 @@ func writeSyslogMessage(r *SyslogMessage, w io.Writer) error {
 		return err
 	}
 	err = writeString(r.Msgid, w)
+	if err != nil {
+		return err
+	}
+	err = writeString(r.Message, w)
 	if err != nil {
 		return err
 	}

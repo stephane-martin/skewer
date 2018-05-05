@@ -11,6 +11,7 @@
 		{ "name": "Appname", "type": "string" },
 		{ "name": "Procid", "type": "string" },
 		{ "name": "Msgid", "type": "string" },
+		{ "name": "Message", "type": "string" },
 		{ "name": "Properties", "type": { "type": "map", "values": { "type": "map", "values": "string" } } }
 	]
 }

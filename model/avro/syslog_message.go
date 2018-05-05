@@ -21,6 +21,7 @@ type SyslogMessage struct {
 	Appname       string
 	Procid        string
 	Msgid         string
+	Message       string
 	Properties    map[string]map[string]string
 }
 
@@ -42,7 +43,7 @@ func NewSyslogMessage() *SyslogMessage {
 }
 
 func (r *SyslogMessage) Schema() string {
-	return "{\"fields\":[{\"name\":\"Facility\",\"type\":\"string\"},{\"name\":\"Severity\",\"type\":\"string\"},{\"name\":\"TimeReported\",\"type\":\"string\"},{\"name\":\"TimeGenerated\",\"type\":\"string\"},{\"name\":\"Hostname\",\"type\":\"string\"},{\"name\":\"Appname\",\"type\":\"string\"},{\"name\":\"Procid\",\"type\":\"string\"},{\"name\":\"Msgid\",\"type\":\"string\"},{\"name\":\"Properties\",\"type\":{\"type\":\"map\",\"values\":{\"type\":\"map\",\"values\":\"string\"}}}],\"name\":\"SyslogMessage\",\"namespace\":\"skewer\",\"type\":\"record\"}"
+	return "{\"fields\":[{\"name\":\"Facility\",\"type\":\"string\"},{\"name\":\"Severity\",\"type\":\"string\"},{\"name\":\"TimeReported\",\"type\":\"string\"},{\"name\":\"TimeGenerated\",\"type\":\"string\"},{\"name\":\"Hostname\",\"type\":\"string\"},{\"name\":\"Appname\",\"type\":\"string\"},{\"name\":\"Procid\",\"type\":\"string\"},{\"name\":\"Msgid\",\"type\":\"string\"},{\"name\":\"Message\",\"type\":\"string\"},{\"name\":\"Properties\",\"type\":{\"type\":\"map\",\"values\":{\"type\":\"map\",\"values\":\"string\"}}}],\"name\":\"SyslogMessage\",\"namespace\":\"skewer\",\"type\":\"record\"}"
 }
 
 func (r *SyslogMessage) Serialize(w io.Writer) error {
