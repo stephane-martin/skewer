@@ -157,11 +157,17 @@ L:
 
 // Len returns the number of items in the queue.
 func (rb *Ring) Len() uint64 {
+	if rb == nil {
+		return 0
+	}
 	return rb.queue.Load() - rb.dequeue.Load()
 }
 
 // Cap returns the capacity of this ring buffer.
 func (rb *Ring) Cap() uint64 {
+	if rb == nil {
+		return 0
+	}
 	return uint64(len(rb.nodes))
 }
 
@@ -169,12 +175,17 @@ func (rb *Ring) Cap() uint64 {
 // in the Put and/or Get methods.  Calling those methods on a disposed
 // queue will return an error.
 func (rb *Ring) Dispose() {
-	rb.disposed.Store(true)
+	if rb != nil {
+		rb.disposed.Store(true)
+	}
 }
 
 // IsDisposed will return a bool indicating if this queue has been
 // disposed.
 func (rb *Ring) IsDisposed() bool {
+	if rb == nil {
+		return true
+	}
 	return rb.disposed.Load()
 }
 
