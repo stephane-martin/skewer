@@ -53,12 +53,12 @@ func (s *Scanner) Bytes() []byte {
 	return s.scanner.Bytes()
 }
 
-func (s *Scanner) Text() string {
-	return s.scanner.Text()
-}
-
 func (s *Scanner) Buffer(buf []byte, max int) {
 	s.scanner.Buffer(buf, max)
+}
+
+func (s *Scanner) Text() string {
+	return s.scanner.Text()
 }
 
 func (s *Scanner) Split(f bufio.SplitFunc) {

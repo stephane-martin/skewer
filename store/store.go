@@ -10,6 +10,7 @@ import (
 	"github.com/awnumar/memguard"
 	"github.com/dgraph-io/badger"
 	"github.com/dgraph-io/badger/options"
+	"github.com/gogo/protobuf/proto"
 	"github.com/inconshreveable/log15"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stephane-martin/skewer/conf"
@@ -219,9 +220,9 @@ func (s *MessageStore) receiveAcks() (err error) {
 }
 
 func (s *MessageStore) consumeStashQueue() (err error) {
-	messages := make([][]byte, 0, s.batchSize)
+	messages := make([]string, 0, s.batchSize)
 	uids := make([]utils.MyULID, 0, s.batchSize)
-	tmpMap1 := make(map[utils.MyULID][]byte, s.batchSize)
+	tmpMap1 := make(map[utils.MyULID]string, s.batchSize)
 	for s.toStashQueue.Wait(0) {
 		s.toStashQueue.GetManyInto(&messages, &uids)
 		if len(messages) == 0 {
@@ -930,7 +931,7 @@ func (s *MessageStore) resetFailuresByDest(dest conf.DestinationType) (err error
 			return 0, len(invalidUIDs), nil
 		}
 
-		err = readyDB.AddManySame(expiredUIDs, []byte("true"), txn)
+		err = readyDB.AddManySame(expiredUIDs, "true", txn)
 		if err != nil {
 			return 0, 0, eerrors.Wrap(err, "Failed to push expired entries to the ready queue")
 		}
@@ -981,12 +982,15 @@ func (s *MessageStore) PurgeBadger() {
 	}
 }
 
-func (s *MessageStore) Stash(uid utils.MyULID, b []byte) error {
+func (s *MessageStore) Stash(uid utils.MyULID, b string) error {
 	// the stashQueue takes care to make a copy of b, in case the multiple instances of b use the same backing array
-	return eerrors.Wrap(s.toStashQueue.Put(uid, b), "Error putting message on the store stash queue")
+	return eerrors.Wrap(
+		s.toStashQueue.Put(uid, b),
+		"Error putting message on the store stash queue",
+	)
 }
 
-func ingestHelper(badg *badger.DB, msgsDB, readyDB db.Partition, queue map[utils.MyULID][]byte) error {
+func ingestHelper(badg *badger.DB, msgsDB, readyDB db.Partition, queue map[utils.MyULID]string) error {
 	txn := db.NewNTransaction(badg, true)
 	defer txn.Discard()
 
@@ -1002,7 +1006,7 @@ func ingestHelper(badg *badger.DB, msgsDB, readyDB db.Partition, queue map[utils
 	return txn.Commit(nil)
 }
 
-func (s *MessageStore) ingestByDest(queue map[utils.MyULID][]byte, dest conf.DestinationType) (err error) {
+func (s *MessageStore) ingestByDest(queue map[utils.MyULID]string, dest conf.DestinationType) (err error) {
 	messagesDB := s.backend.GetPartition(Messages, dest)
 	readyDB := s.backend.GetPartition(Ready, dest)
 
@@ -1014,7 +1018,7 @@ func (s *MessageStore) ingestByDest(queue map[utils.MyULID][]byte, dest conf.Des
 	}
 }
 
-func (s *MessageStore) ingest(queue [][]byte, uids []utils.MyULID, tmpMap1 map[utils.MyULID][]byte) (n int, err error) {
+func (s *MessageStore) ingest(queue []string, uids []utils.MyULID, tmpMap1 map[utils.MyULID]string) (n int, err error) {
 	if len(queue) != len(uids) {
 		return 0, eerrors.Errorf(
 			"ingest: BUG: given queue of messages (%d) and list of uids (%d) have different lengths",
@@ -1055,6 +1059,7 @@ func retrieveIterHelper(msgsDB, readyDB db.Partition, batchsize uint32, txn *db.
 	var fetched uint32
 	var err error
 	var message *model.FullMessage
+	protobuff := proto.NewBuffer(make([]byte, 0, 4096))
 
 	iter := readyDB.KeyIterator(batchsize, txn)
 	defer iter.Close()
@@ -1075,7 +1080,8 @@ func retrieveIterHelper(msgsDB, readyDB db.Partition, batchsize uint32, txn *db.
 			l.Debug("retrieved empty entry", "uid", uid)
 			continue
 		}
-		message, err = model.FromBuf(messageBytes)
+		protobuff.SetBuf(messageBytes)
+		message, err = model.FromBuf(protobuff)
 		if err != nil {
 			invalid = append(invalid, uid)
 			l.Debug("retrieved invalid entry", "uid", uid, "message", "error", err)
@@ -1108,7 +1114,7 @@ func tryRetrieveHelper(msgsDB, readyDB, sentDB db.Partition, badg *badger.DB, ba
 	}
 
 	if len(*uids) > 0 {
-		err = sentDB.AddManySame(*uids, []byte("true"), txn)
+		err = sentDB.AddManySame(*uids, "true", txn)
 		if err != nil {
 			return 0, 0, eerrors.Wrap(err, "Error copying messages to the 'sent' queue")
 		}

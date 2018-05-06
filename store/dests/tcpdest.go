@@ -85,7 +85,7 @@ func (d *TCPDestination) sendOne(ctx context.Context, message *model.FullMessage
 	err = d.clt.Send(ctx, message)
 
 	if err == nil {
-		if d.previousUid != utils.ZeroUid {
+		if d.previousUid != utils.ZeroULID {
 			d.ACK(d.previousUid)
 		}
 		d.previousUid = message.Uid
@@ -97,9 +97,9 @@ func (d *TCPDestination) sendOne(ctx context.Context, message *model.FullMessage
 	}
 	// error writing to the TCP conn
 	d.NACK(message.Uid)
-	if d.previousUid != utils.ZeroUid {
+	if d.previousUid != utils.ZeroULID {
 		d.NACK(d.previousUid)
-		d.previousUid = utils.ZeroUid
+		d.previousUid = utils.ZeroULID
 	}
 	return err
 }

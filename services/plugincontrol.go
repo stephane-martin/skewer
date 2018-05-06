@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/awnumar/memguard"
+	"github.com/gogo/protobuf/proto"
 	"github.com/inconshreveable/log15"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
@@ -111,13 +113,12 @@ func (f *CFactory) NewStore(loggerHandle uintptr) *StorePlugin {
 	s := &StorePlugin{
 		PluginController: st,
 		q:                queue.NewBSliceQueue(),
-		pushwg:           &sync.WaitGroup{},
+		gen:              utils.NewGenerator(),
 		pool: &sync.Pool{
 			New: func() interface{} {
-				return make([]byte, 0, 4096)
+				return proto.NewBuffer(make([]byte, 0, 16384))
 			},
 		},
-		gen: utils.NewGenerator(),
 	}
 	return s
 }
@@ -272,9 +273,11 @@ func (s *PluginController) listenpipe(secret *memguard.LockedBuffer) (err error)
 	scanner.Buffer(make([]byte, 0, 132000), 132000)
 
 	var message *model.FullMessage
+	protobuff := proto.NewBuffer(make([]byte, 0, 4096))
 
 	for scanner.Scan() {
-		message, err = model.FromBuf(scanner.Bytes())
+		protobuff.SetBuf(scanner.Bytes())
+		message, err = model.FromBuf(protobuff)
 		if err != nil {
 			return eerrors.Wrapf(err, "Unexpected error decrypting message from the plugin '%s' pipe", s.name)
 		}
@@ -848,14 +851,26 @@ func (s *PluginController) Create(optsfuncs ...func(*PluginCreateOpts)) error {
 type StorePlugin struct {
 	*PluginController
 	q         *queue.BSliceQueue
-	pushwg    *sync.WaitGroup
-	msgsBatch [][]byte
-	pool      *sync.Pool
+	msgsBatch []string
 	gen       *utils.Generator
+	pushwg    sync.WaitGroup
+	pool      *sync.Pool
+}
+
+func (s *StorePlugin) getBuffer() (buf *proto.Buffer) {
+	buf = s.pool.Get().(*proto.Buffer)
+	buf.Reset()
+	return buf
+}
+
+func (s *StorePlugin) putBuffer(buf *proto.Buffer) {
+	if buf != nil {
+		s.pool.Put(buf)
+	}
 }
 
 func (s *StorePlugin) pushqueue(secret *memguard.LockedBuffer) {
-	var message []byte
+	var message string
 	var err error
 	bufpipe := bufio.NewWriter(s.pipe)
 	writeToStore := utils.NewEncryptWriter(bufpipe, secret)
@@ -865,10 +880,7 @@ func (s *StorePlugin) pushqueue(secret *memguard.LockedBuffer) {
 			return
 		}
 		for _, message = range s.msgsBatch {
-			_, err = writeToStore.Write(message)
-			if cap(message) == 4096 {
-				s.pool.Put(message)
-			}
+			_, err = io.WriteString(writeToStore, message)
 			if err != nil {
 				s.logger.Error("Unexpected error when writing messages to the Store pipe", "error", err)
 				return
@@ -912,18 +924,16 @@ func (s *StorePlugin) Stash(m *model.FullMessage) (err error) {
 	if s.conf.Store.AddMissingMsgID && len(m.Fields.MsgId) == 0 {
 		m.Fields.MsgId = s.gen.Uid().String()
 	}
-	var b []byte
-	size := m.Size()
-	if size > 4096 {
-		b, err = m.Marshal()
-	} else {
-		b = s.pool.Get().([]byte)[:size]
-		_, err = m.MarshalTo(b)
-	}
+	buf := s.getBuffer()
+	defer s.putBuffer(buf)
+	err = buf.Marshal(m)
 	if err != nil {
 		return eerrors.Wrap(err, "Failed to protobuf-marshal message to be sent to the Store")
 	}
-	return eerrors.Wrap(s.q.PutSlice(b), "Failed to enqueue message to be sent to the Store")
+	return eerrors.Wrap(
+		s.q.PutSlice(string(buf.Bytes())),
+		"Failed to enqueue message to be sent to the Store",
+	)
 }
 
 func (s *StorePlugin) Start() (infos []model.ListenerInfo, err error) {
@@ -939,7 +949,7 @@ func (s *StorePlugin) Start() (infos []model.ListenerInfo, err error) {
 	if err != nil {
 		return nil, err
 	}
-	s.msgsBatch = make([][]byte, 0, s.conf.Store.BatchSize)
+	s.msgsBatch = make([]string, 0, s.conf.Store.BatchSize)
 	s.pushwg.Add(1)
 	go s.push(secret)
 	return infos, nil

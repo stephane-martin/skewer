@@ -3,11 +3,13 @@ package base
 import (
 	"bufio"
 	"encoding/json"
+	"io"
 	"os"
 	"sync"
 	"time"
 
 	"github.com/awnumar/memguard"
+	"github.com/gogo/protobuf/proto"
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
@@ -54,12 +56,24 @@ func NewReporter(name string, l log15.Logger, pipe *os.File) *ReporterImpl {
 		pipe:   pipe,
 		pool: &sync.Pool{
 			New: func() interface{} {
-				return make([]byte, 0, 4096)
+				return proto.NewBuffer(make([]byte, 0, 16384))
 			},
 		},
 	}
 	rep.bufferedPipe = bufio.NewWriter(pipe)
 	return &rep
+}
+
+func (s *ReporterImpl) getBuffer() (buf *proto.Buffer) {
+	buf = s.pool.Get().(*proto.Buffer)
+	buf.Reset()
+	return buf
+}
+
+func (s *ReporterImpl) putBuffer(buf *proto.Buffer) {
+	if buf != nil {
+		s.pool.Put(buf)
+	}
 }
 
 func (s *ReporterImpl) Start() {
@@ -77,17 +91,14 @@ func (s *ReporterImpl) pushqueue() {
 		_ = s.bufferedPipe.Flush()
 		_ = s.pipe.Close()
 	}()
-	var m []byte
+	var m string
 	var err error
 
 	for s.queue.Wait(0) {
 		for s.queue.Wait(100 * time.Millisecond) {
 			_, m, err = s.queue.Get()
-			if m != nil && err == nil {
-				_, err = s.pipeWriter.Write(m)
-				if cap(m) == 4096 {
-					s.pool.Put(m)
-				}
+			if m != "" && err == nil {
+				_, err = io.WriteString(s.pipeWriter, m)
 				if err != nil {
 					s.logger.Crit("Unexpected error when writing messages to the plugin pipe", "error", err)
 					return
@@ -109,22 +120,17 @@ func (s *ReporterImpl) Stop() {
 
 // Stash reports one syslog message to the controller.
 func (s *ReporterImpl) Stash(m *model.FullMessage) error {
-	var b []byte
 	var err error
-	size := m.Size()
-	if size > 4096 {
-		b, err = m.Marshal()
-	} else {
-		b = s.pool.Get().([]byte)[:size]
-		_, err = m.MarshalTo(b)
-	}
+	buf := s.getBuffer()
+	defer s.putBuffer(buf)
+	err = buf.Marshal(m)
 	if err != nil {
 		return eerrors.Wrapf(err, "Failed to marshal a message to be sent by plugin: %s", s.name)
 	}
 	// Fatal is set when the queue has been disposed
 	return eerrors.WithTypes(
 		eerrors.Wrapf(
-			s.queue.PutSlice(b),
+			s.queue.PutSlice(string(buf.Bytes())),
 			"Failed to enqueue a message to be sent by plugin: %s",
 			s.name,
 		),

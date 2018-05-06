@@ -24,7 +24,7 @@ func (p *partitionImpl) Set(key utils.MyULID, value []byte, txn *NTransaction) (
 
 var trueBytes = []byte("true")
 
-func (p *partitionImpl) AddManyTrueMap(m map[utils.MyULID]([]byte), txn *NTransaction) (err error) {
+func (p *partitionImpl) AddManyTrueMap(m map[utils.MyULID]string, txn *NTransaction) (err error) {
 	if len(m) == 0 {
 		return
 	}
@@ -40,14 +40,15 @@ func (p *partitionImpl) AddManyTrueMap(m map[utils.MyULID]([]byte), txn *NTransa
 	return
 }
 
-func (p *partitionImpl) AddManySame(uids []utils.MyULID, v []byte, txn *NTransaction) (err error) {
+func (p *partitionImpl) AddManySame(uids []utils.MyULID, v string, txn *NTransaction) (err error) {
 	if len(uids) == 0 {
 		return
 	}
 	ptxn := PTransactionFrom(txn, p.prefix)
 	var uid utils.MyULID
+	vb := []byte(v)
 	for _, uid = range uids {
-		err = ptxn.Set(uid[:], v)
+		err = ptxn.Set(uid[:], vb)
 
 		if err != nil {
 			txn.Discard()
@@ -57,16 +58,16 @@ func (p *partitionImpl) AddManySame(uids []utils.MyULID, v []byte, txn *NTransac
 	return
 }
 
-func (p *partitionImpl) AddMany(m map[utils.MyULID]([]byte), txn *NTransaction) (err error) {
+func (p *partitionImpl) AddMany(m map[utils.MyULID]string, txn *NTransaction) (err error) {
 	if len(m) == 0 {
 		return
 	}
 	ptxn := PTransactionFrom(txn, p.prefix)
 
 	var key utils.MyULID
-	var v []byte
+	var v string
 	for key, v = range m {
-		err = ptxn.Set(key[:], v)
+		err = ptxn.Set(key[:], []byte(v))
 
 		if err != nil {
 			txn.Discard()

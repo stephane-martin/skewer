@@ -105,9 +105,9 @@ type Partition interface {
 	Delete(key utils.MyULID, txn *NTransaction) error
 	DeleteMany(keys []utils.MyULID, txn *NTransaction) error
 	Set(key utils.MyULID, value []byte, txn *NTransaction) error
-	AddMany(m map[utils.MyULID][]byte, txn *NTransaction) error
-	AddManySame(uids []utils.MyULID, v []byte, txn *NTransaction) error
-	AddManyTrueMap(m map[utils.MyULID]([]byte), txn *NTransaction) error
+	AddMany(m map[utils.MyULID]string, txn *NTransaction) error
+	AddManySame(uids []utils.MyULID, v string, txn *NTransaction) error
+	AddManyTrueMap(m map[utils.MyULID]string, txn *NTransaction) error
 	Get(key utils.MyULID, dst []byte, txn *NTransaction) ([]byte, error)
 	Exists(key utils.MyULID, txn *NTransaction) (bool, error)
 	KeyIterator(prefetchSize uint32, txn *NTransaction) *ULIDIterator

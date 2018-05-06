@@ -53,9 +53,9 @@ func (q *AckQueue) Get() (utils.MyULID, conf.DestinationType, error) {
 		q.pool.Put(tail)
 		return next.uid, next.dest, nil
 	} else if q.Disposed() {
-		return utils.ZeroUid, 0, eerrors.ErrQDisposed
+		return utils.ZeroULID, 0, eerrors.ErrQDisposed
 	}
-	return utils.ZeroUid, 0, nil
+	return utils.ZeroULID, 0, nil
 }
 
 func (q *AckQueue) Put(uid utils.MyULID, dest conf.DestinationType) error {
@@ -144,7 +144,7 @@ func (q *AckQueue) GetMany(max uint32) (res []UidDest) {
 	var i uint32
 	for i = 0; i < max; i++ {
 		uid, dest, err = q.Get()
-		if uid == utils.ZeroUid || err != nil {
+		if uid == utils.ZeroULID || err != nil {
 			break
 		}
 		res = append(res, UidDest{Uid: uid, Dest: dest})
@@ -159,7 +159,7 @@ func (q *AckQueue) GetUidsExactlyInto(uids *[]utils.MyULID) error {
 	var i int
 	for i < nb {
 		uid, _, err = q.Get()
-		if uid == utils.ZeroUid || err != nil {
+		if uid == utils.ZeroULID || err != nil {
 			return fmt.Errorf("GetUidsExactlyInto: missing uid for some message")
 		}
 		(*uids)[i] = uid
@@ -177,7 +177,7 @@ func (q *AckQueue) GetManyInto(uids *[]UidDest) {
 	var i int
 	for i < max {
 		uid, dest, err = q.Get()
-		if uid == utils.ZeroUid || err != nil {
+		if uid == utils.ZeroULID || err != nil {
 			break
 		}
 		*uids = append(*uids, UidDest{Uid: uid, Dest: dest})

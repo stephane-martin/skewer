@@ -33,7 +33,7 @@ func NewEncryptedPartition(p Partition, secret *memguard.LockedBuffer) (Partitio
 		},
 		mappool: &sync.Pool{
 			New: func() interface{} {
-				return make(map[utils.MyULID][]byte, 4096)
+				return make(map[utils.MyULID]string, 4096)
 			},
 		},
 	}, nil
@@ -95,46 +95,50 @@ func (encDB *EncryptedDB) Set(key utils.MyULID, value []byte, txn *NTransaction)
 	return encDB.p.Set(key, encValue, txn)
 }
 
-func (encDB *EncryptedDB) AddManyTrueMap(m map[utils.MyULID]([]byte), txn *NTransaction) (err error) {
-	encm := make(map[utils.MyULID]([]byte), len(m))
+func (encDB *EncryptedDB) AddManyTrueMap(m map[utils.MyULID]string, txn *NTransaction) (err error) {
+	encm := make(map[utils.MyULID]string, len(m))
 	encValue, err := sbox.Encrypt(trueBytes, encDB.secret)
 	if err != nil {
 		return err
 	}
+	encStr := string(encValue)
 	for uid := range m {
-		encm[uid] = encValue
+		encm[uid] = encStr
 	}
 	return encDB.p.AddMany(encm, txn)
 }
 
-func (encDB *EncryptedDB) AddManySame(uids []utils.MyULID, v []byte, txn *NTransaction) (err error) {
-	encm := make(map[utils.MyULID]([]byte), len(uids))
-	encValue, err := sbox.Encrypt(v, encDB.secret)
+func (encDB *EncryptedDB) AddManySame(uids []utils.MyULID, v string, txn *NTransaction) (err error) {
+	encm := make(map[utils.MyULID]string, len(uids))
+	encValue, err := sbox.Encrypt([]byte(v), encDB.secret)
 	if err != nil {
 		return err
 	}
+	encStr := string(encValue)
 	for _, uid := range uids {
-		encm[uid] = encValue
+		encm[uid] = encStr
 	}
 	return encDB.p.AddMany(encm, txn)
 }
 
-func (encDB *EncryptedDB) AddMany(m map[utils.MyULID][]byte, txn *NTransaction) error {
+func (encDB *EncryptedDB) AddMany(m map[utils.MyULID]string, txn *NTransaction) error {
 	var err error
 	var uid utils.MyULID
-	var val, encVal []byte
-	tmpMap := encDB.mappool.Get().(map[utils.MyULID][]byte)
+	var val string
+	var encVal []byte
+	tmpMap := encDB.mappool.Get().(map[utils.MyULID]string)
 	// first clean the tmpMap
 	for uid = range tmpMap {
 		delete(tmpMap, uid)
 	}
 
 	for uid, val = range m {
-		encVal, err = sbox.Encrypt(val, encDB.secret)
+		// TODO: avoid conversion to []byte
+		encVal, err = sbox.Encrypt([]byte(val), encDB.secret)
 		if err != nil {
 			return err
 		}
-		tmpMap[uid] = encVal
+		tmpMap[uid] = string(encVal)
 	}
 	err = encDB.p.AddMany(tmpMap, txn)
 	encDB.mappool.Put(tmpMap)

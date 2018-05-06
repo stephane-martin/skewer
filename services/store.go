@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/awnumar/memguard"
+	"github.com/gogo/protobuf/proto"
 	"github.com/inconshreveable/log15"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
@@ -134,15 +135,19 @@ func (s *storeServiceImpl) create() (err error) {
 
 		scanner := utils.NewWrappedScanner(s.pipeCtx, bufio.NewScanner(s.pipe))
 		scanner.Split(utils.MakeDecryptSplit(s.secret))
+		scanner.Buffer(make([]byte, 0, 65536), 65536)
+
 		var err error
 		var message *model.FullMessage
-		var msgBytes []byte
 		var uid utils.MyULID
+		protobuff := proto.NewBuffer(make([]byte, 0, 4096))
+		var msgBytes []byte
 
 		for {
 			for scanner.Scan() {
 				msgBytes = scanner.Bytes()
-				message, err = model.FromBuf(msgBytes) // we need to parse to get the message uid
+				protobuff.SetBuf(msgBytes)
+				message, err = model.FromBuf(protobuff) // we need to parse to get the message uid
 				if err != nil {
 					model.FullFree(message)
 					s.logger.Error("Unexpected error decoding message from the Store pipe", "error", err)
@@ -151,7 +156,7 @@ func (s *storeServiceImpl) create() (err error) {
 				}
 				uid = message.Uid
 				model.FullFree(message)
-				err = s.store.Stash(uid, msgBytes)
+				err = s.store.Stash(uid, string(msgBytes))
 				if err != nil {
 					s.logger.Error("Error pushing message to the store queue", "error", err)
 					go func() { s.Shutdown() }()

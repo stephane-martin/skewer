@@ -134,9 +134,9 @@ func FullFactory() (msg *FullMessage) {
 	return msg
 }
 
-func FromBuf(buf []byte) (msg *FullMessage, err error) {
-	msg = FullFactory()
-	err = proto.Unmarshal(buf, msg)
+func FromBuf(buf *proto.Buffer) (msg *FullMessage, err error) {
+	msg = FullCleanFactory()
+	err = buf.Unmarshal(msg)
 	if err != nil {
 		FullFree(msg)
 		return nil, err
@@ -148,9 +148,9 @@ func FullFactoryFrom(smsg *SyslogMessage) (msg *FullMessage) {
 	msg = fullMsgPool.Get().(*FullMessage)
 	msg.Fields = smsg
 	msg.Txnr = 0
-	msg.ConnId = utils.ZeroUid
-	msg.ConfId = utils.ZeroUid
-	msg.Uid = utils.ZeroUid
+	msg.ConnId = utils.ZeroULID
+	msg.ConfId = utils.ZeroULID
+	msg.Uid = utils.ZeroULID
 	return msg
 }
 
@@ -158,9 +158,9 @@ func FullCleanFactory() (msg *FullMessage) {
 	msg = fullMsgPool.Get().(*FullMessage)
 	msg.Fields = CleanFactory()
 	msg.Txnr = 0
-	msg.ConnId = utils.ZeroUid
-	msg.ConfId = utils.ZeroUid
-	msg.Uid = utils.ZeroUid
+	msg.ConnId = utils.ZeroULID
+	msg.ConfId = utils.ZeroULID
+	msg.Uid = utils.ZeroULID
 	return msg
 }
 
