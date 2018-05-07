@@ -18,13 +18,13 @@ func pGELF(m []byte) ([]*model.SyslogMessage, error) {
 }
 
 func FromGelfMessage(gelfm *gelf.Message) (msg *model.SyslogMessage) {
-	msg = model.CleanFactory()
+	msg = model.Factory()
 	fromGelfMessage(msg, gelfm)
 	return msg
 }
 
 func FullFromGelfMessage(gelfm *gelf.Message) (msg *model.FullMessage) {
-	msg = model.FullCleanFactory()
+	msg = model.FullFactory()
 	fromGelfMessage(msg.Fields, gelfm)
 	return msg
 }
@@ -36,7 +36,7 @@ func fromGelfMessage(m *model.SyslogMessage, gelfm *gelf.Message) {
 	//m.TimeReported = ""
 	//m.TimeGenerated = ""
 	if gelfm == nil {
-		m.Clear()
+		*m = model.ZeroSyslogMessage
 		return
 	}
 	m.Structured = ""

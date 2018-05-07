@@ -221,7 +221,7 @@ func (ch *serveChild) ShutdownControllers() eerrors.ErrorSlice {
 	*/
 
 	ch.globalCancel()
-	ch.store.Shutdown(5 * time.Second)
+	ch.store.Shutdown(150 * time.Second)
 	if ch.consulRegistry != nil {
 		ch.consulRegistry.WaitFinished() // wait that the services have been unregistered from Consul
 	}

@@ -46,12 +46,11 @@ func pCollectd(m []byte) (msgs []*model.SyslogMessage, rerr error) {
 	var gauge api.Gauge
 	var derive api.Derive
 	var ok bool
-	var msg *model.SyslogMessage
 	msgs = make([]*model.SyslogMessage, 10)
 	var b []byte
 
 	for _, list = range lists {
-		msg = model.CleanFactory()
+		msg := model.Factory()
 		b, err = list.MarshalJSON()
 		if err != nil {
 			continue

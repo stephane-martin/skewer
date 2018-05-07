@@ -138,23 +138,20 @@ func (s *storeServiceImpl) create() (err error) {
 		scanner.Buffer(make([]byte, 0, 65536), 65536)
 
 		var err error
-		var message *model.FullMessage
-		var uid utils.MyULID
 		protobuff := proto.NewBuffer(make([]byte, 0, 4096))
-		var msgBytes []byte
 
 		for {
 			for scanner.Scan() {
-				msgBytes = scanner.Bytes()
+				msgBytes := scanner.Bytes()
 				protobuff.SetBuf(msgBytes)
-				message, err = model.FromBuf(protobuff) // we need to parse to get the message uid
+				message, err := model.FromBuf(protobuff) // we need to parse to get the message uid
 				if err != nil {
 					model.FullFree(message)
 					s.logger.Error("Unexpected error decoding message from the Store pipe", "error", err)
 					go func() { s.Shutdown() }()
 					return
 				}
-				uid = message.Uid
+				uid := message.Uid
 				model.FullFree(message)
 				err = s.store.Stash(uid, string(msgBytes))
 				if err != nil {

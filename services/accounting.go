@@ -76,7 +76,7 @@ func readFileUntilEnd(f *os.File, size int) (err error) {
 func (s *AccountingService) makeMessage(buf []byte, tick int64, hostname string, gen *utils.Generator) *model.FullMessage {
 	acct := accounting.MakeAcct(buf, tick)
 	props := acct.Properties()
-	fields := model.CleanFactory()
+	fields := model.Factory()
 	fields.AppName = "accounting"
 	fields.Facility = model.Fuser
 	fields.Severity = model.Sinfo

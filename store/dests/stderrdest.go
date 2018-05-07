@@ -29,7 +29,6 @@ func NewStderrDestination(ctx context.Context, e *Env) (Destination, error) {
 }
 
 func (d *StderrDestination) sendOne(ctx context.Context, message *model.FullMessage) (err error) {
-	defer model.FullFree(message)
 	var buf string
 	buf, err = encoders.ChainEncode(d.encoder, message, "\n")
 	if err != nil {

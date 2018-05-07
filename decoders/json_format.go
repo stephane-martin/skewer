@@ -76,7 +76,7 @@ func pRsyslogJSON(m []byte) ([]*model.SyslogMessage, error) {
 		structured = strings.TrimSpace(sourceMsg.Structured)
 	}
 
-	msg := model.CleanFactory()
+	msg := model.Factory()
 	msg.Priority = model.Priority(pri)
 	msg.Facility = model.Facility(pri / 8)
 	msg.Severity = model.Severity(pri % 8)

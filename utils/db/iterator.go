@@ -98,5 +98,8 @@ func (i *ULIDIterator) ValueCopy(dst []byte) ([]byte, error) {
 		return nil, err
 	}
 	return append(dst[:0], decVal...), nil
+}
 
+func (i *ULIDIterator) IsDeleted() bool {
+	return i.iter.Item().IsDeletedOrExpired()
 }

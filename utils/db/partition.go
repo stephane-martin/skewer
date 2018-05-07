@@ -90,28 +90,28 @@ func (p *partitionImpl) Exists(key utils.MyULID, txn *NTransaction) (bool, error
 
 func (p *partitionImpl) Delete(key utils.MyULID, txn *NTransaction) (err error) {
 	err = PTransactionFrom(txn, p.prefix).Delete(key[:])
-
 	if err != nil {
 		txn.Discard()
 	}
-	return
+	return err
 }
 
 func (p *partitionImpl) DeleteMany(keys []utils.MyULID, txn *NTransaction) (err error) {
 	if len(keys) == 0 {
 		return
 	}
-	ptxn := PTransactionFrom(txn, p.prefix)
 
 	var key utils.MyULID
+	ptxn := PTransactionFrom(txn, p.prefix)
+
 	for _, key = range keys {
 		err = ptxn.Delete(key[:])
 		if err != nil {
 			txn.Discard()
-			return
+			return err
 		}
 	}
-	return
+	return nil
 }
 
 func (p *partitionImpl) ListKeys(txn *NTransaction) []utils.MyULID {

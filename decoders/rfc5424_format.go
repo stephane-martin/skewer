@@ -99,7 +99,7 @@ type listener struct {
 func newListener() *listener {
 	return &listener{
 		BaseRFC5424Listener: &rfc5424.BaseRFC5424Listener{},
-		msg:                 model.CleanFactory(),
+		msg:                 model.Factory(),
 	}
 }
 

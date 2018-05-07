@@ -130,7 +130,6 @@ func (s *MacLogsService) parseStdout(stdout io.ReadCloser) {
 	dec := json.NewDecoder(stdout)
 	dec.Token()
 	var macoslog model.MacOSLogMessage
-	full := model.FullCleanFactory()
 	hostname, _ := os.Hostname()
 	var reported time.Time
 	gen := utils.NewGenerator()
@@ -143,7 +142,7 @@ func (s *MacLogsService) parseStdout(stdout io.ReadCloser) {
 		}
 		// 2018-02-14 21:33:13.792980+0100
 		// 2006-01-02 15:04:05.000000-0700
-		full.Fields.Clear()
+		full := model.FullFactory()
 		full.Fields.Message = macoslog.EventMessage
 		full.Fields.AppName = macoslog.ProcessImagePath
 		full.Fields.Facility = model.Fuser

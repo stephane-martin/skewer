@@ -118,24 +118,26 @@ func init() {
 	}
 }
 
-func CleanFactory() (msg *SyslogMessage) {
-	msg = Factory()
-	msg.Clear()
-	return
-}
-
 func Factory() (msg *SyslogMessage) {
-	return syslogMsgPool.Get().(*SyslogMessage)
+	//return new(SyslogMessage)
+	msg = syslogMsgPool.Get().(*SyslogMessage)
+	*msg = ZeroSyslogMessage
+	msg.ClearProperties()
+	return msg
 }
 
 func FullFactory() (msg *FullMessage) {
 	msg = fullMsgPool.Get().(*FullMessage)
+	*msg = ZeroFullMessage
 	msg.Fields = Factory()
+	//msg = new(FullMessage)
+	//msg.Fields = Factory()
 	return msg
 }
 
 func FromBuf(buf *proto.Buffer) (msg *FullMessage, err error) {
-	msg = FullCleanFactory()
+	msg = fullMsgPool.Get().(*FullMessage)
+	*msg = ZeroFullMessage
 	err = buf.Unmarshal(msg)
 	if err != nil {
 		FullFree(msg)
@@ -145,22 +147,8 @@ func FromBuf(buf *proto.Buffer) (msg *FullMessage, err error) {
 }
 
 func FullFactoryFrom(smsg *SyslogMessage) (msg *FullMessage) {
-	msg = fullMsgPool.Get().(*FullMessage)
+	msg = FullFactory()
 	msg.Fields = smsg
-	msg.Txnr = 0
-	msg.ConnId = utils.ZeroULID
-	msg.ConfId = utils.ZeroULID
-	msg.Uid = utils.ZeroULID
-	return msg
-}
-
-func FullCleanFactory() (msg *FullMessage) {
-	msg = fullMsgPool.Get().(*FullMessage)
-	msg.Fields = CleanFactory()
-	msg.Txnr = 0
-	msg.ConnId = utils.ZeroULID
-	msg.ConfId = utils.ZeroULID
-	msg.Uid = utils.ZeroULID
 	return msg
 }
 
@@ -464,24 +452,8 @@ func (m *SyslogMessage) Date() string {
 	return m.GetTimeReported().Format("2006-01-02")
 }
 
-func (m *SyslogMessage) Clear() {
-	if m == nil {
-		return
-	}
-	m.ClearProperties()
-	m.Priority = 0
-	m.Severity = 0
-	m.Facility = 0
-	m.Version = 0
-	m.TimeGeneratedNum = 0
-	m.TimeReportedNum = 0
-	m.HostName = ""
-	m.AppName = ""
-	m.ProcId = ""
-	m.MsgId = ""
-	m.Structured = ""
-	m.Message = ""
-}
+var ZeroSyslogMessage = SyslogMessage{}
+var ZeroFullMessage = FullMessage{}
 
 func (m *SyslogMessage) ClearProperties() {
 	if m == nil {
@@ -494,8 +466,7 @@ func (m *SyslogMessage) ClearProperties() {
 	if len(m.Properties.Map) == 0 {
 		return
 	}
-	var k string
-	for k = range m.Properties.Map {
+	for k := range m.Properties.Map {
 		delete(m.Properties.Map, k)
 	}
 }

@@ -14,9 +14,13 @@ import (
 )
 
 type ackNode struct {
-	uid  utils.MyULID
-	dest conf.DestinationType
-	next *ackNode
+	Next  *ackNode
+	State aState
+}
+
+type aState struct {
+	UID  utils.MyULID
+	Dest conf.DestinationType
 }
 
 type AckQueue struct {
@@ -47,11 +51,11 @@ func (q *AckQueue) Dispose() {
 
 func (q *AckQueue) Get() (utils.MyULID, conf.DestinationType, error) {
 	tail := q.tail
-	next := tail.next
+	next := tail.Next
 	if next != nil {
-		(*ackNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.tail)), unsafe.Pointer(next))).uid = next.uid
+		(*ackNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.tail)), unsafe.Pointer(next))).State = next.State
 		q.pool.Put(tail)
-		return next.uid, next.dest, nil
+		return next.State.UID, next.State.Dest, nil
 	} else if q.Disposed() {
 		return utils.ZeroULID, 0, eerrors.ErrQDisposed
 	}
@@ -60,18 +64,18 @@ func (q *AckQueue) Get() (utils.MyULID, conf.DestinationType, error) {
 
 func (q *AckQueue) Put(uid utils.MyULID, dest conf.DestinationType) error {
 	n := q.pool.Get().(*ackNode)
-	n.uid = uid
-	n.dest = dest
-	n.next = nil
+	n.State.UID = uid
+	n.State.Dest = dest
+	n.Next = nil
 	if q.Disposed() {
 		return eerrors.ErrQDisposed
 	}
-	(*ackNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.head)), unsafe.Pointer(n))).next = n
+	(*ackNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.head)), unsafe.Pointer(n))).Next = n
 	return nil
 }
 
 func (q *AckQueue) Has() bool {
-	return q.tail.next != nil
+	return q.tail.Next != nil
 }
 
 func (q *AckQueue) Wait() bool {

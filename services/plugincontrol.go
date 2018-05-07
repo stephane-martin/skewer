@@ -262,7 +262,7 @@ type infosAndError struct {
 func (s *PluginController) listenpipe(secret *memguard.LockedBuffer) (err error) {
 	defer func() {
 		if e := eerrors.Err(recover()); e != nil {
-			err = eerrors.Wrapf(err, "scanner panicked in plugin '%s' controller listening pipe", s.name)
+			err = eerrors.Wrapf(e, "scanner panicked in plugin '%s' controller listening pipe", s.name)
 		}
 	}()
 	if s.pipe == nil || s.typ == base.Store || s.typ == base.Configuration {
@@ -922,7 +922,7 @@ func (s *StorePlugin) Stash(m *model.FullMessage) (err error) {
 	// this method is called very frequently, so we avoid to lock anything
 	// the BSliceQueue ensures that we write the messages sequentially to the store child
 	if s.conf.Store.AddMissingMsgID && len(m.Fields.MsgId) == 0 {
-		m.Fields.MsgId = s.gen.Uid().String()
+		m.Fields.MsgId = m.Uid.String()
 	}
 	buf := s.getBuffer()
 	defer s.putBuffer(buf)

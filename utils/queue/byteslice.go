@@ -11,9 +11,13 @@ import (
 )
 
 type bsliceNode struct {
-	uid   utils.MyULID
-	next  *bsliceNode
-	slice string
+	State state
+	Next  *bsliceNode
+}
+
+type state struct {
+	UID utils.MyULID
+	S   string
 }
 
 type BSliceQueue struct {
@@ -48,7 +52,7 @@ func (q *BSliceQueue) Dispose() {
 }
 
 func (q *BSliceQueue) Has() bool {
-	return q.tail.next != nil
+	return q.tail.Next != nil
 }
 
 func (q *BSliceQueue) Wait(timeout time.Duration) bool {
@@ -70,14 +74,14 @@ func (q *BSliceQueue) Wait(timeout time.Duration) bool {
 
 func (q *BSliceQueue) Get() (utils.MyULID, string, error) {
 	tail := q.tail
-	next := tail.next
+	next := tail.Next
 	if next != nil {
 		// prev = q.tail
 		// q.tail = q.tail.next
 		// prev.slice = next.slice
-		(*bsliceNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.tail)), unsafe.Pointer(next))).slice = next.slice
+		(*bsliceNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.tail)), unsafe.Pointer(next))).State = next.State
 		q.pool.Put(tail)
-		return next.uid, string(next.slice), nil
+		return next.State.UID, next.State.S, nil
 	} else if q.Disposed() {
 		return utils.ZeroULID, "", eerrors.ErrQDisposed
 	} else {
@@ -90,18 +94,17 @@ func (q *BSliceQueue) PutSlice(m string) error {
 }
 
 func (q *BSliceQueue) Put(uid utils.MyULID, m string) error {
-	// Put puts a *copy* of the m argument into the queue
 	if q.Disposed() {
 		return eerrors.ErrQDisposed
 	}
 	n := q.pool.Get().(*bsliceNode)
-	n.slice = m
-	n.uid = uid
-	n.next = nil
+	n.State.S = m
+	n.State.UID = uid
+	n.Next = nil
 	// prev = q.head
 	// q.head = n
 	// prev.next = n
-	(*bsliceNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.head)), unsafe.Pointer(n))).next = n
+	(*bsliceNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.head)), unsafe.Pointer(n))).Next = n
 	return nil
 }
 
@@ -120,17 +123,29 @@ func (q *BSliceQueue) GetMany(max uint32) (slices []string) {
 	return slices
 }
 
+func (q *BSliceQueue) GetManyIntoMap(m *map[utils.MyULID]string, max uint32) {
+	var i uint32
+	for k := range *m {
+		delete(*m, k)
+	}
+	for i < max {
+		uid, slice, err := q.Get()
+		if slice == "" || err != nil {
+			break
+		}
+		(*m)[uid] = slice
+		i++
+	}
+}
+
 func (q *BSliceQueue) GetManyInto(slices *[]string, uids *[]utils.MyULID) {
-	var slice string
-	var err error
 	var i int
-	var uid utils.MyULID
 	max := cap(*slices)
 	// the previous content of slices and uids is forgotten
 	*slices = (*slices)[:0]
 	*uids = (*uids)[:0]
 	for i < max {
-		uid, slice, err = q.Get()
+		uid, slice, err := q.Get()
 		if slice == "" || err != nil {
 			break
 		}

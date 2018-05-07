@@ -477,7 +477,7 @@ func (e *Environment) fromJsMessage(sm goja.Value) (m *model.SyslogMessage, err 
 	if err != nil {
 		return m, err
 	}
-	m = model.CleanFactory()
+	m = model.Factory()
 	m.Priority = model.Priority(imsg.Priority)
 	m.Facility = model.Facility(imsg.Facility)
 	m.Severity = model.Severity(imsg.Severity)

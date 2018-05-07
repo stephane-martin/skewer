@@ -28,10 +28,10 @@ func pair2str(s1 []byte, s2 []byte) (string, string) {
 func p3164(m []byte) ([]*model.SyslogMessage, error) {
 	m = bytes.TrimSpace(m)
 
-	defaultMsg := []*model.SyslogMessage{model.CleanFactory()}
+	defaultMsg := []*model.SyslogMessage{model.Factory()}
 	defaultMsg[0].Message = string(m)
 
-	smsg := model.CleanFactory()
+	smsg := model.Factory()
 	n := time.Now().UnixNano()
 	defaultMsg[0].TimeGeneratedNum = n
 	defaultMsg[0].TimeReportedNum = n

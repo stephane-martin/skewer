@@ -21,12 +21,11 @@ func pInflux(m []byte) ([]*model.SyslogMessage, error) {
 	}
 
 	var point models.Point
-	var msg *model.SyslogMessage
 	msgs := make([]*model.SyslogMessage, 0, len(points))
 
 	for _, point = range points {
 
-		msg = model.CleanFactory()
+		msg := model.Factory()
 		msg.AppName = "influxdb"
 		msg.TimeReportedNum = point.UnixNano()
 		msg.TimeGeneratedNum = time.Now().UnixNano()

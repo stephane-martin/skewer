@@ -20,8 +20,8 @@ type KafkaProducerAck struct {
 }
 
 type kafkaProducerAckNode struct {
-	next *kafkaProducerAckNode
-	ack  KafkaProducerAck
+	Next  *kafkaProducerAckNode
+	State KafkaProducerAck
 }
 
 type KafkaProducerAckQueue struct {
@@ -52,11 +52,11 @@ func (q *KafkaProducerAckQueue) Dispose() {
 
 func (q *KafkaProducerAckQueue) Get() (KafkaProducerAck, error) {
 	tail := q.tail
-	next := tail.next
+	next := tail.Next
 	if next != nil {
-		(*kafkaProducerAckNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.tail)), unsafe.Pointer(next))).ack = next.ack
+		(*kafkaProducerAckNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.tail)), unsafe.Pointer(next))).State = next.State
 		q.pool.Put(tail)
-		return next.ack, nil
+		return next.State, nil
 	} else if q.Disposed() {
 		return KafkaProducerAck{}, eerrors.ErrQDisposed
 	}
@@ -65,17 +65,17 @@ func (q *KafkaProducerAckQueue) Get() (KafkaProducerAck, error) {
 
 func (q *KafkaProducerAckQueue) Put(ack KafkaProducerAck) error {
 	n := q.pool.Get().(*kafkaProducerAckNode)
-	n.ack = ack
-	n.next = nil
+	n.State = ack
+	n.Next = nil
 	if q.Disposed() {
 		return eerrors.ErrQDisposed
 	}
-	(*kafkaProducerAckNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.head)), unsafe.Pointer(n))).next = n
+	(*kafkaProducerAckNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.head)), unsafe.Pointer(n))).Next = n
 	return nil
 }
 
 func (q *KafkaProducerAckQueue) Has() bool {
-	return q.tail.next != nil
+	return q.tail.Next != nil
 }
 
 func (q *KafkaProducerAckQueue) Wait() bool {

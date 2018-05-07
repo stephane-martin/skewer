@@ -29,6 +29,18 @@ var ackCounter *prometheus.CounterVec
 var messageFilterCounter *prometheus.CounterVec
 var once sync.Once
 
+var msgsSlicePool = &sync.Pool{
+	New: func() interface{} {
+		return make([]*model.FullMessage, 0, 5000)
+	},
+}
+
+var uidsPool = &sync.Pool{
+	New: func() interface{} {
+		return make([]utils.MyULID, 0, 5000)
+	},
+}
+
 func InitRegistry() {
 	once.Do(func() {
 
@@ -131,7 +143,7 @@ func NewBackend(parent *badger.DB, storeSecret *memguard.LockedBuffer) (b *Backe
 	for qtype := range Queues {
 		b.Partitions[qtype] = map[conf.DestinationType]db.Partition{}
 		for _, dtype := range conf.Destinations {
-			(b.Partitions[qtype])[dtype] = db.NewPartition(parent, getPartitionPrefix(qtype, dtype))
+			b.Partitions[qtype][dtype] = db.NewPartition(parent, getPartitionPrefix(qtype, dtype))
 		}
 	}
 	if storeSecret != nil {
@@ -169,7 +181,6 @@ type MessageStore struct {
 	batchSize       uint32
 	addMissingMsgID bool
 	generator       *utils.Generator
-	msgsSlicePool   *sync.Pool
 	uidsTmpBuf      []utils.MyULID
 }
 
@@ -220,15 +231,13 @@ func (s *MessageStore) receiveAcks() (err error) {
 }
 
 func (s *MessageStore) consumeStashQueue() (err error) {
-	messages := make([]string, 0, s.batchSize)
-	uids := make([]utils.MyULID, 0, s.batchSize)
-	tmpMap1 := make(map[utils.MyULID]string, s.batchSize)
+	m := make(map[utils.MyULID]string)
 	for s.toStashQueue.Wait(0) {
-		s.toStashQueue.GetManyInto(&messages, &uids)
-		if len(messages) == 0 {
+		s.toStashQueue.GetManyIntoMap(&m, s.batchSize)
+		if len(m) == 0 {
 			continue
 		}
-		_, err = s.ingest(messages, uids, tmpMap1)
+		_, err = s.ingest(m)
 		if err != nil {
 			return eerrors.Wrap(err, "Ingestion error")
 		}
@@ -312,10 +321,10 @@ func (s *MessageStore) retrieveAndForward(ctx context.Context) (err error) {
 					// s.Outputs() is a non-buffered chan. So when
 					// s.Outputs() <- msgs returns, it means that the forwarder
 					// has finished to process the previously provided messages.
-					// Therefore we can now Put back the previous messages slice
+					// Therefore we can now push back the previous messages slice
 					// to the slice pool.
 					if previousMsgs != nil {
-						s.msgsSlicePool.Put(previousMsgs)
+						msgsSlicePool.Put(previousMsgs)
 					}
 					previousMsgs = msgs
 					msgs = nil
@@ -358,7 +367,6 @@ func (s *MessageStore) retrieveAndForward(ctx context.Context) (err error) {
 	}
 
 	// actually make messages available to the forwarders
-	var messages []*model.FullMessage
 	var currentDest conf.DestinationType
 	var currentDestIdx uint
 	var first time.Time
@@ -400,7 +408,7 @@ RetrieveLoop:
 			continue RetrieveLoop
 		}
 
-		messages, err = s.retrieve(currentDest)
+		messages, err := s.retrieve(currentDest)
 		if err != nil {
 			return eerrors.Wrap(err, "Failed to retrieve messages from badger")
 		}
@@ -538,12 +546,6 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 		OutputsChans:    make(map[conf.DestinationType]chan []*model.FullMessage, len(conf.Destinations)),
 		addMissingMsgID: cfg.AddMissingMsgID,
 		generator:       utils.NewGenerator(),
-		msgsSlicePool: &sync.Pool{
-			New: func() interface{} {
-				return make([]*model.FullMessage, 0, cfg.BatchSize)
-			},
-		},
-		uidsTmpBuf: make([]utils.MyULID, 0, cfg.BatchSize),
 	}
 	store.dests.Store(dests)
 
@@ -982,12 +984,12 @@ func (s *MessageStore) PurgeBadger() {
 	}
 }
 
-func (s *MessageStore) Stash(uid utils.MyULID, b string) error {
-	// the stashQueue takes care to make a copy of b, in case the multiple instances of b use the same backing array
-	return eerrors.Wrap(
+func (s *MessageStore) Stash(uid utils.MyULID, b string) (err error) {
+	err = eerrors.Wrap(
 		s.toStashQueue.Put(uid, b),
 		"Error putting message on the store stash queue",
 	)
+	return err
 }
 
 func ingestHelper(badg *badger.DB, msgsDB, readyDB db.Partition, queue map[utils.MyULID]string) error {
@@ -1018,31 +1020,15 @@ func (s *MessageStore) ingestByDest(queue map[utils.MyULID]string, dest conf.Des
 	}
 }
 
-func (s *MessageStore) ingest(queue []string, uids []utils.MyULID, tmpMap1 map[utils.MyULID]string) (n int, err error) {
-	if len(queue) != len(uids) {
-		return 0, eerrors.Errorf(
-			"ingest: BUG: given queue of messages (%d) and list of uids (%d) have different lengths",
-			len(queue), len(uids),
-		)
-	}
-
-	length := len(queue)
+func (s *MessageStore) ingest(m map[utils.MyULID]string) (n int, err error) {
+	length := len(m)
 
 	if length == 0 {
 		return 0, nil
 	}
 
-	// clear the map that will hold the marshalled bytes
-	for uid := range tmpMap1 {
-		delete(tmpMap1, uid)
-	}
-
-	for i := range queue {
-		tmpMap1[uids[i]] = queue[i]
-	}
-
 	for _, dest := range s.Destinations() {
-		err = s.ingestByDest(tmpMap1, dest)
+		err = s.ingestByDest(m, dest)
 		if err != nil {
 			return 0, err
 		}
@@ -1052,27 +1038,28 @@ func (s *MessageStore) ingest(queue []string, uids []utils.MyULID, tmpMap1 map[u
 	return length, err
 }
 
-func retrieveIterHelper(msgsDB, readyDB db.Partition, batchsize uint32, txn *db.NTransaction, output *[]*model.FullMessage, uids *[]utils.MyULID, l log15.Logger) (invalid []utils.MyULID, keysNotFound int) {
+func retrieveIterHelper(msgsDB, readyDB db.Partition, batchsize uint32, txn *db.NTransaction, l log15.Logger) (uids []utils.MyULID, messages []*model.FullMessage, invalid []utils.MyULID, keysNotFound int) {
+
 	invalid = make([]utils.MyULID, 0)
-	var uid utils.MyULID
+	uids = uidsPool.Get().([]utils.MyULID)[:0]
+	messages = msgsSlicePool.Get().([]*model.FullMessage)[:0]
+
 	var messageBytes []byte
 	var fetched uint32
 	var err error
-	var message *model.FullMessage
+
 	protobuff := proto.NewBuffer(make([]byte, 0, 4096))
 
 	iter := readyDB.KeyIterator(batchsize, txn)
 	defer iter.Close()
 
 	for iter.Rewind(); fetched < batchsize && iter.Valid(); iter.Next() {
-		if !iter.KeyInto(&uid) {
-			continue
-		}
+		uid := iter.Key()
 		messageBytes, err = msgsDB.Get(uid, messageBytes, txn) // reuse or grow messageBytes at each step
 		if err != nil {
 			invalid = append(invalid, uid)
 			keysNotFound++
-			l.Debug("Error getting message content from message queue", "uid", uid, "error", err)
+			l.Debug("Error getting message content from message queue", "uid", uid.String(), "error", err)
 			continue
 		}
 		if len(messageBytes) == 0 {
@@ -1080,79 +1067,98 @@ func retrieveIterHelper(msgsDB, readyDB db.Partition, batchsize uint32, txn *db.
 			l.Debug("retrieved empty entry", "uid", uid)
 			continue
 		}
+
 		protobuff.SetBuf(messageBytes)
-		message, err = model.FromBuf(protobuff)
+		message, err := model.FromBuf(protobuff)
 		if err != nil {
 			invalid = append(invalid, uid)
 			l.Debug("retrieved invalid entry", "uid", uid, "message", "error", err)
 			continue
 		}
-		*output = append(*output, message)
-		*uids = append(*uids, uid)
+
+		messages = append(messages, message)
+		uids = append(uids, uid)
 		fetched++
 	}
-	return invalid, keysNotFound
+	return uids, messages, invalid, keysNotFound
 }
 
-func tryRetrieveHelper(msgsDB, readyDB, sentDB db.Partition, badg *badger.DB, batchSize uint32, output *[]*model.FullMessage, uids *[]utils.MyULID, l log15.Logger) (nbInvalids int, nbNotFound int, err error) {
+func tryRetrieveHelper(msgsDB, readyDB, sentDB db.Partition, badg *badger.DB, batchSize uint32, l log15.Logger) ([]utils.MyULID, []*model.FullMessage, int, int, error) {
+
 	txn := db.NewNTransaction(badg, true)
 	defer txn.Discard()
+	var err error
 
 	// fetch messages from badger
-	invalidEntries, keysNotFound := retrieveIterHelper(msgsDB, readyDB, batchSize, txn, output, uids, l)
+	uids, messages, invalidEntries, keysNotFound := retrieveIterHelper(msgsDB, readyDB, batchSize, txn, l)
 
 	if len(invalidEntries) > 0 {
 		l.Info("Found invalid entries", "number", len(invalidEntries))
 		err = readyDB.DeleteMany(invalidEntries, txn)
 		if err != nil {
-			return 0, 0, eerrors.Wrap(err, "Error deleting invalid entries from 'ready' queue")
+			return nil, nil, 0, 0, eerrors.Wrap(err, "Error deleting invalid entries from 'ready' queue")
 		}
 		err = msgsDB.DeleteMany(invalidEntries, txn)
 		if err != nil {
-			return 0, 0, eerrors.Wrap(err, "Error deleting invalid entries from 'messages' queue")
+			return nil, nil, 0, 0, eerrors.Wrap(err, "Error deleting invalid entries from 'messages' queue")
 		}
 	}
 
-	if len(*uids) > 0 {
-		err = sentDB.AddManySame(*uids, "true", txn)
+	if len(uids) > 0 {
+		err = sentDB.AddManySame(uids, "true", txn)
 		if err != nil {
-			return 0, 0, eerrors.Wrap(err, "Error copying messages to the 'sent' queue")
+			return nil, nil, 0, 0, eerrors.Wrap(err, "Error copying messages to the 'sent' queue")
 		}
-		err = readyDB.DeleteMany(*uids, txn)
+		err = readyDB.DeleteMany(uids, txn)
 		if err != nil {
-			return 0, 0, eerrors.Wrap(err, "Error deleting messages from the 'ready' queue")
+			return nil, nil, 0, 0, eerrors.Wrap(err, "Error deleting messages from the 'ready' queue")
 		}
 	}
 
-	return len(invalidEntries), keysNotFound, txn.Commit(nil)
+	return uids, messages, len(invalidEntries), keysNotFound, txn.Commit(nil)
 }
 
-func (s *MessageStore) retrieve(dest conf.DestinationType) (messages []*model.FullMessage, err error) {
-	messages = s.msgsSlicePool.Get().([]*model.FullMessage)[:0]
-	uids := s.uidsTmpBuf[:0]
-
-	// messages is allocated from a pool, so it's the responsability of the caller to put back messages to the pool when finished
-	readyDB := s.backend.GetPartition(Ready, dest)
+func (s *MessageStore) retrieve(dest conf.DestinationType) ([]*model.FullMessage, error) {
+	// messages object is allocated from a pool, so it's the responsability of
+	// the caller to put back messages to the pool when finished
 	messagesDB := s.backend.GetPartition(Messages, dest)
+	readyDB := s.backend.GetPartition(Ready, dest)
 	sentDB := s.backend.GetPartition(Sent, dest)
 
-	var nbInvalids, nbNotFound int
+	var messages []*model.FullMessage
+	var uids []utils.MyULID
+	var nbInvalids int
+	var nbNotFound int
+	var err error
 
 	for {
-		nbInvalids, nbNotFound, err = tryRetrieveHelper(messagesDB, readyDB, sentDB, s.badger, s.batchSize, &messages, &uids, s.logger)
-		if err != badger.ErrConflict {
+		uids, messages, nbInvalids, nbNotFound, err = tryRetrieveHelper(messagesDB, readyDB, sentDB, s.badger, s.batchSize, s.logger)
+
+		if err == nil {
 			break
 		}
-	}
 
-	if err != nil {
-		return nil, err
+		if messages != nil {
+			msgsSlicePool.Put(messages)
+		}
+		if uids != nil {
+			uidsPool.Put(uids)
+		}
+
+		if err != badger.ErrConflict {
+			return nil, err
+		}
 	}
 
 	badgerGauge.WithLabelValues("ready", conf.DestinationNames[dest]).Sub(float64(nbInvalids))
 	badgerGauge.WithLabelValues("messages", conf.DestinationNames[dest]).Sub(float64(nbInvalids - nbNotFound))
 	badgerGauge.WithLabelValues("sent", conf.DestinationNames[dest]).Add(float64(len(uids)))
 	badgerGauge.WithLabelValues("ready", conf.DestinationNames[dest]).Sub(float64(len(uids)))
+
+	if uids != nil {
+		uidsPool.Put(uids)
+	}
+
 	return messages, nil
 }
 
