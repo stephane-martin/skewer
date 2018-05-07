@@ -314,11 +314,13 @@
 			"revisionTime": "2016-08-31T15:17:26Z"
 		},
 		{
-			"checksumSHA1": "aC3l1RO5PUuWMEoWOb2qcE2LkDU=",
+			"checksumSHA1": "MYGFlRKXja8DAhRysWsby8Pvx5M=",
 			"path": "github.com/dgraph-io/badger",
-			"revision": "a39f9e06de643cd1edbc85492b18fec552fc7c7e",
-			"revisionTime": "2018-03-20T19:34:03Z",
-			"tree": true
+			"revision": "754278dbecbe8bfa0fec445d6af3bc2e0cf21911",
+			"revisionTime": "2018-05-02T13:11:08Z",
+			"tree": true,
+			"version": "v1.4.0",
+			"versionExact": "v1.4.0"
 		},
 		{
 			"checksumSHA1": "FCHRnXIurWk5RfGtQWiFE60XVK4=",
@@ -367,6 +369,12 @@
 			"path": "github.com/dop251/goja/token",
 			"revision": "09718839f5255969d0dcaef99119b867d187ecea",
 			"revisionTime": "2017-06-14T21:42:59Z"
+		},
+		{
+			"checksumSHA1": "FrFUyTbM2HweMAfdLEig956GBK0=",
+			"path": "github.com/dustin/go-humanize",
+			"revision": "02af3965c54e8cacf948b97fef38925c4120652c",
+			"revisionTime": "2018-04-21T18:26:05Z"
 		},
 		{
 			"checksumSHA1": "y2Kh4iPlgCPXSGTCcFpzePYdzzg=",
@@ -897,10 +905,10 @@
 			"revisionTime": "2017-06-16T20:40:54Z"
 		},
 		{
-			"checksumSHA1": "FGg99nQ56Fo3radSCuU1AeEUJug=",
+			"checksumSHA1": "xKzx54LbkghuMauevGWevn5ip3w=",
 			"path": "github.com/pierrec/lz4",
-			"revision": "5a3d2245f97fc249850e7802e3c01fad02a1c316",
-			"revisionTime": "2017-05-19T17:06:25Z"
+			"revision": "ed8d4cc3b461464e69798080a0092bd028910298",
+			"revisionTime": "2018-01-13T15:17:03Z"
 		},
 		{
 			"checksumSHA1": "IT4sX58d+e8osXHV5U6YCSdB/uE=",

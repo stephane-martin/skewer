@@ -167,6 +167,15 @@ func Open(opt Options) (db *DB, err error) {
 	opt.maxBatchSize = (15 * opt.MaxTableSize) / 100
 	opt.maxBatchCount = opt.maxBatchSize / int64(skl.MaxNodeSize)
 
+	if opt.ValueThreshold > math.MaxUint16-16 {
+		return nil, ErrValueThreshold
+	}
+
+	if opt.ReadOnly {
+		// Can't truncate if the DB is read only.
+		opt.Truncate = false
+	}
+
 	for _, path := range []string{opt.Dir, opt.ValueDir} {
 		dirExists, err := exists(path)
 		if err != nil {
@@ -1200,6 +1209,10 @@ func (db *DB) GetSequence(key []byte, bandwidth uint64) (*Sequence, error) {
 	}
 	err := seq.updateLease()
 	return seq, err
+}
+
+func (db *DB) Tables() []TableInfo {
+	return db.lc.getTableInfo()
 }
 
 // MergeOperator represents a Badger merge operator.
