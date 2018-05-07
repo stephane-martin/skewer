@@ -1,7 +1,9 @@
 package store
 
 import (
+	"bytes"
 	"context"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sync"
@@ -11,6 +13,7 @@ import (
 	"github.com/dgraph-io/badger"
 	"github.com/dgraph-io/badger/options"
 	"github.com/gogo/protobuf/proto"
+	"github.com/golang/snappy"
 	"github.com/inconshreveable/log15"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stephane-martin/skewer/conf"
@@ -20,6 +23,7 @@ import (
 	"github.com/stephane-martin/skewer/utils/db"
 	"github.com/stephane-martin/skewer/utils/eerrors"
 	"github.com/stephane-martin/skewer/utils/queue"
+	"github.com/valyala/bytebufferpool"
 	"go.uber.org/atomic"
 )
 
@@ -40,6 +44,8 @@ var uidsPool = &sync.Pool{
 		return make([]utils.MyULID, 0, 5000)
 	},
 }
+
+var compressPool bytebufferpool.Pool
 
 func InitRegistry() {
 	once.Do(func() {
@@ -1026,7 +1032,18 @@ func (s *MessageStore) ingest(m map[utils.MyULID]string) (n int, err error) {
 	if length == 0 {
 		return 0, nil
 	}
-
+	w := snappy.NewBufferedWriter(ioutil.Discard)
+	for k, v := range m {
+		if len(v) == 0 {
+			continue
+		}
+		cv := compressPool.Get()
+		w.Reset(cv)
+		_, _ = w.Write([]byte(v))
+		w.Close()
+		m[k] = cv.String()
+		compressPool.Put(cv)
+	}
 	for _, dest := range s.Destinations() {
 		err = s.ingestByDest(m, dest)
 		if err != nil {
@@ -1053,6 +1070,8 @@ func retrieveIterHelper(msgsDB, readyDB db.Partition, batchsize uint32, txn *db.
 	iter := readyDB.KeyIterator(batchsize, txn)
 	defer iter.Close()
 
+	r := snappy.NewReader(nil)
+
 	for iter.Rewind(); fetched < batchsize && iter.Valid(); iter.Next() {
 		uid := iter.Key()
 		messageBytes, err = msgsDB.Get(uid, messageBytes, txn) // reuse or grow messageBytes at each step
@@ -1068,11 +1087,23 @@ func retrieveIterHelper(msgsDB, readyDB db.Partition, batchsize uint32, txn *db.
 			continue
 		}
 
-		protobuff.SetBuf(messageBytes)
-		message, err := model.FromBuf(protobuff)
+		r.Reset(bytes.NewReader(messageBytes))
+		dec := compressPool.Get()
+		_, err = dec.ReadFrom(r)
+
 		if err != nil {
 			invalid = append(invalid, uid)
-			l.Debug("retrieved invalid entry", "uid", uid, "message", "error", err)
+			l.Debug("retrieved invalid compressed entry", "uid", uid, "message", "error", err)
+			continue
+		}
+
+		protobuff.SetBuf(dec.Bytes())
+		message, err := model.FromBuf(protobuff)
+		compressPool.Put(dec)
+
+		if err != nil {
+			invalid = append(invalid, uid)
+			l.Debug("retrieved invalid protobuf encoded entry", "uid", uid, "message", "error", err)
 			continue
 		}
 
