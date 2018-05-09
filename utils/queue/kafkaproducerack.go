@@ -34,11 +34,20 @@ type KafkaProducerAckQueue struct {
 	pool      *sync.Pool
 }
 
+var zeroAck KafkaProducerAck
+
 func NewKafkaProducerAckQueue() *KafkaProducerAckQueue {
-	stub := &kafkaProducerAckNode{}
-	q := &KafkaProducerAckQueue{head: stub, tail: stub, disposed: 0, pool: &sync.Pool{New: func() interface{} {
-		return &kafkaProducerAckNode{}
-	}}}
+	stub := new(kafkaProducerAckNode)
+	q := &KafkaProducerAckQueue{
+		head:     stub,
+		tail:     stub,
+		disposed: 0,
+		pool: &sync.Pool{
+			New: func() interface{} {
+				return new(kafkaProducerAckNode)
+			},
+		},
+	}
 	return q
 }
 
@@ -58,9 +67,9 @@ func (q *KafkaProducerAckQueue) Get() (KafkaProducerAck, error) {
 		q.pool.Put(tail)
 		return next.State, nil
 	} else if q.Disposed() {
-		return KafkaProducerAck{}, eerrors.ErrQDisposed
+		return zeroAck, eerrors.ErrQDisposed
 	}
-	return KafkaProducerAck{}, nil
+	return zeroAck, nil
 }
 
 func (q *KafkaProducerAckQueue) Put(ack KafkaProducerAck) error {
