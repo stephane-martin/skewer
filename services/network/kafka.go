@@ -2,6 +2,7 @@ package network
 
 import (
 	"bytes"
+	"context"
 	"runtime"
 	"strings"
 	"sync"
@@ -35,7 +36,8 @@ type KafkaServiceImpl struct {
 	MaxMessageSize   int
 	logger           log15.Logger
 	wg               sync.WaitGroup
-	stopChan         chan struct{}
+	stopCtx          context.Context
+	stop             context.CancelFunc
 	rawpool          *sync.Pool
 	queues           *queue.KafkaQueues
 	fatalErrorChan   chan struct{}
@@ -48,7 +50,6 @@ func NewKafkaService(env *base.ProviderEnv) (base.Provider, error) {
 	s := KafkaServiceImpl{
 		reporter: env.Reporter,
 		logger:   env.Logger.New("class", "KafkaService"),
-		stopChan: make(chan struct{}),
 		confined: env.Confined,
 	}
 	return &s, nil
@@ -75,17 +76,41 @@ func (s *KafkaServiceImpl) Gather() ([]*dto.MetricFamily, error) {
 func (s *KafkaServiceImpl) Start() (infos []model.ListenerInfo, err error) {
 	infos = []model.ListenerInfo{}
 	s.queues = queue.NewQueueFactory()
-	s.stopChan = make(chan struct{})
+	s.stopCtx, s.stop = context.WithCancel(context.Background())
 	s.fatalErrorChan = make(chan struct{})
 	s.fatalOnce = &sync.Once{}
+
+	// start the workers that fetch messages from the kafka cluster
+	// workers push raw messages from kafka to the rawMessagesQueue
+	var workersWG sync.WaitGroup
 	for _, config := range s.configs {
-		s.wg.Add(1)
-		go s.startOne(config)
+		workersWG.Add(1)
+		go func() {
+			defer workersWG.Done()
+			s.startWorker(s.stopCtx, config)
+		}()
 	}
+
+	// when all workers have returned, we know that we won't receive any more raw messages
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		workersWG.Wait()
+		s.rawMessagesQueue.Dispose()
+	}()
+
+	// start the parsers that consume raw messages from the rawMessagesQueue
 	cpus := runtime.NumCPU()
 	for i := 0; i < cpus; i++ {
 		s.wg.Add(1)
-		go s.Parse()
+		go func() {
+			defer s.wg.Done()
+			err := s.parse()
+			if err != nil {
+				s.logger.Error(err.Error())
+				s.dofatal()
+			}
+		}()
 	}
 
 	return infos, nil
@@ -99,60 +124,56 @@ func (s *KafkaServiceImpl) dofatal() {
 	s.fatalOnce.Do(func() { close(s.fatalErrorChan) })
 }
 
-func (s *KafkaServiceImpl) startOne(config conf.KafkaSourceConfig) {
-	defer s.wg.Done()
-	var consumer *cluster.Consumer
-	var err error
+func getConsumer(ctx context.Context, logger log15.Logger, config conf.KafkaSourceConfig, confined bool) *cluster.Consumer {
 	for {
-		for {
-			select {
-			case <-s.stopChan:
-				return
-			default:
-			}
-			consumer, err = config.GetClient(s.confined)
-			if err == nil {
-				s.logger.Debug("Got a Kafka consumer")
-				break
-			}
-			s.logger.Debug("Error getting a Kafka consumer", "error", err)
-			select {
-			case <-s.stopChan:
-				return
-			case <-time.After(2 * time.Second):
-			}
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
 		}
-		s.handleConsumer(config, consumer)
-	}
-}
-
-func (s *KafkaServiceImpl) Parse() {
-	defer s.wg.Done()
-	var err error
-	var raw *model.RawKafkaMessage
-
-	for {
-		raw, err = s.rawMessagesQueue.Get()
-		if raw == nil || err != nil {
-			return
-		}
-		err = s.ParseOne(raw)
-		s.rawpool.Put(raw)
-		if err != nil {
-			return
-		}
-	}
-}
-
-func (s *KafkaServiceImpl) ParseOne(raw *model.RawKafkaMessage) (err error) {
-	ackQueue := s.queues.Get(raw.ConsumerID)
-	if ackQueue == nil {
-		// the kafka consumer is gone
-		return nil
-	}
-	// be sure to ack the message to kafka
-	defer func() {
+		consumer, err := config.GetClient(confined)
 		if err == nil {
+			return consumer
+		}
+		logger.Debug("Error getting a Kafka consumer", "error", err)
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+func (s *KafkaServiceImpl) startWorker(ctx context.Context, config conf.KafkaSourceConfig) {
+	// the for loop here makes us retry if we lose a connection to the kafka cluster
+	for {
+		consumer := getConsumer(ctx, s.logger, config, s.confined)
+		if consumer == nil {
+			return
+		}
+		s.handleConsumer(ctx, config, consumer)
+	}
+}
+
+func (s *KafkaServiceImpl) parse() (err error) {
+	for {
+		raw, err := s.rawMessagesQueue.Get()
+		if raw == nil || err != nil {
+			return nil
+		}
+		err = s.parseOne(raw)
+		if err != nil {
+			base.ParsingErrorCounter.WithLabelValues("kafka", raw.Client, raw.Decoder.Format).Inc()
+			logg(s.logger, &raw.RawMessage).Warn(err.Error())
+			if eerrors.IsFatal(err) {
+				s.rawpool.Put(raw)
+				return err
+			}
+		}
+
+		// ack the raw message to the kafka cluster
+		ackQueue := s.queues.Get(raw.ConsumerID)
+		if ackQueue != nil {
 			_ = ackQueue.Put(queue.KafkaProducerAck{
 				Offset: raw.Offset,
 				TopicPartition: queue.TopicPartition{
@@ -161,51 +182,40 @@ func (s *KafkaServiceImpl) ParseOne(raw *model.RawKafkaMessage) (err error) {
 				},
 			})
 		}
-	}()
+		s.rawpool.Put(raw)
+	}
+}
 
-	logger := s.logger.New(
-		"protocol", "kafka",
-		"format", raw.Decoder.Format,
-		"brokers", raw.Brokers,
-		"topic", raw.Topic,
-	)
+func (s *KafkaServiceImpl) parseOne(raw *model.RawKafkaMessage) (err error) {
 	parser, err := s.parserEnv.GetParser(&raw.Decoder)
 	if parser == nil || err != nil {
-		logger.Error("Unknown parser")
-		return nil
+		return decoders.DecodingError(eerrors.Wrapf(err, "Unknown decoder: %s", raw.Decoder.Format))
 	}
 	defer parser.Release()
 
 	syslogMsgs, err := parser.Parse(raw.Message)
 	if err != nil {
-		base.ParsingErrorCounter.WithLabelValues("kafka", raw.Brokers, raw.Decoder.Format).Inc()
-		logger.Info("Parsing error", "error", err)
-		return nil
+		return decoders.DecodingError(eerrors.Wrap(err, "Parsing error"))
 	}
-	var syslogMsg *model.SyslogMessage
-	var full *model.FullMessage
-	for _, syslogMsg = range syslogMsgs {
+
+	for _, syslogMsg := range syslogMsgs {
 		if syslogMsg == nil {
 			continue
 		}
-		full = model.FullFactoryFrom(syslogMsg)
+		full := model.FullFactoryFrom(syslogMsg)
 		full.Uid = raw.UID
 		full.ConfId = raw.ConfID
 		full.SourceType = "kafka"
-		full.ClientAddr = raw.Brokers
+		full.ClientAddr = raw.Client
 		err := s.reporter.Stash(full)
 		model.FullFree(full)
 
-		if eerrors.Is("Fatal", err) {
-			logger.Error("Fatal error stashing Kafka message", "error", err)
-			s.dofatal()
-			return err
-		}
 		if err != nil {
-			logger.Warn("Non-fatal error stashing Kafka message", "error", err)
-			continue
+			logg(s.logger, &raw.RawMessage).Warn("Error stashing Kafka message", "error", err)
+			if eerrors.IsFatal(err) {
+				return eerrors.Wrap(err, "Fatal error pushing Kafka message to the Store")
+			}
 		}
-		base.IncomingMsgsCounter.WithLabelValues("kafka", raw.Brokers, "", "").Inc()
 	}
 	return nil
 }
@@ -215,23 +225,34 @@ func (s *KafkaServiceImpl) Shutdown() {
 }
 
 func (s *KafkaServiceImpl) Stop() {
-	close(s.stopChan)
-	s.rawMessagesQueue.Dispose()
+	s.stop()
+	// the call to s.stop() makes every worker to return eventually
+	// when every worker has returned, rawMessagesQueue is disposed
+	// because of that, the parsers will return too
 	s.wg.Wait()
 }
 
-func (s *KafkaServiceImpl) handleConsumer(config conf.KafkaSourceConfig, consumer *cluster.Consumer) {
-	brokers := strings.Join(config.Brokers, ",")
+func (s *KafkaServiceImpl) handleConsumer(ctx context.Context, config conf.KafkaSourceConfig, consumer *cluster.Consumer) {
+	if consumer == nil {
+		s.logger.Error("BUG: the consumer passed to handleConsumer is NIL")
+		return
+	}
+	var wg sync.WaitGroup
+	lctx, lcancel := context.WithCancel(ctx)
 	ackQueue := s.queues.New()
-	defer s.queues.Delete(ackQueue)
-
-	nextToACK := map[queue.TopicPartition]int64{}
 
 	go func() {
-		defer func() {
-			_ = consumer.Close()
-		}()
+		<-lctx.Done()
+		consumer.Close()
+	}()
+
+	wg.Add(1)
+	// ack messages to kafka when needed
+	// the goroutine returns eventually after the consumer has been closed
+	go func() {
+		defer wg.Done()
 		processedMsgs := map[queue.TopicPartition](map[int64]bool){}
+		nextToACK := map[queue.TopicPartition]int64{}
 
 		for ackQueue.Wait() {
 			ack, err := ackQueue.Get()
@@ -259,18 +280,31 @@ func (s *KafkaServiceImpl) handleConsumer(config conf.KafkaSourceConfig, consume
 		}
 	}()
 
-	gen := utils.NewGenerator()
-
-Loop:
-	for {
-		select {
-		case err := <-consumer.Errors():
+	wg.Add(1)
+	// watch kafka errors
+	// the goroutine returns eventually after the consumer has been closed
+	go func() {
+		defer wg.Done()
+		for err := range consumer.Errors() {
 			if model.IsFatalKafkaError(err) {
-				s.logger.Warn("Kafka consumer error", "error", err)
-				return
+				s.logger.Warn("Kafka consumer fatal error", "error", err)
+				consumer.Close()
+			} else {
+				s.logger.Info("Kafka consumer non fatal error", "error", err)
 			}
-			s.logger.Info("Kafka consumer non fatal error", "error", err)
-		case msg := <-consumer.Messages():
+		}
+	}()
+
+	wg.Add(1)
+	// watch kafka messages
+	// the goroutine returns eventually after the consumer has been closed
+	go func() {
+		defer wg.Done()
+		gen := utils.NewGenerator()
+		brokers := strings.Join(config.Brokers, ",")
+
+	Loop:
+		for msg := range consumer.Messages() {
 			ok := true
 			value := bytes.TrimSpace(msg.Value)
 			if len(value) == 0 {
@@ -282,6 +316,7 @@ Loop:
 				ok = false
 			}
 			if !ok {
+				// if the message is rejected, immediately ACK it to Kafka
 				ackQueue.Put(
 					queue.KafkaProducerAck{
 						Offset: msg.Offset,
@@ -295,7 +330,7 @@ Loop:
 			}
 			raw := s.rawpool.Get().(*model.RawKafkaMessage)
 			raw.UID = gen.Uid()
-			raw.Brokers = brokers
+			raw.Client = brokers
 			raw.ConfID = config.ConfID
 			raw.ConsumerID = ackQueue.ID()
 			raw.Decoder = config.DecoderBaseConfig
@@ -309,10 +344,19 @@ Loop:
 				// rawMessagesQueue has been disposed
 				s.rawpool.Put(raw)
 				s.logger.Warn("Error queueing kafka message", "error", err)
-				return
+			} else {
+				base.IncomingMsgsCounter.WithLabelValues("kafka", raw.Client, "", "").Inc()
 			}
-		case <-s.stopChan:
-			return
 		}
-	}
+
+		// the previous for loop returns when the Messages channel has been closed
+		// the Messages channel is only closed after the consumer has been closed
+		// so here we now that the current kafka consumer is gone
+		// hence, there is no need to process ACK any further
+		s.queues.Delete(ackQueue)
+
+	}()
+
+	wg.Wait()
+	lcancel()
 }

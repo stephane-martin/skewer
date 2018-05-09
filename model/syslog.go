@@ -42,9 +42,7 @@ type RawMessage struct {
 }
 
 type RawKafkaMessage struct {
-	Decoder    conf.DecoderBaseConfig
-	Brokers    string
-	ConfID     utils.MyULID
+	RawMessage
 	ConsumerID uint32
 	Message    []byte
 	UID        utils.MyULID
