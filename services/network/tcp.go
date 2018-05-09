@@ -232,9 +232,7 @@ func (s *TcpServiceImpl) parse() error {
 			base.ParsingErrorCounter.WithLabelValues("tcp", raw.Client, raw.Decoder.Format).Inc()
 			logg(s.Logger, &raw.RawMessage).Warn(err.Error())
 		}
-
 		s.Pool.Put(raw)
-
 		if err != nil && eerrors.IsFatal(err) {
 			// stop processing when fatal error happens
 			return err
