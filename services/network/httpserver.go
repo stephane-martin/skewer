@@ -2,7 +2,7 @@ package network
 
 import (
 	"bytes"
-	"fmt"
+	"context"
 	"io"
 	"log"
 	"net"
@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/inconshreveable/log15"
 	dto "github.com/prometheus/client_model/go"
@@ -29,7 +30,7 @@ var requestBodyPool bytebufferpool.Pool
 
 var copyBufPool = sync.Pool{
 	New: func() interface{} {
-		return make([]byte, 4096)
+		return make([]byte, 65536)
 	},
 }
 
@@ -110,7 +111,8 @@ type HTTPServiceImpl struct {
 	logger           log15.Logger
 	binder           binder.Client
 	wg               sync.WaitGroup
-	stopChan         chan struct{}
+	stopCtx          context.Context
+	stop             context.CancelFunc
 	rawpool          *sync.Pool
 	fatalErrorChan   chan struct{}
 	fatalOnce        *sync.Once
@@ -124,7 +126,6 @@ func NewHTTPService(env *base.ProviderEnv) (base.Provider, error) {
 		reporter: env.Reporter,
 		logger:   env.Logger.New("class", "HTTPService"),
 		binder:   env.Binder,
-		stopChan: make(chan struct{}),
 		confined: env.Confined,
 	}
 	return &s, nil
@@ -177,17 +178,35 @@ func (s *HTTPServiceImpl) Gather() ([]*dto.MetricFamily, error) {
 
 func (s *HTTPServiceImpl) Start() (infos []model.ListenerInfo, err error) {
 	infos = []model.ListenerInfo{}
-	s.stopChan = make(chan struct{})
+	s.stopCtx, s.stop = context.WithCancel(context.Background())
 	s.fatalErrorChan = make(chan struct{})
 	s.fatalOnce = &sync.Once{}
 	for _, config := range s.configs {
 		s.wg.Add(1)
-		go s.startOne(config)
+		go func() {
+			defer s.wg.Done()
+			err := s.startOne(config)
+			if err != nil {
+				if isSetupError(err) {
+					s.logger.Error("Error setting up the HTTP service", "error", err)
+				} else {
+					s.logger.Error("Error running the HTTP service", "error", err)
+				}
+				s.dofatal()
+			}
+		}()
 	}
 	cpus := runtime.NumCPU()
 	for i := 0; i < cpus; i++ {
 		s.wg.Add(1)
-		go s.parse()
+		go func() {
+			defer s.wg.Done()
+			err := s.parse()
+			if err != nil {
+				s.logger.Error("Fatal error processing messages", "error", err)
+				s.dofatal()
+			}
+		}()
 	}
 
 	return infos, nil
@@ -201,22 +220,28 @@ func (s *HTTPServiceImpl) dofatal() {
 	s.fatalOnce.Do(func() { close(s.fatalErrorChan) })
 }
 
-func (s *HTTPServiceImpl) startOne(config conf.HTTPServerSourceConfig) error {
-	defer s.wg.Done()
-	var err error
-	var listener net.Listener
-
-	hostport := net.JoinHostPort(config.BindAddr, strconv.FormatInt(int64(config.Port), 10))
-	if config.DisableConnKeepAlive {
-		listener, err = s.binder.Listen("tcp", hostport)
+func getListener(bindr binder.Client, addr string, port int, keepalive bool, period time.Duration) (listener net.Listener, err error) {
+	hostport := net.JoinHostPort(addr, strconv.FormatInt(int64(port), 10))
+	if keepalive {
+		listener, err = bindr.ListenKeepAlive("tcp", hostport, period)
 	} else {
-		listener, err = s.binder.ListenKeepAlive("tcp", hostport, config.ConnKeepAlivePeriod)
+		listener, err = bindr.Listen("tcp", hostport)
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer listener.Close()
+	return listener, nil
+}
 
+func setupError(err error) error {
+	return eerrors.WithTypes(err, "Setup")
+}
+
+func isSetupError(err error) bool {
+	return eerrors.Is("Setup", err)
+}
+
+func (s *HTTPServiceImpl) startOne(config conf.HTTPServerSourceConfig) error {
 	server := &http.Server{
 		Handler:           http.HandlerFunc(s.handler(config)),
 		ReadTimeout:       config.ReadTimeout,
@@ -226,51 +251,91 @@ func (s *HTTPServiceImpl) startOne(config conf.HTTPServerSourceConfig) error {
 		MaxHeaderBytes:    config.MaxHeaderBytes,
 		ErrorLog:          log.New(s, "", 0),
 	}
+
 	server.SetKeepAlivesEnabled(!config.DisableHTTPKeepAlive)
+
+	var serve func() error
+
 	if config.TLSEnabled {
 		tlsConf, err := utils.NewTLSConfig("", config.CAFile, config.CAPath, config.CertFile, config.KeyFile, false, s.confined)
 		if err != nil {
-			return err
+			return setupError(eerrors.Wrap(err, "Error setting up TLS configuration"))
 		}
 		tlsConf.ClientAuth = config.GetClientAuthType()
 		server.TLSConfig = tlsConf
-		return server.ServeTLS(listener, "", "")
+		listener, err := getListener(s.binder, config.BindAddr, config.Port, !config.DisableConnKeepAlive, config.ConnKeepAlivePeriod)
+		if err != nil {
+			return setupError(eerrors.Wrap(err, "Error creating TCP listener"))
+		}
+		defer listener.Close()
+		serve = func() error { return server.ServeTLS(listener, "", "") }
+	} else {
+		listener, err := getListener(s.binder, config.BindAddr, config.Port, !config.DisableConnKeepAlive, config.ConnKeepAlivePeriod)
+		if err != nil {
+			return setupError(eerrors.Wrap(err, "Error creating TCP listener"))
+		}
+		defer listener.Close()
+		serve = func() error { return server.Serve(listener) }
 	}
+
+	// close the server when stopChan is closed
+	// this will make the serve() call to return
 	s.wg.Add(1)
 	go func() {
-		<-s.stopChan
+		defer s.wg.Done()
+		<-s.stopCtx.Done()
 		server.Close()
-		s.wg.Done()
 	}()
-	return server.Serve(listener)
+
+	err := serve()
+	if err == http.ErrServerClosed {
+		return nil
+	}
+	return err
+}
+
+func getBody(reader io.ReadCloser, w http.ResponseWriter, maxSize int64) (buf *bytebufferpool.ByteBuffer, err error) {
+	buf = requestBodyPool.Get()
+	buf.Reset()
+	if maxSize > 0 {
+		reader = http.MaxBytesReader(w, reader, maxSize)
+	}
+	_, err = copyZeroAlloc(buf, reader)
+	reader.Close()
+	if err != nil {
+		requestBodyPool.Put(buf)
+		return nil, err
+	}
+	return buf, nil
+}
+
+func releaseBody(buf **bytebufferpool.ByteBuffer) {
+	if *buf != nil {
+		requestBodyPool.Put(*buf)
+		*buf = nil
+	}
 }
 
 func (s *HTTPServiceImpl) handler(config conf.HTTPServerSourceConfig) func(http.ResponseWriter, *http.Request) {
+	ports := strconv.FormatInt(int64(config.Port), 10)
 	return func(w http.ResponseWriter, r *http.Request) {
-		// get the request body into bodyBuf
-		if config.MaxBodySize > 0 {
-			r.Body = http.MaxBytesReader(w, r.Body, config.MaxBodySize)
-		}
-		bodyBuf := requestBodyPool.Get()
-		defer requestBodyPool.Put(bodyBuf)
-		bodyBuf.Reset()
-		_, err := copyZeroAlloc(bodyBuf, r.Body)
-		r.Body.Close()
+		bodyBuf, err := getBody(r.Body, w, config.MaxBodySize)
 		if err != nil {
 			s.logger.Warn("Error reading request body", "error", err)
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
+		// ensure that we give back the buffer. releaseBody can be safely called multiple times.
+		defer releaseBody(&bodyBuf)
 		if r.Method != "POST" {
 			s.logger.Warn("Request method is not POST", "method", r.Method)
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 
-		// parse body to get syslog messages
 		if config.DisableMultiple {
 			// the body should contain only one message
-			raw := s.rawpool.Get().(*model.RawTcpMessage)
+
 			tmp := bytes.TrimSpace(bodyBuf.Bytes())
 			if len(tmp) == 0 {
 				s.logger.Warn("Request did not contain any message")
@@ -282,40 +347,26 @@ func (s *HTTPServiceImpl) handler(config conf.HTTPServerSourceConfig) func(http.
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
+
+			tracker := s.addTracker(1, func() { w.WriteHeader(http.StatusCreated) }, func() { w.WriteHeader(http.StatusBadRequest) })
+			defer s.removeTracker(tracker.connID)
+
+			raw := s.rawpool.Get().(*model.RawTcpMessage)
 			raw.Message = raw.Message[:len(tmp)]
+			// we *copy* tmp so that we can safely release bodyBuf afterwards
 			copy(raw.Message, tmp)
+			releaseBody(&bodyBuf)
+
 			raw.Decoder = config.DecoderBaseConfig
 			raw.Client = r.RemoteAddr
 			raw.ConfID = config.ConfID
 			raw.LocalPort = int32(config.Port)
+			raw.ConnID = tracker.connID
 
-			fulls, err := s.parseOne(raw)
-			defer s.rawpool.Put(raw)
-			if err != nil {
-				s.logger.Warn("Error parsing message", "error", err)
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
+			s.rawMessagesQueue.Put(raw)
+			base.IncomingMsgsCounter.WithLabelValues("httpserver", raw.Client, ports, "").Inc()
 
-			var full *model.FullMessage
-			for _, full = range fulls {
-				defer model.FullFree(full)
-				full.Uid = utils.NewUid()
-
-				err := s.reporter.Stash(full)
-				if eerrors.Is("Fatal", err) {
-					w.WriteHeader(http.StatusInternalServerError)
-					s.logger.Error("Fatal error stashing HTTP message", "error", err)
-					close(s.fatalErrorChan)
-					return
-				}
-				if err != nil {
-					s.logger.Warn("Non-fatal error stashing HTTP message", "error", err)
-				}
-			}
-			//base.IncomingMsgsCounter.WithLabelValues("kafka", raw.Brokers, "", "").Inc()
-			w.WriteHeader(http.StatusCreated)
-
+			tracker.wait()
 			return
 		}
 
@@ -353,14 +404,13 @@ func (s *HTTPServiceImpl) handler(config conf.HTTPServerSourceConfig) func(http.
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		s.logger.Debug("Multiple messages received by HTTP", "nb_messages", len(byteMsgs))
+
 		tracker := s.addTracker(int64(len(byteMsgs)), func() { w.WriteHeader(http.StatusCreated) }, func() { w.WriteHeader(http.StatusBadRequest) })
 		defer s.removeTracker(tracker.connID)
 
 		for _, byteMsg = range byteMsgs {
 			raw := s.rawpool.Get().(*model.RawTcpMessage)
 			raw.Message = raw.Message[:len(byteMsg)]
-			// we copy the byteMsg so that we can release the bodyBuf afterwards
 			copy(raw.Message, byteMsg)
 			raw.Decoder = config.DecoderBaseConfig
 			raw.Client = r.RemoteAddr
@@ -368,7 +418,9 @@ func (s *HTTPServiceImpl) handler(config conf.HTTPServerSourceConfig) func(http.
 			raw.ConfID = config.ConfID
 			raw.LocalPort = int32(config.Port)
 			s.rawMessagesQueue.Put(raw)
+			base.IncomingMsgsCounter.WithLabelValues("httpserver", raw.Client, ports, "").Inc()
 		}
+		releaseBody(&bodyBuf)
 		tracker.wait()
 	}
 }
@@ -378,18 +430,25 @@ func (s *HTTPServiceImpl) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func (s *HTTPServiceImpl) parse() {
-	defer s.wg.Done()
+func (s *HTTPServiceImpl) parse() error {
 	gen := utils.NewGenerator()
 	for {
 		raw, err := s.rawMessagesQueue.Get()
 		if raw == nil || err != nil {
-			return
+			return nil
 		}
 		err = s.parseAndEnqueue(gen, raw)
-		s.rawpool.Put(raw)
 		if err != nil {
-			return
+			s.fail(raw.ConnID)
+			base.ParsingErrorCounter.WithLabelValues("httpserver", raw.Client, raw.Decoder.Format).Inc()
+			logg(s.logger, &raw.RawMessage).Warn(err.Error())
+		} else {
+			s.done(raw.ConnID)
+		}
+		s.rawpool.Put(raw)
+		if err != nil && eerrors.IsFatal(err) {
+			// stop processing when fatal error happens
+			return err
 		}
 	}
 }
@@ -401,63 +460,50 @@ func (s *HTTPServiceImpl) parseAndEnqueue(gen *utils.Generator, raw *model.RawTc
 	)
 	fulls, err := s.parseOne(raw)
 	if err != nil {
-		logger.Warn("Error parsing message", "error", err)
-		s.fail(raw.ConnID)
-		return nil
+		return eerrors.Wrap(err, "Error parsing HTTP server message")
 	}
-	var full *model.FullMessage
-	for _, full = range fulls {
+	for _, full := range fulls {
 		defer model.FullFree(full)
 		full.Uid = gen.Uid()
 
 		err := s.reporter.Stash(full)
 
-		if eerrors.Is("Fatal", err) {
-			logger.Error("Fatal error stashing HTTP message", "error", err)
-			s.fail(raw.ConnID)
-			s.dofatal()
-			return err
+		if eerrors.IsFatal(err) {
+			return eerrors.Wrap(err, "Fatal error stashing HTTP server message")
 		}
 		if err != nil {
 			logger.Warn("Non-fatal error stashing HTTP message", "error", err)
-			// TODO/ think about non-fatal handling
 		}
 	}
-	s.done(raw.ConnID)
 	return nil
-	//base.IncomingMsgsCounter.WithLabelValues("kafka", raw.Brokers, "", "").Inc()
 }
 
 func (s *HTTPServiceImpl) parseOne(raw *model.RawTcpMessage) (fulls []*model.FullMessage, err error) {
 	parser, err := s.parserEnv.GetParser(&raw.Decoder)
 	if parser == nil || err != nil {
-		return nil, fmt.Errorf("Unknown parser")
+		return nil, decoders.DecodingError(eerrors.Wrapf(err, "Unknown decoder: %s", raw.Decoder.Format))
 	}
 	defer parser.Release()
 
 	syslogMsgs, err := parser.Parse(raw.Message)
 	if err != nil {
-		return nil, err
-		//base.ParsingErrorCounter.WithLabelValues("kafka", raw.Brokers, raw.Format).Inc()
-		//logger.Info("Parsing error", "message", string(raw.Message), "error", err)
+		return nil, decoders.DecodingError(eerrors.Wrap(err, "Parsing error"))
 	}
 	if len(syslogMsgs) == 0 {
 		return nil, nil
 	}
 	fulls = make([]*model.FullMessage, 0, len(syslogMsgs))
-	var syslogMsg *model.SyslogMessage
-	var full *model.FullMessage
 
-	for _, syslogMsg = range syslogMsgs {
+	for _, syslogMsg := range syslogMsgs {
 		if syslogMsg == nil {
 			continue
 		}
-		full = model.FullFactoryFrom(syslogMsg)
+		full := model.FullFactoryFrom(syslogMsg)
 		full.SourceType = "httpserver"
 		full.SourcePort = raw.LocalPort
 		full.ClientAddr = raw.Client
 		full.ConfId = raw.ConfID
-		//full.ConnId = raw.ConnID
+		full.ConnId = raw.ConnID
 		fulls = append(fulls, full)
 	}
 	return fulls, nil
@@ -468,7 +514,7 @@ func (s *HTTPServiceImpl) Shutdown() {
 }
 
 func (s *HTTPServiceImpl) Stop() {
-	close(s.stopChan)
+	s.stop()
 	s.rawMessagesQueue.Dispose()
 	s.wg.Wait()
 }
