@@ -30,11 +30,10 @@ func Wout(header []byte, msg []byte) (err error) {
 }
 
 func Launch(ctx context.Context, typ base.Types, opts ...ProviderOpt) (err error) {
-	// TODO: wrap all errors correctly
 	name := base.Types2Names[typ]
 	defer func() {
 		if e := eerrors.Err(recover()); e != nil {
-			err = eerrors.Wrapf(err, "Scanner panicked in plugin provider '%s'", name)
+			err = eerrors.Wrapf(e, "Scanner panicked in plugin provider '%s'", name)
 		}
 	}()
 
@@ -50,7 +49,7 @@ func Launch(ctx context.Context, typ base.Types, opts ...ProviderOpt) (err error
 
 	if typ != base.Store && typ != base.Configuration {
 		if env.Pipe == nil {
-			return eerrors.Errorf("Plugin '%s' has a nil pipe", name)
+			return eerrors.Errorf("Plugin provider '%s' has a nil pipe", name)
 		}
 		SetReporter(base.NewReporter(name, env.Logger, env.Pipe))(env)
 		defer env.Reporter.Stop() // will close the pipe
@@ -113,23 +112,23 @@ func Launch(ctx context.Context, typ base.Types, opts ...ProviderOpt) (err error
 				svc.Stop()
 				err := Wout([]byte("nolistenererror"), []byte("plugin is inactive"))
 				if err != nil {
-					return err
+					return eerrors.Wrapf(err, "Error writing to parent of provider '%s", name)
 				}
 			} else if typ == base.TCP {
 				infosb, _ := json.Marshal(infos)
 				err := Wout(STARTED, infosb)
 				if err != nil {
-					return err
+					return eerrors.Wrapf(err, "Error writing to parent of provider '%s", name)
 				}
 				err = env.Reporter.Report(infos)
 				if err != nil {
-					return err
+					return eerrors.Wrapf(err, "Error writing to parent of provider '%s", name)
 				}
 			} else {
 				infosb, _ := json.Marshal(infos)
 				err := Wout(STARTED, infosb)
 				if err != nil {
-					return err
+					return eerrors.Wrapf(err, "Error writing to parent of provider '%s", name)
 				}
 			}
 			go func() {
@@ -170,12 +169,12 @@ func Launch(ctx context.Context, typ base.Types, opts ...ProviderOpt) (err error
 			}
 			familiesb, err := json.Marshal(families)
 			if err != nil {
-				env.Logger.Warn("Error marshaling metrics", "type", name, "error", err)
+				env.Logger.Warn("Provider had error marshaling metrics", "type", name, "error", err)
 				familiesb, _ = json.Marshal(empty)
 			}
 			err = Wout(METRICS, familiesb)
 			if err != nil {
-				return eerrors.Wrap(err, "Can not write metrics to the controller")
+				return eerrors.Wrapf(err, "Provider '%s' can not write metrics to the controller", name)
 			}
 		default:
 			env.Logger.Crit("Unknown command", "type", name, "command", command)
@@ -200,7 +199,7 @@ func Launch(ctx context.Context, typ base.Types, opts ...ProviderOpt) (err error
 	default:
 	}
 	err = scanner.Err()
-	if err != nil {
+	if err != nil && !eerrors.HasFileClosed(err) {
 		err = eerrors.Wrapf(err, "Error scanning stdin of plugin '%s'", name)
 		svc.Shutdown()
 		_ = Wout(SHUTDOWN, []byte(err.Error()))
