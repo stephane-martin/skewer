@@ -267,7 +267,11 @@ func (s *MessageStore) tickResetFailures(ctx context.Context) (err error) {
 		case <-s.ticker.C:
 			err = s.resetFailures()
 			if err != nil {
-				return eerrors.Wrap(err, "Error moving back failures")
+				return err
+			}
+			err = s.PurgeBadger()
+			if err != nil {
+				s.logger.Warn("Error in the periodic badger purge", "error", err)
 			}
 		case <-ctx.Done():
 			s.ticker.Stop()
@@ -533,6 +537,7 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 	badgerOpts.TableLoadingMode = options.MemoryMap
 	badgerOpts.ValueLogLoadingMode = options.MemoryMap
 	badgerOpts.ValueLogFileSize = cfg.ValueLogFileSize
+	badgerOpts.NumVersionsToKeep = 1
 
 	err := os.MkdirAll(dirname, 0700)
 	if err != nil {
@@ -875,7 +880,6 @@ func (s *MessageStore) resetFailures() (err error) {
 			return err
 		}
 	}
-	s.PurgeBadger()
 	return nil
 }
 
@@ -978,16 +982,12 @@ func (s *MessageStore) resetFailuresByDest(dest conf.DestinationType) (err error
 
 }
 
-func (s *MessageStore) PurgeBadger() {
-	err := s.badger.PurgeOlderVersions()
-	if err == nil {
-		err = s.badger.RunValueLogGC(0.5)
-		if err != nil && err != badger.ErrNoRewrite {
-			s.logger.Info("Error garbage collecting badger", "error", err)
-		}
-	} else {
-		s.logger.Info("Error purging badger", "error", err)
+func (s *MessageStore) PurgeBadger() error {
+	err := s.badger.RunValueLogGC(0.5)
+	if err != nil && err != badger.ErrNoRewrite {
+		return eerrors.Wrap(err, "Error happened when garbage collecting the badger")
 	}
+	return nil
 }
 
 func (s *MessageStore) Stash(uid utils.MyULID, b string) (err error) {
