@@ -154,8 +154,7 @@ func NewElasticDestination(ctx context.Context, e *Env) (Destination, error) {
 			case <-ctx.Done():
 				// the store service asked for stop
 			case <-time.After(config.Rebind):
-				e.logger.Info("HTTP destination rebind period has expired", "rebind", config.Rebind.String())
-				d.dofatal()
+				d.dofatal(eerrors.Errorf("Rebind period has expired (%s)", config.Rebind.String()))
 			}
 		}()
 	}
@@ -169,7 +168,7 @@ func (d *ElasticDestination) getClient() (*elastic.Client, error) {
 
 func (d *ElasticDestination) after(execID int64, requests []elastic.BulkableRequest, response *elastic.BulkResponse, err error) {
 	if response == nil {
-		d.dofatal()
+		d.dofatal(eerrors.New("BUG: response in ElasticDestination.after is NIL"))
 		return
 	}
 	successes := response.Succeeded()
@@ -200,7 +199,7 @@ func (d *ElasticDestination) after(execID int64, requests []elastic.BulkableRequ
 			d.logger.Warn("Elasticsearch index error", "type", item.Error.Type, "reason", item.Error.Reason, "index", item.Error.Index)
 		}
 	}
-	d.dofatal()
+	d.dofatal(eerrors.New("Elasticsearch bulk delivery error"))
 }
 
 func (d *ElasticDestination) Close() error {

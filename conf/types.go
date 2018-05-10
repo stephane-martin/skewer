@@ -320,6 +320,7 @@ type HTTPDestConfig struct {
 	MaxIdleConnsPerHost int           `mapstructure:"max_idle_conns_per_host" toml:"max_idle_conns_per_host" json:"max_idle_conns_per_host"`
 	IdleConnTimeout     time.Duration `mapstructure:"idle_conn_timeout" toml:"idle_conn_timeout" json:"idle_conn_timeout"`
 	ConnTimeout         time.Duration `mapstructure:"connection_timeout" toml:"connection_timeout" json:"connection_timeout"`
+	RequestTimeout      time.Duration `mapstructure:"request_timeout" toml:"request_timeout" json:"request_timeout"`
 	ConnKeepAlive       bool          `mapstructure:"conn_keepalive" toml:"conn_keepalive" json:"conn_keepalive"`
 	ConnKeepAlivePeriod time.Duration `mapstructure:"conn_keepalive_period" toml:"conn_keepalive_period" json:"conn_keepalive_period"`
 	BasicAuth           bool          `mapstructure:"basic_auth" toml:"basic_auth" json:"basic_auth"`

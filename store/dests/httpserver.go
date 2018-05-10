@@ -153,11 +153,8 @@ func (d *HTTPServerDestination) getEncoder(ctype string) encoders.Encoder {
 
 func (d *HTTPServerDestination) serve(listener net.Listener) (err error) {
 	defer func() {
-		if err != nil {
-			d.logger.Info("HTTP server stopped", "error", err)
-		}
 		listener.Close()
-		d.dofatal()
+		d.dofatal(eerrors.Wrap(err, "HTTP server stopped"))
 		d.wg.Done()
 	}()
 	if d.server.TLSConfig == nil {
@@ -201,9 +198,8 @@ func (d *HTTPServerDestination) ServeHTTP(w http.ResponseWriter, r *http.Request
 
 	encodr := d.getEncoder(contentType)
 	if encodr == nil {
-		d.logger.Error("getEncoder returned nil", "content-type", contentType)
 		w.WriteHeader(http.StatusInternalServerError)
-		d.dofatal()
+		d.dofatal(eerrors.Errorf("getEncoder returned NIL (content-type=%s)", contentType))
 		return
 	}
 
@@ -212,7 +208,7 @@ func (d *HTTPServerDestination) ServeHTTP(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		// sendQueue has been closed
 		w.WriteHeader(http.StatusServiceUnavailable)
-		d.dofatal()
+		d.dofatal(nil)
 		return
 	}
 	messages = append(messages, message)
@@ -225,7 +221,7 @@ Loop:
 			break Loop
 		} else if err == eerrors.ErrQDisposed || message == nil {
 			// the sendQueue has been closed, definitely no more messages
-			defer d.dofatal()
+			defer d.dofatal(nil)
 			break Loop
 		} else {
 			messages = append(messages, message)

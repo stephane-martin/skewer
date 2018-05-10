@@ -132,7 +132,7 @@ func (e *Env) Config(c conf.BaseConfig) *Env {
 type baseDestination struct {
 	logger   log15.Logger
 	binder   binder.Client
-	fatal    chan struct{}
+	fatal    chan error
 	once     *sync.Once
 	sack     storeCallback
 	snack    storeCallback
@@ -148,7 +148,7 @@ func newBaseDestination(typ conf.DestinationType, codename string, e *Env) *base
 	base := baseDestination{
 		logger:   e.logger,
 		binder:   e.binder,
-		fatal:    make(chan struct{}),
+		fatal:    make(chan error),
 		once:     &sync.Once{},
 		confined: e.confined,
 		codename: codename,
@@ -224,7 +224,7 @@ func (base *baseDestination) ForEach(ctx context.Context, f func(context.Context
 			} else {
 				base.NACK(uid)
 				base.NACKRemaining(msgs)
-				base.dofatal()
+				base.dofatal(curErr)
 				return c.Sum()
 			}
 		} else if ackf {
@@ -254,7 +254,7 @@ func (base *baseDestination) ForEachWithTopic(ctx context.Context, f func(contex
 			} else {
 				base.NACK(uid)
 				base.NACKRemaining(msgs)
-				base.dofatal()
+				base.dofatal(curErr)
 				return c.Sum()
 			}
 		} else if ackf {
@@ -286,13 +286,14 @@ func (base *baseDestination) setFormat(format string) error {
 	return nil
 }
 
-func (base *baseDestination) Fatal() chan struct{} {
+func (base *baseDestination) Fatal() chan error {
 	return base.fatal
 }
 
-func (base *baseDestination) dofatal() {
+func (base *baseDestination) dofatal(err error) {
 	base.once.Do(func() {
 		fatalCounter.WithLabelValues(base.codename).Inc()
+		base.fatal <- eerrors.Fatal(eerrors.Wrapf(err, "Fatal error happened in destination '%s'", base.codename))
 		close(base.fatal)
 	})
 }

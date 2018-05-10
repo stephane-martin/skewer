@@ -82,13 +82,15 @@ func (fwder *Forwarder) Forward(ctx context.Context) (err error) {
 	var messages []*model.FullMessage
 	var stopping atomic.Bool
 	shutdown := false
+	var rerr error
 
 	go func() {
 		select {
 		case <-ctx.Done():
 			shutdown = true
 			stopping.Store(true)
-		case <-fwder.dest.Fatal():
+		case err := <-fwder.dest.Fatal():
+			rerr = err
 			stopping.Store(true)
 		}
 	}()
@@ -98,8 +100,8 @@ func (fwder *Forwarder) Forward(ctx context.Context) (err error) {
 
 		case <-ctx.Done():
 			return nil
-		case <-fwder.dest.Fatal():
-			return fmt.Errorf("Fatal error in destination: %d", fwder.desttype)
+		case err := <-fwder.dest.Fatal():
+			return err
 		case messages, more = <-outputs:
 			if !more || messages == nil {
 				return nil
@@ -109,9 +111,8 @@ func (fwder *Forwarder) Forward(ctx context.Context) (err error) {
 				if shutdown {
 					return nil
 				}
-				return fmt.Errorf("Fatal error in destination: %d", fwder.desttype)
+				return rerr
 			}
-
 			errs := fwder.fwdMsgs(ctx, messages, jsenvs, fwder.dest)
 			if errs != nil {
 				fwder.logger.Warn("Errors forwarding messages", "errors", errs)

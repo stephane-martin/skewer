@@ -33,18 +33,16 @@ func NewKafkaDestination(ctx context.Context, e *Env) (Destination, error) {
 	connCounter.WithLabelValues("kafka", "success").Inc()
 
 	go func() {
-		var m *sarama.ProducerMessage
-		for m = range d.producer.Successes() {
+		for m := range d.producer.Successes() {
 			d.ACK(m.Metadata.(utils.MyULID))
 		}
 	}()
 
 	go func() {
-		var m *sarama.ProducerError
-		for m = range d.producer.Errors() {
+		for m := range d.producer.Errors() {
 			d.NACK(m.Msg.Metadata.(utils.MyULID))
 			if model.IsFatalKafkaError(m.Err) {
-				d.dofatal()
+				d.dofatal(eerrors.Wrap(m.Err, "Kafka fatal error"))
 			}
 		}
 	}()

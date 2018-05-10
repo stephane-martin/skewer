@@ -59,8 +59,7 @@ func NewRedisDestination(ctx context.Context, e *Env) (Destination, error) {
 			case <-ctx.Done():
 				// the store service asked for stop
 			case <-time.After(config.Rebind):
-				e.logger.Info("HTTP destination rebind period has expired", "rebind", config.Rebind.String())
-				d.dofatal()
+				d.dofatal(eerrors.Errorf("Rebind period has expired (%s)", config.Rebind.String()))
 			}
 		}()
 	}

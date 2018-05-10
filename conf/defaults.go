@@ -138,6 +138,7 @@ func SetHTTPDestDefaults(v *viper.Viper, prefixed bool) {
 	v.SetDefault(prefix+"max_idle_conns_per_host", 2)
 	v.SetDefault(prefix+"idle_conn_timeout", "90s")
 	v.SetDefault(prefix+"connection_timeout", "10s")
+	v.SetDefault(prefix+"request_timeout", "3s")
 	v.SetDefault(prefix+"conn_keepalive", true)
 	v.SetDefault(prefix+"conn_keepalive_period", "30s")
 	v.SetDefault(prefix+"user_agent", "skewer/"+Version)

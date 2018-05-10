@@ -220,13 +220,8 @@ func (d *WebsocketServerDestination) serveRoot(w http.ResponseWriter, r *http.Re
 
 func (d *WebsocketServerDestination) serve(listener net.Listener) (err error) {
 	defer func() {
-		d.dofatal()
-		if err != nil {
-			d.logger.Info("Websocket server has stopped", "error", err)
-		} else {
-			d.logger.Info("Websocket server has stopped")
-		}
 		listener.Close()
+		d.dofatal(eerrors.Wrap(err, "websocket server has stopped"))
 		d.wg.Done()
 	}()
 	return d.server.Serve(listener)

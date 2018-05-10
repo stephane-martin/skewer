@@ -70,8 +70,7 @@ func NewRELPDestination(ctx context.Context, e *Env) (Destination, error) {
 				// the store service asked for stop
 				d.clt.Close()
 			case <-time.After(rebind):
-				e.logger.Info("RELP destination rebind period has expired", "rebind", rebind.String())
-				d.dofatal()
+				d.dofatal(eerrors.Errorf("Rebind period has expired (%s)", rebind.String()))
 			}
 		}()
 	}
@@ -96,8 +95,7 @@ func NewRELPDestination(ctx context.Context, e *Env) (Destination, error) {
 					break
 				}
 				d.NACK(uid)
-				d.logger.Info("RELP server returned a NACK", "uid", uid.String())
-				d.dofatal()
+				d.dofatal(eerrors.Errorf("RELP server returned a NACK for UID '%s'", uid.String()))
 			}
 		}
 	}()

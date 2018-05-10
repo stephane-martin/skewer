@@ -3,7 +3,6 @@ package dests
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"net"
@@ -35,6 +34,7 @@ type HTTPDestination struct {
 	url         *template.Template
 	method      string
 	contentType string
+	reqtimeout  time.Duration
 	queue       *defered.Ring
 	wg          sync.WaitGroup
 }
@@ -45,6 +45,7 @@ func NewHTTPDestination(ctx context.Context, e *Env) (Destination, error) {
 		baseDestination: newBaseDestination(conf.HTTP, "http", e),
 		useragent:       config.UserAgent,
 		method:          config.Method,
+		reqtimeout:      config.RequestTimeout,
 	}
 	err := d.setFormat(config.Format)
 	if err != nil {
@@ -151,15 +152,20 @@ func NewHTTPDestination(ctx context.Context, e *Env) (Destination, error) {
 			case <-ctx.Done():
 				// the store service asked for stop
 			case <-time.After(config.Rebind):
-				e.logger.Info("HTTP destination rebind period has expired", "rebind", config.Rebind.String())
-				d.dofatal()
+				d.dofatal(eerrors.Errorf("Rebind period has expired (%s)", config.Rebind.String()))
 			}
 		}()
 	}
 
 	for i := 0; i < config.MaxIdleConnsPerHost; i++ {
 		d.wg.Add(1)
-		go d.dequeue(ctx)
+		go func() {
+			defer d.wg.Done()
+			err := d.dequeue(ctx)
+			if err != nil {
+				d.dofatal(eerrors.Wrap(err, "Error performing HTTP request"))
+			}
+		}()
 	}
 
 	return d, nil
@@ -193,29 +199,30 @@ func (d *HTTPDestination) doHTTP(ctx context.Context, uid utils.MyULID, req *htt
 	// perform the HTTP request, retry every second, use a circuit breaker to limit the tries
 	var resp *http.Response
 	for {
-		err = d.breaker.CallContext(ctx, func() (e error) {
-			resp, e = d.clt.Do(req)
-			return e
-		}, 0) // TODO: timeout for the request ?
+		err = d.breaker.CallContext(
+			ctx, func() (e error) {
+				resp, e = d.clt.Do(req)
+				return e
+			},
+			d.reqtimeout,
+		)
 		if err == nil {
 			break
 		}
 		if err == context.Canceled {
+			return nil
+		}
+		if eerrors.HasConnRefused(err) {
+			// we stop if there is not even a HTTP server listening
 			return err
 		}
 		select {
 		case <-ctx.Done():
-			return context.Canceled
+			return nil
 		case <-time.After(time.Second):
 		}
 	}
-	//resp, err := d.clt.Do(req)
 
-	if err != nil {
-		// server down ?
-		d.logger.Warn("Error sending HTTP request", "error", err)
-		return err
-	}
 	// not interested in response body
 	io.Copy(ioutil.Discard, resp.Body)
 	resp.Body.Close()
@@ -227,31 +234,24 @@ func (d *HTTPDestination) doHTTP(ctx context.Context, uid utils.MyULID, req *htt
 	}
 	if 400 <= resp.StatusCode && resp.StatusCode < 500 {
 		// client-side error ??!
-		d.logger.Warn("Client side error sending HTTP request", "code", resp.StatusCode, "status", resp.Status)
-		return fmt.Errorf("HTTP error when sending message to server: code '%d', status '%s'", resp.StatusCode, resp.Status)
+		return eerrors.Errorf("HTTP error when sending message to server: code '%d', status '%s'", resp.StatusCode, resp.Status)
 	}
 	if 500 <= resp.StatusCode && resp.StatusCode < 600 {
 		// server side error
-		d.logger.Warn("Server side error sending HTTP request", "code", resp.StatusCode, "status", resp.Status)
-		return fmt.Errorf("HTTP error when sending message to server: code '%d', status '%s'", resp.StatusCode, resp.Status)
+		return eerrors.Errorf("HTTP error when sending message to server: code '%d', status '%s'", resp.StatusCode, resp.Status)
 	}
-	d.logger.Warn("Unexpected status code sending HTTP request", "code", resp.StatusCode, "status", resp.Status)
-	return fmt.Errorf("HTTP error when sending message to server: code '%d', status '%s'", resp.StatusCode, resp.Status)
+	return eerrors.Errorf("HTTP error when sending message to server: code '%d', status '%s'", resp.StatusCode, resp.Status)
 }
 
 func (d *HTTPDestination) dequeue(ctx context.Context) error {
-	defer d.wg.Done()
-	var defered *model.DeferedRequest
-	var err error
 	for {
-		defered, err = d.queue.Get()
+		defered, err := d.queue.Get()
 		if err != nil || defered == nil {
 			return nil
 		}
 		err = d.doHTTP(ctx, defered.UID, defered.Request)
 		if err != nil {
 			d.NACK(defered.UID)
-			d.dofatal()
 			return err
 		}
 		d.ACK(defered.UID)

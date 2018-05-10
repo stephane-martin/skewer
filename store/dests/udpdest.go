@@ -45,8 +45,7 @@ func NewUDPDestination(ctx context.Context, e *Env) (Destination, error) {
 			case <-ctx.Done():
 				d.clt.Close()
 			case <-time.After(rebind):
-				e.logger.Info("UDP destination rebind period has expired", "rebind", rebind.String())
-				d.dofatal()
+				d.dofatal(eerrors.Errorf("Rebind period has expired (%s)", rebind.String()))
 			}
 		}()
 	}

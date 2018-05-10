@@ -67,8 +67,7 @@ func NewNATSDestination(ctx context.Context, e *Env) (Destination, error) {
 }
 
 func (d *NATSDestination) closeHandler(conn *nats.Conn) {
-	d.logger.Debug("NATS client has been closed")
-	d.dofatal()
+	d.dofatal(eerrors.New("NATS client has been closed"))
 }
 
 func (d *NATSDestination) disconnectHandler(conn *nats.Conn) {

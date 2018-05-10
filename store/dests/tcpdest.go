@@ -72,8 +72,7 @@ func NewTCPDestination(ctx context.Context, e *Env) (Destination, error) {
 				// the store service asked for stop
 				d.clt.Close()
 			case <-time.After(rebind):
-				e.logger.Info("TCP destination rebind period has expired", "rebind", rebind.String())
-				d.dofatal()
+				d.dofatal(eerrors.Errorf("Rebind period has expired (%s)", rebind.String()))
 			}
 		}()
 	}
@@ -122,7 +121,7 @@ func (d *TCPDestination) Send(ctx context.Context, msgs []model.OutputMsg, parti
 			c.Append(curErr)
 			if !IsEncodingError(curErr) {
 				d.NACKRemaining(msgs)
-				d.dofatal()
+				d.dofatal(curErr)
 				return c.Sum()
 			}
 		}
