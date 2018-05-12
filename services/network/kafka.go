@@ -11,6 +11,7 @@ import (
 	cluster "github.com/bsm/sarama-cluster"
 	"github.com/inconshreveable/log15"
 	dto "github.com/prometheus/client_model/go"
+	circuit "github.com/rubyist/circuitbreaker"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/decoders"
 	"github.com/stephane-martin/skewer/model"
@@ -124,30 +125,42 @@ func (s *KafkaServiceImpl) dofatal() {
 	s.fatalOnce.Do(func() { close(s.fatalErrorChan) })
 }
 
-func getConsumer(ctx context.Context, logger log15.Logger, config conf.KafkaSourceConfig, confined bool) *cluster.Consumer {
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		default:
+func (s *KafkaServiceImpl) startWorker(ctx context.Context, config conf.KafkaSourceConfig) {
+	breaker := circuit.NewConsecutiveBreaker(3)
+
+	getConsumer := func() (consumer *cluster.Consumer) {
+
+		getClient := func() (err error) {
+			consumer, err = config.GetClient(s.confined)
+			return err
 		}
-		consumer, err := config.GetClient(confined)
-		if err == nil {
-			return consumer
-		}
-		logger.Debug("Error getting a Kafka consumer", "error", err)
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-time.After(2 * time.Second):
+
+		for {
+			// arg timeout is 0 because the sarama client handles connection timeout
+			// through DialTimeout
+			err := breaker.CallContext(ctx, getClient, 0)
+
+			if err == nil {
+				return consumer
+			}
+			if err == context.Canceled {
+				return nil
+			}
+			if err != circuit.ErrBreakerOpen {
+				s.logger.Debug("Error getting a Kafka consumer", "error", err)
+			}
+
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(1 * time.Second):
+			}
 		}
 	}
-}
 
-func (s *KafkaServiceImpl) startWorker(ctx context.Context, config conf.KafkaSourceConfig) {
 	// the for loop here makes us retry if we lose a connection to the kafka cluster
 	for {
-		consumer := getConsumer(ctx, s.logger, config, s.confined)
+		consumer := getConsumer()
 		if consumer == nil {
 			return
 		}
