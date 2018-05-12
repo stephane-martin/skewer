@@ -75,20 +75,20 @@ var DestinationNames = map[DestinationType]string{
 	Redis:           "redis",
 }
 
-var RDestinations = map[DestinationType]byte{
-	Kafka:           'k',
-	UDP:             'u',
-	TCP:             't',
-	RELP:            'r',
-	File:            'f',
-	Stderr:          's',
-	Graylog:         'g',
-	HTTP:            'h',
-	HTTPServer:      'e',
-	NATS:            'n',
-	WebsocketServer: 'w',
-	Elasticsearch:   'l',
-	Redis:           'd',
+var RDestinations = map[DestinationType]string{
+	Kafka:           "k",
+	UDP:             "u",
+	TCP:             "t",
+	RELP:            "r",
+	File:            "f",
+	Stderr:          "s",
+	Graylog:         "g",
+	HTTP:            "h",
+	HTTPServer:      "e",
+	NATS:            "n",
+	WebsocketServer: "w",
+	Elasticsearch:   "l",
+	Redis:           "d",
 }
 
 func (m *MainConfig) GetDestinations() (dests DestinationType, err error) {

@@ -13,7 +13,6 @@ import (
 
 	"github.com/awnumar/memguard"
 	"github.com/inconshreveable/log15"
-	"github.com/oklog/ulid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/cobra"
 	"github.com/stephane-martin/skewer/conf"
@@ -83,7 +82,7 @@ func ExecuteChild() (err error) {
 	if err != nil {
 		return eerrors.Wrap(err, "Error making memory guard")
 	}
-	creds := kring.RingCreds{Secret: ringSecret, SessionID: utils.MyULID(ulid.MustParse(sessionID))}
+	creds := kring.RingCreds{Secret: ringSecret, SessionID: utils.MustParseULID(sessionID)}
 	ring := kring.GetRing(creds)
 	secret, err := ring.GetBoxSecret()
 	if err != nil {

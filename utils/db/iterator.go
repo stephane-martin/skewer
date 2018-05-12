@@ -37,13 +37,12 @@ func (i *ULIDIterator) Valid() bool {
 	}
 }
 
-func (i *ULIDIterator) Key() (uid utils.MyULID) {
+func (i *ULIDIterator) Key() utils.MyULID {
 	if i.prefix != nil {
-		copy(uid[:], i.iter.Item().Key()[len(i.prefix):])
+		return utils.MyULID(string(i.iter.Item().Key()[len(i.prefix):]))
 	} else {
-		copy(uid[:], i.iter.Item().Key())
+		return utils.MyULID(string(i.iter.Item().Key()))
 	}
-	return uid
 }
 
 func (i *ULIDIterator) KeyInto(uid *utils.MyULID) bool {
@@ -51,9 +50,9 @@ func (i *ULIDIterator) KeyInto(uid *utils.MyULID) bool {
 		return false
 	}
 	if i.prefix != nil {
-		copy((*uid)[:], i.iter.Item().Key()[len(i.prefix):])
+		*uid = utils.MyULID(string(i.iter.Item().Key()[len(i.prefix):]))
 	} else {
-		copy((*uid)[:], i.iter.Item().Key())
+		*uid = utils.MyULID(string(i.iter.Item().Key()))
 	}
 	return true
 }

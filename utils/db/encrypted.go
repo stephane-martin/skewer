@@ -11,10 +11,32 @@ import (
 )
 
 type EncryptedDB struct {
-	p       *partitionImpl
-	secret  *memguard.LockedBuffer
-	pool    *sync.Pool
-	mappool *sync.Pool
+	p      *partitionImpl
+	secret *memguard.LockedBuffer
+}
+
+var bufpool = &sync.Pool{
+	New: func() interface{} {
+		return make([]byte, 0, 4096)
+	},
+}
+
+var mappool = &sync.Pool{
+	New: func() interface{} {
+		return make(map[utils.MyULID]string, 5000)
+	},
+}
+
+func getTmpMap() map[utils.MyULID]string {
+	m := mappool.Get().(map[utils.MyULID]string)
+	for k := range m {
+		delete(m, k)
+	}
+	return m
+}
+
+func getTmpBuf() []byte {
+	return bufpool.Get().([]byte)[:0]
 }
 
 func NewEncryptedPartition(p Partition, secret *memguard.LockedBuffer) (Partition, error) {
@@ -26,16 +48,6 @@ func NewEncryptedPartition(p Partition, secret *memguard.LockedBuffer) (Partitio
 	return &EncryptedDB{
 		p:      impl,
 		secret: secret,
-		pool: &sync.Pool{
-			New: func() interface{} {
-				return make([]byte, 0, 4096)
-			},
-		},
-		mappool: &sync.Pool{
-			New: func() interface{} {
-				return make(map[utils.MyULID]string, 4096)
-			},
-		},
 	}, nil
 }
 
@@ -50,7 +62,7 @@ func (encDB *EncryptedDB) KeyIterator(prefetchSize uint32, txn *NTransaction) *U
 		PrefetchValues: false,
 		PrefetchSize:   int(prefetch),
 	}
-	return &ULIDIterator{iter: txn.NewIterator(opt), secret: encDB.secret, prefix: encDB.p.prefix}
+	return &ULIDIterator{iter: txn.NewIterator(opt), secret: encDB.secret, prefix: []byte(encDB.p.prefix)}
 }
 
 func (encDB *EncryptedDB) KeyValueIterator(prefetchSize uint32, txn *NTransaction) *ULIDIterator {
@@ -64,7 +76,7 @@ func (encDB *EncryptedDB) KeyValueIterator(prefetchSize uint32, txn *NTransactio
 		PrefetchValues: true,
 		PrefetchSize:   prefetch,
 	}
-	return &ULIDIterator{iter: txn.NewIterator(opt), secret: encDB.secret, prefix: encDB.p.prefix}
+	return &ULIDIterator{iter: txn.NewIterator(opt), secret: encDB.secret, prefix: []byte(encDB.p.prefix)}
 }
 
 func (encDB *EncryptedDB) Exists(key utils.MyULID, txn *NTransaction) (bool, error) {
@@ -87,72 +99,62 @@ func (encDB *EncryptedDB) DeleteMany(keys []utils.MyULID, txn *NTransaction) err
 	return encDB.p.DeleteMany(keys, txn)
 }
 
-func (encDB *EncryptedDB) Set(key utils.MyULID, value []byte, txn *NTransaction) error {
-	encValue, err := sbox.Encrypt(value, encDB.secret)
+func (encDB *EncryptedDB) Set(key utils.MyULID, value string, txn *NTransaction) error {
+	encBuf, err := sbox.EncryptTo([]byte(value), encDB.secret, getTmpBuf())
 	if err != nil {
 		return err
 	}
-	return encDB.p.Set(key, encValue, txn)
+	// we can reuse encBuf because we pass a *copy*
+	err = encDB.p.Set(key, string(encBuf), txn)
+	bufpool.Put(encBuf)
+	return err
 }
 
 func (encDB *EncryptedDB) AddManyTrueMap(m map[utils.MyULID]string, txn *NTransaction) (err error) {
-	encm := make(map[utils.MyULID]string, len(m))
 	encValue, err := sbox.Encrypt(trueBytes, encDB.secret)
 	if err != nil {
 		return err
 	}
 	encStr := string(encValue)
+
+	tmpMap := getTmpMap()
 	for uid := range m {
-		encm[uid] = encStr
+		tmpMap[uid] = encStr
 	}
-	return encDB.p.AddMany(encm, txn)
+	err = encDB.p.AddMany(tmpMap, txn)
+	mappool.Put(tmpMap)
+	return err
 }
 
 func (encDB *EncryptedDB) AddManySame(uids []utils.MyULID, v string, txn *NTransaction) (err error) {
-	encm := make(map[utils.MyULID]string, len(uids))
 	encValue, err := sbox.Encrypt([]byte(v), encDB.secret)
 	if err != nil {
 		return err
 	}
-	encStr := string(encValue)
-	for _, uid := range uids {
-		encm[uid] = encStr
-	}
-	return encDB.p.AddMany(encm, txn)
+	return encDB.p.AddManySame(uids, string(encValue), txn)
 }
 
 func (encDB *EncryptedDB) AddMany(m map[utils.MyULID]string, txn *NTransaction) error {
-	var err error
-	var uid utils.MyULID
-	var val string
-	var encVal []byte
-	tmpMap := encDB.mappool.Get().(map[utils.MyULID]string)
-	// first clean the tmpMap
-	for uid = range tmpMap {
-		delete(tmpMap, uid)
-	}
+	tmpMap := getTmpMap()
 
-	for uid, val = range m {
-		// TODO: avoid conversion to []byte
-		encVal, err = sbox.Encrypt([]byte(val), encDB.secret)
+	for uid, val := range m {
+		encVal, err := sbox.Encrypt([]byte(val), encDB.secret)
 		if err != nil {
 			return err
 		}
 		tmpMap[uid] = string(encVal)
 	}
-	err = encDB.p.AddMany(tmpMap, txn)
-	encDB.mappool.Put(tmpMap)
+	err := encDB.p.AddMany(tmpMap, txn)
+	mappool.Put(tmpMap)
 	return err
 }
 
-func (encDB *EncryptedDB) Get(key utils.MyULID, dst []byte, txn *NTransaction) (ret []byte, err error) {
-	encValBuf := encDB.pool.Get().([]byte)
-	encVal := encValBuf[:0]
-	encVal, err = encDB.p.Get(key, encVal, txn)
+func (encDB *EncryptedDB) Get(key utils.MyULID, dst []byte, txn *NTransaction) ([]byte, error) {
+	encVal, err := encDB.p.Get(key, getTmpBuf(), txn)
 	if err != nil {
 		return dst, err
 	}
-	ret, err = sbox.DecrypTo(encVal, encDB.secret, dst[:0])
-	encDB.pool.Put(encValBuf)
+	ret, err := sbox.DecrypTo(encVal, encDB.secret, dst[:0])
+	bufpool.Put(encVal)
 	return ret, err
 }

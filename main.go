@@ -16,7 +16,6 @@ import (
 	"github.com/awnumar/memguard"
 	"github.com/inconshreveable/log15"
 	"github.com/kardianos/osext"
-	"github.com/oklog/ulid"
 	"github.com/spf13/pflag"
 	"github.com/stephane-martin/skewer/cmd"
 	"github.com/stephane-martin/skewer/services"
@@ -478,7 +477,7 @@ func runUnconfined(t base.Types) error {
 			return fatalError("Could not create ring secret:", err)
 		}
 		_ = rPipe.Close()
-		sessionID := utils.MyULID(ulid.MustParse(sid))
+		sessionID := utils.MustParseULID(sid)
 		ring := kring.GetRing(kring.RingCreds{Secret: ringSecret, SessionID: sessionID})
 
 		boxsecret, err := ring.GetBoxSecret()
@@ -561,7 +560,7 @@ func runUnconfined(t base.Types) error {
 			return fatalError("Could not create ring secret:", err)
 		}
 		_ = rPipe.Close()
-		sessionID := utils.MyULID(ulid.MustParse(sid))
+		sessionID := utils.MustParseULID(sid)
 		ring := kring.GetRing(kring.RingCreds{Secret: ringSecret, SessionID: sessionID})
 
 		boxsecret, err := ring.GetBoxSecret()

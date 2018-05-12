@@ -120,19 +120,16 @@ const (
 	PermErrors
 )
 
-var Queues = map[QueueType]byte{
-	Messages:   'm',
-	Ready:      'r',
-	Sent:       's',
-	Failed:     'f',
-	PermErrors: 'p',
+var Queues = map[QueueType]string{
+	Messages:   "m",
+	Ready:      "r",
+	Sent:       "s",
+	Failed:     "f",
+	PermErrors: "p",
 }
 
-func getPartitionPrefix(qtype QueueType, dtype conf.DestinationType) (res []byte) {
-	res = make([]byte, 2)
-	res[0] = Queues[qtype]
-	res[1] = conf.RDestinations[dtype]
-	return res
+func getPartitionPrefix(qtype QueueType, dtype conf.DestinationType) string {
+	return Queues[qtype] + conf.RDestinations[dtype]
 }
 
 type Backend struct {
@@ -585,7 +582,7 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 	if err != nil {
 		return nil, eerrors.Wrap(err, "error creating the backend from the badger database")
 	}
-	store.syslogConfigsDB = db.NewPartition(kv, []byte("configs"))
+	store.syslogConfigsDB = db.NewPartition(kv, "configs")
 
 	for _, dest := range conf.Destinations {
 		store.OutputsChans[dest] = make(chan []*model.FullMessage)
@@ -860,7 +857,7 @@ func resetStuckInSentByDest(sentDB, readyDB db.Partition, dest conf.DestinationT
 		return 0, err
 	}
 	for _, uid := range uids {
-		err = readyDB.Set(uid, []byte("true"), txn)
+		err = readyDB.Set(uid, "true", txn)
 		if err != nil {
 			return 0, err
 		}
@@ -1254,7 +1251,7 @@ func doNACKHelper(badg *badger.DB, bend *Backend, nacks []queue.UidDest) (count 
 
 	var nack queue.UidDest
 	count = make(map[conf.DestinationType]int)
-	times := []byte(time.Now().Format(time.RFC3339))
+	times := time.Now().Format(time.RFC3339)
 
 	for _, nack = range nacks {
 		err = bend.GetPartition(Sent, nack.Dest).Delete(nack.Uid, txn)
@@ -1304,7 +1301,7 @@ func doPermErrorHelper(badg *badger.DB, bend *Backend, nacks []queue.UidDest) (c
 
 	var nack queue.UidDest
 	count = make(map[conf.DestinationType]int)
-	times := []byte(time.Now().Format(time.RFC3339))
+	times := time.Now().Format(time.RFC3339)
 
 	for _, nack = range nacks {
 		err = bend.GetPartition(Sent, nack.Dest).Delete(nack.Uid, txn)

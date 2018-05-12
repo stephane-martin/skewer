@@ -196,52 +196,52 @@ func (l KafkaVersion) Greater(r KafkaVersion) bool {
 	return false
 }
 
-func (c *FilterSubConfig) CalculateID() []byte {
-	return fnv.New128a().Sum(c.Export())
+func (c *FilterSubConfig) CalculateID() utils.MyULID {
+	return utils.MyULID(string(fnv.New128a().Sum([]byte(c.Export()))))
 }
 
 func (c *HTTPServerSourceConfig) SetConfID() {
-	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
+	c.ConfID = c.FilterSubConfig.CalculateID()
 }
 
 func (c *TCPSourceConfig) SetConfID() {
-	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
+	c.ConfID = c.FilterSubConfig.CalculateID()
 }
 
 func (c *UDPSourceConfig) SetConfID() {
-	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
+	c.ConfID = c.FilterSubConfig.CalculateID()
 }
 
 func (c *RELPSourceConfig) SetConfID() {
-	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
+	c.ConfID = c.FilterSubConfig.CalculateID()
 }
 
 func (c *DirectRELPSourceConfig) SetConfID() {
-	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
+	c.ConfID = c.FilterSubConfig.CalculateID()
 }
 
 func (c *GraylogSourceConfig) SetConfID() {
-	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
+	c.ConfID = c.FilterSubConfig.CalculateID()
 }
 
 func (c *JournaldConfig) SetConfID() {
-	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
+	c.ConfID = c.FilterSubConfig.CalculateID()
 }
 
 func (c *AccountingSourceConfig) SetConfID() {
-	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
+	c.ConfID = c.FilterSubConfig.CalculateID()
 }
 
 func (c *MacOSSourceConfig) SetConfID() {
-	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
+	c.ConfID = c.FilterSubConfig.CalculateID()
 }
 
 func (c *KafkaSourceConfig) SetConfID() {
-	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
+	c.ConfID = c.FilterSubConfig.CalculateID()
 }
 
 func (c *FilesystemSourceConfig) SetConfID() {
-	copy(c.ConfID[:], c.FilterSubConfig.CalculateID())
+	c.ConfID = c.FilterSubConfig.CalculateID()
 }
 
 func (c *HTTPServerSourceConfig) GetClientAuthType() tls.ClientAuthType {
@@ -401,34 +401,34 @@ func (c *ListenersConfig) GetListenAddrs() (addrs map[int]string, err error) {
 	return
 }
 
-func (c *TCPSourceConfig) Export() []byte {
+func (c *TCPSourceConfig) Export() string {
 	b, _ := json.Marshal(c)
-	return b
+	return string(b)
 }
 
-func (c *UDPSourceConfig) Export() []byte {
+func (c *UDPSourceConfig) Export() string {
 	b, _ := json.Marshal(c)
-	return b
+	return string(b)
 }
 
-func (c *GraylogSourceConfig) Export() []byte {
+func (c *GraylogSourceConfig) Export() string {
 	b, _ := json.Marshal(c)
-	return b
+	return string(b)
 }
 
-func (c *RELPSourceConfig) Export() []byte {
+func (c *RELPSourceConfig) Export() string {
 	b, _ := json.Marshal(c)
-	return b
+	return string(b)
 }
 
-func (c *DirectRELPSourceConfig) Export() []byte {
+func (c *DirectRELPSourceConfig) Export() string {
 	b, _ := json.Marshal(c)
-	return b
+	return string(b)
 }
 
-func (c *FilterSubConfig) Export() []byte {
+func (c *FilterSubConfig) Export() string {
 	b, _ := json.Marshal(c)
-	return b
+	return string(b)
 }
 
 func ImportSyslogConfig(data []byte) (*FilterSubConfig, error) {

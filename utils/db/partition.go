@@ -7,19 +7,19 @@ import (
 
 type partitionImpl struct {
 	parent *badger.DB
-	prefix []byte
+	prefix string
 }
 
 func (p *partitionImpl) Get(key utils.MyULID, dst []byte, txn *NTransaction) (ret []byte, err error) {
-	return PTransactionFrom(txn, p.prefix).Get(key[:], dst)
+	return PTransactionFrom(txn, p.prefix).Get(string(key), dst)
 }
 
-func (p *partitionImpl) Set(key utils.MyULID, value []byte, txn *NTransaction) (err error) {
-	err = PTransactionFrom(txn, p.prefix).Set(key[:], value)
+func (p *partitionImpl) Set(key utils.MyULID, value string, txn *NTransaction) (err error) {
+	err = PTransactionFrom(txn, p.prefix).Set(string(key), value)
 	if err != nil {
 		txn.Discard()
 	}
-	return
+	return err
 }
 
 var trueBytes = []byte("true")
@@ -30,7 +30,7 @@ func (p *partitionImpl) AddManyTrueMap(m map[utils.MyULID]string, txn *NTransact
 	}
 	var uid utils.MyULID
 	for uid = range m {
-		err = PTransactionFrom(txn, p.prefix).Set(uid[:], trueBytes)
+		err = PTransactionFrom(txn, p.prefix).Set(string(uid), "true")
 
 		if err != nil {
 			txn.Discard()
@@ -46,9 +46,8 @@ func (p *partitionImpl) AddManySame(uids []utils.MyULID, v string, txn *NTransac
 	}
 	ptxn := PTransactionFrom(txn, p.prefix)
 	var uid utils.MyULID
-	vb := []byte(v)
 	for _, uid = range uids {
-		err = ptxn.Set(uid[:], vb)
+		err = ptxn.Set(string(uid), v)
 
 		if err != nil {
 			txn.Discard()
@@ -64,21 +63,18 @@ func (p *partitionImpl) AddMany(m map[utils.MyULID]string, txn *NTransaction) (e
 	}
 	ptxn := PTransactionFrom(txn, p.prefix)
 
-	var key utils.MyULID
-	var v string
-	for key, v = range m {
-		err = ptxn.Set(key[:], []byte(v))
-
+	for key, v := range m {
+		err = ptxn.Set(string(key), v)
 		if err != nil {
 			txn.Discard()
-			return
+			return err
 		}
 	}
-	return
+	return nil
 }
 
 func (p *partitionImpl) Exists(key utils.MyULID, txn *NTransaction) (bool, error) {
-	_, err := PTransactionFrom(txn, p.prefix).Get(key[:], nil)
+	_, err := PTransactionFrom(txn, p.prefix).Get(string(key), nil)
 	if err == nil {
 		return true, nil
 	} else if err == badger.ErrKeyNotFound {
@@ -89,7 +85,7 @@ func (p *partitionImpl) Exists(key utils.MyULID, txn *NTransaction) (bool, error
 }
 
 func (p *partitionImpl) Delete(key utils.MyULID, txn *NTransaction) (err error) {
-	err = PTransactionFrom(txn, p.prefix).Delete(key[:])
+	err = PTransactionFrom(txn, p.prefix).Delete(string(key))
 	if err != nil {
 		txn.Discard()
 	}
@@ -105,7 +101,7 @@ func (p *partitionImpl) DeleteMany(keys []utils.MyULID, txn *NTransaction) (err 
 	ptxn := PTransactionFrom(txn, p.prefix)
 
 	for _, key = range keys {
-		err = ptxn.Delete(key[:])
+		err = ptxn.Delete(string(key))
 		if err != nil {
 			txn.Discard()
 			return err
@@ -148,7 +144,7 @@ func (p *partitionImpl) KeyIterator(prefetchSize uint32, txn *NTransaction) *ULI
 		PrefetchValues: false,
 		PrefetchSize:   int(prefetch),
 	}
-	return &ULIDIterator{iter: txn.NewIterator(opt), secret: nil, prefix: p.prefix}
+	return &ULIDIterator{iter: txn.NewIterator(opt), secret: nil, prefix: []byte(p.prefix)}
 }
 
 func (p *partitionImpl) KeyValueIterator(prefetchSize uint32, txn *NTransaction) *ULIDIterator {
@@ -162,9 +158,9 @@ func (p *partitionImpl) KeyValueIterator(prefetchSize uint32, txn *NTransaction)
 		PrefetchValues: true,
 		PrefetchSize:   prefetch,
 	}
-	return &ULIDIterator{iter: txn.NewIterator(opt), secret: nil, prefix: p.prefix}
+	return &ULIDIterator{iter: txn.NewIterator(opt), secret: nil, prefix: []byte(p.prefix)}
 }
 
-func NewPartition(parent *badger.DB, prefix []byte) Partition {
+func NewPartition(parent *badger.DB, prefix string) Partition {
 	return &partitionImpl{parent: parent, prefix: prefix}
 }
