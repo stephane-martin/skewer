@@ -46,7 +46,7 @@ func (txn *NTransaction) Get(key, dst []byte) ([]byte, error) {
 }
 
 func (txn *NTransaction) Set(key, val []byte) error {
-	return txn.txn.Set(key, val)
+	return txn.txn.SetWithDiscard(key, val, 0)
 }
 
 func (txn *NTransaction) NewIterator(opt badger.IteratorOptions) *badger.Iterator {
