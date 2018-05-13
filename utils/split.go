@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/awnumar/memguard"
@@ -17,6 +18,16 @@ import (
 
 var NOW []byte = []byte("now")
 var SP []byte = []byte(" ")
+
+var spool = &sync.Pool{
+	New: func() interface{} {
+		return make([]byte, 4096)
+	},
+}
+
+func getBuf() []byte {
+	return spool.Get().([]byte)[:0]
+}
 
 type SigWriter struct {
 	dest io.Writer
@@ -32,12 +43,12 @@ func (s *SigWriter) Write(p []byte) (n int, err error) {
 		return 0, nil
 	}
 	signature := ed25519.Sign(s.key.Buffer(), p)
-	err = ChainWrites(
-		s.dest,
-		[]byte(fmt.Sprintf("%010d %010d ", len(p), len(signature))),
-		p,
-		signature,
-	)
+	var b strings.Builder
+	b.Grow(22 + len(p) + len(signature))
+	b.WriteString(fmt.Sprintf("%010d %010d ", len(p), len(signature)))
+	b.Write(p)
+	b.Write(signature)
+	_, err = io.WriteString(s.dest, b.String())
 	if err == nil {
 		return len(p), nil
 	}
@@ -45,11 +56,12 @@ func (s *SigWriter) Write(p []byte) (n int, err error) {
 }
 
 func (s *SigWriter) WriteWithHeader(header []byte, message []byte) (err error) {
-	fullmessage := make([]byte, 0, len(header)+len(message)+1)
-	fullmessage = append(fullmessage, header...)
-	fullmessage = append(fullmessage, SP...)
-	fullmessage = append(fullmessage, message...)
-	_, err = s.Write(fullmessage)
+	var b strings.Builder
+	b.Grow(len(header) + len(message) + 1)
+	b.Write(header)
+	b.Write(SP)
+	b.Write(message)
+	_, err = io.WriteString(s, b.String())
 	return err
 }
 
@@ -104,18 +116,12 @@ func MakeSignSplit(signpubkey *memguard.LockedBuffer) (signSplit bufio.SplitFunc
 type EncryptWriter struct {
 	dest io.Writer
 	key  *memguard.LockedBuffer
-	pool *sync.Pool
 }
 
 func NewEncryptWriter(dest io.Writer, encryptkey *memguard.LockedBuffer) *EncryptWriter {
 	return &EncryptWriter{
 		dest: dest,
 		key:  encryptkey,
-		pool: &sync.Pool{
-			New: func() interface{} {
-				return make([]byte, 4096)
-			},
-		},
 	}
 }
 
@@ -134,7 +140,8 @@ func (s *EncryptWriter) WriteMsgUnix(b []byte, oob []byte, addr *net.UnixAddr) (
 			}
 		}
 		buf := bytes.NewBuffer(nil)
-		buf.Write([]byte(fmt.Sprintf("%010d ", len(enc))))
+		buf.Grow(11 + len(enc))
+		io.WriteString(buf, fmt.Sprintf("%010d ", len(enc)))
 		buf.Write(enc)
 		return conn.WriteMsgUnix(buf.Bytes(), oob, addr)
 	}
@@ -145,41 +152,40 @@ func (s *EncryptWriter) Write(p []byte) (n int, err error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
-	var buf []byte
-	var bufpooled []byte
+	buf := getBuf()
 	if s.key == nil {
 		encLength := len(p)
-		buf = make([]byte, 0, 11+encLength)
 		buf = append(buf, fmt.Sprintf("%010d ", encLength)...)
 		buf = append(buf, p...)
 	} else {
 		encLength := len(p) + 24 + secretbox.Overhead
-		if encLength <= (4096 - 11) {
-			bufpooled = s.pool.Get().([]byte)
-			defer s.pool.Put(bufpooled)
-			buf = bufpooled[:11+encLength]
-		} else {
+		if cap(buf) < 11+encLength {
 			buf = make([]byte, 11+encLength)
 		}
+		buf = buf[:11+encLength]
 		_, err = sbox.EncryptTo(p, s.key, buf[:11])
 		if err != nil {
 			return 0, err
 		}
 		copy(buf[:11], fmt.Sprintf("%010d ", encLength))
 	}
-	_, err = s.dest.Write(buf)
-	if err == nil {
-		return len(p), nil
+	// ensure we make a *copy* of buf before we pass it to s.dest
+	// then in any cases we can release buf afterwards
+	_, err = io.WriteString(s.dest, string(buf))
+	spool.Put(buf)
+	if err != nil {
+		return 0, err
 	}
-	return 0, err
+	return len(p), nil
 }
 
 func (s *EncryptWriter) WriteWithHeader(header []byte, message []byte) (err error) {
-	fullmessage := make([]byte, 0, len(header)+len(message)+1)
-	fullmessage = append(fullmessage, header...)
-	fullmessage = append(fullmessage, SP...)
-	fullmessage = append(fullmessage, message...)
-	_, err = s.Write(fullmessage)
+	var b strings.Builder
+	b.Grow(len(header) + len(message) + 1)
+	b.Write(header)
+	b.Write(SP)
+	b.Write(message)
+	_, err = io.WriteString(s, b.String())
 	return err
 }
 
@@ -195,7 +201,7 @@ func MakeDecryptSplit(secret *memguard.LockedBuffer) bufio.SplitFunc {
 			return adv, tok, err
 		}
 		if sbox.LenDecrypted(tok) <= 4096 {
-			dec, err = sbox.DecrypTo(tok, secret, buf[:0])
+			dec, err = sbox.DecryptTo(tok, secret, buf[:0])
 		} else {
 			dec, err = sbox.Decrypt(tok, secret)
 		}

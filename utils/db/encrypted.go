@@ -136,15 +136,18 @@ func (encDB *EncryptedDB) AddManySame(uids []utils.MyULID, v string, txn *NTrans
 
 func (encDB *EncryptedDB) AddMany(m map[utils.MyULID]string, txn *NTransaction) error {
 	tmpMap := getTmpMap()
+	buf := getTmpBuf()
 
+	var err error
 	for uid, val := range m {
-		encVal, err := sbox.Encrypt([]byte(val), encDB.secret)
+		buf, err = sbox.EncryptTo([]byte(val), encDB.secret, buf[:0])
 		if err != nil {
 			return err
 		}
-		tmpMap[uid] = string(encVal)
+		tmpMap[uid] = string(buf)
 	}
-	err := encDB.p.AddMany(tmpMap, txn)
+	err = encDB.p.AddMany(tmpMap, txn)
+	bufpool.Put(buf)
 	mappool.Put(tmpMap)
 	return err
 }
@@ -154,7 +157,7 @@ func (encDB *EncryptedDB) Get(key utils.MyULID, dst []byte, txn *NTransaction) (
 	if err != nil {
 		return dst, err
 	}
-	ret, err := sbox.DecrypTo(encVal, encDB.secret, dst[:0])
+	ret, err := sbox.DecryptTo(encVal, encDB.secret, dst[:0])
 	bufpool.Put(encVal)
 	return ret, err
 }

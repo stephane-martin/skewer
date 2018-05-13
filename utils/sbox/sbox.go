@@ -50,10 +50,10 @@ func Encrypt(message []byte, secret *memguard.LockedBuffer) (encrypted []byte, e
 }
 
 func Decrypt(encrypted []byte, secret *memguard.LockedBuffer) (decrypted []byte, err error) {
-	return DecrypTo(encrypted, secret, nil)
+	return DecryptTo(encrypted, secret, nil)
 }
 
-func DecrypTo(encrypted []byte, secret *memguard.LockedBuffer, out []byte) (decrypted []byte, err error) {
+func DecryptTo(encrypted []byte, secret *memguard.LockedBuffer, out []byte) (decrypted []byte, err error) {
 	if secret == nil {
 		return nil, fmt.Errorf("Decrypt: nil secret")
 	}
