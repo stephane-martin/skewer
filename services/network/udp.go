@@ -62,9 +62,6 @@ func (s *UdpServiceImpl) Type() base.Types {
 
 //func (s *UdpServiceImpl) SetConf(sc []conf.UDPSourceConfig, pc []conf.ParserConfig, queueSize uint64) {
 func (s *UdpServiceImpl) SetConf(c conf.BaseConfig) {
-	s.BaseService.Pool = &sync.Pool{New: func() interface{} {
-		return &model.RawUdpMessage{}
-	}}
 	s.BaseService.SetConf(c.Parsers, c.Main.InputQueueSize)
 	s.UdpConfigs = c.UDPSource
 	s.rawMessagesQueue = udp.NewRing(c.Main.InputQueueSize)
@@ -85,7 +82,7 @@ func (s *UdpServiceImpl) Parse() error {
 			base.ParsingErrorCounter.WithLabelValues("udp", raw.Client, raw.Decoder.Format).Inc()
 			logg(s.Logger, &raw.RawMessage).Warn(err.Error())
 		}
-		s.Pool.Put(raw)
+		model.RawUDPFree(raw)
 
 		if err != nil && eerrors.IsFatal(err) {
 			// stop processing when fatal error happens
@@ -110,8 +107,7 @@ func (s *UdpServiceImpl) ParseOne(raw *model.RawUdpMessage, gen *utils.Generator
 	}
 	defer parser.Release()
 
-	raws := raw.Message[:raw.Size]
-	syslogMsgs, err := parser.Parse(raws)
+	syslogMsgs, err := parser.Parse(raw.GetMessage())
 	if err != nil {
 		return decoders.DecodingError(eerrors.Wrap(err, "Parsing error"))
 	}
@@ -310,21 +306,15 @@ func (s *UdpServiceImpl) handleConnection(conn net.PacketConn, config conf.UDPSo
 	}
 
 	// Syslog UDP server
-	var remote net.Addr
-	var rawmsg *model.RawUdpMessage
-
 	for {
-		rawmsg = s.Pool.Get().(*model.RawUdpMessage)
-		rawmsg.Size, remote, err = conn.ReadFrom(rawmsg.Message[:])
+		rawmsg, remote, err := model.RawUDPFromConn(conn)
 		if err != nil {
-			s.Pool.Put(rawmsg)
 			if eerrors.HasFileClosed(err) {
 				return io.EOF
 			}
 			return eerrors.Wrap(err, "Error reading UDP socket")
 		}
 		if rawmsg.Size == 0 {
-			s.Pool.Put(rawmsg)
 			continue
 		}
 		rawmsg.LocalPort = localPort
@@ -337,7 +327,7 @@ func (s *UdpServiceImpl) handleConnection(conn net.PacketConn, config conf.UDPSo
 		} else {
 			rawmsg.Client = strings.Split(remote.String(), ":")[0]
 		}
-		err := s.rawMessagesQueue.Put(rawmsg)
+		err = s.rawMessagesQueue.Put(rawmsg)
 		if err != nil {
 			return eerrors.WithTypes(eerrors.Wrap(err, "Failed to enqueue new raw UDP message"))
 		}

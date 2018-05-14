@@ -363,9 +363,6 @@ func (s *DirectRelpServiceImpl) SetConf(sc []conf.DirectRELPSourceConfig, pc []c
 	}
 	s.StreamingService.SetConf(tcpConfigs, pc, queueSize, 132000)
 	s.kafkaConf = kc
-	s.BaseService.Pool = &sync.Pool{New: func() interface{} {
-		return &model.RawTcpMessage{Message: make([]byte, 132000)}
-	}}
 	s.parserEnv = decoders.NewParsersEnv(s.ParserConfigs, s.Logger)
 }
 
@@ -424,20 +421,13 @@ func (s *DirectRelpServiceImpl) parseOne(raw *model.RawTcpMessage) error {
 func (s *DirectRelpServiceImpl) parse() {
 	defer s.parsewg.Done()
 
-	var raw *model.RawTcpMessage
-	var err error
-
 	for {
-		raw, err = s.rawQ.Get()
-		if err != nil {
-			return
-		}
-		if raw == nil {
-			s.Logger.Error("rawMessagesQueue returns nil, should not happen!")
+		raw, err := s.rawQ.Get()
+		if raw == nil || err != nil {
 			return
 		}
 		err = s.parseOne(raw)
-		s.Pool.Put(raw)
+		model.RawTCPFree(raw)
 		if err != nil {
 			return
 		}
@@ -668,26 +658,18 @@ func (h DirectRelpHandler) HandleConnection(conn net.Conn, c conf.TCPSourceConfi
 	s := h.Server
 	s.AddConnection(conn)
 	connID := s.forwarder.AddConn(s.QueueSize)
-	lport, lports, client, path := props(conn)
-	l := s.Logger.New(
-		"ConnID", connID,
-		"protocol", "directrelp",
-		"client", client,
-		"local_port", lport,
-		"unix_socket_path", path,
-		"format", config.Format,
-	)
-
+	props := eprops(conn)
+	l := makeLogger(s.Logger, props, "directrelp")
 	l.Info("New client")
 	defer l.Debug("Client gone away")
-	base.ClientConnectionCounter.WithLabelValues("directrelp", client, lports, path).Inc()
+	clientCounter(props, "directrelp")
 
 	var wg sync.WaitGroup
 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		err := s.handleResponses(conn, connID, client, l)
+		err := s.handleResponses(conn, connID, props.Client, l)
 		if err != nil && !eerrors.HasFileClosed(err) {
 			s.Logger.Warn("Unexpected error in Direct RELP handleResponses", "error", err, "connID", connID.String())
 		}
@@ -700,7 +682,7 @@ func (h DirectRelpHandler) HandleConnection(conn net.Conn, c conf.TCPSourceConfi
 			s.RemoveConnection(conn)
 			wg.Done()
 		}()
-		err := scan(l, s.forwarder, s.rawQ, conn, config.Timeout, config.ConfID, connID, s.MaxMessageSize, lport, config.DecoderBaseConfig, lports, path, client, s.Pool)
+		err := scan(l, s.forwarder, s.rawQ, conn, config.Timeout, config.ConfID, connID, s.MaxMessageSize, config.DecoderBaseConfig, props)
 		if err != nil && !eerrors.HasFileClosed(err) {
 			rerr = eerrors.Wrapf(err, "Error scanning Direct RELP stream: %s", connID.String())
 		}

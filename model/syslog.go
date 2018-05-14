@@ -1,7 +1,9 @@
 package model
 
 import (
+	"net"
 	"net/http"
+	"sync"
 
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/utils"
@@ -67,4 +69,50 @@ type RawUdpMessage struct {
 type DeferedRequest struct {
 	UID     utils.MyULID
 	Request *http.Request
+}
+
+var rawTCPPool = &sync.Pool{
+	New: func() interface{} {
+		return &RawTcpMessage{
+			Message: make([]byte, 0, 4096),
+		}
+	},
+}
+
+var rawUDPPool = &sync.Pool{
+	New: func() interface{} {
+		return new(RawUdpMessage)
+	},
+}
+
+func RawTCPFactory(message []byte) (raw *RawTcpMessage) {
+	raw = rawTCPPool.Get().(*RawTcpMessage)
+	if cap(raw.Message) < len(message) {
+		raw.Message = make([]byte, 0, len(message))
+	}
+	raw.Message = raw.Message[:len(message)]
+	copy(raw.Message, message)
+	return raw
+}
+
+func RawTCPFree(raw *RawTcpMessage) {
+	rawTCPPool.Put(raw)
+}
+
+func RawUDPFactory() (raw *RawUdpMessage) {
+	return rawUDPPool.Get().(*RawUdpMessage)
+}
+
+func RawUDPFree(raw *RawUdpMessage) {
+	rawUDPPool.Put(raw)
+}
+
+func (raw *RawUdpMessage) GetMessage() []byte {
+	return raw.Message[:raw.Size]
+}
+
+func RawUDPFromConn(conn net.PacketConn) (raw *RawUdpMessage, remote net.Addr, err error) {
+	raw = RawUDPFactory()
+	raw.Size, remote, err = conn.ReadFrom(raw.Message[:])
+	return raw, remote, err
 }

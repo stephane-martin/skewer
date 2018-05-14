@@ -21,7 +21,6 @@ type BaseService struct {
 
 	connMutex   sync.Mutex
 	statusMutex sync.Mutex
-	Pool        *sync.Pool
 }
 
 func (s *BaseService) Init() {

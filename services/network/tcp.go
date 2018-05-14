@@ -7,6 +7,7 @@ import (
 	"net"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -154,9 +155,6 @@ func (s *TcpServiceImpl) Stop() {
 
 // SetConf configures the TCP service
 func (s *TcpServiceImpl) SetConf(c conf.BaseConfig) {
-	s.BaseService.Pool = &sync.Pool{New: func() interface{} {
-		return &model.RawTcpMessage{Message: make([]byte, c.Main.MaxInputMessageSize)}
-	}}
 	s.StreamingService.SetConf(c.TCPSource, c.Parsers, c.Main.InputQueueSize, c.Main.MaxInputMessageSize)
 	s.rawMessagesQueue = tcp.NewRing(c.Main.InputQueueSize)
 	s.parserEnv = decoders.NewParsersEnv(s.ParserConfigs, s.Logger)
@@ -186,15 +184,12 @@ func (s *TcpServiceImpl) parseOne(raw *model.RawTcpMessage, gen *utils.Generator
 		return decoders.DecodingError(eerrors.Wrap(err, "Parsing error"))
 	}
 
-	var syslogMsg *model.SyslogMessage
-	var full *model.FullMessage
-
-	for _, syslogMsg = range syslogMsgs {
+	for _, syslogMsg := range syslogMsgs {
 		if syslogMsg == nil {
 			continue
 		}
 
-		full = model.FullFactoryFrom(syslogMsg)
+		full := model.FullFactoryFrom(syslogMsg)
 		full.Uid = gen.Uid()
 		full.ConfId = raw.ConfID
 		full.SourceType = "tcp"
@@ -217,13 +212,9 @@ func (s *TcpServiceImpl) parseOne(raw *model.RawTcpMessage, gen *utils.Generator
 // parse fetch messages from the raw queue, parse them, and push them to be sent.
 func (s *TcpServiceImpl) parse() error {
 	gen := utils.NewGenerator()
-	var (
-		raw *model.RawTcpMessage
-		err error
-	)
 
 	for {
-		raw, err = s.rawMessagesQueue.Get()
+		raw, err := s.rawMessagesQueue.Get()
 		if raw == nil || err != nil {
 			return nil
 		}
@@ -232,12 +223,36 @@ func (s *TcpServiceImpl) parse() error {
 			base.ParsingErrorCounter.WithLabelValues("tcp", raw.Client, raw.Decoder.Format).Inc()
 			logg(s.Logger, &raw.RawMessage).Warn(err.Error())
 		}
-		s.Pool.Put(raw)
+		model.RawTCPFree(raw)
 		if err != nil && eerrors.IsFatal(err) {
 			// stop processing when fatal error happens
 			return err
 		}
 	}
+}
+
+func makeRawTCPFactory(props tcpProps, confID utils.MyULID, decoder conf.DecoderBaseConfig) func([]byte) *model.RawTcpMessage {
+	return func(data []byte) *model.RawTcpMessage {
+		raw := model.RawTCPFactory(data)
+		raw.Client = props.Client
+		raw.LocalPort = props.LocalPort
+		raw.UnixSocketPath = props.Path
+		raw.ConfID = confID
+		raw.Decoder = decoder
+		return raw
+	}
+}
+
+func makeLogger(logger log15.Logger, props tcpProps, protocol string) log15.Logger {
+	return logger.New("protocol", protocol, "client", props.Client, "local_port", props.LocalPortStr, "unix_socket_path", props.Path)
+}
+
+func clientCounter(props tcpProps, protocol string) {
+	base.ClientConnectionCounter.WithLabelValues(protocol, props.Client, props.LocalPortStr, props.Path).Inc()
+}
+
+func incomingCounter(props tcpProps, protocol string) {
+	base.IncomingMsgsCounter.WithLabelValues(protocol, props.Client, props.LocalPortStr, props.Path).Inc()
 }
 
 type tcpHandler struct {
@@ -247,15 +262,20 @@ type tcpHandler struct {
 func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TCPSourceConfig) (err error) {
 	s := h.Server
 	s.AddConnection(conn)
-	defer s.RemoveConnection(conn)
+	props := eprops(conn)
+	logger := makeLogger(s.Logger, props, "tcp")
+	factory := makeRawTCPFactory(props, config.ConfID, config.DecoderBaseConfig)
+	clientCounter(props, "tcp")
 
-	lport, lports, client, path := props(conn)
-
-	logger := s.Logger.New("protocol", "tcp", "client", client, "local_port", lports, "unix_socket_path", path, "format", config.Format)
 	logger.Info("New client")
-	defer logger.Debug("Client gone away")
 
-	base.ClientConnectionCounter.WithLabelValues("tcp", client, lports, path).Inc()
+	defer func() {
+		if e := eerrors.Err(recover()); e != nil {
+			err = eerrors.Wrap(e, "Scanner panicked in TCP service")
+		}
+		logger.Debug("Closed connected to TCP Client")
+		s.RemoveConnection(conn)
+	}()
 
 	timeout := config.Timeout
 	if timeout > 0 {
@@ -268,41 +288,23 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TCPSourceConfig)
 	} else {
 		scanner.Split(TcpSplit)
 	}
-	var (
-		rawmsg *model.RawTcpMessage
-		buf    []byte
-	)
-
-	defer func() {
-		if e := eerrors.Err(recover()); e != nil {
-			err = eerrors.Wrap(e, "Scanner panicked in TCP service")
-		}
-	}()
 
 	for scanner.Scan() {
 		if timeout > 0 {
 			_ = conn.SetReadDeadline(time.Now().Add(timeout))
 		}
-		buf = scanner.Bytes()
+		buf := scanner.Bytes()
 		if len(buf) == 0 {
 			continue
 		}
 		if s.MaxMessageSize > 0 && len(buf) > s.MaxMessageSize {
 			return eerrors.Fatal(eerrors.Errorf("Raw TCP message too large: %d > %d", len(buf), s.MaxMessageSize))
 		}
-		rawmsg = s.Pool.Get().(*model.RawTcpMessage)
-		rawmsg.Client = client
-		rawmsg.LocalPort = lport
-		rawmsg.UnixSocketPath = path
-		rawmsg.ConfID = config.ConfID
-		rawmsg.Decoder = config.DecoderBaseConfig
-		rawmsg.Message = rawmsg.Message[:len(buf)]
-		copy(rawmsg.Message, buf)
-		err = s.rawMessagesQueue.Put(rawmsg)
+		err = s.rawMessagesQueue.Put(factory(buf))
 		if err != nil {
 			return eerrors.Fatal(eerrors.Wrap(err, "Failed to enqueue new raw TCP message"))
 		}
-		base.IncomingMsgsCounter.WithLabelValues("tcp", client, lports, path).Inc()
+		incomingCounter(props, "tcp")
 	}
 	err = scanner.Err()
 	if eerrors.HasFileClosed(err) {
@@ -372,4 +374,30 @@ func TcpSplit(data []byte, atEOF bool) (advance int, token []byte, eoferr error)
 	token = bytes.Trim(trimmedData[sp+1:sp+1+datalen], " \r\n")
 	return advance, token, nil
 
+}
+
+type tcpProps struct {
+	LocalPort    int32
+	LocalPortStr string
+	Client       string
+	Path         string
+}
+
+func eprops(conn net.Conn) (props tcpProps) {
+	remote := conn.RemoteAddr()
+	if remote == nil {
+		props.Client = "localhost"
+		props.LocalPort = 0
+		props.Path = conn.LocalAddr().String()
+	} else {
+		props.Path = ""
+		props.Client = strings.Split(remote.String(), ":")[0]
+		local := conn.LocalAddr()
+		if local != nil {
+			s := strings.Split(local.String(), ":")
+			props.LocalPort, _ = utils.Atoi32(s[len(s)-1])
+		}
+	}
+	props.LocalPortStr = strconv.FormatInt(int64(props.LocalPort), 10)
+	return props
 }
