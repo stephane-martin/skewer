@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net"
 	"os"
 	"os/signal"
@@ -630,7 +629,6 @@ func (ch *serveChild) StartUdp() error {
 
 	if err != nil {
 		return eerrors.Wrap(err, "Error creating UDP controller")
-		return fmt.Errorf("error creating UDP plugin: %s", err)
 	}
 	ctl.SetConf(*ch.conf)
 	udpinfos, err := ctl.Start()
@@ -658,7 +656,6 @@ func (ch *serveChild) StartGraylog() error {
 
 	if err != nil {
 		return eerrors.Wrap(err, "Error creating Graylog controller")
-		return fmt.Errorf("error creating Graylog plugin: %s", err)
 	}
 	ctl.SetConf(*ch.conf)
 	infos, err := ctl.Start()

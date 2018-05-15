@@ -86,10 +86,10 @@ func (s *KafkaServiceImpl) Start() (infos []model.ListenerInfo, err error) {
 	var workersWG sync.WaitGroup
 	for _, config := range s.configs {
 		workersWG.Add(1)
-		go func() {
+		go func(c conf.KafkaSourceConfig) {
 			defer workersWG.Done()
-			s.startWorker(s.stopCtx, config)
-		}()
+			s.startWorker(s.stopCtx, c)
+		}(config)
 	}
 
 	// when all workers have returned, we know that we won't receive any more raw messages

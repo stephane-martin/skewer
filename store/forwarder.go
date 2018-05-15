@@ -63,7 +63,7 @@ func (fwder *Forwarder) CreateDestination(ctx context.Context) (err error) {
 
 func (fwder *Forwarder) Forward(ctx context.Context) (err error) {
 	if fwder.dest == nil {
-		return fmt.Errorf("Destination not created for forwarder", "dest", fwder.desttype)
+		return eerrors.New("Destination not created for forwarder")
 	}
 
 	defer func() {

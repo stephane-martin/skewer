@@ -275,7 +275,6 @@ func (s *MessageStore) tickResetFailures(ctx context.Context) (err error) {
 			return nil
 		}
 	}
-	return nil
 }
 
 func (s *MessageStore) retrieveAndForward(ctx context.Context) (err error) {
@@ -427,7 +426,6 @@ RetrieveLoop:
 		waits[currentDest].Reset()
 		bucket[currentDest].Store(messages)
 	}
-	return nil
 }
 
 func (s *MessageStore) init(ctx context.Context) {

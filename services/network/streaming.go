@@ -179,17 +179,17 @@ func (s *StreamingService) Listen() (err error) {
 
 	for _, lc := range s.TcpListeners {
 		wg.Add(1)
-		go func() {
+		go func(co TCPListenerConf) {
 			defer wg.Done()
-			c.Append(s.AcceptTCP(lc))
-		}()
+			c.Append(s.AcceptTCP(co))
+		}(lc)
 	}
 	for _, lc := range s.UnixListeners {
 		wg.Add(1)
-		go func() {
+		go func(co UnixListenerConf) {
 			defer wg.Done()
-			c.Append(s.AcceptUnix(lc))
-		}()
+			c.Append(s.AcceptUnix(co))
+		}(lc)
 	}
 	wg.Wait()
 	errs := c.Sum()

@@ -113,7 +113,6 @@ type HTTPServiceImpl struct {
 	wg               sync.WaitGroup
 	stopCtx          context.Context
 	stop             context.CancelFunc
-	rawpool          *sync.Pool
 	fatalErrorChan   chan struct{}
 	fatalOnce        *sync.Once
 	confined         bool
@@ -161,9 +160,6 @@ func (s *HTTPServiceImpl) fail(connID utils.MyULID) {
 }
 
 func (s *HTTPServiceImpl) SetConf(c conf.BaseConfig) {
-	s.rawpool = &sync.Pool{New: func() interface{} {
-		return &model.RawTcpMessage{Message: make([]byte, c.Main.MaxInputMessageSize)}
-	}}
 	s.maxMessageSize = c.Main.MaxInputMessageSize
 	s.configs = c.HTTPServerSource
 	s.parserConfigs = c.Parsers
@@ -183,9 +179,9 @@ func (s *HTTPServiceImpl) Start() (infos []model.ListenerInfo, err error) {
 	s.fatalOnce = &sync.Once{}
 	for _, config := range s.configs {
 		s.wg.Add(1)
-		go func() {
+		go func(c conf.HTTPServerSourceConfig) {
 			defer s.wg.Done()
-			err := s.startOne(config)
+			err := s.startOne(c)
 			if err != nil {
 				if isSetupError(err) {
 					s.logger.Error("Error setting up the HTTP service", "error", err)
@@ -194,7 +190,7 @@ func (s *HTTPServiceImpl) Start() (infos []model.ListenerInfo, err error) {
 				}
 				s.dofatal()
 			}
-		}()
+		}(config)
 	}
 	cpus := runtime.NumCPU()
 	for i := 0; i < cpus; i++ {
@@ -351,10 +347,7 @@ func (s *HTTPServiceImpl) handler(config conf.HTTPServerSourceConfig) func(http.
 			tracker := s.addTracker(1, func() { w.WriteHeader(http.StatusCreated) }, func() { w.WriteHeader(http.StatusBadRequest) })
 			defer s.removeTracker(tracker.connID)
 
-			raw := s.rawpool.Get().(*model.RawTcpMessage)
-			raw.Message = raw.Message[:len(tmp)]
-			// we *copy* tmp so that we can safely release bodyBuf afterwards
-			copy(raw.Message, tmp)
+			raw := model.RawTCPFactory(tmp)
 			releaseBody(&bodyBuf)
 
 			raw.Decoder = config.DecoderBaseConfig
@@ -409,9 +402,7 @@ func (s *HTTPServiceImpl) handler(config conf.HTTPServerSourceConfig) func(http.
 		defer s.removeTracker(tracker.connID)
 
 		for _, byteMsg = range byteMsgs {
-			raw := s.rawpool.Get().(*model.RawTcpMessage)
-			raw.Message = raw.Message[:len(byteMsg)]
-			copy(raw.Message, byteMsg)
+			raw := model.RawTCPFactory(byteMsg)
 			raw.Decoder = config.DecoderBaseConfig
 			raw.Client = r.RemoteAddr
 			raw.ConnID = tracker.connID
@@ -445,7 +436,7 @@ func (s *HTTPServiceImpl) parse() error {
 		} else {
 			s.done(raw.ConnID)
 		}
-		s.rawpool.Put(raw)
+		model.RawTCPFree(raw)
 		if err != nil && eerrors.IsFatal(err) {
 			// stop processing when fatal error happens
 			return err
