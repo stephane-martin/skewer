@@ -3,6 +3,7 @@
 package journald
 
 import (
+	"context"
 	"os"
 	"strconv"
 	"strings"
@@ -18,14 +19,11 @@ import (
 	"github.com/stephane-martin/skewer/utils/eerrors"
 )
 
-// TODO: provide a way to link statically to libsystemd
-
 var Supported = true
 
 type Reader struct {
 	journal        *sdjournal.Journal
-	stopchan       chan struct{}
-	shutdownchan   chan struct{}
+	stop           context.CancelFunc
 	wgroup         sync.WaitGroup
 	logger         log15.Logger
 	stasher        base.Stasher
@@ -33,7 +31,7 @@ type Reader struct {
 	fatalOnce      sync.Once
 }
 
-type Converter func(map[string]string) *model.FullMessage
+type Converter func(*sdjournal.JournalEntry) *model.FullMessage
 
 func EntryToSyslog(entry map[string]string) (m *model.SyslogMessage) {
 	m = model.CleanFactory()
@@ -93,14 +91,13 @@ func EntryToSyslog(entry map[string]string) (m *model.SyslogMessage) {
 func makeMapConverter(coding string, confID utils.MyULID) Converter {
 	decoder := utils.SelectDecoder(coding)
 	generator := utils.NewGenerator()
-	return func(m map[string]string) *model.FullMessage {
-		dest := make(map[string]string)
-		var k, k2, v, v2 string
-		var err error
-		for k, v = range m {
-			k2, err = decoder.String(k)
+
+	return func(m *sdjournal.JournalEntry) *model.FullMessage {
+		dest := make(map[string]string, len(m.Fields))
+		for k, v := range m.Fields {
+			k2, err := decoder.String(k)
 			if err == nil {
-				v2, err = decoder.String(v)
+				v2, err := decoder.String(v)
 				if err == nil {
 					dest[k2] = v2
 				}
@@ -126,7 +123,6 @@ func NewReader(stasher base.Stasher, logger log15.Logger) (*Reader, error) {
 	r := &Reader{
 		logger:         logger,
 		stasher:        stasher,
-		shutdownchan:   make(chan struct{}),
 		fatalErrorChan: make(chan struct{}),
 	}
 	r.journal, err = sdjournal.NewJournal()
@@ -146,105 +142,74 @@ func NewReader(stasher base.Stasher, logger log15.Logger) (*Reader, error) {
 	return r, nil
 }
 
-func (r *Reader) wait() chan struct{} {
-	events := make(chan struct{})
-	r.wgroup.Add(1)
+func wait(ctx context.Context, logger log15.Logger, j *sdjournal.Journal) {
+	lctx, lcancel := context.WithCancel(ctx)
 
 	go func() {
-		defer r.wgroup.Done()
-		var ev int
-
 		for {
-			select {
-			case <-r.stopchan:
-				close(events)
+			// Wait() is a blocking call
+			ev := j.Wait(time.Second)
+			if ev == sdjournal.SD_JOURNAL_APPEND || ev == sdjournal.SD_JOURNAL_INVALIDATE {
+				lcancel()
 				return
-			case <-r.shutdownchan:
-				close(events)
+			} else if ev == -int(syscall.EBADF) {
+				logger.Debug("journal.Wait returned EBADF") // r.journal was closed
+				lcancel()
 				return
-			default:
-				ev = r.journal.Wait(time.Second)
-				if ev == sdjournal.SD_JOURNAL_APPEND || ev == sdjournal.SD_JOURNAL_INVALIDATE {
-					close(events)
-					return
-				} else if ev == -int(syscall.EBADF) {
-					r.logger.Debug("journal.Wait returned EBADF") // r.journal was closed
-					close(events)
-					return
-				} else if ev != 0 {
-					// r.logger.Debug("journal.Wait event", "code", ev)
-				}
+			} else if ev != 0 {
+				// r.logger.Debug("journal.Wait event", "code", ev)
 			}
 		}
 	}()
-	return events
+	<-lctx.Done()
 }
 
 func (r *Reader) Start(confID utils.MyULID) {
-	r.stopchan = make(chan struct{})
+	var ctx context.Context
+	ctx, r.stop = context.WithCancel(context.Background())
 	hostname, err := os.Hostname()
 	if err != nil {
 		hostname = "unknown"
 	}
+	converter := makeMapConverter("utf8", confID)
 
 	r.wgroup.Add(1)
 	go func() {
-		defer func() {
-			r.wgroup.Done()
-		}()
+		defer r.wgroup.Done()
 
-		var err error
-		var nb uint64
-		var entry *sdjournal.JournalEntry
-		converter := makeMapConverter("utf8", confID)
-
+	L:
 		for {
-			// get entries from journald
-		LoopGetEntries:
-			for {
-				select {
-				case <-r.stopchan:
-					return
-				default:
-					nb, err = r.journal.Next()
-					if err != nil {
-						return
-					}
-					if nb == 0 {
-						select {
-						case <-r.shutdownchan:
-							return
-						default:
-							break LoopGetEntries
-						}
-					}
-					entry, err = r.journal.GetEntry()
-					if err != nil {
-						return
-					}
-					err = r.stasher.Stash(converter(entry.Fields))
-					if eerrors.Is("Fatal", err) {
-						r.logger.Error("Fatal error stashing journal message", "error", err)
-						r.dofatal()
-						return
-					}
-					if err != nil {
-						r.logger.Warn("Non-fatal error stashing journal message", "error", err)
-						continue
-					}
-					base.IncomingMsgsCounter.WithLabelValues("journald", hostname, "", "").Inc()
-
-				}
-			}
-
-			// wait that journald has more entries
-			events := r.wait()
 			select {
-			case <-events:
-			case <-r.stopchan:
+			case <-ctx.Done():
 				return
+			default:
+				nb, err := r.journal.Next()
+				if err != nil {
+					return
+				}
+				if nb == 0 {
+					wait(ctx, r.logger, r.journal) // wait that journald has more entries
+					continue L
+				}
+				entry, err := r.journal.GetEntry()
+				if err != nil {
+					return
+				}
+				err = r.stasher.Stash(converter(entry))
+				if eerrors.IsFatal(err) {
+					r.logger.Error("Fatal error stashing journal message", "error", err)
+					r.dofatal()
+					return
+				}
+				if err != nil {
+					r.logger.Warn("Non-fatal error stashing journal message", "error", err)
+					continue L
+				}
+				base.IncomingMsgsCounter.WithLabelValues("journald", hostname, "", "").Inc()
+
 			}
 		}
+
 	}()
 }
 
@@ -253,18 +218,15 @@ func (r *Reader) WaitFinished() {
 }
 
 func (r *Reader) Stop() {
-	if r.stopchan != nil {
-		close(r.stopchan)
-		r.WaitFinished()
+	if r.stop != nil {
+		r.stop()
+		r.stop = nil
 	}
+	r.WaitFinished()
 }
 
 func (r *Reader) Shutdown() {
-	close(r.shutdownchan)
-	r.WaitFinished()
-	if r.stopchan != nil {
-		close(r.stopchan)
-	}
+	r.Stop()
 	// async close the low level journald reader
 	go func() {
 		r.journal.Close()
