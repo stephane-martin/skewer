@@ -33,8 +33,8 @@ type Reader struct {
 
 type Converter func(*sdjournal.JournalEntry) *model.FullMessage
 
-func EntryToSyslog(entry map[string]string) (m *model.SyslogMessage) {
-	m = model.CleanFactory()
+func EntryToSyslog(entry map[string]string) *model.SyslogMessage {
+	m := model.Factory()
 	properties := map[string]string{}
 	for k, v := range entry {
 		k = strings.ToLower(k)
