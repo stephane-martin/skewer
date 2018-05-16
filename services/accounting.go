@@ -2,7 +2,7 @@ package services
 
 import (
 	"bufio"
-	"fmt"
+	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -31,7 +31,7 @@ type AccountingService struct {
 	logger         log15.Logger
 	wgroup         sync.WaitGroup
 	Conf           conf.AccountingSourceConfig
-	stopchan       chan struct{}
+	stop           context.CancelFunc
 	fatalErrorChan chan struct{}
 	fatalOnce      *sync.Once
 	confined       bool
@@ -55,20 +55,17 @@ func (s *AccountingService) Gather() ([]*dto.MetricFamily, error) {
 	return base.Registry.Gather()
 }
 
-func readFileUntilEnd(f *os.File, size int) (err error) {
+func readFileUntilEnd(f *os.File, size int) error {
 	// read the acct file until the end
 	buf := make([]byte, accounting.Ssize)
 	reader := bufio.NewReader(f)
 	for {
-		_, err = io.ReadFull(reader, buf)
-		if err == io.EOF {
+		_, err := io.ReadFull(reader, buf)
+		if eerrors.HasFileClosed(err) {
 			// we are at the end of the file
 			return nil
-		} else if err == io.ErrUnexpectedEOF {
-			// the file size is not a multiple of Ssize...
-			return nil
 		} else if err != nil {
-			return fmt.Errorf("unexpected error while reading the accounting file: %s", err)
+			return eerrors.Fatal(eerrors.Wrap(err, "Failed to read the accounting file"))
 		}
 	}
 }
@@ -101,7 +98,7 @@ func (s *AccountingService) makeMessage(buf []byte, tick int64, hostname string,
 
 var ErrTruncated = eerrors.New("file has been truncated")
 
-func (s *AccountingService) readFile(f *os.File, tick int64, hostname string, size int) (err error) {
+func (s *AccountingService) readFile(ctx context.Context, f *os.File, tick int64, hostname string, size int) error {
 	var offset int64
 	var fsize int64
 	var infos os.FileInfo
@@ -110,8 +107,13 @@ func (s *AccountingService) readFile(f *os.File, tick int64, hostname string, si
 	gen := utils.NewGenerator()
 
 	for {
-		_, err = io.ReadFull(f, buf)
-		if err == io.EOF || err == io.ErrUnexpectedEOF {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+		_, err := io.ReadFull(f, buf)
+		if eerrors.HasFileClosed(err) {
 			// check if file has been truncated
 			offset, err = f.Seek(0, 1)
 			if err != nil {
@@ -123,19 +125,17 @@ func (s *AccountingService) readFile(f *os.File, tick int64, hostname string, si
 			}
 			fsize = infos.Size()
 			if offset > fsize {
-				s.logger.Info("Accounting file has been truncated", "offset", offset, "filesize", fsize)
 				return ErrTruncated
 			}
+			// we reached the end of the file
 			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("unexpected error while reading the accounting file: %s", err)
+		} else if err != nil {
+			return err
 		}
 		full = s.makeMessage(buf, tick, hostname, gen)
-		err := s.stasher.Stash(full)
+		err = s.stasher.Stash(full)
 		model.FullFree(full)
-		if eerrors.Is("Fatal", err) {
-			s.logger.Error("Fatal error stashing accounting message", "error", err)
+		if eerrors.IsFatal(err) {
 			return err
 		}
 		if err != nil {
@@ -146,38 +146,26 @@ func (s *AccountingService) readFile(f *os.File, tick int64, hostname string, si
 	}
 }
 
-func (s *AccountingService) doStart(watcher *fsnotify.Watcher, hostname string, f *os.File, tick int64) {
-	defer func() {
-		_ = f.Close()
-		s.wgroup.Done()
-	}()
-	var err error
-
-	err = watcher.Add(s.Conf.Path)
-	if err != nil {
-		s.logger.Error("Error starting to watch accounting file")
-		return
-	}
+func (s *AccountingService) doStart(ctx context.Context, watcher *fsnotify.Watcher, hostname string, f *os.File, tick int64) error {
 
 Read:
 	// fetch content from the acct file
 	for {
-		err = s.readFile(f, tick, hostname, accounting.Ssize)
+		err := s.readFile(ctx, f, tick, hostname, accounting.Ssize)
 		if err == ErrTruncated {
-			// file truncation was detected
+			s.logger.Info("Accounting file has been truncated")
 			_, err = f.Seek(0, 0)
 			if err != nil {
-				s.logger.Error("Error when seeking to the beginning of the accounting file", "error", err)
-				_ = watcher.Close()
-				s.dofatal()
-				return
+				return eerrors.Fatal(eerrors.Wrap(err, "Failed to seek to the beginning of the accounting file"))
 			}
 			continue Read
 		} else if err != nil {
-			s.logger.Error("Error reading the accounting file", "error")
-			_ = watcher.Close()
-			s.dofatal()
-			return
+			return eerrors.Fatal(eerrors.Wrap(err, "Error reading the accounting file"))
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
 		}
 
 	WaitWrite:
@@ -194,27 +182,19 @@ Read:
 					s.logger.Info("Accounting file has been renamed (rotation?)", "notifypath", ev.Name)
 					time.Sleep(3 * time.Second)
 					f2, err := os.Open(s.Conf.Path)
-					if err == nil {
-						s.logger.Info("Accounting file has been reopened", "path", s.Conf.Path)
-					} else {
-						s.logger.Error("Error reopening accounting file", "error", err, "path", s.Conf.Path)
-						_ = watcher.Close()
-						s.dofatal()
-						return
+					if err != nil {
+						return eerrors.Fatal(eerrors.Wrap(err, "Failed to reopen the accounting file"))
 					}
-					s.wgroup.Add(1)
-					go s.doStart(watcher, hostname, f2, tick)
-					return
+					s.logger.Info("Accounting file has been reopened", "path", s.Conf.Path)
+					err = s.doStart(ctx, watcher, hostname, f2, tick)
+					f2.Close()
+					return err
 				case fsnotify.Remove:
-					s.logger.Error("Accounting file has been removed ?!", "notifypath", ev.Name)
-					_ = watcher.Close()
-					s.dofatal()
-					return
+					return eerrors.Fatal(eerrors.Wrap(err, "Accounting file has disappeared"))
 				default:
 				}
-			case <-s.stopchan:
-				_ = watcher.Close()
-				return
+			case <-ctx.Done():
+				return nil
 			}
 		}
 
@@ -231,12 +211,12 @@ func (s *AccountingService) dofatal() {
 }
 
 func (s *AccountingService) Start() (infos []model.ListenerInfo, err error) {
+	var ctx context.Context
 	infos = []model.ListenerInfo{}
-	s.stopchan = make(chan struct{})
+	ctx, s.stop = context.WithCancel(context.Background())
 	s.fatalErrorChan = make(chan struct{})
 	s.fatalOnce = &sync.Once{}
 	tick := accounting.Tick()
-	var f *os.File
 
 	hostname, err := os.Hostname()
 	if err != nil {
@@ -247,7 +227,8 @@ func (s *AccountingService) Start() (infos []model.ListenerInfo, err error) {
 	if s.confined {
 		acctFilename = filepath.Join("/tmp", "acct", acctFilename)
 	}
-	f, err = os.Open(acctFilename)
+
+	f, err := os.Open(acctFilename)
 	if err != nil {
 		return
 	}
@@ -259,25 +240,36 @@ func (s *AccountingService) Start() (infos []model.ListenerInfo, err error) {
 
 	s.wgroup.Add(1)
 	go func() {
-		defer s.wgroup.Done()
-		err = readFileUntilEnd(f, accounting.Ssize)
+		defer func() {
+			watcher.Close()
+			f.Close()
+			s.wgroup.Done()
+		}()
+		err := readFileUntilEnd(f, accounting.Ssize)
 		if err != nil {
 			s.logger.Error("Error reading the accounting file for the first time", "error", err)
-			_ = watcher.Close()
 			s.dofatal()
 			return
 		}
 		s.logger.Debug("Finished going through accounting file")
-		s.wgroup.Add(1)
-		go s.doStart(watcher, hostname, f, tick)
+		err = watcher.Add(s.Conf.Path)
+		if err != nil {
+			s.logger.Error("Failed to watch the accounting file", "error", err)
+			s.dofatal()
+			return
+		}
+		err = s.doStart(ctx, watcher, hostname, f, tick)
+		if err != nil {
+			s.logger.Error(err.Error())
+			s.dofatal()
+		}
 	}()
-	return
+	return infos, nil
 }
 
 func (s *AccountingService) Stop() {
-	if s.stopchan != nil {
-		close(s.stopchan)
-		s.stopchan = nil
+	if s.stop != nil {
+		s.stop()
 	}
 	s.wgroup.Wait()
 }
