@@ -28,12 +28,10 @@ func initPollingRegistry() {
 }
 
 type FilePollingService struct {
-	pool           *sync.Pool
 	stasher        base.Stasher
 	logger         log15.Logger
 	confs          map[utils.MyULID](*conf.FilesystemSourceConfig)
 	confsMap       map[ulid.ULID]utils.MyULID
-	ParserConfigs  []conf.ParserConfig
 	parserEnv      *decoders.ParsersEnv
 	tailor         *tail.Tailor
 	rawQueue       chan *model.RawFileMessage
@@ -46,17 +44,26 @@ type FilePollingService struct {
 	nWatchedDirs   prometheus.GaugeFunc
 }
 
+var fpool = &sync.Pool{
+	New: func() interface{} {
+		return &model.RawFileMessage{}
+	},
+}
+
+func getFRaw() *model.RawFileMessage {
+	return fpool.Get().(*model.RawFileMessage)
+}
+
+func freeFRaw(raw *model.RawFileMessage) {
+	fpool.Put(raw)
+}
+
 func NewFilePollingService(env *base.ProviderEnv) (base.Provider, error) {
 	initPollingRegistry()
 	s := FilePollingService{
 		stasher:  env.Reporter,
 		logger:   env.Logger.New("class", "filepoll"),
 		confined: env.Confined,
-		pool: &sync.Pool{
-			New: func() interface{} {
-				return &model.RawFileMessage{}
-			},
-		},
 	}
 	s.nWatchedFiles = prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
@@ -116,11 +123,11 @@ func (s *FilePollingService) Start() (infos []model.ListenerInfo, err error) {
 	infos = []model.ListenerInfo{}
 	s.fatalErrorChan = make(chan struct{})
 	s.fatalOnce = &sync.Once{}
-	s.rawQueue = make(chan *model.RawFileMessage)
+	rawQueue := make(chan *model.RawFileMessage)
 
-	results := make(chan tail.FileLineID)
+	lines := make(chan tail.FileLineID)
 	errors := make(chan error)
-	tailor, err := tail.NewTailor(results, errors)
+	tailor, err := tail.NewTailor(lines, errors)
 	if err != nil {
 		return infos, err
 	}
@@ -153,19 +160,32 @@ func (s *FilePollingService) Start() (infos []model.ListenerInfo, err error) {
 	}
 
 	s.wg.Add(1)
-	go s.fetchLines(results)
+	go func() {
+		defer s.wg.Done()
+		s.fetchLines(lines, rawQueue)
+	}()
 	s.wg.Add(1)
-	go s.fetchErrors(errors)
+	go func() {
+		defer s.wg.Done()
+		fetchErrors(s.logger, errors)
+	}()
 	cpus := runtime.NumCPU()
 	for i := 0; i < cpus; i++ {
 		s.wg.Add(1)
-		go s.parse()
+		go func() {
+			defer s.wg.Done()
+			err := s.parse(rawQueue)
+			if err != nil {
+				s.dofatal()
+				s.logger.Error(err.Error())
+			}
+		}()
 	}
 
 	return infos, nil
 }
 
-func makeFLogger(logger log15.Logger, raw *model.RawFileMessage) log15.Logger {
+func flogg(logger log15.Logger, raw *model.RawFileMessage) log15.Logger {
 	return logger.New(
 		"protocol", "filepoll",
 		"format", raw.Decoder.Format,
@@ -174,20 +194,15 @@ func makeFLogger(logger log15.Logger, raw *model.RawFileMessage) log15.Logger {
 }
 
 func (s *FilePollingService) parseOne(raw *model.RawFileMessage, gen *utils.Generator) error {
-
 	parser, err := s.parserEnv.GetParser(&raw.Decoder)
-
 	if parser == nil || err != nil {
-		makeFLogger(s.logger, raw).Error("Unknown parser")
-		return nil
+		return decoders.DecodingError(eerrors.Wrapf(err, "Unknown decoder: %s", raw.Decoder.Format))
 	}
 	defer parser.Release()
 
 	syslogMsgs, err := parser.Parse(raw.Line)
 	if err != nil {
-		base.ParsingErrorCounter.WithLabelValues("filepoll", raw.Hostname, raw.Decoder.Format).Inc()
-		makeFLogger(s.logger, raw).Info("Parsing error", "error", err)
-		return nil
+		return decoders.DecodingError(eerrors.Wrap(err, "Parsing error"))
 	}
 
 	var syslogMsg *model.SyslogMessage
@@ -205,83 +220,75 @@ func (s *FilePollingService) parseOne(raw *model.RawFileMessage, gen *utils.Gene
 		full.Uid = gen.Uid()
 		full.ConfId = raw.ConfID
 		err := s.stasher.Stash(full)
+
 		model.FullFree(full)
 
-		if eerrors.Is("Fatal", err) {
-			makeFLogger(s.logger, raw).Error("Fatal error stashing filepoll message", "error", err)
-			s.dofatal()
-			return err
-		}
 		if err != nil {
-			makeFLogger(s.logger, raw).Warn("Non-fatal error stashing filepoll message", "error", err)
+			flogg(s.logger, raw).Error("Error stashing filepoll message", "error", err)
+			if eerrors.IsFatal(err) {
+				return eerrors.Wrap(err, "Fatal error pushing filepoll message to the Store")
+			}
 		}
 	}
 	return nil
 }
 
-func (s *FilePollingService) parse() {
-	defer s.wg.Done()
-
+func (s *FilePollingService) parse(rawq chan *model.RawFileMessage) error {
 	gen := utils.NewGenerator()
-	var raw *model.RawFileMessage
-	var err error
-	for raw = range s.rawQueue {
+
+	for raw := range rawq {
 		if raw == nil {
-			return
+			return nil
 		}
-		err = s.parseOne(raw, gen)
-		s.pool.Put(raw)
+		err := s.parseOne(raw, gen)
 		if err != nil {
-			return
+			base.ParsingErrorCounter.WithLabelValues("filepoll", raw.Hostname, raw.Decoder.Format).Inc()
+			flogg(s.logger, raw).Warn(err.Error())
+		}
+		freeFRaw(raw)
+		if err != nil && eerrors.IsFatal(err) {
+			// stop processing when fatal error happens
+			return err
 		}
 	}
+	return nil
 }
 
-func (s *FilePollingService) fetchErrors(errors chan error) {
-	defer s.wg.Done()
-	var err error
-	for err = range errors {
+func fetchErrors(logger log15.Logger, errors chan error) {
+	for err := range errors {
 		switch e := err.(type) {
 		case *tail.FileErrorID:
-			s.logger.Warn("Error watching file", "error", e.Err, "filename", e.Filename)
+			logger.Warn("Error watching file", "error", e.Err, "filename", e.Filename)
 		case *tail.FileError:
-			s.logger.Warn("Error watching file", "error", e.Err, "filename", e.Filename)
+			logger.Warn("Error watching file", "error", e.Err, "filename", e.Filename)
 		default:
-			s.logger.Warn("Error watching file", "error", err)
+			logger.Warn("Error watching file", "error", err)
 		}
 	}
 }
 
-func (s *FilePollingService) fetchLines(results chan tail.FileLineID) {
-	defer func() {
-		close(s.rawQueue)
-		s.wg.Done()
-	}()
-
-	var result tail.FileLineID
-	var config *conf.FilesystemSourceConfig
-	var raw *model.RawFileMessage
-
+func (s *FilePollingService) fetchLines(lines chan tail.FileLineID, rawq chan *model.RawFileMessage) {
+	defer close(rawq)
 	hostname, err := os.Hostname()
 	if err != nil {
 		hostname = "unknown"
 	}
 
-	for result = range results {
-		config = s.confs[s.confsMap[result.Uid]]
-		raw = s.pool.Get().(*model.RawFileMessage)
+	for l := range lines {
+		config := s.confs[s.confsMap[l.Uid]]
+		raw := getFRaw()
 		raw.Hostname = hostname
 		raw.Decoder = config.DecoderBaseConfig
 		raw.Directory = config.BaseDirectory
 		raw.Glob = config.Glob
-		raw.Filename = result.Filename
+		raw.Filename = l.Filename
 		if s.confined && len(raw.Filename) >= 13 {
 			raw.Filename = raw.Filename[13:] // /tmp/polldirs/...
 		}
-		raw.Line = result.Line
+		raw.Line = l.Line
 		raw.ConfID = config.ConfID
 		base.IncomingMsgsCounter.WithLabelValues("filepoll", hostname, "0", config.BaseDirectory)
-		s.rawQueue <- raw
+		rawq <- raw
 	}
 }
 
@@ -303,8 +310,7 @@ func (s *FilePollingService) SetConf(c conf.BaseConfig) {
 		s.confs[c.FSSource[i].ConfID] = &(c.FSSource[i])
 	}
 	s.confsMap = make(map[ulid.ULID]utils.MyULID)
-	s.ParserConfigs = c.Parsers
-	s.parserEnv = decoders.NewParsersEnv(s.ParserConfigs, s.logger)
+	s.parserEnv = decoders.NewParsersEnv(c.Parsers, s.logger)
 }
 
 func MakeFilter(globstring string) (tail.FilterFunc, error) {
