@@ -141,43 +141,57 @@ func (s *KafkaServiceImpl) dofatal() {
 	s.fatalOnce.Do(func() { close(s.fatalErrorChan) })
 }
 
-func (s *KafkaServiceImpl) startWorker(ctx context.Context, config conf.KafkaSourceConfig) {
-	breaker := circuit.NewConsecutiveBreaker(3)
+func getConsumer(ctx context.Context, logger log15.Logger, breaker *circuit.Breaker, config conf.KafkaSourceConfig, confined bool) *cluster.Consumer {
+	var consumer *cluster.Consumer
 
-	getConsumer := func() (consumer *cluster.Consumer) {
-
-		// TODO: getClient should be cancelable with a context
-		getClient := func() (err error) {
-			consumer, err = config.GetClient(s.confined)
+	getClient := func() (err error) {
+		ret := make(chan struct{})
+		go func() {
+			consumer, err = config.GetClient(confined)
+			close(ret)
+		}()
+		select {
+		case <-ctx.Done():
+			return context.Canceled
+		case <-ret:
 			return err
-		}
-
-		for {
-			// arg timeout is 0 because the sarama client handles connection timeout
-			// through DialTimeout
-			err := breaker.CallContext(ctx, getClient, 0)
-
-			if err == nil {
-				return consumer
-			}
-			if err == context.Canceled {
-				return nil
-			}
-			if err != circuit.ErrBreakerOpen {
-				s.logger.Debug("Error getting a Kafka consumer", "error", err)
-			}
-
-			select {
-			case <-ctx.Done():
-				return nil
-			case <-time.After(1 * time.Second):
-			}
 		}
 	}
 
-	// the for loop here makes us retry if we lose a connection to the kafka cluster
 	for {
-		consumer := getConsumer()
+		// arg timeout is 0 because the sarama client handles connection timeout
+		// through DialTimeout
+		err := breaker.CallContext(ctx, getClient, 0)
+
+		if err == nil {
+			return consumer
+		}
+		if err == context.Canceled {
+			return nil
+		}
+		if err != circuit.ErrBreakerOpen {
+			logger.Debug("Error getting a Kafka consumer", "error", err)
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(1 * time.Second):
+		}
+	}
+}
+
+func (s *KafkaServiceImpl) startWorker(ctx context.Context, config conf.KafkaSourceConfig) {
+	breaker := circuit.NewConsecutiveBreaker(3)
+
+	// the for loop here makes us retry if we lose the connection to the kafka cluster
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		consumer := getConsumer(ctx, s.logger, breaker, config, s.confined)
 		if consumer == nil {
 			return
 		}
@@ -312,7 +326,7 @@ func (s *KafkaServiceImpl) handleConsumer(ctx context.Context, config conf.Kafka
 		for err := range consumer.Errors() {
 			if model.IsFatalKafkaError(err) {
 				s.logger.Warn("Kafka consumer fatal error", "error", err)
-				consumer.Close()
+				lcancel()
 			} else {
 				s.logger.Info("Kafka consumer non fatal error", "error", err)
 			}
