@@ -3,6 +3,7 @@ package network
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"runtime"
 	"strings"
 	"sync"
@@ -10,7 +11,9 @@ import (
 
 	cluster "github.com/bsm/sarama-cluster"
 	"github.com/inconshreveable/log15"
+	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
+	metrics "github.com/rcrowley/go-metrics"
 	circuit "github.com/rubyist/circuitbreaker"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/decoders"
@@ -21,6 +24,8 @@ import (
 	"github.com/stephane-martin/skewer/utils/queue"
 	"github.com/stephane-martin/skewer/utils/queue/kafka"
 )
+
+var incomingByteRate *prometheus.GaugeVec
 
 func initKafkaRegistry() {
 	base.Once.Do(func() {
@@ -141,13 +146,14 @@ func (s *KafkaServiceImpl) dofatal() {
 	s.fatalOnce.Do(func() { close(s.fatalErrorChan) })
 }
 
-func getConsumer(ctx context.Context, logger log15.Logger, breaker *circuit.Breaker, config conf.KafkaSourceConfig, confined bool) *cluster.Consumer {
+func getConsumer(ctx context.Context, logger log15.Logger, breaker *circuit.Breaker, config conf.KafkaSourceConfig, confined bool) (*cluster.Consumer, metrics.Registry) {
 	var consumer *cluster.Consumer
+	var mregistry metrics.Registry
 
 	getClient := func() (err error) {
 		ret := make(chan struct{})
 		go func() {
-			consumer, err = config.GetClient(confined)
+			consumer, mregistry, err = config.GetClient(confined)
 			close(ret)
 		}()
 		select {
@@ -164,10 +170,10 @@ func getConsumer(ctx context.Context, logger log15.Logger, breaker *circuit.Brea
 		err := breaker.CallContext(ctx, getClient, 0)
 
 		if err == nil {
-			return consumer
+			return consumer, mregistry
 		}
 		if err == context.Canceled {
-			return nil
+			return nil, nil
 		}
 		if err != circuit.ErrBreakerOpen {
 			logger.Debug("Error getting a Kafka consumer", "error", err)
@@ -175,7 +181,7 @@ func getConsumer(ctx context.Context, logger log15.Logger, breaker *circuit.Brea
 
 		select {
 		case <-ctx.Done():
-			return nil
+			return nil, nil
 		case <-time.After(1 * time.Second):
 		}
 	}
@@ -191,11 +197,11 @@ func (s *KafkaServiceImpl) startWorker(ctx context.Context, config conf.KafkaSou
 			return
 		default:
 		}
-		consumer := getConsumer(ctx, s.logger, breaker, config, s.confined)
+		consumer, mregistry := getConsumer(ctx, s.logger, breaker, config, s.confined)
 		if consumer == nil {
 			return
 		}
-		s.handleConsumer(ctx, config, consumer)
+		s.handleConsumer(ctx, config, consumer, mregistry)
 	}
 }
 
@@ -218,13 +224,7 @@ func (s *KafkaServiceImpl) parse() (err error) {
 		// ack the raw message to the kafka cluster
 		ackQueue := s.queues.Get(raw.ConsumerID)
 		if ackQueue != nil {
-			_ = ackQueue.Put(queue.KafkaProducerAck{
-				Offset: raw.Offset,
-				TopicPartition: queue.TopicPartition{
-					Partition: raw.Partition,
-					Topic:     raw.Topic,
-				},
-			})
+			ackQueue.Put(raw.Offset, raw.Partition, raw.Topic)
 		}
 		freeRawKafka(raw)
 	}
@@ -270,14 +270,31 @@ func (s *KafkaServiceImpl) Stop() {
 	s.wg.Wait()
 }
 
-func (s *KafkaServiceImpl) handleConsumer(ctx context.Context, config conf.KafkaSourceConfig, consumer *cluster.Consumer) {
+func (s *KafkaServiceImpl) handleConsumer(ctx context.Context, config conf.KafkaSourceConfig, consumer *cluster.Consumer, mregistry metrics.Registry) {
 	if consumer == nil {
 		s.logger.Error("BUG: the consumer passed to handleConsumer is NIL")
 		return
 	}
 	var wg sync.WaitGroup
 	lctx, lcancel := context.WithCancel(ctx)
+	defer lcancel()
 	ackQueue := s.queues.New()
+
+	incomingByteRate := prometheus.NewGaugeFunc(
+		prometheus.GaugeOpts{
+			Help: "Kafka consumers incoming byte rate",
+			Name: fmt.Sprintf("skw_kafka_consumer_incoming_byte_rate_%d", ackQueue.ID()),
+		},
+		func() float64 {
+			meter := mregistry.Get("incoming-byte-rate")
+			if meter == nil {
+				return 0
+			}
+			return meter.(metrics.Meter).Rate1()
+		},
+	)
+	base.Registry.MustRegister(incomingByteRate)
+	defer base.Registry.Unregister(incomingByteRate)
 
 	go func() {
 		<-lctx.Done()
@@ -355,15 +372,7 @@ func (s *KafkaServiceImpl) handleConsumer(ctx context.Context, config conf.Kafka
 			}
 			if !ok {
 				// if the message is rejected, immediately ACK it to Kafka
-				ackQueue.Put(
-					queue.KafkaProducerAck{
-						Offset: msg.Offset,
-						TopicPartition: queue.TopicPartition{
-							Partition: msg.Partition,
-							Topic:     msg.Topic,
-						},
-					},
-				)
+				ackQueue.Put(msg.Offset, msg.Partition, msg.Topic)
 				continue Loop
 			}
 			raw := rawKafkaFactory(value)
@@ -388,5 +397,4 @@ func (s *KafkaServiceImpl) handleConsumer(ctx context.Context, config conf.Kafka
 	}()
 
 	wg.Wait()
-	lcancel()
 }

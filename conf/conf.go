@@ -20,6 +20,7 @@ import (
 	"github.com/bsm/sarama-cluster"
 	"github.com/fatih/set"
 	"github.com/nats-io/go-nats"
+	metrics "github.com/rcrowley/go-metrics"
 
 	"github.com/BurntSushi/toml"
 	"github.com/inconshreveable/log15"
@@ -580,16 +581,16 @@ func (c *KafkaDestConfig) GetClient(confined bool) (sarama.Client, error) {
 	return cl, nil
 }
 
-func (c *KafkaSourceConfig) GetClient(confined bool) (*cluster.Consumer, error) {
+func (c *KafkaSourceConfig) GetClient(confined bool) (*cluster.Consumer, metrics.Registry, error) {
 	conf, err := c.GetSaramaConsumerConfig(confined)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	cl, err := cluster.NewConsumer(c.Brokers, c.GroupID, c.Topics, conf)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return cl, nil
+	return cl, conf.Config.MetricRegistry, nil
 }
 
 func getViper(confDir string) (v *viper.Viper, err error) {

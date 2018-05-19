@@ -72,7 +72,14 @@ func (q *KafkaProducerAckQueue) Get() (KafkaProducerAck, error) {
 	return zeroAck, nil
 }
 
-func (q *KafkaProducerAckQueue) Put(ack KafkaProducerAck) error {
+func (q *KafkaProducerAckQueue) Put(offset int64, partition int32, topic string) error {
+	ack := KafkaProducerAck{
+		Offset: offset,
+		TopicPartition: TopicPartition{
+			Partition: partition,
+			Topic:     topic,
+		},
+	}
 	n := q.pool.Get().(*kafkaProducerAckNode)
 	n.State = ack
 	n.Next = nil
