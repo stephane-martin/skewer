@@ -28,7 +28,7 @@ func initPollingRegistry() {
 }
 
 type FilePollingService struct {
-	stasher        base.Stasher
+	stasher        *base.Reporter
 	logger         log15.Logger
 	confs          map[utils.MyULID](*conf.FilesystemSourceConfig)
 	confsMap       map[ulid.ULID]utils.MyULID

@@ -84,7 +84,7 @@ type DirectRelpService struct {
 	fatalOnce      *sync.Once
 	QueueSize      uint64
 	logger         log15.Logger
-	reporter       base.Reporter
+	reporter       *base.Reporter
 	b              binder.Client
 	sc             []conf.DirectRELPSourceConfig
 	pc             []conf.ParserConfig
@@ -195,7 +195,7 @@ type DirectRelpServiceImpl struct {
 	status              RelpServerStatus
 	StatusChan          chan RelpServerStatus
 	producer            sarama.AsyncProducer
-	reporter            base.Reporter
+	reporter            *base.Reporter
 	rawQ                *tcp.Ring
 	parsedMessagesQueue *message.Ring
 	parsewg             sync.WaitGroup
@@ -204,7 +204,7 @@ type DirectRelpServiceImpl struct {
 	parserEnv           *decoders.ParsersEnv
 }
 
-func NewDirectRelpServiceImpl(confined bool, reporter base.Reporter, b binder.Client, logger log15.Logger) *DirectRelpServiceImpl {
+func NewDirectRelpServiceImpl(confined bool, reporter *base.Reporter, b binder.Client, logger log15.Logger) *DirectRelpServiceImpl {
 	s := DirectRelpServiceImpl{
 		status:    Stopped,
 		reporter:  reporter,

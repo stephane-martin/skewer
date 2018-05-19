@@ -13,7 +13,7 @@ var Supported = false
 type DummyReader struct {
 }
 
-func NewReader(stasher base.Stasher, logger log15.Logger) (*DummyReader, error) {
+func NewReader(stasher *base.Reporter, logger log15.Logger) (*DummyReader, error) {
 	return new(DummyReader), nil
 }
 

@@ -201,7 +201,7 @@ func (d *HTTPDestination) doHTTP(ctx context.Context, uid utils.MyULID, req *htt
 	for {
 		err = d.breaker.CallContext(
 			ctx, func() (e error) {
-				resp, e = d.clt.Do(req)
+				resp, e = d.clt.Do(req.WithContext(ctx))
 				return e
 			},
 			d.reqtimeout,

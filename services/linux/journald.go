@@ -17,7 +17,7 @@ func initJournalRegistry() {
 }
 
 type JournalService struct {
-	stasher base.Stasher
+	stasher *base.Reporter
 	reader  journald.JournaldReader
 	logger  log15.Logger
 	Conf    conf.JournaldConfig

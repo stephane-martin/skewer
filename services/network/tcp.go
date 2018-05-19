@@ -39,7 +39,7 @@ type TcpServiceImpl struct {
 	StreamingService
 	status           TcpServerStatus
 	statusChan       chan TcpServerStatus
-	reporter         base.Stasher
+	reporter         *base.Reporter
 	rawMessagesQueue *tcp.Ring
 	fatalErrorChan   chan struct{}
 	fatalOnce        *sync.Once

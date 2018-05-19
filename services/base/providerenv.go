@@ -12,7 +12,7 @@ type ProviderEnv struct {
 	Confined bool
 	Profile  bool
 	Ring     kring.Ring
-	Reporter Reporter
+	Reporter *Reporter
 	Binder   binder.Client
 	Logger   log15.Logger
 	Pipe     *os.File

@@ -60,6 +60,7 @@ func (s *BaseService) CloseConnections() {
 	s.connMutex.Lock()
 	for conn, _ := range s.Connections {
 		_ = conn.Close()
+		delete(s.Connections, conn)
 	}
 	for _, path := range s.UnixSocketPaths {
 		if !strings.HasPrefix(path, "@") {
@@ -77,5 +78,6 @@ func (s *BaseService) CloseConnections() {
 func (s *BaseService) ClearConnections() {
 	s.connMutex.Lock()
 	s.Connections = map[io.Closer]bool{}
+	s.UnixSocketPaths = []string{}
 	s.connMutex.Unlock()
 }

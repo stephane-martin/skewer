@@ -24,20 +24,8 @@ var SYSLOG = []byte("syslog")
 var INFOS = []byte("infos")
 var SP = []byte(" ")
 
-type Stasher interface {
-	Start()
-	SetSecret(secret *memguard.LockedBuffer)
-	Stop()
-	Stash(m *model.FullMessage) error
-}
-
-type Reporter interface {
-	Stasher
-	Report(infos []model.ListenerInfo) error
-}
-
-// ReporterImpl is used by plugins to report new syslog messages to the controller.
-type ReporterImpl struct {
+// Reporter is used by plugins to report new syslog messages to the controller.
+type Reporter struct {
 	name         string
 	logger       log15.Logger
 	pipe         *os.File
@@ -49,8 +37,8 @@ type ReporterImpl struct {
 }
 
 // NewReporter creates a reporter.
-func NewReporter(name string, l log15.Logger, pipe *os.File) *ReporterImpl {
-	rep := ReporterImpl{
+func NewReporter(name string, l log15.Logger, pipe *os.File) *Reporter {
+	rep := Reporter{
 		name:   name,
 		logger: l,
 		pipe:   pipe,
@@ -64,29 +52,29 @@ func NewReporter(name string, l log15.Logger, pipe *os.File) *ReporterImpl {
 	return &rep
 }
 
-func (s *ReporterImpl) getBuffer() (buf *proto.Buffer) {
+func (s *Reporter) getBuffer() (buf *proto.Buffer) {
 	buf = s.pool.Get().(*proto.Buffer)
 	buf.Reset()
 	return buf
 }
 
-func (s *ReporterImpl) putBuffer(buf *proto.Buffer) {
+func (s *Reporter) putBuffer(buf *proto.Buffer) {
 	if buf != nil {
 		s.pool.Put(buf)
 	}
 }
 
-func (s *ReporterImpl) Start() {
+func (s *Reporter) Start() {
 	s.queue = queue.NewBSliceQueue()
 	go s.pushqueue()
 }
 
-func (s *ReporterImpl) SetSecret(secret *memguard.LockedBuffer) {
+func (s *Reporter) SetSecret(secret *memguard.LockedBuffer) {
 	s.secret = secret
 	s.pipeWriter = utils.NewEncryptWriter(s.bufferedPipe, s.secret)
 }
 
-func (s *ReporterImpl) pushqueue() {
+func (s *Reporter) pushqueue() {
 	defer func() {
 		_ = s.bufferedPipe.Flush()
 		_ = s.pipe.Close()
@@ -114,12 +102,12 @@ func (s *ReporterImpl) pushqueue() {
 }
 
 // Stop stops the reporter.
-func (s *ReporterImpl) Stop() {
+func (s *Reporter) Stop() {
 	s.queue.Dispose()
 }
 
 // Stash reports one syslog message to the controller.
-func (s *ReporterImpl) Stash(m *model.FullMessage) error {
+func (s *Reporter) Stash(m *model.FullMessage) error {
 	var err error
 	buf := s.getBuffer()
 	defer s.putBuffer(buf)
@@ -127,19 +115,16 @@ func (s *ReporterImpl) Stash(m *model.FullMessage) error {
 	if err != nil {
 		return eerrors.Wrapf(err, "Failed to marshal a message to be sent by plugin: %s", s.name)
 	}
-	// Fatal is set when the queue has been disposed
-	return eerrors.WithTypes(
+	return eerrors.Fatal(
 		eerrors.Wrapf(
 			s.queue.PutSlice(string(buf.Bytes())),
-			"Failed to enqueue a message to be sent by plugin: %s",
-			s.name,
+			"Failed to enqueue a message to be sent by plugin: %s", s.name,
 		),
-		"Fatal",
 	)
 }
 
 // Report reports information about the actual listening ports to the controller.
-func (s *ReporterImpl) Report(infos []model.ListenerInfo) error {
+func (s *Reporter) Report(infos []model.ListenerInfo) error {
 	b, err := json.Marshal(infos)
 	if err != nil {
 		return eerrors.Wrapf(err, "Plugin '%s' failed to report infos", s.name)

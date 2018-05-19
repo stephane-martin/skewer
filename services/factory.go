@@ -100,7 +100,7 @@ func SetRing(ring kring.Ring) func(e *base.ProviderEnv) {
 	}
 }
 
-func SetReporter(reporter base.Reporter) func(e *base.ProviderEnv) {
+func SetReporter(reporter *base.Reporter) func(e *base.ProviderEnv) {
 	return func(e *base.ProviderEnv) {
 		e.Reporter = reporter
 	}

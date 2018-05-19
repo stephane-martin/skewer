@@ -32,7 +32,7 @@ type KafkaServiceImpl struct {
 	configs          []conf.KafkaSourceConfig
 	parserConfigs    []conf.ParserConfig
 	parserEnv        *decoders.ParsersEnv
-	reporter         base.Stasher
+	reporter         *base.Reporter
 	rawMessagesQueue *kafka.Ring
 	MaxMessageSize   int
 	logger           log15.Logger
@@ -130,6 +130,7 @@ func (s *KafkaServiceImpl) startWorker(ctx context.Context, config conf.KafkaSou
 
 	getConsumer := func() (consumer *cluster.Consumer) {
 
+		// TODO: getClient should be cancelable with a context
 		getClient := func() (err error) {
 			consumer, err = config.GetClient(s.confined)
 			return err

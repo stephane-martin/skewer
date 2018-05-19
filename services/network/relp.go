@@ -209,7 +209,7 @@ type RelpService struct {
 	fatalOnce      *sync.Once
 	QueueSize      uint64
 	logger         log15.Logger
-	reporter       base.Reporter
+	reporter       *base.Reporter
 	b              binder.Client
 	sc             []conf.RELPSourceConfig
 	pc             []conf.ParserConfig
@@ -329,7 +329,7 @@ type RelpServiceImpl struct {
 	RelpConfigs []conf.RELPSourceConfig
 	status      RelpServerStatus
 	StatusChan  chan RelpServerStatus
-	reporter    base.Reporter
+	reporter    *base.Reporter
 	rawQ        *tcp.Ring
 	parsewg     sync.WaitGroup
 	configs     map[utils.MyULID]conf.RELPSourceConfig
@@ -337,7 +337,7 @@ type RelpServiceImpl struct {
 	parserEnv   *decoders.ParsersEnv
 }
 
-func NewRelpServiceImpl(confined bool, reporter base.Reporter, b binder.Client, logger log15.Logger) *RelpServiceImpl {
+func NewRelpServiceImpl(confined bool, reporter *base.Reporter, b binder.Client, logger log15.Logger) *RelpServiceImpl {
 	s := RelpServiceImpl{
 		status:    Stopped,
 		reporter:  reporter,

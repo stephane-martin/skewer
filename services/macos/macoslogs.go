@@ -27,7 +27,7 @@ func initMacOSRegistry() {
 }
 
 type MacLogsService struct {
-	stasher        base.Stasher
+	stasher        *base.Reporter
 	logger         log15.Logger
 	wgroup         sync.WaitGroup
 	Conf           conf.MacOSSourceConfig

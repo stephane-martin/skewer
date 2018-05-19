@@ -27,7 +27,7 @@ func initAccountingRegistry() {
 }
 
 type AccountingService struct {
-	stasher        base.Stasher
+	stasher        *base.Reporter
 	logger         log15.Logger
 	wgroup         sync.WaitGroup
 	Conf           conf.AccountingSourceConfig

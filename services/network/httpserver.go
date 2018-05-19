@@ -105,7 +105,7 @@ type HTTPServiceImpl struct {
 	configs          []conf.HTTPServerSourceConfig
 	parserConfigs    []conf.ParserConfig
 	parserEnv        *decoders.ParsersEnv
-	reporter         base.Stasher
+	reporter         *base.Reporter
 	rawMessagesQueue *tcp.Ring
 	maxMessageSize   int
 	logger           log15.Logger

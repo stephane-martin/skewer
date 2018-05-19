@@ -50,7 +50,7 @@ type GraylogSvcImpl struct {
 	base.BaseService
 	Configs        []conf.GraylogSourceConfig
 	status         GraylogStatus
-	stasher        base.Stasher
+	stasher        *base.Reporter
 	wg             sync.WaitGroup
 	fatalErrorChan chan struct{}
 	fatalOnce      *sync.Once

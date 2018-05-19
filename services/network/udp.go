@@ -35,7 +35,7 @@ type UdpServiceImpl struct {
 	base.BaseService
 	UdpConfigs       []conf.UDPSourceConfig
 	status           UdpServerStatus
-	stasher          base.Stasher
+	stasher          *base.Reporter
 	wg               sync.WaitGroup
 	fatalErrorChan   chan struct{}
 	fatalOnce        *sync.Once
