@@ -387,6 +387,11 @@ func (s *MessageStore) retrieveAndForward(ctx context.Context) (err error) {
 
 RetrieveLoop:
 	for {
+		select {
+		case <-lctx.Done():
+			return nil
+		default:
+		}
 		// wait until we have something to do
 		now = time.Now()
 		first = now.Add(time.Hour)
@@ -421,11 +426,12 @@ RetrieveLoop:
 			next[currentDest] = now.Add(waits[currentDest].Next())
 			continue RetrieveLoop
 		}
-
+		//now := time.Now()
 		messages, err := s.retrieve(currentDest)
 		if err != nil {
 			return eerrors.Wrap(err, "Failed to retrieve messages from badger")
 		}
+		//s.logger.Debug("retrieve", "seconds", time.Now().Sub(now).Seconds())
 		if len(messages) == 0 {
 			// no messages in store for that destination
 			next[currentDest] = now.Add(waits[currentDest].Next())
@@ -437,7 +443,6 @@ RetrieveLoop:
 }
 
 func (s *MessageStore) init(ctx context.Context) {
-	defer s.wg.Done()
 	lctx, cancel := context.WithCancel(ctx)
 
 	s.FatalErrorChan = make(chan struct{})
@@ -456,6 +461,7 @@ func (s *MessageStore) init(ctx context.Context) {
 	if err != nil {
 		s.logger.Warn("Error pruning orphaned messages", "error", err)
 	}
+	s.logger.Debug("prune orphaned messages done")
 
 	s.initGauge()
 
@@ -463,38 +469,51 @@ func (s *MessageStore) init(ctx context.Context) {
 
 	s.wg.Add(1)
 	go func() {
+		defer func() {
+			s.logger.Debug("receiveAcks done")
+			s.wg.Done()
+		}()
+
 		err := s.receiveAcks()
 		if err != nil {
 			errs <- err
 		}
-		s.wg.Done()
 	}()
 
 	s.wg.Add(1)
 	go func() {
+		defer func() {
+			s.logger.Debug("consumeStashQueue done")
+			s.wg.Done()
+		}()
 		err := s.consumeStashQueue()
 		if err != nil {
 			errs <- err
 		}
-		s.wg.Done()
 	}()
 
 	s.wg.Add(1)
 	go func() {
+		defer func() {
+			s.logger.Debug("tickResetFailures done")
+			s.wg.Done()
+		}()
 		err := s.tickResetFailures(lctx)
 		if err != nil {
 			errs <- err
 		}
-		s.wg.Done()
 	}()
 
 	s.wg.Add(1)
 	go func() {
+		defer func() {
+			s.logger.Debug("retrieveAndForward done")
+			s.wg.Done()
+		}()
 		err := s.retrieveAndForward(lctx)
 		if err != nil {
 			errs <- err
 		}
-		s.wg.Done()
 	}()
 
 	go func() {
@@ -518,9 +537,11 @@ func (s *MessageStore) init(ctx context.Context) {
 		s.permerrorsQueue.Dispose()
 
 		// wait that all goroutines have stopped
+		s.logger.Debug("Waiting for the end of store goroutines")
 		s.wg.Wait()
+		s.logger.Debug("Final purge of badger")
 		s.PurgeBadger()
-		// finally close the badger
+		s.logger.Debug("Final close of badger")
 		s.closeBadgers()
 		// notify our caller
 		close(s.closedChan)
@@ -595,7 +616,10 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 	}
 
 	store.wg.Add(1)
-	go store.init(ctx)
+	go func() {
+		defer store.wg.Done()
+		store.init(ctx)
+	}()
 
 	return store, nil
 }
@@ -698,9 +722,12 @@ func (s *MessageStore) GetSyslogConfig(confID utils.MyULID) (*conf.FilterSubConf
 }
 
 func (s *MessageStore) initGauge() {
+	s.logger.Debug("Calculating the store initial content size")
+
 	txn := db.NewNTransaction(s.badger, false)
-	defer txn.Discard()
 	badgerGauge.WithLabelValues("syslogconf", "").Set(float64(s.syslogConfigsDB.Count(txn)))
+	txn.Discard()
+
 	for dname, dtype := range conf.Destinations {
 		messagesDB := s.backend.GetPartition(Messages, dtype)
 		readyDB := s.backend.GetPartition(Ready, dtype)
@@ -708,12 +735,27 @@ func (s *MessageStore) initGauge() {
 		failedDB := s.backend.GetPartition(Failed, dtype)
 		peDB := s.backend.GetPartition(PermErrors, dtype)
 
+		txn := db.NewNTransaction(s.badger, false)
 		badgerGauge.WithLabelValues("messages", dname).Set(float64(messagesDB.Count(txn)))
+		txn.Discard()
+
+		txn = db.NewNTransaction(s.badger, false)
 		badgerGauge.WithLabelValues("ready", dname).Set(float64(readyDB.Count(txn)))
+		txn.Discard()
+
+		txn = db.NewNTransaction(s.badger, false)
 		badgerGauge.WithLabelValues("sent", dname).Set(float64(sentDB.Count(txn)))
+		txn.Discard()
+
+		txn = db.NewNTransaction(s.badger, false)
 		badgerGauge.WithLabelValues("failed", dname).Set(float64(failedDB.Count(txn)))
+		txn.Discard()
+
+		txn = db.NewNTransaction(s.badger, false)
 		badgerGauge.WithLabelValues("permerrors", dname).Set(float64(peDB.Count(txn)))
+		txn.Discard()
 	}
+	s.logger.Debug("Done calculating the store initial content size")
 }
 
 func (s *MessageStore) closeBadgers() {
@@ -986,6 +1028,8 @@ func (s *MessageStore) resetFailuresByDest(dest conf.DestinationType) (err error
 }
 
 func (s *MessageStore) PurgeBadger() error {
+	s.logger.Debug("RunValueLogGC")
+	defer s.logger.Debug("RunValueLogGC done")
 	err := s.badger.RunValueLogGC(0.5)
 	if err != nil && err != badger.ErrNoRewrite {
 		return eerrors.Wrap(err, "Error happened when garbage collecting the badger")

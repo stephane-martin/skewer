@@ -26,7 +26,7 @@ type Reader struct {
 	stop           context.CancelFunc
 	wgroup         sync.WaitGroup
 	logger         log15.Logger
-	stasher        base.Stasher
+	stasher        *base.Reporter
 	fatalErrorChan chan struct{}
 	fatalOnce      sync.Once
 }
@@ -118,7 +118,7 @@ func (r *Reader) dofatal() {
 	r.fatalOnce.Do(func() { close(r.fatalErrorChan) })
 }
 
-func NewReader(stasher base.Stasher, logger log15.Logger) (*Reader, error) {
+func NewReader(stasher *base.Reporter, logger log15.Logger) (*Reader, error) {
 	var err error
 	r := &Reader{
 		logger:         logger,
