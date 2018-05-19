@@ -79,7 +79,7 @@ func (s *UdpServiceImpl) Parse() error {
 		}
 		err = s.ParseOne(raw, gen)
 		if err != nil {
-			base.ParsingErrorCounter.WithLabelValues("udp", raw.Client, raw.Decoder.Format).Inc()
+			base.CountParsingError(base.UDP, raw.Client, raw.Decoder.Format)
 			logg(s.Logger, &raw.RawMessage).Warn(err.Error())
 		}
 		model.RawUDPFree(raw)
@@ -92,45 +92,27 @@ func (s *UdpServiceImpl) Parse() error {
 }
 
 func (s *UdpServiceImpl) ParseOne(raw *model.RawUdpMessage, gen *utils.Generator) error {
-
-	logger := s.Logger.New(
-		"protocol", "udp",
-		"client", raw.Client,
-		"local_port", raw.LocalPort,
-		"unix_socket_path", raw.UnixSocketPath,
-		"format", raw.Decoder.Format,
-	)
-
-	parser, err := s.parserEnv.GetParser(&raw.Decoder)
-	if parser == nil || err != nil {
-		return decoders.DecodingError(eerrors.Wrapf(err, "Unknown decoder: %s", raw.Decoder.Format))
-	}
-	defer parser.Release()
-
-	syslogMsgs, err := parser.Parse(raw.GetMessage())
+	syslogMsgs, err := s.parserEnv.Parse(&raw.Decoder, raw.Message[:raw.Size])
 	if err != nil {
-		return decoders.DecodingError(eerrors.Wrap(err, "Parsing error"))
+		return err
 	}
 
-	var syslogMsg *model.SyslogMessage
-	var full *model.FullMessage
-
-	for _, syslogMsg = range syslogMsgs {
+	for _, syslogMsg := range syslogMsgs {
 		if syslogMsg == nil {
 			continue
 		}
-		full = model.FullFactoryFrom(syslogMsg)
+		full := model.FullFactoryFrom(syslogMsg)
 		full.Uid = gen.Uid()
 		full.ConfId = raw.ConfID
 		full.SourceType = "udp"
 		full.SourcePath = raw.UnixSocketPath
-		full.SourcePort = raw.LocalPort
+		full.SourcePort = int32(raw.LocalPort)
 		full.ClientAddr = raw.Client
 		err := s.stasher.Stash(full)
 		model.FullFree(full)
 
 		if err != nil {
-			logger.Warn("Error stashing UDP message", "error", err)
+			logg(s.Logger, &raw.RawMessage).Warn("Error stashing UDP message", "error", err)
 			if eerrors.IsFatal(err) {
 				return eerrors.Wrap(err, "Fatal error pushing UDP message to the Store")
 			}
@@ -285,8 +267,7 @@ func (s *UdpServiceImpl) ListenPacket(c chan model.ListenerInfo) {
 }
 
 func (s *UdpServiceImpl) handleConnection(conn net.PacketConn, config conf.UDPSourceConfig) (err error) {
-	var localPort int32
-	var localPortS string
+	var localPort int
 	var path string
 
 	s.AddConnection(conn)
@@ -297,11 +278,9 @@ func (s *UdpServiceImpl) handleConnection(conn net.PacketConn, config conf.UDPSo
 	if local != nil {
 		l := local.String()
 		s := strings.Split(l, ":")
-		localPort, err = utils.Atoi32(s[len(s)-1])
+		localPort, err = strconv.Atoi(s[len(s)-1])
 		if err != nil {
 			path = strings.TrimSpace(l)
-		} else {
-			localPortS = strconv.FormatInt(int64(localPort), 10)
 		}
 	}
 
@@ -331,6 +310,6 @@ func (s *UdpServiceImpl) handleConnection(conn net.PacketConn, config conf.UDPSo
 		if err != nil {
 			return eerrors.WithTypes(eerrors.Wrap(err, "Failed to enqueue new raw UDP message"))
 		}
-		base.IncomingMsgsCounter.WithLabelValues("udp", rawmsg.Client, localPortS, path).Inc()
+		base.CountIncomingMessage(base.UDP, rawmsg.Client, rawmsg.LocalPort, path)
 	}
 }

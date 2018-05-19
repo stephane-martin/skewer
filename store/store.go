@@ -94,6 +94,14 @@ func InitRegistry() {
 	})
 }
 
+func countACK(dest conf.DestinationType, status string) {
+	ackCounter.WithLabelValues(status, conf.DestinationNames[dest]).Inc()
+}
+
+func countFiltered(dest conf.DestinationType, status string, client string) {
+	messageFilterCounter.WithLabelValues(status, client, conf.DestinationNames[dest]).Inc()
+}
+
 type Destinations struct {
 	atomic.Uint64
 }
@@ -1189,7 +1197,7 @@ func (s *MessageStore) retrieve(dest conf.DestinationType) ([]*model.FullMessage
 }
 
 func (s *MessageStore) ACK(uid utils.MyULID, dest conf.DestinationType) {
-	ackCounter.WithLabelValues("ack", conf.DestinationNames[dest]).Inc()
+	countACK(dest, "ack")
 	_ = s.ackQueue.Put(uid, dest)
 }
 
@@ -1239,7 +1247,7 @@ func (s *MessageStore) doACK(acks []queue.UidDest) (err error) {
 }
 
 func (s *MessageStore) NACK(uid utils.MyULID, dest conf.DestinationType) {
-	ackCounter.WithLabelValues("nack", conf.DestinationNames[dest]).Inc()
+	countACK(dest, "nack")
 	_ = s.nackQueue.Put(uid, dest)
 }
 
@@ -1289,7 +1297,7 @@ func (s *MessageStore) doNACK(nacks []queue.UidDest) (err error) {
 }
 
 func (s *MessageStore) PermError(uid utils.MyULID, dest conf.DestinationType) {
-	ackCounter.WithLabelValues("permerror", conf.DestinationNames[dest]).Inc()
+	countACK(dest, "permerror")
 	_ = s.permerrorsQueue.Put(uid, dest)
 }
 

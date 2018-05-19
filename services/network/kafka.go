@@ -28,6 +28,26 @@ func initKafkaRegistry() {
 	})
 }
 
+var rawkafkapool = &sync.Pool{New: func() interface{} {
+	return &model.RawKafkaMessage{
+		Message: make([]byte, 0, 4096),
+	}
+}}
+
+func rawKafkaFactory(data []byte) (raw *model.RawKafkaMessage) {
+	raw = rawkafkapool.Get().(*model.RawKafkaMessage)
+	if cap(raw.Message) < len(data) {
+		raw.Message = make([]byte, 0, len(data))
+	}
+	raw.Message = raw.Message[:len(data)]
+	copy(raw.Message, data)
+	return raw
+}
+
+func freeRawKafka(raw *model.RawKafkaMessage) {
+	rawkafkapool.Put(raw)
+}
+
 type KafkaServiceImpl struct {
 	configs          []conf.KafkaSourceConfig
 	parserConfigs    []conf.ParserConfig
@@ -39,7 +59,6 @@ type KafkaServiceImpl struct {
 	wg               sync.WaitGroup
 	stopCtx          context.Context
 	stop             context.CancelFunc
-	rawpool          *sync.Pool
 	queues           *queue.KafkaQueues
 	fatalErrorChan   chan struct{}
 	fatalOnce        *sync.Once
@@ -61,9 +80,6 @@ func (s *KafkaServiceImpl) Type() base.Types {
 }
 
 func (s *KafkaServiceImpl) SetConf(c conf.BaseConfig) {
-	s.rawpool = &sync.Pool{New: func() interface{} {
-		return &model.RawKafkaMessage{}
-	}}
 	s.configs = c.KafkaSource
 	s.parserConfigs = c.Parsers
 	s.parserEnv = decoders.NewParsersEnv(s.parserConfigs, s.logger)
@@ -177,10 +193,10 @@ func (s *KafkaServiceImpl) parse() (err error) {
 		}
 		err = s.parseOne(raw)
 		if err != nil {
-			base.ParsingErrorCounter.WithLabelValues("kafka", raw.Client, raw.Decoder.Format).Inc()
+			base.CountParsingError(base.KafkaSource, raw.Client, raw.Decoder.Format)
 			logg(s.logger, &raw.RawMessage).Warn(err.Error())
 			if eerrors.IsFatal(err) {
-				s.rawpool.Put(raw)
+				freeRawKafka(raw)
 				return err
 			}
 		}
@@ -196,20 +212,14 @@ func (s *KafkaServiceImpl) parse() (err error) {
 				},
 			})
 		}
-		s.rawpool.Put(raw)
+		freeRawKafka(raw)
 	}
 }
 
 func (s *KafkaServiceImpl) parseOne(raw *model.RawKafkaMessage) (err error) {
-	parser, err := s.parserEnv.GetParser(&raw.Decoder)
-	if parser == nil || err != nil {
-		return decoders.DecodingError(eerrors.Wrapf(err, "Unknown decoder: %s", raw.Decoder.Format))
-	}
-	defer parser.Release()
-
-	syslogMsgs, err := parser.Parse(raw.Message)
+	syslogMsgs, err := s.parserEnv.Parse(&raw.Decoder, raw.Message)
 	if err != nil {
-		return decoders.DecodingError(eerrors.Wrap(err, "Parsing error"))
+		return err
 	}
 
 	for _, syslogMsg := range syslogMsgs {
@@ -342,25 +352,17 @@ func (s *KafkaServiceImpl) handleConsumer(ctx context.Context, config conf.Kafka
 				)
 				continue Loop
 			}
-			raw := s.rawpool.Get().(*model.RawKafkaMessage)
+			raw := rawKafkaFactory(value)
 			raw.UID = gen.Uid()
 			raw.Client = brokers
 			raw.ConfID = config.ConfID
 			raw.ConsumerID = ackQueue.ID()
 			raw.Decoder = config.DecoderBaseConfig
-			raw.Message = raw.Message[:len(value)]
-			copy(raw.Message, value)
 			raw.Topic = msg.Topic
 			raw.Partition = msg.Partition
 			raw.Offset = msg.Offset
-			err := s.rawMessagesQueue.Put(raw)
-			if err != nil {
-				// rawMessagesQueue has been disposed
-				s.rawpool.Put(raw)
-				s.logger.Warn("Error queueing kafka message", "error", err)
-			} else {
-				base.IncomingMsgsCounter.WithLabelValues("kafka", raw.Client, "", "").Inc()
-			}
+			s.rawMessagesQueue.Put(raw)
+			base.CountIncomingMessage(base.KafkaSource, raw.Client, 0, "")
 		}
 
 		// the previous for loop returns when the Messages channel has been closed

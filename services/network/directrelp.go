@@ -378,34 +378,28 @@ func makeDRELPLogger(logger log15.Logger, raw *model.RawTcpMessage) log15.Logger
 }
 
 func (s *DirectRelpServiceImpl) parseOne(raw *model.RawTcpMessage) error {
-
-	parser, err := s.parserEnv.GetParser(&raw.Decoder)
-	if err != nil || parser == nil {
-		s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
-		makeDRELPLogger(s.Logger, raw).Crit("Unknown parser")
-		return nil
+	syslogMsgs, err := s.parserEnv.Parse(&raw.Decoder, raw.Message)
+	if err != nil {
+		return err
 	}
-	defer parser.Release()
-	syslogMsgs, err := parser.Parse(raw.Message)
+
 	if err != nil {
 		makeDRELPLogger(s.Logger, raw).Warn("Parsing error", "error", err)
 		s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
-		base.ParsingErrorCounter.WithLabelValues("directrelp", raw.Client, raw.Decoder.Format).Inc()
+		base.CountParsingError(base.DirectRELP, raw.Client, raw.Decoder.Format)
+		// TODO
 		return nil
 	}
 
-	var syslogMsg *model.SyslogMessage
-	var full *model.FullMessage
-
-	for _, syslogMsg = range syslogMsgs {
+	for _, syslogMsg := range syslogMsgs {
 		if syslogMsg == nil {
 			continue
 		}
 
-		full = model.FullFactoryFrom(syslogMsg)
+		full := model.FullFactoryFrom(syslogMsg)
 		full.SourceType = "directrelp"
 		full.SourcePath = raw.UnixSocketPath
-		full.SourcePort = raw.LocalPort
+		full.SourcePort = int32(raw.LocalPort)
 		full.ClientAddr = raw.Client
 		full.Txnr = raw.Txnr
 		full.ConfId = raw.ConfID
@@ -519,14 +513,14 @@ func (s *DirectRelpServiceImpl) handleResponses(conn net.Conn, connID utils.MyUL
 				err = writeSuccess(conn, next)
 				if err == nil {
 					successes[next] = false
-					relpAnswersCounter.WithLabelValues("200", client).Inc()
+					countRelpAnswer(client, 200)
 					ackCounter.WithLabelValues("directrelp", "ack").Inc()
 				}
 			} else if failures[next] {
 				err = writeFailure(conn, next)
 				if err == nil {
 					failures[next] = false
-					relpAnswersCounter.WithLabelValues("500", client).Inc()
+					countRelpAnswer(client, 500)
 					ackCounter.WithLabelValues("directrelp", "nack").Inc()
 				}
 			} else {
@@ -662,7 +656,7 @@ func (h DirectRelpHandler) HandleConnection(conn net.Conn, c conf.TCPSourceConfi
 	l := makeLogger(s.Logger, props, "directrelp")
 	l.Info("New client")
 	defer l.Debug("Client gone away")
-	clientCounter(props, "directrelp")
+	clientCounter(base.DirectRELP, props)
 
 	var wg sync.WaitGroup
 

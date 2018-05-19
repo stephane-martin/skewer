@@ -194,29 +194,20 @@ func flogg(logger log15.Logger, raw *model.RawFileMessage) log15.Logger {
 }
 
 func (s *FilePollingService) parseOne(raw *model.RawFileMessage, gen *utils.Generator) error {
-	parser, err := s.parserEnv.GetParser(&raw.Decoder)
-	if parser == nil || err != nil {
-		return decoders.DecodingError(eerrors.Wrapf(err, "Unknown decoder: %s", raw.Decoder.Format))
-	}
-	defer parser.Release()
-
-	syslogMsgs, err := parser.Parse(raw.Line)
+	syslogMsgs, err := s.parserEnv.Parse(&raw.Decoder, raw.Line)
 	if err != nil {
-		return decoders.DecodingError(eerrors.Wrap(err, "Parsing error"))
+		return err
 	}
 
-	var syslogMsg *model.SyslogMessage
-	var full *model.FullMessage
-
-	for _, syslogMsg = range syslogMsgs {
+	for _, syslogMsg := range syslogMsgs {
 		if syslogMsg == nil {
 			continue
 		}
-		syslogMsg.SetProperty("skewer", "client", raw.Hostname)
 		syslogMsg.SetProperty("skewer", "filename", raw.Filename)
-		syslogMsg.SetProperty("skewer", "directory", raw.Directory)
-
-		full = model.FullFactoryFrom(syslogMsg)
+		full := model.FullFactoryFrom(syslogMsg)
+		full.SourceType = "filepoll"
+		full.SourcePath = raw.Directory
+		full.ClientAddr = raw.Hostname
 		full.Uid = gen.Uid()
 		full.ConfId = raw.ConfID
 		err := s.stasher.Stash(full)
@@ -242,7 +233,7 @@ func (s *FilePollingService) parse(rawq chan *model.RawFileMessage) error {
 		}
 		err := s.parseOne(raw, gen)
 		if err != nil {
-			base.ParsingErrorCounter.WithLabelValues("filepoll", raw.Hostname, raw.Decoder.Format).Inc()
+			base.CountParsingError(base.Filesystem, raw.Hostname, raw.Decoder.Format)
 			flogg(s.logger, raw).Warn(err.Error())
 		}
 		freeFRaw(raw)
@@ -287,7 +278,7 @@ func (s *FilePollingService) fetchLines(lines chan tail.FileLineID, rawq chan *m
 		}
 		raw.Line = l.Line
 		raw.ConfID = config.ConfID
-		base.IncomingMsgsCounter.WithLabelValues("filepoll", hostname, "0", config.BaseDirectory)
+		base.CountIncomingMessage(base.Filesystem, hostname, 0, config.BaseDirectory)
 		rawq <- raw
 	}
 }

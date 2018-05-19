@@ -173,15 +173,9 @@ func logg(logger log15.Logger, raw *model.RawMessage) log15.Logger {
 }
 
 func (s *TcpServiceImpl) parseOne(raw *model.RawTcpMessage, gen *utils.Generator) error {
-	parser, err := s.parserEnv.GetParser(&raw.Decoder)
-	if parser == nil || err != nil {
-		return decoders.DecodingError(eerrors.Wrapf(err, "Unknown decoder: %s", raw.Decoder.Format))
-	}
-	defer parser.Release()
-
-	syslogMsgs, err := parser.Parse(raw.Message)
+	syslogMsgs, err := s.parserEnv.Parse(&raw.Decoder, raw.Message)
 	if err != nil {
-		return decoders.DecodingError(eerrors.Wrap(err, "Parsing error"))
+		return err
 	}
 
 	for _, syslogMsg := range syslogMsgs {
@@ -195,7 +189,7 @@ func (s *TcpServiceImpl) parseOne(raw *model.RawTcpMessage, gen *utils.Generator
 		full.SourceType = "tcp"
 		full.ClientAddr = raw.Client
 		full.SourcePath = raw.UnixSocketPath
-		full.SourcePort = raw.LocalPort
+		full.SourcePort = int32(raw.LocalPort)
 
 		err := s.reporter.Stash(full)
 		model.FullFree(full)
@@ -220,7 +214,7 @@ func (s *TcpServiceImpl) parse() error {
 		}
 		err = s.parseOne(raw, gen)
 		if err != nil {
-			base.ParsingErrorCounter.WithLabelValues("tcp", raw.Client, raw.Decoder.Format).Inc()
+			base.CountParsingError(base.TCP, raw.Client, raw.Decoder.Format)
 			logg(s.Logger, &raw.RawMessage).Warn(err.Error())
 		}
 		model.RawTCPFree(raw)
@@ -247,12 +241,12 @@ func makeLogger(logger log15.Logger, props tcpProps, protocol string) log15.Logg
 	return logger.New("protocol", protocol, "client", props.Client, "local_port", props.LocalPortStr, "unix_socket_path", props.Path)
 }
 
-func clientCounter(props tcpProps, protocol string) {
-	base.ClientConnectionCounter.WithLabelValues(protocol, props.Client, props.LocalPortStr, props.Path).Inc()
+func clientCounter(t base.Types, props tcpProps) {
+	base.CountClientConnection(t, props.Client, props.LocalPort, props.Path)
 }
 
-func incomingCounter(props tcpProps, protocol string) {
-	base.IncomingMsgsCounter.WithLabelValues(protocol, props.Client, props.LocalPortStr, props.Path).Inc()
+func incomingCounter(t base.Types, props tcpProps) {
+	base.CountIncomingMessage(t, props.Client, props.LocalPort, props.Path)
 }
 
 type tcpHandler struct {
@@ -265,7 +259,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TCPSourceConfig)
 	props := eprops(conn)
 	logger := makeLogger(s.Logger, props, "tcp")
 	factory := makeRawTCPFactory(props, config.ConfID, config.DecoderBaseConfig)
-	clientCounter(props, "tcp")
+	clientCounter(base.TCP, props)
 
 	logger.Info("New client")
 
@@ -304,7 +298,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TCPSourceConfig)
 		if err != nil {
 			return eerrors.Fatal(eerrors.Wrap(err, "Failed to enqueue new raw TCP message"))
 		}
-		incomingCounter(props, "tcp")
+		incomingCounter(base.TCP, props)
 	}
 	err = scanner.Err()
 	if eerrors.HasFileClosed(err) {
@@ -377,7 +371,7 @@ func TcpSplit(data []byte, atEOF bool) (advance int, token []byte, eoferr error)
 }
 
 type tcpProps struct {
-	LocalPort    int32
+	LocalPort    int
 	LocalPortStr string
 	Client       string
 	Path         string
@@ -395,7 +389,7 @@ func eprops(conn net.Conn) (props tcpProps) {
 		local := conn.LocalAddr()
 		if local != nil {
 			s := strings.Split(local.String(), ":")
-			props.LocalPort, _ = utils.Atoi32(s[len(s)-1])
+			props.LocalPort, _ = strconv.Atoi(s[len(s)-1])
 		}
 	}
 	props.LocalPortStr = strconv.FormatInt(int64(props.LocalPort), 10)

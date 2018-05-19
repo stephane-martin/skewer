@@ -205,8 +205,7 @@ func (r *Reader) Start(confID utils.MyULID) {
 					r.logger.Warn("Non-fatal error stashing journal message", "error", err)
 					continue L
 				}
-				base.IncomingMsgsCounter.WithLabelValues("journald", hostname, "", "").Inc()
-
+				base.CountIncomingMessage(base.Journal, hostname, 0, "")
 			}
 		}
 

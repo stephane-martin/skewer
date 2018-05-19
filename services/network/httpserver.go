@@ -313,8 +313,8 @@ func releaseBody(buf **bytebufferpool.ByteBuffer) {
 }
 
 func (s *HTTPServiceImpl) handler(config conf.HTTPServerSourceConfig) func(http.ResponseWriter, *http.Request) {
-	ports := strconv.FormatInt(int64(config.Port), 10)
 	return func(w http.ResponseWriter, r *http.Request) {
+		base.CountClientConnection(base.HTTPServer, r.RemoteAddr, config.Port, "")
 		bodyBuf, err := getBody(r.Body, w, config.MaxBodySize)
 		if err != nil {
 			s.logger.Warn("Error reading request body", "error", err)
@@ -353,11 +353,11 @@ func (s *HTTPServiceImpl) handler(config conf.HTTPServerSourceConfig) func(http.
 			raw.Decoder = config.DecoderBaseConfig
 			raw.Client = r.RemoteAddr
 			raw.ConfID = config.ConfID
-			raw.LocalPort = int32(config.Port)
+			raw.LocalPort = config.Port
 			raw.ConnID = tracker.connID
 
 			s.rawMessagesQueue.Put(raw)
-			base.IncomingMsgsCounter.WithLabelValues("httpserver", raw.Client, ports, "").Inc()
+			base.CountIncomingMessage(base.HTTPServer, raw.Client, raw.LocalPort, "")
 
 			tracker.wait()
 			return
@@ -407,9 +407,9 @@ func (s *HTTPServiceImpl) handler(config conf.HTTPServerSourceConfig) func(http.
 			raw.Client = r.RemoteAddr
 			raw.ConnID = tracker.connID
 			raw.ConfID = config.ConfID
-			raw.LocalPort = int32(config.Port)
+			raw.LocalPort = config.Port
 			s.rawMessagesQueue.Put(raw)
-			base.IncomingMsgsCounter.WithLabelValues("httpserver", raw.Client, ports, "").Inc()
+			base.CountIncomingMessage(base.HTTPServer, raw.Client, raw.LocalPort, "")
 		}
 		releaseBody(&bodyBuf)
 		tracker.wait()
@@ -431,7 +431,7 @@ func (s *HTTPServiceImpl) parse() error {
 		err = s.parseAndEnqueue(gen, raw)
 		if err != nil {
 			s.fail(raw.ConnID)
-			base.ParsingErrorCounter.WithLabelValues("httpserver", raw.Client, raw.Decoder.Format).Inc()
+			base.CountParsingError(base.HTTPServer, raw.Client, raw.Decoder.Format)
 			logg(s.logger, &raw.RawMessage).Warn(err.Error())
 		} else {
 			s.done(raw.ConnID)
@@ -470,15 +470,9 @@ func (s *HTTPServiceImpl) parseAndEnqueue(gen *utils.Generator, raw *model.RawTc
 }
 
 func (s *HTTPServiceImpl) parseOne(raw *model.RawTcpMessage) (fulls []*model.FullMessage, err error) {
-	parser, err := s.parserEnv.GetParser(&raw.Decoder)
-	if parser == nil || err != nil {
-		return nil, decoders.DecodingError(eerrors.Wrapf(err, "Unknown decoder: %s", raw.Decoder.Format))
-	}
-	defer parser.Release()
-
-	syslogMsgs, err := parser.Parse(raw.Message)
+	syslogMsgs, err := s.parserEnv.Parse(&raw.Decoder, raw.Message)
 	if err != nil {
-		return nil, decoders.DecodingError(eerrors.Wrap(err, "Parsing error"))
+		return nil, err
 	}
 	if len(syslogMsgs) == 0 {
 		return nil, nil
@@ -491,7 +485,7 @@ func (s *HTTPServiceImpl) parseOne(raw *model.RawTcpMessage) (fulls []*model.Ful
 		}
 		full := model.FullFactoryFrom(syslogMsg)
 		full.SourceType = "httpserver"
-		full.SourcePort = raw.LocalPort
+		full.SourcePort = int32(raw.LocalPort)
 		full.ClientAddr = raw.Client
 		full.ConfId = raw.ConfID
 		full.ConnId = raw.ConnID

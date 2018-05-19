@@ -19,7 +19,7 @@ func InitRegistry() {
 			Name: "skw_incoming_messages_total",
 			Help: "total number of messages that were received",
 		},
-		[]string{"protocol", "client", "port", "path"},
+		[]string{"provider", "client", "port", "path"},
 	)
 
 	ClientConnectionCounter = prometheus.NewCounterVec(
@@ -27,7 +27,7 @@ func InitRegistry() {
 			Name: "skw_client_connections_total",
 			Help: "total number of client connections",
 		},
-		[]string{"protocol", "client", "port", "path"},
+		[]string{"provider", "client", "port", "path"},
 	)
 
 	ParsingErrorCounter = prometheus.NewCounterVec(
@@ -35,7 +35,7 @@ func InitRegistry() {
 			Name: "skw_parsing_errors_total",
 			Help: "total number of times there was a parsing error",
 		},
-		[]string{"protocol", "client", "parser_name"},
+		[]string{"provider", "client", "parsername"},
 	)
 
 	Registry = prometheus.NewRegistry()

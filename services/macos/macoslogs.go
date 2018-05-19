@@ -200,7 +200,7 @@ func (s *MacLogsService) parseStdout(stdout io.ReadCloser) {
 			s.logger.Error("Error stashing message", "error", err)
 			continue
 		}
-		base.IncomingMsgsCounter.WithLabelValues("macos", hostname, "", "").Inc()
+		base.CountIncomingMessage(base.MacOS, hostname, 0, "")
 	}
 
 }

@@ -184,7 +184,7 @@ func (s *GraylogSvcImpl) handleConnection(conn net.PacketConn, config conf.Grayl
 		s.wg.Done()
 	}()
 
-	var localPort int32
+	var localPort int
 	var localPortS string
 	var path string
 	var err error
@@ -201,7 +201,7 @@ func (s *GraylogSvcImpl) handleConnection(conn net.PacketConn, config conf.Grayl
 	if local != nil {
 		l := local.String()
 		s := strings.Split(l, ":")
-		localPort, err = utils.Atoi32(s[len(s)-1])
+		localPort, err = strconv.Atoi(s[len(s)-1])
 		if err != nil {
 			path = strings.TrimSpace(l)
 		} else {
@@ -273,7 +273,7 @@ func (s *GraylogSvcImpl) handleConnection(conn net.PacketConn, config conf.Grayl
 		}
 
 		if err != nil {
-			base.ParsingErrorCounter.WithLabelValues("graylog", client, "graylog").Inc()
+			base.CountParsingError(base.Graylog, client, "graylog")
 			logger.Warn("Error decoding full GELF message", "error", err)
 			continue
 		}
@@ -282,10 +282,10 @@ func (s *GraylogSvcImpl) handleConnection(conn net.PacketConn, config conf.Grayl
 		full.ConfId = config.ConfID
 		full.SourceType = "graylog"
 		full.SourcePath = path
-		full.SourcePort = localPort
+		full.SourcePort = int32(localPort)
 		full.ClientAddr = client
 		s.stasher.Stash(full)
-		base.IncomingMsgsCounter.WithLabelValues("graylog", client, localPortS, path).Inc()
+		base.CountIncomingMessage(base.Graylog, client, localPort, path)
 		model.FullFree(full)
 	}
 }

@@ -194,18 +194,18 @@ Loop:
 		switch filterResult {
 		case javascript.DROPPED:
 			fwder.store.ACK(m.Uid, fwder.desttype)
-			messageFilterCounter.WithLabelValues("dropped", m.Fields.GetProperty("skewer", "client"), conf.DestinationNames[fwder.desttype]).Inc()
+			countFiltered(fwder.desttype, "dropped", m.Fields.GetProperty("skewer", "client"))
 			continue Loop
 		case javascript.REJECTED:
-			messageFilterCounter.WithLabelValues("rejected", m.Fields.GetProperty("skewer", "client"), conf.DestinationNames[fwder.desttype]).Inc()
 			fwder.store.NACK(m.Uid, fwder.desttype)
+			countFiltered(fwder.desttype, "rejected", m.Fields.GetProperty("skewer", "client"))
 			continue Loop
 		case javascript.PASS:
-			messageFilterCounter.WithLabelValues("passing", m.Fields.GetProperty("skewer", "client"), conf.DestinationNames[fwder.desttype]).Inc()
+			countFiltered(fwder.desttype, "passing", m.Fields.GetProperty("skewer", "client"))
 		default:
 			fwder.store.PermError(m.Uid, fwder.desttype)
+			countFiltered(fwder.desttype, "unknown", m.Fields.GetProperty("skewer", "client"))
 			fwder.logger.Warn("Error happened processing message", "uid", m.Uid, "error", err)
-			messageFilterCounter.WithLabelValues("unknown", m.Fields.GetProperty("skewer", "client"), conf.DestinationNames[fwder.desttype]).Inc()
 			continue Loop
 		}
 		fwder.outputMsgs[i].PartitionKey = partitionKey

@@ -38,7 +38,7 @@ type RawFileMessage struct {
 type RawMessage struct {
 	Decoder        conf.DecoderBaseConfig
 	Client         string
-	LocalPort      int32
+	LocalPort      int
 	UnixSocketPath string
 	ConfID         utils.MyULID
 }

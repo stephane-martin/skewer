@@ -24,8 +24,7 @@ type BaseService struct {
 }
 
 func (s *BaseService) Init() {
-	s.UnixSocketPaths = []string{}
-	s.Connections = map[io.Closer]bool{}
+	s.ClearConnections()
 }
 
 func (s *BaseService) LockStatus() {

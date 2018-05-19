@@ -99,7 +99,26 @@ func (e *ParsersEnv) getJSEnv() *javascript.Environment {
 	return e.jsEnvsPool.Get().(*javascript.Environment)
 }
 
-func (e *ParsersEnv) GetParser(c *conf.DecoderBaseConfig) (p Parser, err error) {
+func (e *ParsersEnv) Parse(c *conf.DecoderBaseConfig, m []byte) ([]*model.SyslogMessage, error) {
+	if len(m) == 0 {
+		return nil, nil
+	}
+	if c == nil {
+		return nil, eerrors.Fatal(eerrors.New("Decoder config is NIL"))
+	}
+	parser, err := e.getParser(c)
+	if parser == nil || err != nil {
+		return nil, DecodingError(eerrors.Wrapf(err, "Unknown decoder: %s", c.Format))
+	}
+	syslogMsgs, err := parser.Parse(m)
+	parser.Release()
+	if err != nil {
+		return nil, DecodingError(eerrors.Wrap(err, "Parsing error"))
+	}
+	return syslogMsgs, nil
+}
+
+func (e *ParsersEnv) getParser(c *conf.DecoderBaseConfig) (p Parser, err error) {
 	frmt := base.ParseFormat(c.Format)
 	if frmt == -1 {
 		// look for a JS function

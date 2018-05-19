@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"runtime"
+	"strconv"
 	"sync"
 	"time"
 
@@ -55,6 +56,17 @@ func initRelpRegistry() {
 			relpProtocolErrorsCounter,
 		)
 	})
+}
+
+func countRelpProtocolError(client string) {
+	relpProtocolErrorsCounter.WithLabelValues(client).Inc()
+}
+
+func countRelpAnswer(client string, status int) {
+	relpAnswersCounter.WithLabelValues(
+		strconv.FormatInt(int64(status), 10),
+		client,
+	).Inc()
 }
 
 type RelpServerStatus int
@@ -492,32 +504,23 @@ func (s *RelpServiceImpl) SetConf(sc []conf.RELPSourceConfig, pc []conf.ParserCo
 }
 
 func (s *RelpServiceImpl) parseOne(raw *model.RawTcpMessage, gen *utils.Generator) error {
-	parser, err := s.parserEnv.GetParser(&raw.Decoder)
-	if parser == nil || err != nil {
-		return decoders.DecodingError(eerrors.Wrapf(err, "Unknown decoder: %s", raw.Decoder.Format))
-	}
-	defer parser.Release()
-
-	syslogMsgs, err := parser.Parse(raw.Message)
+	syslogMsgs, err := s.parserEnv.Parse(&raw.Decoder, raw.Message)
 	if err != nil {
-		return decoders.DecodingError(eerrors.Wrap(err, "Parsing error"))
+		return err
 	}
 
-	var syslogMsg *model.SyslogMessage
-	var full *model.FullMessage
-
-	for _, syslogMsg = range syslogMsgs {
+	for _, syslogMsg := range syslogMsgs {
 		if syslogMsg == nil {
 			continue
 		}
 
-		full = model.FullFactoryFrom(syslogMsg)
+		full := model.FullFactoryFrom(syslogMsg)
 		full.Txnr = raw.Txnr
 		full.ConfId = raw.ConfID
 		full.Uid = gen.Uid()
 		full.SourceType = "relp"
 		full.ClientAddr = raw.Client
-		full.SourcePort = raw.LocalPort
+		full.SourcePort = int32(raw.LocalPort)
 		full.SourcePath = raw.UnixSocketPath
 
 		err := s.reporter.Stash(full)
@@ -546,7 +549,7 @@ func (s *RelpServiceImpl) Parse() error {
 		err = s.parseOne(raw, gen)
 		if err != nil {
 			s.forwarder.ForwardFail(raw.ConnID, raw.Txnr)
-			base.ParsingErrorCounter.WithLabelValues("relp", raw.Client, raw.Decoder.Format).Inc()
+			base.CountParsingError(base.RELP, raw.Client, raw.Decoder.Format)
 			logg(s.Logger, &raw.RawMessage).Warn(err.Error())
 		} else {
 			s.forwarder.ForwardSucc(raw.ConnID, raw.Txnr)
@@ -619,13 +622,13 @@ func (s *RelpServiceImpl) handleResponses(conn net.Conn, connID utils.MyULID, cl
 				err = writeSuccess(conn, next)
 				if err == nil {
 					successes[next] = false
-					relpAnswersCounter.WithLabelValues("200", client).Inc()
+					countRelpAnswer(client, 200)
 				}
 			} else if failures[next] {
 				err = writeFailure(conn, next)
 				if err == nil {
 					failures[next] = false
-					relpAnswersCounter.WithLabelValues("500", client).Inc()
+					countRelpAnswer(client, 500)
 				}
 			} else {
 				break Cooking
@@ -658,7 +661,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, c conf.TCPSourceConfig) (er
 	l := makeLogger(s.Logger, props, "relp")
 	l.Info("New client")
 	defer l.Debug("Client gone away")
-	clientCounter(props, "relp")
+	clientCounter(base.RELP, props)
 
 	var wg sync.WaitGroup
 
@@ -714,11 +717,11 @@ func scan(l log15.Logger, f *ackForwarder, rawq *tcp.Ring, c net.Conn, tout time
 		splits = bytes.SplitN(scanner.Bytes(), sp, 3)
 		txnr, err = utils.Atoi32(string(splits[0]))
 		if err != nil {
-			relpProtocolErrorsCounter.WithLabelValues(props.Client).Inc()
+			countRelpProtocolError(props.Client)
 			return eerrors.Wrap(err, "Badly formed TXNR")
 		}
 		if txnr <= previous {
-			relpProtocolErrorsCounter.WithLabelValues(props.Client).Inc()
+			countRelpProtocolError(props.Client)
 			return eerrors.Errorf("TXNR has not increased (previous = %d, current = %d)", previous, txnr)
 		}
 		previous = txnr
@@ -732,13 +735,13 @@ func scan(l log15.Logger, f *ackForwarder, rawq *tcp.Ring, c net.Conn, tout time
 		if err != nil {
 			switch err.(type) {
 			case fsm.UnknownEventError:
-				relpProtocolErrorsCounter.WithLabelValues(props.Client).Inc()
+				countRelpProtocolError(props.Client)
 				return eerrors.Wrapf(err, "Unknown RELP command: %s", command)
 			case fsm.InvalidEventError:
-				relpProtocolErrorsCounter.WithLabelValues(props.Client).Inc()
+				countRelpProtocolError(props.Client)
 				return eerrors.Wrapf(err, "Invalid RELP command: %s", command)
 			case fsm.InternalError:
-				relpProtocolErrorsCounter.WithLabelValues(props.Client).Inc()
+				countRelpProtocolError(props.Client)
 				return eerrors.Wrap(err, "Internal RELP state machine error")
 			case fsm.NoTransitionError:
 				// syslog does not change opened/closed state
@@ -781,7 +784,7 @@ func newMachine(l log15.Logger, fwder *ackForwarder, rawq *tcp.Ring, conn io.Wri
 					return
 				}
 				if msiz > 0 && len(data) > msiz {
-					relpProtocolErrorsCounter.WithLabelValues(props.Client).Inc()
+					countRelpProtocolError(props.Client)
 					e.Err = fmt.Errorf("Message too large: %d > %d", len(data), msiz)
 					return
 				}
@@ -793,7 +796,7 @@ func newMachine(l log15.Logger, fwder *ackForwarder, rawq *tcp.Ring, conn io.Wri
 					e.Err = eerrors.Fatal(eerrors.Wrap(err, "Failed to enqueue new raw RELP message"))
 					return
 				}
-				incomingCounter(props, "relp")
+				incomingCounter(base.RELP, props)
 			},
 			"enter_closed": func(e *fsm.Event) {
 				txnr := e.Args[0].(int32)

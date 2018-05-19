@@ -142,7 +142,7 @@ func (s *AccountingService) readFile(ctx context.Context, f *os.File, tick int64
 			s.logger.Warn("Non-fatal error stashing accounting message", "error", err)
 			continue
 		}
-		base.IncomingMsgsCounter.WithLabelValues("accounting", hostname, "", "").Inc()
+		base.CountIncomingMessage(base.Accounting, hostname, 0, "")
 	}
 }
 
