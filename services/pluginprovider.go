@@ -31,11 +31,6 @@ func Wout(header []byte, msg []byte) (err error) {
 
 func Launch(ctx context.Context, typ base.Types, opts ...ProviderOpt) (err error) {
 	name := base.Types2Names[typ]
-	defer func() {
-		if e := eerrors.Err(recover()); e != nil {
-			err = eerrors.Wrapf(e, "Scanner panicked in plugin provider '%s'", name)
-		}
-	}()
 
 	env := &base.ProviderEnv{}
 	for _, opt := range opts {
@@ -77,7 +72,14 @@ func Launch(ctx context.Context, typ base.Types, opts ...ProviderOpt) (err error
 	scanner := utils.NewWrappedScanner(fatalctx, bufio.NewScanner(os.Stdin))
 	scanner.Split(utils.MakeSignSplit(signpubkey))
 
-	for scanner.Scan() {
+	for {
+		cont, err := utils.ScanRecover(scanner)
+		if err != nil {
+			return eerrors.Wrap(err, "Plugin provider scanning panicked")
+		}
+		if !cont {
+			break
+		}
 		parts := bytes.SplitN(scanner.Bytes(), space, 2)
 		command = string(parts[0])
 		switch command {

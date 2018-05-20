@@ -196,17 +196,21 @@ func serveOne(ctx context.Context, wg *sync.WaitGroup, parentFD uintptr, secret 
 	wg.Add(1)
 	go func() {
 		defer func() {
-			if e := recover(); e != nil {
-				errString := fmt.Sprintf("%s", e)
-				logger.Crit("scanner in binder server panicked", "err", errString)
-			}
 			cancel()
 			wg.Done()
 		}()
 
 		listeners := map[string]net.Listener{}
 		var rmsg string
-		for scanner.Scan() {
+		for {
+			cont, err := utils.ScanRecover(scanner)
+			if err != nil {
+				logger.Crit("Scanner panicked in binder server", "error", err)
+				return
+			}
+			if !cont {
+				break
+			}
 			rmsg = strings.Trim(scanner.Text(), " \r\n")
 			command := strings.SplitN(rmsg, " ", 2)[0]
 			args := strings.Trim(rmsg[len(command):], " \r\n")

@@ -614,7 +614,7 @@ func getViper(confDir string) (v *viper.Viper, err error) {
 
 func InitLoad(ctx context.Context, confDir string, p consul.ConnParams, r kring.Ring, l log15.Logger) (c BaseConfig, updates chan *BaseConfig, err error) {
 	defer func() {
-		// sometimes viper panics... let's catch that
+		// viper may panic... let's catch that
 		if e := eerrors.Err(recover()); e != nil {
 			l.Warn("Panic recovered in conf.InitLoad()", "error", e.Error())
 		}

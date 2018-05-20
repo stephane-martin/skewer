@@ -260,11 +260,6 @@ type infosAndError struct {
 
 // listen for the encrypted messages that the plugin produces
 func (s *PluginController) listenpipe(secret *memguard.LockedBuffer) (err error) {
-	defer func() {
-		if e := eerrors.Err(recover()); e != nil {
-			err = eerrors.Wrapf(e, "scanner panicked in plugin '%s' controller listening pipe", s.name)
-		}
-	}()
 	if s.pipe == nil || s.typ == base.Store || s.typ == base.Configuration {
 		return nil
 	}
@@ -275,7 +270,14 @@ func (s *PluginController) listenpipe(secret *memguard.LockedBuffer) (err error)
 	var message *model.FullMessage
 	protobuff := proto.NewBuffer(make([]byte, 0, 4096))
 
-	for scanner.Scan() {
+	for {
+		cont, err := utils.ScanRecover(scanner)
+		if err != nil {
+			return eerrors.Wrap(err, "Plugin control scanning panicked")
+		}
+		if !cont {
+			break
+		}
 		protobuff.SetBuf(scanner.Bytes())
 		message, err = model.FromBuf(protobuff)
 		if err != nil {
@@ -319,11 +321,6 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 		normalStop := false
 
 		defer func() {
-			err := eerrors.Err(recover())
-			if err != nil {
-				s.logger.Error("Scanner panicked in plugin control", "error", err)
-			}
-
 			s.logger.Debug("Plugin controller is stopping", "type", s.name)
 			startError(eerrors.New("unexpected end of plugin before it was initialized"), nil)
 
@@ -364,9 +361,19 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 		scanner.Buffer(make([]byte, 0, 132000), 132000)
 		command := ""
 		infos := make([]model.ListenerInfo, 0)
-		var m *model.FullMessage
 
-		for scanner.Scan() {
+		for {
+			cont, err := utils.ScanRecover(scanner)
+			if err != nil {
+				err = eerrors.Wrap(err, "Scanner panicked in plugin control listen pipe")
+				s.logger.Crit(err.Error())
+				startError(err, nil)
+				kill = true
+				return
+			}
+			if !cont {
+				break
+			}
 			parts := bytes.SplitN(scanner.Bytes(), space, 2)
 			command = string(parts[0])
 			switch command {
@@ -381,7 +388,7 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 						kill = true
 						return
 					}
-					m = model.FullFactory()
+					m := model.FullFactory()
 					err := m.Decrypt(secret, parts[1])
 					if err == nil {
 						err = s.stasher.Stash(m)

@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	"fmt"
 	"io"
 	"math"
 	"net"
@@ -31,8 +30,15 @@ var endl = []byte("\n")
 var sp = []byte(" ")
 var zerotime = time.Time{}
 
-var ErrRELPNotConnected = eerrors.New("RELPClient: not connected")
-var ErrRELPClosed = eerrors.New("RELPClient: closed")
+func RELPClientError(err error) error {
+	return eerrors.WithTypes(err, "RELPClient")
+}
+
+var ErrRELPNotConnected = RELPClientError(eerrors.New("Not connected"))
+var ErrRELPClosed = RELPClientError(eerrors.New("Closed"))
+var ErrRELPNoHost = RELPClientError(eerrors.New("Empty host or empty unix socket path"))
+var ErrRELPNoPort = RELPClientError(eerrors.New("Empty port"))
+var ErrRELPTimeout = RELPClientError(eerrors.New("Timeout waiting for RELP response"))
 
 type IntKey int32
 
@@ -83,8 +89,7 @@ func (m *Txnr2UidMap) Get(txnr int32) (uid utils.MyULID, err error) {
 		m.sem.Release()
 		return t.(utils.MyULID), nil
 	}
-	err = fmt.Errorf("unknown txnr: %d", txnr)
-	return
+	return uid, RELPClientError(eerrors.Errorf("Unknown TXNR: %d", txnr))
 }
 
 func (m *Txnr2UidMap) ForEach(f func(int32, utils.MyULID)) {
@@ -193,7 +198,7 @@ func (c *RELPClient) TLS(config *tls.Config) *RELPClient {
 
 func (c *RELPClient) Connect() (err error) {
 	if c.closed.Load() {
-		return eerrors.New("RELPClient: closed")
+		return ErrRELPClosed
 	}
 	defer func() {
 		if err != nil {
@@ -218,10 +223,10 @@ func (c *RELPClient) Connect() (err error) {
 
 	if len(c.path) == 0 {
 		if len(c.host) == 0 {
-			return eerrors.New("RELPClient: specify a host or a unix path")
+			return ErrRELPNoHost
 		}
 		if c.port == 0 {
-			return eerrors.New("RELPClient: specify a port")
+			return ErrRELPNoPort
 		}
 		hostport := net.JoinHostPort(c.host, strconv.FormatInt(int64(c.port), 10))
 		var dialer *net.Dialer
@@ -236,7 +241,7 @@ func (c *RELPClient) Connect() (err error) {
 			conn, err = tls.DialWithDialer(dialer, "tcp", hostport, c.tlsConfig)
 		}
 		if err != nil {
-			return err
+			return RELPClientError(eerrors.Wrap(err, "Error connecting to TCP server"))
 		}
 		tcpconn := conn.(*net.TCPConn)
 		if c.keepAlive {
@@ -250,7 +255,7 @@ func (c *RELPClient) Connect() (err error) {
 			conn, err = net.DialTimeout("unix", c.path, c.connTimeout)
 		}
 		if err != nil {
-			return err
+			return RELPClientError(eerrors.Wrap(err, "Error connecting to TCP server"))
 		}
 	}
 
@@ -260,7 +265,7 @@ func (c *RELPClient) Connect() (err error) {
 
 	err = c.wopen()
 	if err != nil {
-		return err
+		return RELPClientError(eerrors.Wrap(err, "Error opening RELP session"))
 	}
 	if c.connTimeout != 0 {
 		_ = c.conn.SetReadDeadline(time.Now().Add(c.connTimeout))
@@ -270,18 +275,17 @@ func (c *RELPClient) Connect() (err error) {
 		return err
 	}
 	if txnr != 0 {
-		return fmt.Errorf("RELP server answered 'open' with a non-zero txnr: '%d'", txnr)
+		return RELPClientError(eerrors.Errorf("RELP server answered 'open' with a non-zero txnr: '%d'", txnr))
 	}
 	if retcode != 200 {
-		return fmt.Errorf("RELP server answered 'open' with a non-200 status code: '%d'", retcode)
+		return RELPClientError(eerrors.Errorf("RELP server answered 'open' with a non-200 status code: '%d'", retcode))
 	}
 	if c.flushPeriod > 0 {
 		c.writer = concurrent.NewWriterAutoFlush(c.conn, 4096, 0.75)
 		c.ticker = time.NewTicker(c.flushPeriod)
 		go func() {
-			var err error
 			for range c.ticker.C {
-				err = c.Flush()
+				err := c.Flush()
 				if err != nil {
 					if eerrors.HasBrokenPipe(err) || eerrors.HasFileClosed(err) {
 						c.logger.Warn("Broken pipe detected when flushing buffers", "error", err)
@@ -309,7 +313,13 @@ func (c *RELPClient) Connect() (err error) {
 	c.nackChan = queue.NewAckQueue()
 	c.txnr2msgid = NewTxnrMap(window)
 	c.handleWg.Add(1)
-	go c.handleRspAnswers()
+	go func() {
+		defer c.handleWg.Done()
+		err := c.handleRspAnswers()
+		if err != nil {
+			c.logger.Info(err.Error())
+		}
+	}()
 	return nil
 }
 
@@ -322,13 +332,13 @@ func (c *RELPClient) encode(command string, v interface{}) (buf string, txnr int
 	// if no error, we can increment txnr
 	txnr = c.curtxnr.Add(1)
 	if len(buf) == 0 {
-		buf, err = encoders.RelpEncode(c.encoder, txnr, command, nil) // cannot fail
+		buf, err = encoders.RELPEncode(c.encoder, txnr, command, nil) // cannot fail
 	} else {
-		buf, err = encoders.RelpEncode(c.encoder, txnr, command, buf) // cannot fail
+		buf, err = encoders.RELPEncode(c.encoder, txnr, command, buf) // cannot fail
 	}
 	if err != nil {
-		c.logger.Error("RelpEncode error, should not happen", "error", err)
-		return "", 0, err
+		c.logger.Error("RELPEncode error, should not happen", "error", err)
+		return "", 0, RELPClientError(eerrors.Wrap(err, "RELPEncode error"))
 	}
 	return buf, txnr, nil
 }
@@ -356,24 +366,20 @@ func (c *RELPClient) wclose() (err error) {
 }
 
 func (c *RELPClient) scan() (txnr int32, retcode int, data []byte, err error) {
-	defer func() {
-		if e := recover(); e != nil {
-			err = fmt.Errorf("%s", e)
-		}
-	}()
-	if !c.scanner.Scan() {
-		err = c.scanner.Err()
-		return
+	ret, err := utils.ScanRecover(c.scanner)
+	if err != nil {
+		return 0, 0, nil, RELPClientError(err)
+	}
+	if !ret {
+		return 0, 0, nil, c.scanner.Err()
 	}
 	splits := bytes.SplitN(c.scanner.Bytes(), sp, 4)
 	txnr64, _ := strconv.ParseInt(string(splits[0]), 10, 64)
 	if txnr64 > int64(math.MaxInt32) {
-		err = fmt.Errorf("RELPClient: received txnr is not an int32: %d", txnr64)
-		return
+		return 0, 0, nil, RELPClientError(eerrors.Errorf("RELPClient: received txnr is not an int32: %d", txnr64))
 	}
 	if string(splits[1]) != "rsp" {
-		err = fmt.Errorf("RELP server answered with invalid command: '%s'", string(splits[1]))
-		return
+		return 0, 0, nil, RELPClientError(eerrors.Errorf("RELP server answered with invalid command: '%s'", string(splits[1])))
 	}
 	txnr = int32(txnr64)
 	datalen, _ := strconv.Atoi(string(splits[2]))
@@ -393,13 +399,12 @@ func (c *RELPClient) scan() (txnr int32, retcode int, data []byte, err error) {
 	return
 }
 
-func (c *RELPClient) handleRspAnswers() {
+func (c *RELPClient) handleRspAnswers() error {
 	// returns if
 	// - Close() was called (hence the conn was closed)
 	// - conn was closed by server
 	// - there was a RELP session timeout
 	defer func() {
-
 		_ = c.conn.Close() // in case the conn was not properly closed
 		// now we can NACK the messages that we did not have a response for,
 		// as no more txnr2msgid entries will be added by Send()
@@ -418,7 +423,6 @@ func (c *RELPClient) handleRspAnswers() {
 		// close the ackChan channels: we have nothing more to say
 		c.ackChan.Dispose()
 		c.nackChan.Dispose()
-		c.handleWg.Done()
 	}()
 
 	for {
@@ -430,23 +434,20 @@ func (c *RELPClient) handleRspAnswers() {
 
 		if err != nil {
 			if eerrors.HasFileClosed(err) || eerrors.HasBrokenPipe(err) {
-				c.logger.Debug("Connection has been closed")
-				return
+				return ErrRELPClosed
 			}
 			if eerrors.IsTimeout(err) {
-				c.logger.Info("timeout waiting for RELP answers", "error", err)
-				return
+				return ErrRELPTimeout
 			}
 			if eerrors.IsTemporary(err) {
-				c.logger.Info("temporary error", "error", err)
+				c.logger.Info("RELP client temporary error", "error", err)
 				continue
 			}
-			c.logger.Info("error reading server responses", "error", err)
-			return
+			return RELPClientError(eerrors.Wrap(err, "Error scanning RELP server response"))
 		}
 		uid, err := c.txnr2msgid.Get(txnr)
 		if err != nil {
-			c.logger.Warn("Unknown txnr", "txnr", txnr)
+			c.logger.Warn("RELP CLient: unknown txnr", "txnr", txnr)
 			continue
 		}
 		if retcode != 200 {
@@ -476,7 +477,6 @@ func (c *RELPClient) doSendOne(msg *model.FullMessage) (err error) {
 		_, err = c.writer.WriteString(buf)
 	}
 	if err != nil {
-		// error happened sending the message
 		return err
 	}
 	// everything alright, we register the Uid to wait for the server response
@@ -484,14 +484,13 @@ func (c *RELPClient) doSendOne(msg *model.FullMessage) (err error) {
 }
 
 func (c *RELPClient) Send(ctx context.Context, msg *model.FullMessage) error {
-
 	if c.conn == nil {
 		return ErrRELPNotConnected
 	}
 	if c.closed.Load() {
 		return ErrRELPClosed
 	}
-	return c.doSendOne(msg)
+	return RELPClientError(eerrors.Wrap(c.doSendOne(msg), "Error sending RELP message"))
 }
 
 func (c *RELPClient) Close() (err error) {
@@ -517,7 +516,7 @@ func (c *RELPClient) Close() (err error) {
 	// close the connection to the RELP server
 	_ = c.conn.Close() // makes handleRspAnswers return
 	c.handleWg.Wait()
-	return err
+	return RELPClientError(eerrors.Wrap(err, "Error closing RELP session"))
 }
 
 func (c *RELPClient) Ack() *queue.AckQueue {
@@ -530,7 +529,7 @@ func (c *RELPClient) Nack() *queue.AckQueue {
 
 func (c *RELPClient) Flush() error {
 	if c.writer != nil {
-		return c.writer.Flush()
+		return RELPClientError(eerrors.Wrap(c.writer.Flush(), "Error flushing RELP connection buffer"))
 	}
 	return nil
 }

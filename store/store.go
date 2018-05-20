@@ -31,6 +31,8 @@ var Registry *prometheus.Registry
 var badgerGauge *prometheus.GaugeVec
 var ackCounter *prometheus.CounterVec
 var messageFilterCounter *prometheus.CounterVec
+var retrieveTimeSummary prometheus.Summary
+
 var once sync.Once
 
 var msgsSlicePool = &sync.Pool{
@@ -74,8 +76,19 @@ func InitRegistry() {
 			[]string{"status", "client", "destination"},
 		)
 
+		retrieveTimeSummary = prometheus.NewSummary(
+			prometheus.SummaryOpts{
+				Help:       "histogram for the response time to retrieve messages from the Store",
+				Name:       "skw_store_retrieve",
+				Objectives: prometheus.DefObjectives,
+				MaxAge:     prometheus.DefMaxAge,
+				AgeBuckets: prometheus.DefAgeBuckets,
+				BufCap:     prometheus.DefBufCap,
+			},
+		)
+
 		Registry = prometheus.NewRegistry()
-		Registry.MustRegister(badgerGauge, ackCounter, messageFilterCounter)
+		Registry.MustRegister(badgerGauge, ackCounter, messageFilterCounter, retrieveTimeSummary)
 
 		// TODO: gather badger metrics
 
@@ -426,12 +439,10 @@ RetrieveLoop:
 			next[currentDest] = now.Add(waits[currentDest].Next())
 			continue RetrieveLoop
 		}
-		//now := time.Now()
 		messages, err := s.retrieve(currentDest)
 		if err != nil {
 			return eerrors.Wrap(err, "Failed to retrieve messages from badger")
 		}
-		//s.logger.Debug("retrieve", "seconds", time.Now().Sub(now).Seconds())
 		if len(messages) == 0 {
 			// no messages in store for that destination
 			next[currentDest] = now.Add(waits[currentDest].Next())
@@ -1197,6 +1208,11 @@ func tryRetrieveHelper(msgsDB, readyDB, sentDB db.Partition, badg *badger.DB, ba
 }
 
 func (s *MessageStore) retrieve(dest conf.DestinationType) ([]*model.FullMessage, error) {
+	now := time.Now()
+	defer func() {
+		retrieveTimeSummary.Observe(time.Now().Sub(now).Seconds() * 1000)
+	}()
+
 	// messages object is allocated from a pool, so it's the responsability of
 	// the caller to put back messages to the pool when finished
 	messagesDB := s.backend.GetPartition(Messages, dest)

@@ -156,7 +156,7 @@ func TcpOctetEncode(e Encoder, obj interface{}) (ret string, err error) {
 	return ret, err
 }
 
-func RelpEncode(e Encoder, txnr int32, command string, obj interface{}) (ret string, err error) {
+func RELPEncode(e Encoder, txnr int32, command string, obj interface{}) (ret string, err error) {
 	if obj == nil {
 		return ChainEncode(e, txnr, sp, command, sp, int(0), endl)
 	}

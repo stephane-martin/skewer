@@ -125,13 +125,7 @@ func (s *storeServiceImpl) create() (err error) {
 	// receive syslog messages on the pipe
 	s.ingestwg.Add(1)
 	go func() {
-		defer func() {
-			if e := eerrors.Err(recover()); e != nil {
-				err := eerrors.Wrap(e, "Scanner panicked in store service")
-				s.logger.Error(err.Error())
-			}
-			s.ingestwg.Done()
-		}()
+		defer s.ingestwg.Done()
 
 		scanner := utils.NewWrappedScanner(s.pipeCtx, bufio.NewScanner(s.pipe))
 		scanner.Split(utils.MakeDecryptSplit(s.secret))
@@ -141,7 +135,16 @@ func (s *storeServiceImpl) create() (err error) {
 		protobuff := proto.NewBuffer(make([]byte, 0, 4096))
 
 		for {
-			for scanner.Scan() {
+			for {
+				cont, err := utils.ScanRecover(scanner)
+				if err != nil {
+					s.logger.Crit("Scanner panicked in store service", "error", err)
+					go func() { s.Shutdown() }()
+					return
+				}
+				if !cont {
+					break
+				}
 				msgBytes := scanner.Bytes()
 				protobuff.SetBuf(msgBytes)
 				message, err := model.FromBuf(protobuff) // we need to parse to get the message uid

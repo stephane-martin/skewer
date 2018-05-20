@@ -707,13 +707,14 @@ func scan(l log15.Logger, f *ackForwarder, rawq *tcp.Ring, c net.Conn, tout time
 	scanner.Split(utils.RelpSplit)
 	scanner.Buffer(make([]byte, 0, 132000), 132000)
 
-	defer func() {
-		if e := eerrors.Err(recover()); e != nil {
-			err = eerrors.Wrap(e, "Scanner panicked in RELP service")
+	for {
+		cont, err := utils.ScanRecover(scanner)
+		if err != nil {
+			return eerrors.Wrap(err, "Scanner panicked in RELP service")
 		}
-	}()
-
-	for scanner.Scan() {
+		if !cont {
+			break
+		}
 		splits = bytes.SplitN(scanner.Bytes(), sp, 3)
 		txnr, err = utils.Atoi32(string(splits[0]))
 		if err != nil {

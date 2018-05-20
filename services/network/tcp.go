@@ -256,20 +256,13 @@ type tcpHandler struct {
 func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TCPSourceConfig) (err error) {
 	s := h.Server
 	s.AddConnection(conn)
+	defer s.RemoveConnection(conn)
+
 	props := eprops(conn)
 	logger := makeLogger(s.Logger, props, "tcp")
+	logger.Info("New client")
 	factory := makeRawTCPFactory(props, config.ConfID, config.DecoderBaseConfig)
 	clientCounter(base.TCP, props)
-
-	logger.Info("New client")
-
-	defer func() {
-		if e := eerrors.Err(recover()); e != nil {
-			err = eerrors.Wrap(e, "Scanner panicked in TCP service")
-		}
-		logger.Debug("Closed connected to TCP Client")
-		s.RemoveConnection(conn)
-	}()
 
 	timeout := config.Timeout
 	if timeout > 0 {
@@ -283,7 +276,14 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TCPSourceConfig)
 		scanner.Split(TcpSplit)
 	}
 
-	for scanner.Scan() {
+	for {
+		cont, err := utils.ScanRecover(scanner)
+		if err != nil {
+			return eerrors.Wrap(err, "Scanner panicked in TCP service")
+		}
+		if !cont {
+			break
+		}
 		if timeout > 0 {
 			_ = conn.SetReadDeadline(time.Now().Add(timeout))
 		}
@@ -331,7 +331,7 @@ func makeLFTCPSplit(delimiter string) func(d []byte, a bool) (int, []byte, error
 
 func getline(data []byte, trimmed int, eoferr error) (int, []byte, error) {
 	lf := bytes.IndexByte(data, '\n')
-	if lf == 0 {
+	if lf <= 0 {
 		return 0, nil, eoferr
 	}
 	token := bytes.Trim(data[0:lf], " \r\n")

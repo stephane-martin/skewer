@@ -148,10 +148,6 @@ func (c *ConfigurationService) Start(r kring.Ring) error {
 		kill := false
 		once := &sync.Once{}
 		defer func() {
-			err := eerrors.Err(recover())
-			if err != nil {
-				c.logger.Error("Scanner panicked in configuration controller", "error", err)
-			}
 			c.logger.Debug("Configuration service is stopping")
 
 			once.Do(func() {
@@ -200,7 +196,16 @@ func (c *ConfigurationService) Start(r kring.Ring) error {
 		scanner := bufio.NewScanner(cmd.Stdout)
 		scanner.Split(utils.MakeDecryptSplit(c.boxsec))
 
-		for scanner.Scan() {
+		for {
+			cont, err := utils.ScanRecover(scanner)
+			if err != nil {
+				c.logger.Crit("Scanner panicked in configuration controller", "error", err)
+				kill = true
+				return
+			}
+			if !cont {
+				break
+			}
 			parts := strings.SplitN(scanner.Text(), " ", 2)
 			command = parts[0]
 			switch command {
@@ -339,12 +344,6 @@ func start(confdir string, params consul.ConnParams, r kring.Ring, logger log15.
 }
 
 func LaunchConfProvider(ctx context.Context, r kring.Ring, confined bool, logger log15.Logger) (err error) {
-	defer func() {
-		if e := recover(); e != nil {
-			errString := fmt.Sprintf("%s", e)
-			err = fmt.Errorf("ccanner panicked in configuration provider: %s", errString)
-		}
-	}()
 	if r == nil {
 		return fmt.Errorf("no ring provided")
 	}
@@ -365,7 +364,14 @@ func LaunchConfProvider(ctx context.Context, r kring.Ring, confined bool, logger
 	var command string
 	var cancel context.CancelFunc
 
-	for scanner.Scan() {
+	for {
+		cont, err := utils.ScanRecover(scanner)
+		if err != nil {
+			return eerrors.Wrap(err, "Scanner panicked in configuration provider")
+		}
+		if !cont {
+			break
+		}
 		parts := strings.SplitN(scanner.Text(), " ", 2)
 		command = parts[0]
 
