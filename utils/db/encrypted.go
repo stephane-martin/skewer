@@ -51,30 +51,18 @@ func NewEncryptedPartition(p Partition, secret *memguard.LockedBuffer) (Partitio
 	}, nil
 }
 
-func (encDB *EncryptedDB) KeyIterator(prefetchSize uint32, txn *NTransaction) *ULIDIterator {
-	var prefetch int
-	if uint64(prefetchSize) > uint64(MaxInt) {
-		prefetch = MaxInt
-	} else {
-		prefetch = int(prefetchSize)
-	}
+func (encDB *EncryptedDB) KeyIterator(txn *NTransaction) *ULIDIterator {
 	opt := badger.IteratorOptions{
 		PrefetchValues: false,
-		PrefetchSize:   int(prefetch),
+		PrefetchSize:   100,
 	}
 	return &ULIDIterator{iter: txn.NewIterator(opt), secret: encDB.secret, prefix: []byte(encDB.p.prefix)}
 }
 
-func (encDB *EncryptedDB) KeyValueIterator(prefetchSize uint32, txn *NTransaction) *ULIDIterator {
-	var prefetch int
-	if uint64(prefetchSize) > uint64(MaxInt) {
-		prefetch = MaxInt
-	} else {
-		prefetch = int(prefetchSize)
-	}
+func (encDB *EncryptedDB) KeyValueIterator(txn *NTransaction) *ULIDIterator {
 	opt := badger.IteratorOptions{
 		PrefetchValues: true,
-		PrefetchSize:   prefetch,
+		PrefetchSize:   100,
 	}
 	return &ULIDIterator{iter: txn.NewIterator(opt), secret: encDB.secret, prefix: []byte(encDB.p.prefix)}
 }

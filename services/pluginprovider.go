@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"sync"
 
@@ -17,6 +18,7 @@ import (
 
 var stdoutMu sync.Mutex
 var stdoutWriter *utils.EncryptWriter
+var emptyMetrics = make([]*dto.MetricFamily, 0)
 
 func init() {
 	stdoutWriter = utils.NewEncryptWriter(os.Stdout, nil)
@@ -163,16 +165,17 @@ func Launch(ctx context.Context, typ base.Types, opts ...ProviderOpt) (err error
 				return err
 			}
 		case "gathermetrics":
-			empty := []*dto.MetricFamily{}
 			families, err := svc.Gather()
 			if err != nil {
 				env.Logger.Warn("Error gathering metrics", "type", name, "error", err)
-				families = empty
+				families = emptyMetrics
 			}
 			familiesb, err := json.Marshal(families)
 			if err != nil {
-				env.Logger.Warn("Provider had error marshaling metrics", "type", name, "error", err)
-				familiesb, _ = json.Marshal(empty)
+				env.Logger.Warn("Error marshaling metrics", "type", name, "error", err)
+				fmt.Fprintf(os.Stderr, "%v\n", families)
+				//env.Logger.Warn()
+				familiesb, _ = json.Marshal(emptyMetrics)
 			}
 			err = Wout(METRICS, familiesb)
 			if err != nil {

@@ -112,7 +112,7 @@ func (p *partitionImpl) DeleteMany(keys []utils.MyULID, txn *NTransaction) (err 
 
 func (p *partitionImpl) ListKeys(txn *NTransaction) []utils.MyULID {
 	l := []utils.MyULID{}
-	iter := p.KeyIterator(1000, txn)
+	iter := p.KeyIterator(txn)
 	for iter.Rewind(); iter.Valid(); iter.Next() {
 		l = append(l, iter.Key())
 	}
@@ -122,7 +122,7 @@ func (p *partitionImpl) ListKeys(txn *NTransaction) []utils.MyULID {
 
 func (p *partitionImpl) Count(txn *NTransaction) int {
 	var l int
-	iter := p.KeyIterator(1000, txn)
+	iter := p.KeyIterator(txn)
 	for iter.Rewind(); iter.Valid(); iter.Next() {
 		l++
 	}
@@ -133,30 +133,22 @@ func (p *partitionImpl) Count(txn *NTransaction) int {
 const MaxUint = ^uint(0)
 const MaxInt = int(MaxUint >> 1)
 
-func (p *partitionImpl) KeyIterator(prefetchSize uint32, txn *NTransaction) *ULIDIterator {
-	var prefetch int
-	if uint64(prefetchSize) > uint64(MaxInt) {
-		prefetch = MaxInt
-	} else {
-		prefetch = int(prefetchSize)
-	}
+func (p *partitionImpl) KeyIterator(txn *NTransaction) *ULIDIterator {
 	opt := badger.IteratorOptions{
 		PrefetchValues: false,
-		PrefetchSize:   int(prefetch),
+		PrefetchSize:   100,
+		Reverse:        false,
+		AllVersions:    false,
 	}
 	return &ULIDIterator{iter: txn.NewIterator(opt), secret: nil, prefix: []byte(p.prefix)}
 }
 
-func (p *partitionImpl) KeyValueIterator(prefetchSize uint32, txn *NTransaction) *ULIDIterator {
-	var prefetch int
-	if uint64(prefetchSize) > uint64(MaxInt) {
-		prefetch = MaxInt
-	} else {
-		prefetch = int(prefetchSize)
-	}
+func (p *partitionImpl) KeyValueIterator(txn *NTransaction) *ULIDIterator {
 	opt := badger.IteratorOptions{
 		PrefetchValues: true,
-		PrefetchSize:   prefetch,
+		PrefetchSize:   100,
+		Reverse:        false,
+		AllVersions:    false,
 	}
 	return &ULIDIterator{iter: txn.NewIterator(opt), secret: nil, prefix: []byte(p.prefix)}
 }

@@ -113,6 +113,6 @@ type Partition interface {
 	AddManyTrueMap(m map[utils.MyULID]string, txn *NTransaction) error
 	Get(key utils.MyULID, dst []byte, txn *NTransaction) ([]byte, error)
 	Exists(key utils.MyULID, txn *NTransaction) (bool, error)
-	KeyIterator(prefetchSize uint32, txn *NTransaction) *ULIDIterator
-	KeyValueIterator(prefetchSize uint32, txn *NTransaction) *ULIDIterator
+	KeyIterator(txn *NTransaction) *ULIDIterator
+	KeyValueIterator(txn *NTransaction) *ULIDIterator
 }

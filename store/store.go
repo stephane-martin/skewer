@@ -947,14 +947,16 @@ func (s *MessageStore) resetFailuresByDest(dest conf.DestinationType) (err error
 		expiredUIDs = make([]utils.MyULID, 0)
 		invalidUIDs = make([]utils.MyULID, 0)
 
-		iter := failedDB.KeyValueIterator(s.batchSize/5, txn)
+		iter := failedDB.KeyIterator(txn)
 		defer iter.Close()
 
 		now := time.Now()
+		var timeb []byte
+		var err error
 
 		for iter.Rewind(); iter.Valid(); iter.Next() {
 			uid := iter.Key()
-			timeb, err := iter.Value()
+			timeb, err = iter.Value(timeb)
 			if err != nil {
 				s.logger.Warn("Invalid entry in failed", "error", err)
 				invalidUIDs = append(invalidUIDs, uid)
@@ -1125,7 +1127,7 @@ func retrieveIterHelper(msgsDB, readyDB db.Partition, batchsize uint32, txn *db.
 
 	protobuff := proto.NewBuffer(make([]byte, 0, 4096))
 
-	iter := readyDB.KeyIterator(batchsize, txn)
+	iter := readyDB.KeyIterator(txn)
 	defer iter.Close()
 
 	r := snappy.NewReader(nil)
