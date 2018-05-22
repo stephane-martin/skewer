@@ -122,14 +122,11 @@ func (fwder *Forwarder) Forward(ctx context.Context) (err error) {
 }
 
 func (fwder *Forwarder) fwdMsgs(ctx context.Context, msgs []*model.FullMessage, envs map[utils.MyULID]*javascript.Environment, dest dests.Destination) (err eerrors.ErrorSlice) {
-	var joinedErr error
-	var topic, partitionKey string
-	var partitionNumber int32
-	var m *model.FullMessage
-	var i int
+
+	i := int(0)
 
 Loop:
-	for _, m = range msgs {
+	for _, m := range msgs {
 		if m == nil || m.Fields == nil {
 			continue Loop
 		}
@@ -158,9 +155,10 @@ Loop:
 			env = envs[m.ConfId]
 		}
 
-		topic = ""
-		partitionKey = ""
-		partitionNumber = 0
+		topic := ""
+		partitionKey := ""
+		partitionNumber := int32(0)
+		var joinedErr error
 
 		_, ok1 := dest.(*dests.KafkaDestination)
 		_, ok2 := dest.(*dests.NATSDestination)
@@ -217,5 +215,5 @@ Loop:
 	if i == 0 {
 		return nil
 	}
-	return dest.Send(ctx, fwder.outputMsgs[:i], partitionKey, partitionNumber, topic)
+	return dest.Send(ctx, fwder.outputMsgs[:i])
 }

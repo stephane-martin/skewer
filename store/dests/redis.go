@@ -81,6 +81,6 @@ func (d *RedisDestination) sendOne(ctx context.Context, msg *model.FullMessage, 
 	return err
 }
 
-func (d *RedisDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err eerrors.ErrorSlice) {
+func (d *RedisDestination) Send(ctx context.Context, msgs []model.OutputMsg) (err eerrors.ErrorSlice) {
 	return d.ForEachWithTopic(ctx, d.sendOne, true, true, msgs)
 }

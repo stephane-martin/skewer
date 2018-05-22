@@ -61,6 +61,6 @@ func (d *UDPDestination) sendOne(ctx context.Context, msg *model.FullMessage) er
 	return d.clt.Send(msg)
 }
 
-func (d *UDPDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err eerrors.ErrorSlice) {
+func (d *UDPDestination) Send(ctx context.Context, msgs []model.OutputMsg) (err eerrors.ErrorSlice) {
 	return d.ForEach(ctx, d.sendOne, true, true, msgs)
 }

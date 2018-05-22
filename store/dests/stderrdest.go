@@ -42,6 +42,6 @@ func (d *StderrDestination) Close() error {
 	return nil
 }
 
-func (d *StderrDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err eerrors.ErrorSlice) {
+func (d *StderrDestination) Send(ctx context.Context, msgs []model.OutputMsg) (err eerrors.ErrorSlice) {
 	return d.ForEach(ctx, d.sendOne, true, true, msgs)
 }

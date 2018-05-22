@@ -1150,26 +1150,30 @@ func (s *MessageStore) ingest(m map[utils.MyULID]string) (n int, err error) {
 	return length, err
 }
 
-func retrieveIterHelper(msgsDB, readyDB db.Partition, batchsize uint32, txn *db.NTransaction, l log15.Logger) (uids []utils.MyULID, messages []*model.FullMessage, invalid []utils.MyULID, keysNotFound int) {
-
-	invalid = make([]utils.MyULID, 0)
-	uids = uidsPool.Get().([]utils.MyULID)[:0]
+func retrieveIterHelper(msgsDB, readyDB db.Partition, batchsize uint32, txn *db.NTransaction, l log15.Logger) (fUIDs []utils.MyULID, messages []*model.FullMessage, invalid []utils.MyULID, keysNotFound int) {
 	messages = msgsSlicePool.Get().([]*model.FullMessage)[:0]
+	allUIDs := uidsPool.Get().([]utils.MyULID)[:0]
+	fUIDs = allUIDs[:0]
+	invalid = make([]utils.MyULID, 0)
 
 	var messageBytes []byte
-	var fetched uint32
 	var err error
 
 	protobuff := proto.NewBuffer(make([]byte, 0, 4096))
 
-	// TODO: first iterate on ready keys, then only after fetch the messages contents
+	// first iterate on ready keys
 	iter := readyDB.KeyIterator(txn)
-	defer iter.Close()
+	fetched := uint32(0)
+	for iter.Rewind(); fetched < batchsize && iter.Valid(); iter.Next() {
+		allUIDs = append(allUIDs, iter.Key())
+		fetched++
+	}
+	iter.Close()
 
 	r := snappy.NewReader(nil)
 
-	for iter.Rewind(); fetched < batchsize && iter.Valid(); iter.Next() {
-		uid := iter.Key()
+	// fetch messages content and filter the UIDs
+	for _, uid := range allUIDs {
 		messageBytes, err = msgsDB.Get(uid, messageBytes, txn) // reuse or grow messageBytes at each step
 		if err != nil {
 			invalid = append(invalid, uid)
@@ -1204,10 +1208,9 @@ func retrieveIterHelper(msgsDB, readyDB db.Partition, batchsize uint32, txn *db.
 		}
 
 		messages = append(messages, message)
-		uids = append(uids, uid)
-		fetched++
+		fUIDs = append(fUIDs, uid) // reuse allUIDs backing storage
 	}
-	return uids, messages, invalid, keysNotFound
+	return fUIDs, messages, invalid, keysNotFound
 }
 
 func tryRetrieveHelper(msgsDB, readyDB, sentDB db.Partition, badg *badger.DB, batchSize uint32, l log15.Logger) ([]utils.MyULID, []*model.FullMessage, int, int, error) {
@@ -1290,7 +1293,6 @@ func (s *MessageStore) retrieve(dest conf.DestinationType) ([]*model.FullMessage
 	if uids != nil {
 		uidsPool.Put(uids)
 	}
-
 	return messages, nil
 }
 

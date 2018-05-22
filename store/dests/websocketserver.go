@@ -248,6 +248,6 @@ func (d *WebsocketServerDestination) sendOne(ctx context.Context, msg *model.Ful
 	return d.sendQueue.Put(msg)
 }
 
-func (d *WebsocketServerDestination) Send(ctx context.Context, msgs []model.OutputMsg, pKey string, pNumber int32, topic string) (err eerrors.ErrorSlice) {
+func (d *WebsocketServerDestination) Send(ctx context.Context, msgs []model.OutputMsg) (err eerrors.ErrorSlice) {
 	return d.ForEach(ctx, d.sendOne, false, false, msgs)
 }

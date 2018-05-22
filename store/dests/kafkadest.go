@@ -77,6 +77,6 @@ func (d *KafkaDestination) Close() error {
 	return nil
 }
 
-func (d *KafkaDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err eerrors.ErrorSlice) {
+func (d *KafkaDestination) Send(ctx context.Context, msgs []model.OutputMsg) (err eerrors.ErrorSlice) {
 	return d.ForEachWithTopic(ctx, d.sendOne, false, true, msgs)
 }

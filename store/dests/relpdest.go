@@ -107,6 +107,6 @@ func (d *RELPDestination) Close() (err error) {
 	return d.clt.Close()
 }
 
-func (d *RELPDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err eerrors.ErrorSlice) {
+func (d *RELPDestination) Send(ctx context.Context, msgs []model.OutputMsg) (err eerrors.ErrorSlice) {
 	return d.ForEach(ctx, d.clt.Send, false, true, msgs)
 }

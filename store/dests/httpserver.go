@@ -293,6 +293,6 @@ func (d *HTTPServerDestination) sendOne(ctx context.Context, msg *model.FullMess
 	return d.sendQueue.Put(msg)
 }
 
-func (d *HTTPServerDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err eerrors.ErrorSlice) {
+func (d *HTTPServerDestination) Send(ctx context.Context, msgs []model.OutputMsg) (err eerrors.ErrorSlice) {
 	return d.ForEach(ctx, d.sendOne, false, false, msgs)
 }

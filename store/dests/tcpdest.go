@@ -107,7 +107,7 @@ func (d *TCPDestination) Close() error {
 	return d.clt.Close()
 }
 
-func (d *TCPDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err eerrors.ErrorSlice) {
+func (d *TCPDestination) Send(ctx context.Context, msgs []model.OutputMsg) (err eerrors.ErrorSlice) {
 	var msg *model.FullMessage
 	var curErr error
 	c := eerrors.ChainErrors()

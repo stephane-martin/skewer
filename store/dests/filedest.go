@@ -375,6 +375,6 @@ func (d *FileDestination) Close() error {
 	return nil
 }
 
-func (d *FileDestination) Send(ctx context.Context, msgs []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) (err eerrors.ErrorSlice) {
+func (d *FileDestination) Send(ctx context.Context, msgs []model.OutputMsg) (err eerrors.ErrorSlice) {
 	return d.ForEach(ctx, d.sendOne, true, true, msgs)
 }

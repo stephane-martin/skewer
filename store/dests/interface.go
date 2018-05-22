@@ -12,7 +12,7 @@ import (
 )
 
 type Destination interface {
-	Send(ctx context.Context, m []model.OutputMsg, partitionKey string, partitionNumber int32, topic string) eerrors.ErrorSlice
+	Send(ctx context.Context, m []model.OutputMsg) eerrors.ErrorSlice
 	Fatal() chan error
 	Close() error
 	ACK(utils.MyULID)
