@@ -2,6 +2,7 @@ package utils
 
 import (
 	"github.com/stephane-martin/skewer/utils/eerrors"
+	"github.com/stephane-martin/skewer/utils/waiter"
 	"go.uber.org/atomic"
 )
 
@@ -21,7 +22,7 @@ func (s *Semaphore) Acquire() error {
 	if s.disposed.Load() {
 		return eerrors.ErrQDisposed
 	}
-	var wait ExpWait
+	wait := waiter.Default()
 	// acquire spinlock
 	for !s.spinlock.CAS(false, true) {
 		if s.disposed.Load() {

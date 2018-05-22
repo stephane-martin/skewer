@@ -5,8 +5,8 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/eerrors"
+	"github.com/stephane-martin/skewer/utils/waiter"
 )
 
 type TopicPartition struct {
@@ -95,7 +95,7 @@ func (q *KafkaProducerAckQueue) Has() bool {
 }
 
 func (q *KafkaProducerAckQueue) Wait() bool {
-	var w utils.ExpWait
+	w := waiter.Default()
 	for {
 		if q.Has() {
 			return true

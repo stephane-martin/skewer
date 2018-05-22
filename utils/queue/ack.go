@@ -11,6 +11,7 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/eerrors"
+	"github.com/stephane-martin/skewer/utils/waiter"
 )
 
 type ackNode struct {
@@ -79,7 +80,7 @@ func (q *AckQueue) Has() bool {
 }
 
 func (q *AckQueue) Wait() bool {
-	var w utils.ExpWait
+	w := waiter.Default()
 	for {
 		if q.Has() {
 			return true

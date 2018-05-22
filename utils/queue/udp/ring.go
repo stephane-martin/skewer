@@ -10,6 +10,7 @@ import (
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/eerrors"
+	"github.com/stephane-martin/skewer/utils/waiter"
 	"go.uber.org/atomic"
 )
 
@@ -64,10 +65,8 @@ func (rb *Ring) Offer(item *model.RawUdpMessage) (bool, error) {
 }
 
 func (rb *Ring) put(item *model.RawUdpMessage, offer bool) (bool, error) {
-	var (
-		n *node
-		w utils.ExpWait
-	)
+	var n *node
+	w := waiter.Default()
 	pos := rb.queue.Load()
 L:
 	for {
@@ -122,9 +121,9 @@ func (rb *Ring) Poll(timeout time.Duration) (*model.RawUdpMessage, error) {
 		n     *node
 		pos   = rb.dequeue.Load()
 		start time.Time
-		w     utils.ExpWait
 		zero  *model.RawUdpMessage
 	)
+	w := waiter.Default()
 	if timeout > 0 {
 		start = time.Now()
 	}

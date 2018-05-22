@@ -25,6 +25,7 @@ import (
 	"github.com/stephane-martin/skewer/utils/db"
 	"github.com/stephane-martin/skewer/utils/eerrors"
 	"github.com/stephane-martin/skewer/utils/queue"
+	"github.com/stephane-martin/skewer/utils/waiter"
 	"github.com/valyala/bytebufferpool"
 	"go.uber.org/atomic"
 )
@@ -321,7 +322,7 @@ func (s *MessageStore) retrieveAndForward(ctx context.Context) (err error) {
 		go func(dest conf.DestinationType) {
 			defer wg.Done()
 
-			var ew utils.ExpWait
+			ew := waiter.Default()
 			var previousMsgs []*model.FullMessage
 
 		ForwardLoop:
@@ -388,10 +389,10 @@ func (s *MessageStore) retrieveAndForward(ctx context.Context) (err error) {
 	}()
 
 	next := make(map[conf.DestinationType]time.Time, len(conf.Destinations))
-	waits := make(map[conf.DestinationType]*utils.ExpWait, len(conf.Destinations))
+	waits := make(map[conf.DestinationType]*waiter.W, len(conf.Destinations))
 	now := time.Now()
 	for _, d := range conf.Destinations {
-		waits[d] = &utils.ExpWait{}
+		waits[d] = waiter.Default()
 		if s.dests.Has(d) {
 			next[d] = now
 		} else {
@@ -399,7 +400,6 @@ func (s *MessageStore) retrieveAndForward(ctx context.Context) (err error) {
 		}
 	}
 
-	// actually make messages available to the forwarders
 	var currentDest conf.DestinationType
 	var currentDestIdx uint
 	var first time.Time

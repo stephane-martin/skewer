@@ -9,6 +9,7 @@ import (
 
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/eerrors"
+	"github.com/stephane-martin/skewer/utils/waiter"
 	"go.uber.org/atomic"
 )
 
@@ -63,10 +64,8 @@ func (rb *Ring) Offer(item int32) (bool, error) {
 }
 
 func (rb *Ring) put(item int32, offer bool) (bool, error) {
-	var (
-		n *node
-		w utils.ExpWait
-	)
+	var n *node
+	w := waiter.Default()
 	pos := rb.queue.Load()
 L:
 	for {
@@ -121,9 +120,9 @@ func (rb *Ring) Poll(timeout time.Duration) (int32, error) {
 		n     *node
 		pos   = rb.dequeue.Load()
 		start time.Time
-		w     utils.ExpWait
 		zero  int32
 	)
+	w := waiter.Default()
 	if timeout > 0 {
 		start = time.Now()
 	}

@@ -8,6 +8,8 @@ import (
 	"unsafe"
 
 	errors "github.com/segmentio/errors-go"
+	"github.com/stephane-martin/skewer/utils/waiter"
+	uatomic "go.uber.org/atomic"
 )
 
 type errNode struct {
@@ -145,8 +147,9 @@ func (s ErrorSlice) Is(typ string) bool {
 }
 
 type ChainedErrors struct {
-	head *errNode
-	tail *errNode
+	head   *errNode
+	tail   *errNode
+	closed uatomic.Bool
 }
 
 func ChainErrors() (c *ChainedErrors) {
@@ -158,7 +161,14 @@ func ChainErrors() (c *ChainedErrors) {
 	return c
 }
 
+func (c *ChainedErrors) Close() {
+	c.closed.Store(true)
+}
+
 func (c *ChainedErrors) Append(s ...error) *ChainedErrors {
+	if c.closed.Load() {
+		return c
+	}
 	for _, e := range s {
 		c.append(e)
 	}
@@ -193,6 +203,9 @@ func (c *ChainedErrors) get() error {
 }
 
 func (c *ChainedErrors) Sum() (s ErrorSlice) {
+	if !c.closed.CAS(false, true) {
+		return nil
+	}
 	s = make([]error, 0, 10)
 	var err error
 	for {
@@ -209,6 +222,9 @@ func (c *ChainedErrors) Sum() (s ErrorSlice) {
 }
 
 func (c *ChainedErrors) Extend(s []error) *ChainedErrors {
+	if c.closed.Load() {
+		return c
+	}
 	for _, e := range s {
 		c.append(e)
 	}
@@ -216,6 +232,9 @@ func (c *ChainedErrors) Extend(s []error) *ChainedErrors {
 }
 
 func (c *ChainedErrors) Receive(ch <-chan error) *ChainedErrors {
+	if c.closed.Load() {
+		return c
+	}
 	for e := range ch {
 		c.append(e)
 	}
@@ -224,13 +243,20 @@ func (c *ChainedErrors) Receive(ch <-chan error) *ChainedErrors {
 
 func (c *ChainedErrors) Send(ch chan<- error) {
 	var err error
+	w := waiter.Default()
 	for {
 		err = c.get()
 		if err == nil {
-			break
+			if c.closed.Load() {
+				break
+			}
+			w.Wait()
+		} else {
+			w.Reset()
+			ch <- err
 		}
-		ch <- err
 	}
+	close(ch)
 }
 
 func Combine(errs ...error) (err error) {

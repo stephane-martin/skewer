@@ -26,6 +26,7 @@ import (
 	"github.com/stephane-martin/skewer/utils/eerrors"
 	"github.com/stephane-martin/skewer/utils/queue/intq"
 	"github.com/stephane-martin/skewer/utils/queue/tcp"
+	"github.com/stephane-martin/skewer/utils/waiter"
 )
 
 var relpAnswersCounter *prometheus.CounterVec
@@ -138,7 +139,7 @@ func (f *ackForwarder) ForwardFail(connID utils.MyULID, txnr int32) {
 }
 
 func (f *ackForwarder) GetSuccAndFail(connID utils.MyULID) (success int32, failure int32) {
-	var w utils.ExpWait
+	w := waiter.Default()
 	var err error
 	success = -1
 	failure = -1

@@ -8,6 +8,7 @@ import (
 
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/eerrors"
+	"github.com/stephane-martin/skewer/utils/waiter"
 )
 
 type bsliceNode struct {
@@ -57,7 +58,7 @@ func (q *BSliceQueue) Has() bool {
 
 func (q *BSliceQueue) Wait(timeout time.Duration) bool {
 	start := time.Now()
-	var w utils.ExpWait
+	w := waiter.Default()
 	for {
 		if q.Has() {
 			return true
