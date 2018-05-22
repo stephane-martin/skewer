@@ -65,7 +65,7 @@ func (i *ULIDIterator) Value(dst []byte) ([]byte, error) {
 	var encVal []byte
 	var decVal []byte
 	// TODO: pool encVal and decVal
-	encVal, err = i.iter.Item().Value()
+	encVal, err = i.iter.Item().ValueCopy(nil)
 	if err != nil {
 		return nil, err
 	}

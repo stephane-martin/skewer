@@ -3,38 +3,52 @@ package utils
 import (
 	"runtime"
 	"time"
+
+	"go.uber.org/atomic"
 )
 
 type ExpWait struct {
-	nb uint
+	steps   uint
+	maxwait time.Duration
+	pos     atomic.Uint64
 }
 
-func (e *ExpWait) Wait() {
-	if e.nb < 22 {
-		runtime.Gosched()
-	} else if e.nb < 24 {
-		time.Sleep(time.Millisecond)
-	} else if e.nb < 26 {
-		time.Sleep(10 * time.Millisecond)
-	} else if e.nb < 40 {
-		time.Sleep(100 * time.Millisecond)
-	} else {
-		time.Sleep(250 * time.Millisecond)
+func Waiter(steps uint, maxwait time.Duration) ExpWait {
+	if steps <= 0 {
+		steps = 5
 	}
-	e.nb++
+	if maxwait <= 0 {
+		maxwait = 250 * time.Millisecond
+	}
+	return ExpWait{steps: steps, maxwait: maxwait}
+}
+
+// TODO: configurable
+
+func (e *ExpWait) Wait() {
+	d := e.Next()
+	if d == 0 {
+		runtime.Gosched()
+		return
+	}
+	time.Sleep(d)
 }
 
 func (e *ExpWait) Next() time.Duration {
-	e.nb++
-	if e.nb < 26 {
+	nb := e.pos.Inc() - 1
+	if nb < 22 {
+		return 0
+	} else if nb < 24 {
+		return time.Millisecond
+	} else if nb < 26 {
 		return 10 * time.Millisecond
-	}
-	if e.nb < 40 {
+	} else if nb < 40 {
 		return 100 * time.Millisecond
+	} else {
+		return 250 * time.Millisecond
 	}
-	return 250 * time.Millisecond
 }
 
 func (e *ExpWait) Reset() {
-	e.nb = 0
+	e.pos.Store(0)
 }

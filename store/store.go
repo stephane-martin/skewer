@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"context"
+	"expvar"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"github.com/awnumar/memguard"
 	"github.com/dgraph-io/badger"
 	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/y"
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
 	"github.com/inconshreveable/log15"
@@ -32,6 +34,8 @@ var badgerGauge *prometheus.GaugeVec
 var ackCounter *prometheus.CounterVec
 var messageFilterCounter *prometheus.CounterVec
 var retrieveTimeSummary prometheus.Summary
+var lsmSize prometheus.GaugeFunc
+var vlogSize prometheus.GaugeFunc
 
 var once sync.Once
 
@@ -87,23 +91,24 @@ func InitRegistry() {
 			},
 		)
 
+		lsmSize = prometheus.NewGaugeFunc(
+			prometheus.GaugeOpts{
+				Help: "Size of the key table in badger",
+				Name: "skw_store_lsm_size",
+			},
+			getLSMSize,
+		)
+
+		vlogSize = prometheus.NewGaugeFunc(
+			prometheus.GaugeOpts{
+				Help: "Size of the value log in badger",
+				Name: "skw_store_vlog_size",
+			},
+			getValueLogSize,
+		)
+
 		Registry = prometheus.NewRegistry()
-		Registry.MustRegister(badgerGauge, ackCounter, messageFilterCounter, retrieveTimeSummary)
-
-		// TODO: gather badger metrics
-
-		/*
-			expvarCollector := prometheus.NewExpvarCollector(map[string]*prometheus.Desc{
-				"memstats": prometheus.NewDesc(
-					"store_memstats",
-					"All numeric memstats as one metric family. Not a good role-model, actually... ;-)",
-					[]string{"type"}, nil,
-				),
-			})
-		*/
-		//Registry.MustRegister(badgerGauge, ackCounter, expvarCollector)
-		//Registry.MustRegister(badgerGauge, ackCounter, prometheus.NewGoCollector())
-		//Registry.MustRegister(badgerGauge, ackCounter, prometheus.NewProcessCollector(os.Getpid(), "store"))
+		Registry.MustRegister(badgerGauge, ackCounter, messageFilterCounter, retrieveTimeSummary, lsmSize, vlogSize)
 	})
 }
 
@@ -192,9 +197,10 @@ type MessageStore struct {
 	ticker *time.Ticker
 	logger log15.Logger
 
-	closedChan     chan struct{}
-	FatalErrorChan chan struct{}
-	OutputsChans   map[conf.DestinationType]chan []*model.FullMessage
+	closedChan       chan struct{}
+	FatalErrorChan   chan struct{}
+	OutputsChans     map[conf.DestinationType]chan []*model.FullMessage
+	ZeroMessageFlags map[conf.DestinationType]*atomic.Bool
 
 	toStashQueue    *queue.BSliceQueue
 	ackQueue        *queue.AckQueue
@@ -423,9 +429,8 @@ RetrieveLoop:
 
 		currentDestIdx = (currentDestIdx + 1) % uint(len(conf.Destinations))
 		currentDest = 1 << currentDestIdx
-		now = time.Now()
 
-		if now.Before(next[currentDest]) {
+		if time.Now().Before(next[currentDest]) {
 			// wait more for next check
 			continue RetrieveLoop
 		}
@@ -439,13 +444,19 @@ RetrieveLoop:
 			next[currentDest] = now.Add(waits[currentDest].Next())
 			continue RetrieveLoop
 		}
+		if s.ZeroMessageFlags[currentDest].Load() {
+			// we are sure that there was no new message
+			next[currentDest] = time.Now().Add(waits[currentDest].Next())
+			continue RetrieveLoop
+		}
 		messages, err := s.retrieve(currentDest)
 		if err != nil {
 			return eerrors.Wrap(err, "Failed to retrieve messages from badger")
 		}
 		if len(messages) == 0 {
 			// no messages in store for that destination
-			next[currentDest] = now.Add(waits[currentDest].Next())
+			s.ZeroMessageFlags[currentDest].Store(true)
+			next[currentDest] = time.Now().Add(waits[currentDest].Next())
 			continue RetrieveLoop
 		}
 		waits[currentDest].Reset()
@@ -559,6 +570,26 @@ func (s *MessageStore) init(ctx context.Context) {
 	}()
 }
 
+func getLSMSize() float64 {
+	size := int64(0)
+	y.LSMSize.Do(
+		func(kv expvar.KeyValue) {
+			size = kv.Value.(*expvar.Int).Value()
+		},
+	)
+	return float64(size)
+}
+
+func getValueLogSize() float64 {
+	size := int64(0)
+	y.VlogSize.Do(
+		func(kv expvar.KeyValue) {
+			size = kv.Value.(*expvar.Int).Value()
+		},
+	)
+	return float64(size)
+}
+
 func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests conf.DestinationType, cfnd bool, l log15.Logger) (*MessageStore, error) {
 	dirname := cfg.Dirname
 	if cfnd {
@@ -569,7 +600,7 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 	badgerOpts.ValueDir = dirname
 	badgerOpts.MaxTableSize = cfg.MaxTableSize
 	badgerOpts.SyncWrites = cfg.FSync
-	badgerOpts.TableLoadingMode = options.MemoryMap
+	badgerOpts.TableLoadingMode = options.LoadToRAM
 	badgerOpts.ValueLogLoadingMode = options.MemoryMap
 	badgerOpts.ValueLogFileSize = cfg.ValueLogFileSize
 	badgerOpts.NumVersionsToKeep = 1
@@ -580,18 +611,19 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 	}
 
 	store := &MessageStore{
-		confined:        cfnd,
-		logger:          l.New("class", "MessageStore"),
-		dests:           &Destinations{},
-		batchSize:       cfg.BatchSize,
-		toStashQueue:    queue.NewBSliceQueue(),
-		ackQueue:        queue.NewAckQueue(),
-		nackQueue:       queue.NewAckQueue(),
-		permerrorsQueue: queue.NewAckQueue(),
-		closedChan:      make(chan struct{}),
-		OutputsChans:    make(map[conf.DestinationType]chan []*model.FullMessage, len(conf.Destinations)),
-		addMissingMsgID: cfg.AddMissingMsgID,
-		generator:       utils.NewGenerator(),
+		confined:         cfnd,
+		logger:           l.New("class", "MessageStore"),
+		dests:            &Destinations{},
+		batchSize:        cfg.BatchSize,
+		toStashQueue:     queue.NewBSliceQueue(),
+		ackQueue:         queue.NewAckQueue(),
+		nackQueue:        queue.NewAckQueue(),
+		permerrorsQueue:  queue.NewAckQueue(),
+		closedChan:       make(chan struct{}),
+		OutputsChans:     make(map[conf.DestinationType]chan []*model.FullMessage, len(conf.Destinations)),
+		ZeroMessageFlags: make(map[conf.DestinationType]*atomic.Bool, len(conf.Destinations)),
+		addMissingMsgID:  cfg.AddMissingMsgID,
+		generator:        utils.NewGenerator(),
 	}
 	store.dests.Store(dests)
 
@@ -624,6 +656,7 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 
 	for _, dest := range conf.Destinations {
 		store.OutputsChans[dest] = make(chan []*model.FullMessage)
+		store.ZeroMessageFlags[dest] = atomic.NewBool(false)
 	}
 
 	store.wg.Add(1)
@@ -947,6 +980,7 @@ func (s *MessageStore) resetFailuresByDest(dest conf.DestinationType) (err error
 		expiredUIDs = make([]utils.MyULID, 0)
 		invalidUIDs = make([]utils.MyULID, 0)
 
+		// TODO: benchmark keyiterator vs keyvalueiterator ?
 		iter := failedDB.KeyIterator(txn)
 		defer iter.Close()
 
@@ -1109,6 +1143,7 @@ func (s *MessageStore) ingest(m map[utils.MyULID]string) (n int, err error) {
 		if err != nil {
 			return 0, err
 		}
+		s.ZeroMessageFlags[dest].Store(false)
 		badgerGauge.WithLabelValues("messages", conf.DestinationNames[dest]).Add(float64(length))
 		badgerGauge.WithLabelValues("ready", conf.DestinationNames[dest]).Add(float64(length))
 	}
@@ -1127,6 +1162,7 @@ func retrieveIterHelper(msgsDB, readyDB db.Partition, batchsize uint32, txn *db.
 
 	protobuff := proto.NewBuffer(make([]byte, 0, 4096))
 
+	// TODO: first iterate on ready keys, then only after fetch the messages contents
 	iter := readyDB.KeyIterator(txn)
 	defer iter.Close()
 
