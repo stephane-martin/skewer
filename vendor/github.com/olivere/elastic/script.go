@@ -9,7 +9,7 @@ import "errors"
 // Script holds all the paramaters necessary to compile or find in cache
 // and then execute a script.
 //
-// See https://www.elastic.co/guide/en/elasticsearch/reference/6.0/modules-scripting.html
+// See https://www.elastic.co/guide/en/elasticsearch/reference/6.2/modules-scripting.html
 // for details of scripting.
 type Script struct {
 	script string
@@ -55,7 +55,7 @@ func (s *Script) Type(typ string) *Script {
 // Lang sets the language of the script. Permitted values are "groovy",
 // "expression", "mustache", "mvel" (default), "javascript", "python".
 // To use certain languages, you need to configure your server and/or
-// add plugins. See https://www.elastic.co/guide/en/elasticsearch/reference/6.0/modules-scripting.html
+// add plugins. See https://www.elastic.co/guide/en/elasticsearch/reference/6.2/modules-scripting.html
 // for details.
 func (s *Script) Lang(lang string) *Script {
 	s.lang = lang
@@ -89,7 +89,10 @@ func (s *Script) Source() (interface{}, error) {
 	} else {
 		source["id"] = s.script
 	}
-	if s.lang != "" {
+	if s.lang == "null" || s.lang == "nil" {
+		// HACK(oe) Hotfix for https://github.com/elastic/elasticsearch/issues/28002; remove when 6.3 and/or 7.x are out.
+		source["lang"] = nil
+	} else if s.lang != "" {
 		source["lang"] = s.lang
 	}
 	if len(s.params) > 0 {
