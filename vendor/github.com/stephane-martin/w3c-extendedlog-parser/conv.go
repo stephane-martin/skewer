@@ -14,7 +14,7 @@ func makeStr(s string) interface{} {
 }
 
 func makeIP(s string) interface{} {
-	if s == "-" {
+	if s == "-" || s == "" {
 		return nil
 	}
 	ip := net.ParseIP(s)
@@ -26,7 +26,7 @@ func makeIP(s string) interface{} {
 }
 
 func makeInt(s string) interface{} {
-	if s == "-" {
+	if s == "-" || s == "" {
 		return nil
 	}
 	i, err := strconv.ParseInt(s, 10, 64)
@@ -37,7 +37,7 @@ func makeInt(s string) interface{} {
 }
 
 func makeFloat(s string) interface{} {
-	if s == "-" {
+	if s == "-" || s == "" {
 		return nil
 	}
 	f, err := strconv.ParseFloat(s, 64)
@@ -48,7 +48,7 @@ func makeFloat(s string) interface{} {
 }
 
 func decodeURI(s string) interface{} {
-	if s == "-" {
+	if s == "-" || s == "" {
 		return ""
 	}
 	uri, err := url.QueryUnescape(s)
@@ -57,3 +57,4 @@ func decodeURI(s string) interface{} {
 	}
 	return uri
 }
+

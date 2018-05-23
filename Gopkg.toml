@@ -1,0 +1,254 @@
+# Gopkg.toml example
+#
+# Refer to https://github.com/golang/dep/blob/master/docs/Gopkg.toml.md
+# for detailed Gopkg.toml documentation.
+#
+# required = ["github.com/user/thing/cmd/thing"]
+# ignored = ["github.com/user/project/pkgX", "bitbucket.org/user/project/pkgA/pkgY"]
+#
+# [[constraint]]
+#   name = "github.com/user/project"
+#   version = "1.0.0"
+#
+# [[constraint]]
+#   name = "github.com/user/project2"
+#   branch = "dev"
+#   source = "github.com/myfork/project2"
+#
+# [[override]]
+#   name = "github.com/x/y"
+#   version = "2.4.0"
+#
+# [prune]
+#   non-go = false
+#   go-tests = true
+#   unused-packages = true
+
+
+[[constraint]]
+  branch = "master"
+  name = "collectd.org"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/BurntSushi/toml"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/EricLagergren/go-gnulib"
+
+[[constraint]]
+  name = "github.com/Shopify/sarama"
+  version = "1.16.0"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/alanctgardner/gogen-avro"
+
+[[constraint]]
+  name = "github.com/antlr/antlr4"
+  version = "4.7.1"
+
+[[constraint]]
+  name = "github.com/awnumar/memguard"
+  version = "0.15.0"
+
+[[constraint]]
+  name = "github.com/bsm/sarama-cluster"
+  version = "2.1.13"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/cheekybits/genny"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/coreos/go-systemd"
+
+[[constraint]]
+  name = "github.com/dgraph-io/badger"
+  version = "1.5.0"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/dop251/goja"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/fatih/set"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/free/concurrent-writer"
+
+[[constraint]]
+  name = "github.com/fsnotify/fsnotify"
+  version = "1.4.7"
+
+[[constraint]]
+  name = "github.com/go-redis/redis"
+  version = "6.10.2"
+
+[[constraint]]
+  name = "github.com/gobwas/glob"
+  version = "0.2.3"
+
+[[constraint]]
+  name = "github.com/gogo/protobuf"
+  version = "1.0.0"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/golang/snappy"
+
+[[constraint]]
+  branch = "v2"
+  name = "github.com/Graylog2/go-gelf"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/gorilla/websocket"
+
+[[constraint]]
+  name = "github.com/hashicorp/consul"
+  version = "1.1.0"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/hashicorp/go-rootcerts"
+
+[[constraint]]
+  name = "github.com/inconshreveable/log15"
+  version = "2.13"
+
+[[constraint]]
+  name = "github.com/influxdata/influxdb"
+  version = "1.5.2"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/jsipprell/keyctl"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/kardianos/osext"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/keybase/go-keychain"
+
+[[constraint]]
+  name = "github.com/linkedin/goavro"
+  version = "2.3.0"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/looplab/fsm"
+
+[[constraint]]
+  name = "github.com/nats-io/go-nats"
+  version = "1.5.0"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/oklog/ulid"
+
+[[constraint]]
+  name = "github.com/olivere/elastic"
+  version = "6.1.4"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/pquerna/ffjson"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/prometheus/client_golang"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/rakyll/gom"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/rakyll/statik"
+
+[[constraint]]
+  name = "github.com/rubyist/circuitbreaker"
+  version = "2.2.1"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/seccomp/libseccomp-golang"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/segmentio/errors-go"
+
+[[constraint]]
+  name = "github.com/shirou/gopsutil"
+  version = "2.17.6"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/spaolacci/murmur3"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/spf13/pflag"
+
+[[constraint]]
+  name = "github.com/spf13/cobra"
+  version = "0.0.3"
+
+[[constraint]]
+  name = "github.com/spf13/viper"
+  version = "1.0.2"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/stephane-martin/go-semaphore"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/stephane-martin/go-shm"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/stephane-martin/gotail"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/stephane-martin/w3c-extendedlog-parser"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/syndtr/gocapability"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/valyala/bytebufferpool"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/zond/gotomic"
+
+[[constraint]]
+  name = "go.uber.org/atomic"
+  version = "1.3.1"
+
+[[constraint]]
+  branch = "master"
+  name = "golang.org/x/sys"
+
+[[constraint]]
+  branch = "master"
+  name = "golang.org/x/crypto"
+
+[[constraint]]
+  branch = "master"
+  name = "golang.org/x/text"
+
+[prune]
+  go-tests = true
+  unused-packages = true

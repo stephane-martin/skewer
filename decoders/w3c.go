@@ -2,6 +2,7 @@ package decoders
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"strings"
 
@@ -29,7 +30,11 @@ func W3CDecoder(fieldNames string) func([]byte) ([]*model.SyslogMessage, error) 
 			}
 			msg = model.Factory()
 			msg.ClearDomain("w3c")
-			msg.Properties.Map["w3c"].Map = line.GetProperties()
+			for k, v := range line.GetAll() {
+				if v != nil {
+					msg.SetProperty("w3c", k, fmt.Sprintf("%v", v))
+				}
+			}
 			msgs = append(msgs, msg)
 		}
 

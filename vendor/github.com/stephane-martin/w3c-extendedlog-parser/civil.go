@@ -53,6 +53,10 @@ func ParseDate(s string) (Date, error) {
 	return DateOf(t), nil
 }
 
+func (d Date) IsZero() bool {
+	return d.Year == 0 && d.Month == 0 && d.Day == 0
+}
+
 // String returns the date in RFC3339 full-date format.
 func (d Date) String() string {
 	return fmt.Sprintf("%04d-%02d-%02d", d.Year, d.Month, d.Day)
@@ -156,6 +160,10 @@ func ParseTime(s string) (Time, error) {
 		return Time{}, err
 	}
 	return TimeOf(t), nil
+}
+
+func (t Time) IsZero() bool {
+	return t.Hour == 0 && t.Minute == 0 && t.Second == 0 && t.Nanosecond == 0
 }
 
 // String returns the date in the format described in ParseTime. If Nanoseconds

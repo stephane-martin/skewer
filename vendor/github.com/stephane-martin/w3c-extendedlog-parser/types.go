@@ -127,40 +127,67 @@ func ConvertValue(fieldName string, value string) interface{} {
 	value = strings.TrimSpace(value)
 	switch fieldName {
 	case "date", "x-cookie-date", "x-http-date":
+		if value == "" {
+			return nil
+		}
 		d, err := ParseDate(value)
 		if err != nil {
 			return nil
 		}
 		return d
 	case "time":
+		if value == "" {
+			return nil
+		}
 		t, err := ParseTime(value)
 		if err != nil {
 			return nil
 		}
 		return t
 	case "time-taken", "rs-time-taken", "sc-time-taken", "rs-service-time-taken", "rs-download-time-taken", "cs-categorization-time-dynamic", "duration":
+		if value == "" {
+			return nil
+		}
 		ttaken, err := strconv.ParseFloat(value, 64)
 		if err != nil {
 			return nil
 		}
 		return ttaken
 	case "bytes":
+		if value == "" {
+			return nil
+		}
 		return makeInt(value)
 	case "cached":
 		return value == "1"
 	case "x-client-address", "x-bluecoat-appliance-primary-address", "x-bluecoat-proxy-primary-address", "cs-uri-address", "c-uri-address":
+		if value == "" {
+			return nil
+		}
 		return net.ParseIP(value)
 	case "sr-uri-address", "s-uri-address", "x-cs-user-login-address":
+		if value == "" {
+			return nil
+		}
 		return net.ParseIP(value)
 	case "connect-time", "dnslookup-time":
+		if value == "" {
+			return nil
+		}
 		return makeInt(value)
 	case "gmttime":
+		if value == "" {
+			return nil
+		}
 		t, err := time.Parse("02/01/2006:15:04:05", value)
 		if err != nil {
 			return nil
 		}
 		return t.UTC()
 	case "localtime":
+		if value == "" {
+			return nil
+		}
 		var t time.Time
 		var err error
 		pluspos := strings.Index(value, "+")
@@ -172,8 +199,11 @@ func ConvertValue(fieldName string, value string) interface{} {
 		if err != nil {
 			return nil
 		}
-		return t.UTC()
+		return t
 	case "timestamp", "x-timestamp-unix", "x-timestamp-unix-utc":
+		if value == "" {
+			return nil
+		}
 		i := makeInt(value)
 		if i != nil {
 			return time.Unix(i.(int64), 0).UTC()

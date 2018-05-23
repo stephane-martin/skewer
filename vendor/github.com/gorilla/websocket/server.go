@@ -44,8 +44,12 @@ type Upgrader struct {
 	Error func(w http.ResponseWriter, r *http.Request, status int, reason error)
 
 	// CheckOrigin returns true if the request Origin header is acceptable. If
-	// CheckOrigin is nil, the host in the Origin header must not be set or
-	// must match the host of the request.
+	// CheckOrigin is nil, then a safe default is used: return false if the
+	// Origin request header is present and the origin host is not equal to
+	// request Host header.
+	//
+	// A CheckOrigin function should carefully validate the request origin to
+	// prevent cross-site request forgery.
 	CheckOrigin func(r *http.Request) bool
 
 	// EnableCompression specify if the server should attempt to negotiate per
@@ -99,7 +103,7 @@ func (u *Upgrader) selectSubprotocol(r *http.Request, responseHeader http.Header
 //
 // The responseHeader is included in the response to the client's upgrade
 // request. Use the responseHeader to specify cookies (Set-Cookie) and the
-// application negotiated subprotocol (Sec-Websocket-Protocol).
+// application negotiated subprotocol (Sec-WebSocket-Protocol).
 //
 // If the upgrade fails, then Upgrade replies to the client with an HTTP error
 // response.
@@ -123,7 +127,7 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeade
 	}
 
 	if _, ok := responseHeader["Sec-Websocket-Extensions"]; ok {
-		return u.returnError(w, r, http.StatusInternalServerError, "websocket: application specific 'Sec-Websocket-Extensions' headers are unsupported")
+		return u.returnError(w, r, http.StatusInternalServerError, "websocket: application specific 'Sec-WebSocket-Extensions' headers are unsupported")
 	}
 
 	checkOrigin := u.CheckOrigin
@@ -131,12 +135,12 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeade
 		checkOrigin = checkSameOrigin
 	}
 	if !checkOrigin(r) {
-		return u.returnError(w, r, http.StatusForbidden, "websocket: 'Origin' header value not allowed")
+		return u.returnError(w, r, http.StatusForbidden, "websocket: request origin not allowed by Upgrader.CheckOrigin")
 	}
 
 	challengeKey := r.Header.Get("Sec-Websocket-Key")
 	if challengeKey == "" {
-		return u.returnError(w, r, http.StatusBadRequest, "websocket: not a websocket handshake: `Sec-Websocket-Key' header is missing or blank")
+		return u.returnError(w, r, http.StatusBadRequest, "websocket: not a websocket handshake: `Sec-WebSocket-Key' header is missing or blank")
 	}
 
 	subprotocol := u.selectSubprotocol(r, responseHeader)
@@ -186,12 +190,12 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeade
 	p = append(p, computeAcceptKey(challengeKey)...)
 	p = append(p, "\r\n"...)
 	if c.subprotocol != "" {
-		p = append(p, "Sec-Websocket-Protocol: "...)
+		p = append(p, "Sec-WebSocket-Protocol: "...)
 		p = append(p, c.subprotocol...)
 		p = append(p, "\r\n"...)
 	}
 	if compress {
-		p = append(p, "Sec-Websocket-Extensions: permessage-deflate; server_no_context_takeover; client_no_context_takeover\r\n"...)
+		p = append(p, "Sec-WebSocket-Extensions: permessage-deflate; server_no_context_takeover; client_no_context_takeover\r\n"...)
 	}
 	for k, vs := range responseHeader {
 		if k == "Sec-Websocket-Protocol" {
@@ -239,7 +243,7 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeade
 // of the same origin policy check is:
 //
 //	if req.Header.Get("Origin") != "http://"+req.Host {
-//		http.Error(w, "Origin not allowed", 403)
+//		http.Error(w, "Origin not allowed", http.StatusForbidden)
 //		return
 //	}
 //

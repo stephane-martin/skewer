@@ -13,13 +13,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Graylog2/go-gelf/gelf"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/decoders"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/base"
 	"github.com/stephane-martin/skewer/utils"
-	"gopkg.in/Graylog2/go-gelf.v2/gelf"
 )
 
 type GraylogStatus int

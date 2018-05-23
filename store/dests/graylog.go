@@ -6,11 +6,11 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Graylog2/go-gelf/gelf"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/encoders"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils/eerrors"
-	"gopkg.in/Graylog2/go-gelf.v2/gelf"
 )
 
 type GraylogDestination struct {

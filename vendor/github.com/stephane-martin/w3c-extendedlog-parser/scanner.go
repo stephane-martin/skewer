@@ -19,7 +19,7 @@ type Scanner struct {
 func NewScanner(reader io.Reader) *Scanner {
 	s := Scanner{
 		reader:  reader,
-		origbuf: make([]byte, 0, 4096),
+		origbuf: make([]byte, 0, 65536),
 	}
 	s.buf = s.origbuf
 	return &s
@@ -84,11 +84,11 @@ func (s *Scanner) Scan() bool {
 		// if there is no more space on the right side of s.buf, or if there is
 		// much space on the left side of s.buf, then copy the data to the
 		// beginning of s.origbuf
-		if cap(s.buf) < 4096 && (len(s.buf) == cap(s.buf) || cap(s.buf) < 2048) {
+		if cap(s.buf) < 65536 && (len(s.buf) == cap(s.buf) || cap(s.buf) < 32768) {
 			copy(s.origbuf[:len(s.buf)], s.buf)
 			s.buf = s.origbuf[:len(s.buf)]
 		}
-		if len(s.buf) == 4096 {
+		if len(s.buf) == 65536 {
 			// the line to parse is too long
 			s.err = bufio.ErrTooLong
 			return false

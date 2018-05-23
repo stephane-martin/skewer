@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Graylog2/go-gelf/gelf"
 	"github.com/stephane-martin/skewer/model"
-	"gopkg.in/Graylog2/go-gelf.v2/gelf"
 )
 
 func pGELF(m []byte) ([]*model.SyslogMessage, error) {

@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"io"
 
+	"github.com/Graylog2/go-gelf/gelf"
 	"github.com/stephane-martin/skewer/model"
-	"gopkg.in/Graylog2/go-gelf.v2/gelf"
 )
 
 func FullToGelfMessage(m *model.FullMessage) *gelf.Message {
