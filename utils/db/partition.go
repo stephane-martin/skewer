@@ -18,51 +18,48 @@ func (p *partitionImpl) Set(key utils.MyULID, value string, txn *NTransaction) (
 	err = PTransactionFrom(txn, p.prefix).Set(string(key), value)
 	if err != nil {
 		txn.Discard()
+		return err
 	}
-	return err
+	return nil
 }
 
 var trueBytes = []byte("true")
 
 func (p *partitionImpl) AddManyTrueMap(m map[utils.MyULID]string, txn *NTransaction) (err error) {
 	if len(m) == 0 {
-		return
+		return nil
 	}
-	var uid utils.MyULID
-	for uid = range m {
+	for uid := range m {
 		err = PTransactionFrom(txn, p.prefix).Set(string(uid), "true")
-
 		if err != nil {
 			txn.Discard()
-			return
+			return err
 		}
 	}
-	return
+	return nil
 }
 
 func (p *partitionImpl) AddManySame(uids []utils.MyULID, v string, txn *NTransaction) (err error) {
 	if len(uids) == 0 {
-		return
+		return nil
 	}
 	ptxn := PTransactionFrom(txn, p.prefix)
-	var uid utils.MyULID
-	for _, uid = range uids {
+	for _, uid := range uids {
 		err = ptxn.Set(string(uid), v)
 
 		if err != nil {
 			txn.Discard()
-			return
+			return err
 		}
 	}
-	return
+	return nil
 }
 
 func (p *partitionImpl) AddMany(m map[utils.MyULID]string, txn *NTransaction) (err error) {
 	if len(m) == 0 {
-		return
+		return nil
 	}
 	ptxn := PTransactionFrom(txn, p.prefix)
-
 	for key, v := range m {
 		err = ptxn.Set(string(key), v)
 		if err != nil {
@@ -77,30 +74,30 @@ func (p *partitionImpl) Exists(key utils.MyULID, txn *NTransaction) (bool, error
 	_, err := PTransactionFrom(txn, p.prefix).Get(string(key), nil)
 	if err == nil {
 		return true, nil
-	} else if err == badger.ErrKeyNotFound {
-		return false, nil
-	} else {
-		return false, err
 	}
+	if err == badger.ErrKeyNotFound {
+		return false, nil
+	}
+	return false, err
 }
 
 func (p *partitionImpl) Delete(key utils.MyULID, txn *NTransaction) (err error) {
 	err = PTransactionFrom(txn, p.prefix).Delete(string(key))
 	if err != nil {
 		txn.Discard()
+		return err
 	}
-	return err
+	return nil
 }
 
 func (p *partitionImpl) DeleteMany(keys []utils.MyULID, txn *NTransaction) (err error) {
 	if len(keys) == 0 {
-		return
+		return nil
 	}
 
-	var key utils.MyULID
 	ptxn := PTransactionFrom(txn, p.prefix)
 
-	for _, key = range keys {
+	for _, key := range keys {
 		err = ptxn.Delete(string(key))
 		if err != nil {
 			txn.Discard()
@@ -110,14 +107,18 @@ func (p *partitionImpl) DeleteMany(keys []utils.MyULID, txn *NTransaction) (err 
 	return nil
 }
 
-func (p *partitionImpl) ListKeys(txn *NTransaction) []utils.MyULID {
-	l := []utils.MyULID{}
+func (p *partitionImpl) ListKeysTo(txn *NTransaction, dest []utils.MyULID) []utils.MyULID {
+	dest = dest[:0]
 	iter := p.KeyIterator(txn)
 	for iter.Rewind(); iter.Valid(); iter.Next() {
-		l = append(l, iter.Key())
+		dest = append(dest, iter.Key())
 	}
 	iter.Close()
-	return l
+	return dest
+}
+
+func (p *partitionImpl) ListKeys(txn *NTransaction) []utils.MyULID {
+	return p.ListKeysTo(txn, nil)
 }
 
 func (p *partitionImpl) Count(txn *NTransaction) int {

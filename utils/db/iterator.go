@@ -37,46 +37,40 @@ func (i *ULIDIterator) Valid() bool {
 	}
 }
 
-func (i *ULIDIterator) Key() utils.MyULID {
-	if len(i.prefix) > 0 {
-		return utils.MyULID(string(i.iter.Item().Key()[len(i.prefix):]))
-	} else {
-		return utils.MyULID(string(i.iter.Item().Key()))
-	}
+func (i *ULIDIterator) Key() (uid utils.MyULID) {
+	i.KeyInto(&uid)
+	return uid
 }
 
-func (i *ULIDIterator) KeyInto(uid *utils.MyULID) bool {
-	if i == nil || uid == nil {
-		return false
-	}
+func (i *ULIDIterator) KeyInto(uid *utils.MyULID) {
 	if len(i.prefix) > 0 {
 		*uid = utils.MyULID(string(i.iter.Item().Key()[len(i.prefix):]))
 	} else {
 		*uid = utils.MyULID(string(i.iter.Item().Key()))
 	}
-	return true
 }
 
 func (i *ULIDIterator) Value(dst []byte) ([]byte, error) {
 	if i.secret == nil {
 		return i.iter.Item().ValueCopy(dst)
 	}
-	var err error
-	var encVal []byte
-	var decVal []byte
-	// TODO: pool encVal and decVal
-	encVal, err = i.iter.Item().ValueCopy(nil)
+	encVal, err := i.iter.Item().ValueCopy(getTmpBuf())
 	if err != nil {
 		return nil, err
 	}
-	if encVal == nil {
+	if len(encVal) == 0 {
+		bufpool.Put(encVal)
 		return nil, nil
 	}
-	decVal, err = sbox.Decrypt(encVal, i.secret)
+	decVal, err := sbox.DecryptTo(encVal, i.secret, getTmpBuf())
 	if err != nil {
+		bufpool.Put(encVal)
 		return nil, err
 	}
-	return append(dst[:0], decVal...), nil
+	res := append(dst[:0], decVal...)
+	bufpool.Put(encVal)
+	bufpool.Put(decVal)
+	return res, nil
 }
 
 func (i *ULIDIterator) IsDeleted() bool {

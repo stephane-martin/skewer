@@ -75,6 +75,10 @@ func (encDB *EncryptedDB) ListKeys(txn *NTransaction) []utils.MyULID {
 	return encDB.p.ListKeys(txn)
 }
 
+func (encDB *EncryptedDB) ListKeysTo(txn *NTransaction, dest []utils.MyULID) []utils.MyULID {
+	return encDB.p.ListKeysTo(txn, dest)
+}
+
 func (encDB *EncryptedDB) Count(txn *NTransaction) int {
 	return encDB.p.Count(txn)
 }
@@ -99,11 +103,12 @@ func (encDB *EncryptedDB) Set(key utils.MyULID, value string, txn *NTransaction)
 }
 
 func (encDB *EncryptedDB) AddManyTrueMap(m map[utils.MyULID]string, txn *NTransaction) (err error) {
-	encValue, err := sbox.Encrypt(trueBytes, encDB.secret)
+	encValue, err := sbox.EncryptTo(trueBytes, encDB.secret, getTmpBuf())
 	if err != nil {
 		return err
 	}
 	encStr := string(encValue)
+	bufpool.Put(encValue)
 
 	tmpMap := getTmpMap()
 	for uid := range m {

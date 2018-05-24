@@ -985,11 +985,12 @@ func (s *MessageStore) resetFailuresByDest(dest conf.DestinationType) (err error
 		defer iter.Close()
 
 		now := time.Now()
+		var uid utils.MyULID
 		var timeb []byte
 		var err error
 
 		for iter.Rewind(); iter.Valid(); iter.Next() {
-			uid := iter.Key()
+			iter.KeyInto(&uid)
 			timeb, err = iter.Value(timeb)
 			if err != nil {
 				s.logger.Warn("Invalid entry in failed", "error", err)
@@ -1305,10 +1306,9 @@ func doACKHelper(badg *badger.DB, bend *Backend, acks []queue.UidDest) (count ma
 	txn := db.NewNTransaction(badg, true)
 	defer txn.Discard()
 
-	var ack queue.UidDest
 	count = make(map[conf.DestinationType]int)
 
-	for _, ack = range acks {
+	for _, ack := range acks {
 		err = bend.GetPartition(Sent, ack.Dest).Delete(ack.Uid, txn)
 		if err != nil {
 			return nil, eerrors.Wrap(err, "Error removing messages from the Sent DB")
@@ -1355,11 +1355,10 @@ func doNACKHelper(badg *badger.DB, bend *Backend, nacks []queue.UidDest) (count 
 	txn := db.NewNTransaction(badg, true)
 	defer txn.Discard()
 
-	var nack queue.UidDest
 	count = make(map[conf.DestinationType]int)
 	times := time.Now().Format(time.RFC3339)
 
-	for _, nack = range nacks {
+	for _, nack := range nacks {
 		err = bend.GetPartition(Sent, nack.Dest).Delete(nack.Uid, txn)
 		if err != nil {
 			return nil, eerrors.Wrap(err, "Error removing messages from the Sent DB")
@@ -1405,11 +1404,10 @@ func doPermErrorHelper(badg *badger.DB, bend *Backend, nacks []queue.UidDest) (c
 	txn := db.NewNTransaction(badg, true)
 	defer txn.Discard()
 
-	var nack queue.UidDest
 	count = make(map[conf.DestinationType]int)
 	times := time.Now().Format(time.RFC3339)
 
-	for _, nack = range nacks {
+	for _, nack := range nacks {
 		err = bend.GetPartition(Sent, nack.Dest).Delete(nack.Uid, txn)
 		if err != nil {
 			return nil, eerrors.Wrap(err, "Error removing messages from the Sent DB")

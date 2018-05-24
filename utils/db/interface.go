@@ -104,6 +104,7 @@ func (txn *PTransaction) Set(key, val string) (err error) {
 
 type Partition interface {
 	ListKeys(txn *NTransaction) []utils.MyULID
+	ListKeysTo(txn *NTransaction, dest []utils.MyULID) []utils.MyULID
 	Count(txn *NTransaction) int
 	Delete(key utils.MyULID, txn *NTransaction) error
 	DeleteMany(keys []utils.MyULID, txn *NTransaction) error
