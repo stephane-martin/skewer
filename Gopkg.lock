@@ -104,10 +104,10 @@
   revision = "9127e812e1e9e501ce899a18121d316ecb52e4ba"
 
 [[projects]]
+  branch = "master"
   name = "github.com/coreos/go-systemd"
   packages = ["sdjournal"]
-  revision = "39ca1b05acc7ad1220e09f133283b8859a8b71ab"
-  version = "v17"
+  revision = "a4887aeaa186e68961d2d6af7d5fbac6bd6fa79b"
 
 [[projects]]
   name = "github.com/coreos/pkg"
@@ -122,6 +122,7 @@
   version = "v1.1.0"
 
 [[projects]]
+  branch = "master"
   name = "github.com/dgraph-io/badger"
   packages = [
     ".",
@@ -131,8 +132,7 @@
     "table",
     "y"
   ]
-  revision = "3ff1bfbb11c02c78c11269096669396c2d2cbbd3"
-  version = "v1.5.0"
+  revision = "2e3a32f0ccac3066fb4206b28deb39c210c5266f"
 
 [[projects]]
   branch = "master"
@@ -761,6 +761,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "21271dfa32ec902adab969ddcb8297d7e4cb2233a7d4a6d63f416389061393e1"
+  inputs-digest = "78c002a33dd9943a551b89dcfb5cacba4f9df89034fedf1f1ab0f90b75bd5dc7"
   solver-name = "gps-cdcl"
   solver-version = 1
