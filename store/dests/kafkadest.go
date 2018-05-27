@@ -2,8 +2,10 @@ package dests
 
 import (
 	"context"
+	"sync"
 
 	sarama "github.com/Shopify/sarama"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
@@ -13,7 +15,9 @@ import (
 
 type KafkaDestination struct {
 	*baseDestination
-	producer sarama.AsyncProducer
+	producer   sarama.AsyncProducer
+	collectors []prometheus.Collector
+	wg         sync.WaitGroup
 }
 
 func NewKafkaDestination(ctx context.Context, e *Env) (Destination, error) {
@@ -25,19 +29,30 @@ func NewKafkaDestination(ctx context.Context, e *Env) (Destination, error) {
 		return nil, err
 	}
 
-	d.producer, err = e.config.KafkaDest.GetAsyncProducer(e.confined)
+	producer, registry, err := e.config.KafkaDest.GetAsyncProducer(e.confined)
 	if err != nil {
 		connCounter.WithLabelValues("kafka", "fail").Inc()
 		return nil, err
 	}
+	// we've got a kafka client
+	d.producer = producer
+	// record the success
 	connCounter.WithLabelValues("kafka", "success").Inc()
+	// register the kafka client metrics
+	d.collectors = utils.KafkaProducerMetrics(registry, "skw_dest_kafka")
+	Registry.MustRegister(d.collectors...)
 
+	// process the kafka acks
+	d.wg.Add(1)
 	go func() {
 		for m := range d.producer.Successes() {
 			d.ACK(m.Metadata.(utils.MyULID))
 		}
+		d.wg.Done()
 	}()
 
+	// process the kafka errors
+	d.wg.Add(1)
 	go func() {
 		for m := range d.producer.Errors() {
 			d.NACK(m.Msg.Metadata.(utils.MyULID))
@@ -45,6 +60,16 @@ func NewKafkaDestination(ctx context.Context, e *Env) (Destination, error) {
 				d.dofatal(eerrors.Wrap(m.Err, "Kafka fatal error"))
 			}
 		}
+		d.wg.Done()
+	}()
+
+	// unregister metrics when the client has finished all operations
+	go func() {
+		d.wg.Wait()
+		for _, collector := range d.collectors {
+			Registry.Unregister(collector)
+		}
+		d.collectors = nil
 	}()
 
 	return d, nil
@@ -74,6 +99,7 @@ func (d *KafkaDestination) sendOne(ctx context.Context, message *model.FullMessa
 
 func (d *KafkaDestination) Close() error {
 	d.producer.AsyncClose()
+	d.wg.Wait()
 	return nil
 }
 

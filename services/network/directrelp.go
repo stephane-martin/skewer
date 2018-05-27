@@ -202,6 +202,7 @@ type DirectRelpServiceImpl struct {
 	configs             map[utils.MyULID]conf.DirectRELPSourceConfig
 	forwarder           *ackForwarder
 	parserEnv           *decoders.ParsersEnv
+	collectors          []prometheus.Collector
 }
 
 func NewDirectRelpServiceImpl(confined bool, reporter *base.Reporter, b binder.Client, logger log15.Logger) *DirectRelpServiceImpl {
@@ -237,12 +238,16 @@ func (s *DirectRelpServiceImpl) Start() ([]model.ListenerInfo, error) {
 	}
 
 	var err error
-	s.producer, err = s.kafkaConf.GetAsyncProducer(s.confined)
+	producer, registry, err := s.kafkaConf.GetAsyncProducer(s.confined)
 	if err != nil {
 		connCounter.WithLabelValues("directkafka", "fail").Inc()
 		s.resetTCPListeners()
 		return nil, err
 	}
+	s.producer = producer
+	s.collectors = utils.KafkaProducerMetrics(registry, "skw_directrelp_kafka")
+	base.Registry.MustRegister(s.collectors...)
+
 	connCounter.WithLabelValues("directkafka", "success").Inc()
 
 	s.Logger.Info("Listening on DirectRELP", "nb_services", len(infos))
@@ -259,14 +264,23 @@ func (s *DirectRelpServiceImpl) Start() ([]model.ListenerInfo, error) {
 	}
 
 	s.wg.Add(1)
-	go s.push2kafka()
+	go func() {
+		defer s.wg.Done()
+		s.push2kafka()
+	}()
 	s.wg.Add(1)
-	go s.handleKafkaResponses()
+	go func() {
+		defer s.wg.Done()
+		s.handleKafkaResponses()
+	}()
 
 	cpus := runtime.NumCPU()
 	for i := 0; i < cpus; i++ {
 		s.parsewg.Add(1)
-		go s.parse()
+		go func() {
+			defer s.parsewg.Done()
+			s.parse()
+		}()
 	}
 
 	s.status = Started
@@ -342,6 +356,11 @@ func (s *DirectRelpServiceImpl) doStop(final bool, wait bool) {
 	s.forwarder.RemoveAll()
 	// wait that all goroutines have ended
 	s.wg.Wait()
+	// unregister kafka metrics
+	for _, collector := range s.collectors {
+		base.Registry.Unregister(collector)
+	}
+	s.collectors = nil
 
 	if final {
 		s.status = FinalStopped
@@ -413,8 +432,6 @@ func (s *DirectRelpServiceImpl) parseOne(raw *model.RawTcpMessage) error {
 }
 
 func (s *DirectRelpServiceImpl) parse() {
-	defer s.parsewg.Done()
-
 	for {
 		raw, err := s.rawQ.Get()
 		if raw == nil || err != nil {
@@ -429,9 +446,6 @@ func (s *DirectRelpServiceImpl) parse() {
 }
 
 func (s *DirectRelpServiceImpl) handleKafkaResponses() {
-	var succ *sarama.ProducerMessage
-	var fail *sarama.ProducerError
-	var more, fatal bool
 	kafkaSuccChan := s.producer.Successes()
 	kafkaFailChan := s.producer.Errors()
 	for {
@@ -439,32 +453,26 @@ func (s *DirectRelpServiceImpl) handleKafkaResponses() {
 			return
 		}
 		select {
-		case succ, more = <-kafkaSuccChan:
+		case succ, more := <-kafkaSuccChan:
 			if more {
 				metad := succ.Metadata.(meta)
 				s.forwarder.ForwardSucc(metad.ConnID, metad.Txnr)
 			} else {
 				kafkaSuccChan = nil
 			}
-		case fail, more = <-kafkaFailChan:
+		case fail, more := <-kafkaFailChan:
 			if more {
 				metad := fail.Msg.Metadata.(meta)
 				s.forwarder.ForwardFail(metad.ConnID, metad.Txnr)
 				s.Logger.Info("NACK from Kafka", "error", fail.Error(), "txnr", metad.Txnr, "topic", fail.Msg.Topic)
-				fatal = model.IsFatalKafkaError(fail.Err)
+				if model.IsFatalKafkaError(fail.Err) {
+					s.StopAndWait()
+				}
 			} else {
 				kafkaFailChan = nil
 			}
-
 		}
-
-		if fatal {
-			s.StopAndWait()
-			return
-		}
-
 	}
-
 }
 
 func (s *DirectRelpServiceImpl) handleResponses(conn net.Conn, connID utils.MyULID, client string, logger log15.Logger) error {
@@ -541,16 +549,11 @@ func (s *DirectRelpServiceImpl) handleResponses(conn net.Conn, connID utils.MyUL
 }
 
 func (s *DirectRelpServiceImpl) push2kafka() {
-	defer func() {
-		s.producer.AsyncClose()
-		s.wg.Done()
-	}()
+	defer s.producer.AsyncClose()
 	envs := map[utils.MyULID]*javascript.Environment{}
-	var message *model.FullMessage
-	var err error
 
 	for {
-		message, err = s.parsedMessagesQueue.Get()
+		message, err := s.parsedMessagesQueue.Get()
 		if message == nil || err != nil {
 			return
 		}

@@ -557,16 +557,16 @@ func (c *KafkaDestConfig) GetSaramaProducerConfig(confined bool) (*sarama.Config
 	return s, nil
 }
 
-func (c *KafkaDestConfig) GetAsyncProducer(confined bool) (sarama.AsyncProducer, error) {
+func (c *KafkaDestConfig) GetAsyncProducer(confined bool) (sarama.AsyncProducer, metrics.Registry, error) {
 	conf, err := c.GetSaramaProducerConfig(confined)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	p, err := sarama.NewAsyncProducer(c.Brokers, conf)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return p, nil
+	return p, conf.MetricRegistry, nil
 }
 
 func (c *KafkaDestConfig) GetClient(confined bool) (sarama.Client, error) {

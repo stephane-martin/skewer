@@ -270,41 +270,6 @@ func (s *KafkaServiceImpl) Stop() {
 	s.wg.Wait()
 }
 
-func saramaMetrics(mregistry metrics.Registry, clientID uint32) []prometheus.Collector {
-	collectors := make([]prometheus.Collector, 0)
-
-	collectors = append(collectors, prometheus.NewGaugeFunc(
-		prometheus.GaugeOpts{
-			Help: "Kafka consumers incoming one-minute-averaged byte rate",
-			Name: fmt.Sprintf("skw_kafka_consumer_incoming_1min_byte_rate_%d", clientID),
-		},
-		func() float64 {
-			meter := mregistry.Get("incoming-byte-rate")
-			if meter == nil {
-				return 0
-			}
-			return meter.(metrics.Meter).Rate1()
-		},
-	))
-
-	collectors = append(collectors, prometheus.NewGaugeFunc(
-		prometheus.GaugeOpts{
-			Help: "Kafka consumers incoming mean byte rate",
-			Name: fmt.Sprintf("skw_kafka_consumer_incoming_mean_byte_rate_%d", clientID),
-		},
-		func() float64 {
-			meter := mregistry.Get("incoming-byte-rate")
-			if meter == nil {
-				return 0
-			}
-			return meter.(metrics.Meter).RateMean()
-		},
-	))
-
-	return collectors
-
-}
-
 func (s *KafkaServiceImpl) handleConsumer(ctx context.Context, config conf.KafkaSourceConfig, consumer *cluster.Consumer, mregistry metrics.Registry) {
 	if consumer == nil {
 		s.logger.Error("BUG: the consumer passed to handleConsumer is NIL")
@@ -315,7 +280,7 @@ func (s *KafkaServiceImpl) handleConsumer(ctx context.Context, config conf.Kafka
 	defer lcancel()
 	ackQueue := s.queues.New()
 
-	collectors := saramaMetrics(mregistry, ackQueue.ID())
+	collectors := utils.KafkaConsumerMetrics(mregistry, fmt.Sprintf("skw_kafka_source_%d", ackQueue.ID()))
 	base.Registry.MustRegister(collectors...)
 	defer func() {
 		for _, collector := range collectors {
