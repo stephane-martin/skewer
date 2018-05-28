@@ -86,10 +86,10 @@
   revision = "3a771d992973f24aa725d07868b467d1ddfceafb"
 
 [[projects]]
+  branch = "master"
   name = "github.com/bsm/sarama-cluster"
   packages = ["."]
-  revision = "cf455bc755fe41ac9bb2861e7a961833d9c2ecc3"
-  version = "v2.1.13"
+  revision = "d98592677c0aa08d8aafb882d344fb461682b722"
 
 [[projects]]
   name = "github.com/cenk/backoff"
@@ -761,6 +761,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "78c002a33dd9943a551b89dcfb5cacba4f9df89034fedf1f1ab0f90b75bd5dc7"
+  inputs-digest = "c69c844b3796b4a749fa18d4ed3550c9c3863b60bb730e026f9e4f1c89e6baf7"
   solver-name = "gps-cdcl"
   solver-version = 1
