@@ -20,7 +20,8 @@ func IsFatalKafkaError(e error) bool {
 		sarama.ErrClusterAuthorizationFailed,
 		sarama.ErrUnsupportedVersion,
 		sarama.ErrUnsupportedForMessageFormat,
-		sarama.ErrPolicyViolation:
+		sarama.ErrPolicyViolation,
+		sarama.ErrConsumerCoordinatorNotAvailable:
 		return true
 	default:
 		return false
