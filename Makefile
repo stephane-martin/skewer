@@ -12,7 +12,7 @@ LDFLAGS_RELEASE=-ldflags '-w -s -X github.com/stephane-martin/skewer/conf.Versio
 SOURCES = $(shell find . -type f -name '*.go' -not -path "./vendor/*")
 SUBDIRS = $(shell find . -type d -regex './[a-z].*' -not -path './vendor*' -not -path '*.shapesdoc' | xargs)
 
-$(BINARY): ${SOURCES} utils/logging/types.pb.go conf/derived.gen.go utils/queue/intq/ring.go utils/queue/tcp/ring.go utils/queue/udp/ring.go utils/queue/defered/ring.go utils/queue/kafka/ring.go utils/queue/message/ring.go model/types.pb.go model/types_ffjson.go utils/collectd/embed/statik/statik.go grammars/rfc5424/rfc5424_lexer.go model/avro/full_message.go
+$(BINARY): ${SOURCES} utils/logging/types.pb.go conf/derived.gen.go utils/queue/intq/ring.go utils/queue/tcp/ring.go utils/queue/udp/ring.go utils/queue/defered/ring.go utils/queue/kafka/ring.go utils/queue/message/ring.go model/types.pb.go model/types_ffjson.go utils/collectd/embed/statik/statik.go grammars/rfc5424/rfc5424_lexer.go model/avro/full_message.go utils/ctrie/inttrie/ctrie.go
 	test -n "${GOPATH}"  # test $$GOPATH
 	go build -o ${BINARY} ${LDFLAGS}
 
@@ -32,6 +32,10 @@ model/types_ffjson.go: model/types.go
 model/types.pb.go: model/types.proto
 	test -n "${GOPATH}"  # test $$GOPATH
 	protoc -I=. -I="$$GOPATH/src" -I="$$GOPATH/src/github.com/stephane-martin/skewer/vendor/github.com/gogo/protobuf/protobuf" --gogoslick_out=. model/types.proto
+
+utils/ctrie/inttrie/ctrie.go: utils/ctrie/ctrie.go
+	test -n "${GOPATH}"  # test $$GOPATH
+	genny -in=utils/ctrie/ctrie.go -out=utils/ctrie/inttrie/ctrie.go -pkg=inttrie gen Data=*int32
 
 utils/queue/intq/ring.go: utils/queue/ring.go
 	test -n "${GOPATH}"  # test $$GOPATH
