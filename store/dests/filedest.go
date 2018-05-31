@@ -64,6 +64,7 @@ type openedFile struct {
 	syncmu     sync.Mutex
 }
 
+// TODO: get rid of finalizers
 func finalizer(obj *openedFile) {
 	obj.closeFile()
 }
