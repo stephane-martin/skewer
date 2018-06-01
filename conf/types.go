@@ -355,7 +355,6 @@ type FileDestConfig struct {
 	SyncPeriod      time.Duration `mapstructure:"sync_period" toml:"sync_period" json:"sync_period"`
 	FlushPeriod     time.Duration `mapstructure:"flush_period" toml:"flush_period" json:"flush_period"`
 	BufferSize      int           `mapstructure:"buffer_size" toml:"buffer_size" json:"buffer_size"`
-	OpenFilesCache  uint64        `mapstructure:"open_files_cache" toml:"open_files_cache" json:"open_files_cache"`
 	OpenFileTimeout time.Duration `mapstructure:"open_file_timeout" toml:"open_file_timeout" json:"open_file_timeout"`
 	Gzip            bool          `mapstructure:"gzip" toml:"gzip" json:"gzip"`
 	GzipLevel       int           `mapstructure:"gzip_level" toml:"gzip_level" json:"gzip_level"`
