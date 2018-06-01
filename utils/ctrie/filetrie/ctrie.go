@@ -24,7 +24,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License
 */
-package inttrie
+package filetrie
 
 import (
 	"errors"
@@ -33,6 +33,8 @@ import (
 	"io"
 	"sync/atomic"
 	"unsafe"
+
+	"github.com/stephane-martin/skewer/utils"
 )
 
 const (
@@ -213,7 +215,7 @@ func (l *lNode) head() *sNode {
 
 // lookup returns the value at the given entry in the L-node or returns false
 // if it's not contained.
-func (l *lNode) lookup(key string) (*int32, bool) {
+func (l *lNode) lookup(key string) (*utils.OFile, bool) {
 	// return: value, true if key has been found
 	found, ok := l.l.Find(func(sn *sNode) bool {
 		return key == sn.key
@@ -225,7 +227,7 @@ func (l *lNode) lookup(key string) (*int32, bool) {
 }
 
 // inserted creates a new L-node with the added entry.
-func (l *lNode) inserted(key string, value *int32, hash uint32, replace bool) (*lNode, bool, bool) {
+func (l *lNode) inserted(key string, value *utils.OFile, hash uint32, replace bool) (*lNode, bool, bool) {
 	// return: newlist, replaced, inserted
 	idx := l.l.FindIndex(func(sn *sNode) bool {
 		return key == sn.key
@@ -267,13 +269,13 @@ type branch struct {
 // Entry contains a Ctrie key-value pair.
 type Entry struct {
 	Key   string
-	Value *int32
+	Value *utils.OFile
 }
 
 // sNode is a singleton node which contains a single key and value.
 type sNode struct {
 	key   string
-	value *int32
+	value *utils.OFile
 	hash  uint32
 }
 
@@ -296,25 +298,25 @@ func newCtrie(root *iNode, hashFactory HashFactory, readOnly bool) *Ctrie {
 }
 
 // Insert adds the key-value pair to the Ctrie
-func (c *Ctrie) Insert(key string, value *int32) (inserted bool) {
+func (c *Ctrie) Insert(key string, value *utils.OFile) (inserted bool) {
 	c.assertReadWrite()
 	return c.insert(key, value, c.hash(key))
 }
 
-func (c *Ctrie) Set(key string, value *int32) (replaced bool) {
+func (c *Ctrie) Set(key string, value *utils.OFile) (replaced bool) {
 	c.assertReadWrite()
 	return c.set(key, value, c.hash(key))
 }
 
 // Lookup returns the value for the associated key or returns false if the key
 // doesn't exist.
-func (c *Ctrie) Lookup(key string) (*int32, bool) {
+func (c *Ctrie) Lookup(key string) (*utils.OFile, bool) {
 	return c.lookup(key, c.hash(key))
 }
 
 // Remove deletes the value for the associated key, returning true if it was
 // removed or false if the entry doesn't exist.
-func (c *Ctrie) Remove(key string) (*int32, bool) {
+func (c *Ctrie) Remove(key string) (*utils.OFile, bool) {
 	c.assertReadWrite()
 	return c.remove(key, c.hash(key))
 }
@@ -459,7 +461,7 @@ func (c *Ctrie) assertReadWrite() {
 	}
 }
 
-func (c *Ctrie) insert(key string, value *int32, hash uint32) (inserted bool) {
+func (c *Ctrie) insert(key string, value *utils.OFile, hash uint32) (inserted bool) {
 	for {
 		root := c.readRoot()
 		done, _, inserted := c.iinsert(root, key, value, hash, false, 0, nil, root.gen)
@@ -469,7 +471,7 @@ func (c *Ctrie) insert(key string, value *int32, hash uint32) (inserted bool) {
 	}
 }
 
-func (c *Ctrie) set(key string, value *int32, hash uint32) (replaced bool) {
+func (c *Ctrie) set(key string, value *utils.OFile, hash uint32) (replaced bool) {
 	for {
 		root := c.readRoot()
 		done, replaced, _ := c.iinsert(root, key, value, hash, true, 0, nil, root.gen)
@@ -479,7 +481,7 @@ func (c *Ctrie) set(key string, value *int32, hash uint32) (replaced bool) {
 	}
 }
 
-func (c *Ctrie) lookup(key string, hash uint32) (*int32, bool) {
+func (c *Ctrie) lookup(key string, hash uint32) (*utils.OFile, bool) {
 	for {
 		root := c.readRoot()
 		result, exists, ok := c.ilookup(root, key, hash, 0, nil, root.gen)
@@ -489,7 +491,7 @@ func (c *Ctrie) lookup(key string, hash uint32) (*int32, bool) {
 	}
 }
 
-func (c *Ctrie) remove(key string, hash uint32) (*int32, bool) {
+func (c *Ctrie) remove(key string, hash uint32) (*utils.OFile, bool) {
 	for {
 		root := c.readRoot()
 		result, exists, ok := c.iremove(root, key, hash, 0, nil, root.gen)
@@ -507,7 +509,7 @@ func (c *Ctrie) hash(k string) uint32 {
 
 // iinsert attempts to insert the entry into the Ctrie. If false is returned,
 // the operation should be retried.
-func (c *Ctrie) iinsert(i *iNode, key string, value *int32, hash uint32, replace bool, lev uint, parent *iNode, startGen *generation) (bool, bool, bool) {
+func (c *Ctrie) iinsert(i *iNode, key string, value *utils.OFile, hash uint32, replace bool, lev uint, parent *iNode, startGen *generation) (bool, bool, bool) {
 	// return: done, replaced, inserted
 	main := gcasRead(i, c)
 	if main.cNode != nil {
@@ -596,8 +598,8 @@ func (c *Ctrie) iinsert(i *iNode, key string, value *int32, hash uint32, replace
 // values are the entry value and whether or not the entry was contained in the
 // Ctrie. The last bool indicates if the operation succeeded. False means it
 // should be retried.
-func (c *Ctrie) ilookup(i *iNode, key string, hash uint32, lev uint, parent *iNode, startGen *generation) (*int32, bool, bool) {
-	// return *int32, present, done
+func (c *Ctrie) ilookup(i *iNode, key string, hash uint32, lev uint, parent *iNode, startGen *generation) (*utils.OFile, bool, bool) {
+	// return *utils.OFile, present, done
 	main := gcasRead(i, c)
 	switch {
 	case main.cNode != nil:
@@ -648,7 +650,7 @@ func (c *Ctrie) ilookup(i *iNode, key string, hash uint32, lev uint, parent *iNo
 // values are the entry value and whether or not the entry was contained in the
 // Ctrie. The last bool indicates if the operation succeeded. False means it
 // should be retried.
-func (c *Ctrie) iremove(i *iNode, key string, hash uint32, lev uint, parent *iNode, startGen *generation) (*int32, bool, bool) {
+func (c *Ctrie) iremove(i *iNode, key string, hash uint32, lev uint, parent *iNode, startGen *generation) (*utils.OFile, bool, bool) {
 	// return value, removed, done
 	main := gcasRead(i, c)
 	if main.cNode != nil {
@@ -768,7 +770,7 @@ func clean(i *iNode, lev uint, ctrie *Ctrie) bool {
 	return true
 }
 
-func cleanReadOnly(tn *sNode, lev uint, p *iNode, ctrie *Ctrie, key string, hash uint32) (val *int32, exists bool, ok bool) {
+func cleanReadOnly(tn *sNode, lev uint, p *iNode, ctrie *Ctrie, key string, hash uint32) (val *utils.OFile, exists bool, ok bool) {
 	if !ctrie.readOnly {
 		clean(p, lev-5, ctrie)
 		return nil, false, false

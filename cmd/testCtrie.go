@@ -37,7 +37,7 @@ var testCtrieCmd = &cobra.Command{
 		trie.Remove("zogzog_134")
 		ch := make(chan inttrie.Entry)
 		go func() {
-			trie.Iterator(ch)
+			trie.Iterate(ch)
 			close(ch)
 		}()
 		for e := range ch {

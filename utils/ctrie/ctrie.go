@@ -6,6 +6,7 @@ in the paper Concurrent Tries with Efficient Non-Blocking Snapshots:
 https://axel22.github.io/resources/docs/ctries-snapshot.pdf
 
 Copyright 2015 Workiva, LLC
+Modified by stephane martin
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -38,7 +39,6 @@ type Data generic.Type
 const (
 	// w controls the number of branches at a node (2^w branches).
 	w = 5
-
 	// exp2 is 2^w, which is the hashcode space.
 	exp2 = 32
 )
@@ -94,7 +94,7 @@ func (i *iNode) copyToGen(gen *generation, ctrie *Ctrie) *iNode {
 type mainNode struct {
 	cNode  *cNode
 	tNode  *sNode
-	lNode  *list
+	lNode  *lNode
 	failed *mainNode
 
 	// prev is set as a failed main node when we attempt to CAS and the
@@ -134,7 +134,7 @@ func newMainNode(x *sNode, xhc uint32, y *sNode, yhc uint32, lev uint, gen *gene
 		}
 		return &mainNode{cNode: &cNode{bmp, []branch{branch{s: y}, branch{s: x}}, gen}}
 	}
-	return &mainNode{lNode: new(list).Add(x).Add(y)}
+	return &mainNode{lNode: makeLNode(x, y)}
 }
 
 // inserted returns a copy of this cNode with the new entry at the given
@@ -196,10 +196,27 @@ func untombed(t *sNode) *sNode {
 	return &sNode{key: t.key, hash: t.hash, value: t.value}
 }
 
+type lNode struct {
+	l *list
+}
+
+func makeLNode(x *sNode, y *sNode) *lNode {
+	return &lNode{new(list).Add(x).Add(y)}
+}
+
+func (l *lNode) length() int {
+	return l.l.Length()
+}
+
+func (l *lNode) head() *sNode {
+	return l.l.Head()
+}
+
 // lookup returns the value at the given entry in the L-node or returns false
 // if it's not contained.
-func lNodeLookup(l *list, key string) (Data, bool) {
-	found, ok := l.Find(func(sn *sNode) bool {
+func (l *lNode) lookup(key string) (Data, bool) {
+	// return: value, true if key has been found
+	found, ok := l.l.Find(func(sn *sNode) bool {
 		return key == sn.key
 	})
 	if !ok {
@@ -209,20 +226,37 @@ func lNodeLookup(l *list, key string) (Data, bool) {
 }
 
 // inserted creates a new L-node with the added entry.
-func lNodeInserted(l *list, key string, value Data, hash uint32) *list {
-	return l.Add(&sNode{key: key, value: value, hash: hash})
-}
-
-// removed creates a new L-node with the entry removed.
-func lNodeRemoved(l *list, key string) *list {
-	idx := l.FindIndex(func(sn *sNode) bool {
+func (l *lNode) inserted(key string, value Data, hash uint32, replace bool) (*lNode, bool, bool) {
+	// return: newlist, replaced, inserted
+	idx := l.l.FindIndex(func(sn *sNode) bool {
 		return key == sn.key
 	})
 	if idx < 0 {
-		return l
+		// the key is not present in the list, so we can push the entry on top
+		return &lNode{l.l.Add(&sNode{key: key, value: value, hash: hash})}, false, true
 	}
-	nl, _ := l.Remove(idx)
-	return nl
+	if !replace {
+		// the key is already present, but she should not replace the value, so do nothing
+		return l, false, false
+	}
+	// the key is already present in the list, so first we remove it from the list,
+	// then we add the entry on top
+	newl, _ := l.l.Remove(idx)
+	return &lNode{newl.Add(&sNode{key: key, value: value, hash: hash})}, true, false
+}
+
+// removed creates a new L-node with the entry removed.
+func (l *lNode) removed(key string) (*lNode, bool) {
+	// return: value, true if key has been found
+	idx := l.l.FindIndex(func(sn *sNode) bool {
+		return key == sn.key
+	})
+	if idx < 0 {
+		// the key was not found, so do nothing
+		return l, false
+	}
+	nl, _ := l.l.Remove(idx)
+	return &lNode{nl}, true
 }
 
 // branch is either an iNode or sNode.
@@ -262,11 +296,15 @@ func newCtrie(root *iNode, hashFactory HashFactory, readOnly bool) *Ctrie {
 	}
 }
 
-// Insert adds the key-value pair to the Ctrie, replacing the existing value if
-// the key already exists.
-func (c *Ctrie) Insert(key string, value Data) {
+// Insert adds the key-value pair to the Ctrie
+func (c *Ctrie) Insert(key string, value Data) (inserted bool) {
 	c.assertReadWrite()
-	c.insert(key, value, c.hash(key))
+	return c.insert(key, value, c.hash(key))
+}
+
+func (c *Ctrie) Set(key string, value Data) (replaced bool) {
+	c.assertReadWrite()
+	return c.set(key, value, c.hash(key))
 }
 
 // Lookup returns the value for the associated key or returns false if the key
@@ -331,9 +369,33 @@ func (c *Ctrie) Clear() {
 }
 
 // Iterator returns a channel which yields the Entries of the Ctrie.
-func (c *Ctrie) Iterator(ch chan Entry) {
+func (c *Ctrie) Iterate(ch chan Entry) {
 	snapshot := c.ReadOnlySnapshot()
 	snapshot.traverse(snapshot.readRoot(), ch)
+}
+
+func (c *Ctrie) ForEach(f func(Entry)) {
+	ch := make(chan Entry)
+	go func() {
+		c.Iterate(ch)
+		close(ch)
+	}()
+	for e := range ch {
+		f(e)
+	}
+}
+
+func (c *Ctrie) Filter(f func(Entry) bool, ch chan Entry) {
+	ich := make(chan Entry)
+	go func() {
+		c.Iterate(ich)
+		close(ich)
+	}()
+	for e := range ich {
+		if f(e) {
+			ch <- e
+		}
+	}
 }
 
 // Size returns the number of keys in the Ctrie.
@@ -349,8 +411,7 @@ func (c *Ctrie) Size() int {
 
 func (c *Ctrie) count(i *iNode) int {
 	main := gcasRead(i, c)
-	switch {
-	case main.cNode != nil:
+	if main.cNode != nil {
 		var total int
 		for _, br := range main.cNode.array {
 			if br.i != nil {
@@ -360,9 +421,11 @@ func (c *Ctrie) count(i *iNode) int {
 			}
 		}
 		return total
-	case main.lNode != nil:
-		return main.lNode.Length()
-	case main.tNode != nil:
+	}
+	if main.lNode != nil {
+		return main.lNode.length()
+	}
+	if main.tNode != nil {
 		return 1
 	}
 	return 0
@@ -370,8 +433,7 @@ func (c *Ctrie) count(i *iNode) int {
 
 func (c *Ctrie) traverse(i *iNode, ch chan<- Entry) {
 	main := gcasRead(i, c)
-	switch {
-	case main.cNode != nil:
+	if main.cNode != nil {
 		for _, br := range main.cNode.array {
 			if br.i != nil {
 				c.traverse(br.i, ch)
@@ -379,16 +441,17 @@ func (c *Ctrie) traverse(i *iNode, ch chan<- Entry) {
 				ch <- Entry{Key: br.s.key, Value: br.s.value}
 			}
 		}
-	case main.lNode != nil:
-		main.lNode.ForEach(
+	}
+	if main.lNode != nil {
+		main.lNode.l.ForEach(
 			func(sn *sNode) {
 				ch <- Entry{Key: sn.key, Value: sn.value}
 			},
 		)
-	case main.tNode != nil:
+	}
+	if main.tNode != nil {
 		ch <- Entry{Key: main.tNode.key, Value: main.tNode.value}
 	}
-	return
 }
 
 func (c *Ctrie) assertReadWrite() {
@@ -397,18 +460,29 @@ func (c *Ctrie) assertReadWrite() {
 	}
 }
 
-func (c *Ctrie) insert(key string, value Data, hash uint32) {
-	root := c.readRoot()
+func (c *Ctrie) insert(key string, value Data, hash uint32) (inserted bool) {
 	for {
-		if c.iinsert(root, key, value, hash, 0, nil, root.gen) {
-			return
+		root := c.readRoot()
+		done, _, inserted := c.iinsert(root, key, value, hash, false, 0, nil, root.gen)
+		if done {
+			return inserted
+		}
+	}
+}
+
+func (c *Ctrie) set(key string, value Data, hash uint32) (replaced bool) {
+	for {
+		root := c.readRoot()
+		done, replaced, _ := c.iinsert(root, key, value, hash, true, 0, nil, root.gen)
+		if done {
+			return replaced
 		}
 	}
 }
 
 func (c *Ctrie) lookup(key string, hash uint32) (Data, bool) {
-	root := c.readRoot()
 	for {
+		root := c.readRoot()
 		result, exists, ok := c.ilookup(root, key, hash, 0, nil, root.gen)
 		if ok {
 			return result, exists
@@ -417,8 +491,8 @@ func (c *Ctrie) lookup(key string, hash uint32) (Data, bool) {
 }
 
 func (c *Ctrie) remove(key string, hash uint32) (Data, bool) {
-	root := c.readRoot()
 	for {
+		root := c.readRoot()
 		result, exists, ok := c.iremove(root, key, hash, 0, nil, root.gen)
 		if ok {
 			return result, exists
@@ -434,11 +508,10 @@ func (c *Ctrie) hash(k string) uint32 {
 
 // iinsert attempts to insert the entry into the Ctrie. If false is returned,
 // the operation should be retried.
-func (c *Ctrie) iinsert(i *iNode, key string, value Data, hash uint32, lev uint, parent *iNode, startGen *generation) bool {
-	// Linearization point.
+func (c *Ctrie) iinsert(i *iNode, key string, value Data, hash uint32, replace bool, lev uint, parent *iNode, startGen *generation) (bool, bool, bool) {
+	// return: done, replaced, inserted
 	main := gcasRead(i, c)
-	switch {
-	case main.cNode != nil:
+	if main.cNode != nil {
 		cn := main.cNode
 		flag, pos := flagPos(hash, lev, cn.bmp)
 		if cn.bmp&flag == 0 {
@@ -450,7 +523,10 @@ func (c *Ctrie) iinsert(i *iNode, key string, value Data, hash uint32, lev uint,
 				rn = cn.renewed(i.gen, c)
 			}
 			ncn := &mainNode{cNode: rn.inserted(pos, flag, branch{s: &sNode{key: key, value: value, hash: hash}}, i.gen)}
-			return gcas(i, main, ncn, c)
+			if gcas(i, main, ncn, c) {
+				return true, false, true
+			}
+			return false, false, false
 		}
 		// If the relevant bit is present in the bitmap, then its corresponding
 		// branch is read from the array.
@@ -458,12 +534,12 @@ func (c *Ctrie) iinsert(i *iNode, key string, value Data, hash uint32, lev uint,
 		if bra.i != nil {
 			// If the branch is an I-node, then iinsert is called recursively.
 			if startGen == bra.i.gen {
-				return c.iinsert(bra.i, key, value, hash, lev+w, i, startGen)
+				return c.iinsert(bra.i, key, value, hash, replace, lev+w, i, startGen)
 			}
 			if gcas(i, main, &mainNode{cNode: cn.renewed(startGen, c)}, c) {
-				return c.iinsert(i, key, value, hash, lev, parent, startGen)
+				return c.iinsert(i, key, value, hash, replace, lev, parent, startGen)
 			}
-			return false
+			return false, false, false
 		}
 		if bra.s.key != key {
 			// If the branch is an S-node and its key is not equal to the
@@ -480,22 +556,41 @@ func (c *Ctrie) iinsert(i *iNode, key string, value Data, hash uint32, lev uint,
 			nsn := &sNode{key: key, value: value, hash: hash}
 			nin := &iNode{main: newMainNode(bra.s, bra.s.hash, nsn, nsn.hash, lev+w, i.gen), gen: i.gen}
 			ncn := &mainNode{cNode: rn.updated(pos, branch{i: nin}, i.gen)}
-			return gcas(i, main, ncn, c)
+			if gcas(i, main, ncn, c) {
+				return true, false, true
+			}
+			return false, false, false
 		}
 		// If the key in the S-node is equal to the key being inserted,
 		// then the C-node is replaced with its updated version with a new
 		// S-node. The linearization point is a successful CAS.
-		ncn := &mainNode{cNode: cn.updated(pos, branch{s: &sNode{key: key, value: value, hash: hash}}, i.gen)}
-		return gcas(i, main, ncn, c)
-	case main.tNode != nil:
-		clean(parent, lev-w, c)
-		return false
-	case main.lNode != nil:
-		nln := &mainNode{lNode: lNodeInserted(main.lNode, key, value, hash)}
-		return gcas(i, main, nln, c)
-	default:
-		panic("Ctrie is in an invalid state")
+		if replace {
+			ncn := &mainNode{cNode: cn.updated(pos, branch{s: &sNode{key: key, value: value, hash: hash}}, i.gen)}
+			if gcas(i, main, ncn, c) {
+				return true, true, false
+			}
+			return false, false, false
+		}
+		// the key is already present, but we should not replace, so do nothing
+		return true, false, false
 	}
+	if main.tNode != nil {
+		clean(parent, lev-w, c)
+		return false, false, false
+	}
+	if main.lNode != nil {
+		newLNode, replaced, inserted := main.lNode.inserted(key, value, hash, replace)
+		if !inserted && !replaced {
+			// nothing to do
+			return true, false, false
+		}
+		nln := &mainNode{lNode: newLNode}
+		if gcas(i, main, nln, c) {
+			return true, replaced, inserted
+		}
+		return false, false, false
+	}
+	panic("Ctrie is in an invalid state")
 }
 
 // ilookup attempts to fetch the entry from the Ctrie. The first two return
@@ -503,7 +598,7 @@ func (c *Ctrie) iinsert(i *iNode, key string, value Data, hash uint32, lev uint,
 // Ctrie. The last bool indicates if the operation succeeded. False means it
 // should be retried.
 func (c *Ctrie) ilookup(i *iNode, key string, hash uint32, lev uint, parent *iNode, startGen *generation) (Data, bool, bool) {
-	// Linearization point.
+	// return Data, present, done
 	main := gcasRead(i, c)
 	switch {
 	case main.cNode != nil:
@@ -527,7 +622,6 @@ func (c *Ctrie) ilookup(i *iNode, key string, hash uint32, lev uint, parent *iNo
 				return c.ilookup(i, key, hash, lev, parent, startGen)
 			}
 			return nil, false, false
-			//case *sNode:
 		}
 
 		// If the branch is an S-node, then the key within the S-node is
@@ -544,7 +638,7 @@ func (c *Ctrie) ilookup(i *iNode, key string, hash uint32, lev uint, parent *iNo
 	case main.lNode != nil:
 		// Hash collisions are handled using L-nodes, which are essentially
 		// persistent linked lists.
-		val, ok := lNodeLookup(main.lNode, key)
+		val, ok := main.lNode.lookup(key)
 		return val, ok, true
 	default:
 		panic("Ctrie is in an invalid state")
@@ -556,7 +650,7 @@ func (c *Ctrie) ilookup(i *iNode, key string, hash uint32, lev uint, parent *iNo
 // Ctrie. The last bool indicates if the operation succeeded. False means it
 // should be retried.
 func (c *Ctrie) iremove(i *iNode, key string, hash uint32, lev uint, parent *iNode, startGen *generation) (Data, bool, bool) {
-	// Linearization point.
+	// return value, removed, done
 	main := gcasRead(i, c)
 	if main.cNode != nil {
 		cn := main.cNode
@@ -611,12 +705,13 @@ func (c *Ctrie) iremove(i *iNode, key string, hash uint32, lev uint, parent *iNo
 		return nil, false, false
 	}
 	if main.lNode != nil {
-		nln := &mainNode{lNode: lNodeRemoved(main.lNode, key)}
-		if nln.lNode.Length() == 1 {
-			nln = entomb(nln.lNode.Head())
+		newLNode, _ := main.lNode.removed(key)
+		nln := &mainNode{lNode: newLNode}
+		if nln.lNode.length() == 1 {
+			nln = entomb(nln.lNode.head())
 		}
 		if gcas(i, main, nln, c) {
-			val, ok := lNodeLookup(main.lNode, key)
+			val, ok := main.lNode.lookup(key)
 			return val, ok, true
 		}
 		return nil, false, true
@@ -912,8 +1007,7 @@ type list struct {
 	tail *list
 }
 
-// Head returns the head of the list. The bool will be false if the list is
-// empty.
+// Head returns the head of the list. The bool will be false if the list is empty.
 func (l *list) Head() *sNode {
 	if l == nil {
 		return nil
@@ -921,8 +1015,7 @@ func (l *list) Head() *sNode {
 	return l.head
 }
 
-// Tail returns the tail of the list. The bool will be false if the list is
-// empty.
+// Tail returns the tail of the list. The bool will be false if the list is empty.
 func (l *list) Tail() (*list, bool) {
 	if l == nil {
 		return nil, false
