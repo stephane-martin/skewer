@@ -552,8 +552,6 @@ func (c *KafkaDestConfig) GetSaramaProducerConfig(confined bool) (*sarama.Config
 	default:
 		s.Producer.Partitioner = sarama.NewHashPartitioner
 	}
-
-	// TODO: MetricRegistry ?
 	return s, nil
 }
 
