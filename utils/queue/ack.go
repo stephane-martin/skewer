@@ -1,17 +1,15 @@
 package queue
 
 import (
-	"fmt"
-	"runtime"
 	"sync"
 	"sync/atomic"
-	"time"
 	"unsafe"
 
 	"github.com/stephane-martin/skewer/conf"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/eerrors"
 	"github.com/stephane-martin/skewer/utils/waiter"
+	uatomic "go.uber.org/atomic"
 )
 
 type ackNode struct {
@@ -24,47 +22,60 @@ type aState struct {
 	Dest conf.DestinationType
 }
 
+var ackPool = &sync.Pool{New: func() interface{} { return &ackNode{} }}
+
+func getACKNode() *ackNode {
+	return ackPool.Get().(*ackNode)
+}
+
 type AckQueue struct {
 	head      *ackNode
 	_padding1 [8]uint64
 	tail      *ackNode
 	_padding2 [8]uint64
-	disposed  int32
-	_padding3 [8]uint64
-	pool      *sync.Pool
+	disposed  uatomic.Bool
 }
 
 func NewAckQueue() *AckQueue {
-	stub := &ackNode{}
-	q := &AckQueue{head: stub, tail: stub, disposed: 0, pool: &sync.Pool{New: func() interface{} {
-		return &ackNode{}
-	}}}
-	return q
+	stub := new(ackNode)
+	return &AckQueue{head: stub, tail: stub}
 }
 
 func (q *AckQueue) Disposed() bool {
-	return atomic.LoadInt32(&q.disposed) == 1
+	if q == nil {
+		return true
+	}
+	return q.disposed.Load()
 }
 
 func (q *AckQueue) Dispose() {
-	atomic.StoreInt32(&q.disposed, 1)
+	if q != nil {
+		q.disposed.Store(true)
+	}
 }
 
 func (q *AckQueue) Get() (utils.MyULID, conf.DestinationType, error) {
+	if q == nil {
+		return utils.ZeroULID, 0, eerrors.ErrQDisposed
+	}
 	tail := q.tail
 	next := tail.Next
 	if next != nil {
 		(*ackNode)(atomic.SwapPointer((*unsafe.Pointer)(unsafe.Pointer(&q.tail)), unsafe.Pointer(next))).State = next.State
-		q.pool.Put(tail)
+		ackPool.Put(tail)
 		return next.State.UID, next.State.Dest, nil
-	} else if q.Disposed() {
+	}
+	if q.Disposed() {
 		return utils.ZeroULID, 0, eerrors.ErrQDisposed
 	}
 	return utils.ZeroULID, 0, nil
 }
 
 func (q *AckQueue) Put(uid utils.MyULID, dest conf.DestinationType) error {
-	n := q.pool.Get().(*ackNode)
+	if q == nil {
+		return eerrors.ErrQDisposed
+	}
+	n := getACKNode()
 	n.State.UID = uid
 	n.State.Dest = dest
 	n.Next = nil
@@ -76,10 +87,16 @@ func (q *AckQueue) Put(uid utils.MyULID, dest conf.DestinationType) error {
 }
 
 func (q *AckQueue) Has() bool {
+	if q == nil {
+		return false
+	}
 	return q.tail.Next != nil
 }
 
 func (q *AckQueue) Wait() bool {
+	if q == nil {
+		return false
+	}
 	w := waiter.Default()
 	for {
 		if q.Has() {
@@ -93,44 +110,39 @@ func (q *AckQueue) Wait() bool {
 }
 
 func WaitManyAckQueues(queues ...*AckQueue) bool {
-	var nb uint64
 	var q *AckQueue
 
-	notNilQueues := make([]*AckQueue, 0, len(queues))
+	// inplace empty queues filtering
+	notNilQueues := queues[:0]
 	for _, q = range queues {
 		if q != nil {
 			notNilQueues = append(notNilQueues, q)
 		}
 	}
-	if len(notNilQueues) == 0 {
+	queues = notNilQueues
+	if len(queues) == 0 {
 		return false
 	}
-	queues = notNilQueues
 
-MainLoop:
+	w := waiter.Default()
+
+L:
 	for {
 		for _, q = range queues {
-			if q != nil {
-				if q.Has() {
-					return true
-				}
+			if q != nil && q.Has() {
+				// at least one queue is not empty
+				return true
 			}
 		}
+		// all queues are empty
 		for _, q = range queues {
 			if !q.Disposed() {
-				if nb < 22 {
-					runtime.Gosched()
-				} else if nb < 24 {
-					time.Sleep(time.Millisecond)
-				} else if nb < 26 {
-					time.Sleep(10 * time.Millisecond)
-				} else {
-					time.Sleep(100 * time.Millisecond)
-				}
-				nb++
-				continue MainLoop
+				// at least one queue is not disposed
+				w.Wait()
+				continue L
 			}
 		}
+		// all queues are empty and disposed
 		return false
 	}
 }
@@ -141,6 +153,9 @@ type UidDest struct {
 }
 
 func (q *AckQueue) GetMany(max uint32) (res []UidDest) {
+	if q == nil {
+		return nil
+	}
 	var uid utils.MyULID
 	var dest conf.DestinationType
 	var err error
@@ -157,23 +172,10 @@ func (q *AckQueue) GetMany(max uint32) (res []UidDest) {
 	return res
 }
 
-func (q *AckQueue) GetUidsExactlyInto(uids *[]utils.MyULID) error {
-	var uid utils.MyULID
-	var err error
-	nb := len(*uids)
-	var i int
-	for i < nb {
-		uid, _, err = q.Get()
-		if uid == utils.ZeroULID || err != nil {
-			return fmt.Errorf("GetUidsExactlyInto: missing uid for some message")
-		}
-		(*uids)[i] = uid
-		i++
-	}
-	return nil
-}
-
 func (q *AckQueue) GetManyInto(uids *[]UidDest) {
+	if q == nil {
+		return
+	}
 	var uid utils.MyULID
 	var dest conf.DestinationType
 	var err error

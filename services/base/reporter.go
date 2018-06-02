@@ -24,6 +24,22 @@ var SYSLOG = []byte("syslog")
 var INFOS = []byte("infos")
 var SP = []byte(" ")
 
+var rpool = &sync.Pool{New: func() interface{} {
+	return proto.NewBuffer(make([]byte, 0, 16384))
+}}
+
+func getBuffer() (buf *proto.Buffer) {
+	buf = rpool.Get().(*proto.Buffer)
+	buf.Reset()
+	return buf
+}
+
+func putBuffer(buf *proto.Buffer) {
+	if buf != nil {
+		rpool.Put(buf)
+	}
+}
+
 // Reporter is used by plugins to report new syslog messages to the controller.
 type Reporter struct {
 	name         string
@@ -33,7 +49,6 @@ type Reporter struct {
 	queue        *queue.BSliceQueue
 	secret       *memguard.LockedBuffer
 	pipeWriter   *utils.EncryptWriter
-	pool         *sync.Pool
 }
 
 // NewReporter creates a reporter.
@@ -42,26 +57,9 @@ func NewReporter(name string, l log15.Logger, pipe *os.File) *Reporter {
 		name:   name,
 		logger: l,
 		pipe:   pipe,
-		pool: &sync.Pool{
-			New: func() interface{} {
-				return proto.NewBuffer(make([]byte, 0, 16384))
-			},
-		},
 	}
-	rep.bufferedPipe = bufio.NewWriter(pipe)
+	rep.bufferedPipe = bufio.NewWriterSize(pipe, 32768)
 	return &rep
-}
-
-func (s *Reporter) getBuffer() (buf *proto.Buffer) {
-	buf = s.pool.Get().(*proto.Buffer)
-	buf.Reset()
-	return buf
-}
-
-func (s *Reporter) putBuffer(buf *proto.Buffer) {
-	if buf != nil {
-		s.pool.Put(buf)
-	}
 }
 
 func (s *Reporter) Start() {
@@ -79,13 +77,16 @@ func (s *Reporter) pushqueue() {
 		_ = s.bufferedPipe.Flush()
 		_ = s.pipe.Close()
 	}()
-	var m string
-	var err error
+	var (
+		m    string
+		have bool
+		err  error
+	)
 
 	for s.queue.Wait(0) {
 		for s.queue.Wait(100 * time.Millisecond) {
-			_, m, err = s.queue.Get()
-			if m != "" && err == nil {
+			have, _, m, _ = s.queue.Get()
+			if have {
 				_, err = io.WriteString(s.pipeWriter, m)
 				if err != nil {
 					s.logger.Crit("Unexpected error when writing messages to the plugin pipe", "error", err)
@@ -109,8 +110,8 @@ func (s *Reporter) Stop() {
 // Stash reports one syslog message to the controller.
 func (s *Reporter) Stash(m *model.FullMessage) error {
 	var err error
-	buf := s.getBuffer()
-	defer s.putBuffer(buf)
+	buf := getBuffer()
+	defer putBuffer(buf)
 	err = buf.Marshal(m)
 	if err != nil {
 		return eerrors.Wrapf(err, "Failed to marshal a message to be sent by plugin: %s", s.name)
