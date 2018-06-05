@@ -29,18 +29,18 @@ func (dests DestinationType) Has(one DestinationType) bool {
 
 const (
 	Kafka           DestinationType = 1
-	UDP                             = 2
-	TCP                             = 4
-	RELP                            = 8
-	File                            = 16
-	Stderr                          = 32
-	Graylog                         = 64
-	HTTP                            = 128
-	NATS                            = 256
-	HTTPServer                      = 512
-	WebsocketServer                 = 1024
-	Elasticsearch                   = 2048
-	Redis                           = 4096
+	UDP             DestinationType = 2
+	TCP             DestinationType = 4
+	RELP            DestinationType = 8
+	File            DestinationType = 16
+	Stderr          DestinationType = 32
+	Graylog         DestinationType = 64
+	HTTP            DestinationType = 128
+	NATS            DestinationType = 256
+	HTTPServer      DestinationType = 512
+	WebsocketServer DestinationType = 1024
+	Elasticsearch   DestinationType = 2048
+	Redis           DestinationType = 4096
 )
 
 var Destinations = map[string]DestinationType{
