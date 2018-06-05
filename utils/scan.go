@@ -9,71 +9,141 @@ import (
 	"github.com/stephane-martin/skewer/utils/eerrors"
 )
 
-type Scanner struct {
-	scanner *bufio.Scanner
-	c       chan bool
-	sync.Mutex
-	ctx context.Context
+type Scanner interface {
+	Scan() bool
+	Err() error
+	Bytes() []byte
+	Text() string
+	Buffer([]byte, int)
+	Split(bufio.SplitFunc)
 }
 
-func NewWrappedScanner(ctx context.Context, scanner *bufio.Scanner) (s *Scanner) {
-	s = &Scanner{
+type CtxScanner struct {
+	scanner Scanner
+	reschan chan bool
+	sync.Mutex
+	ctx context.Context
+	sync.Once
+}
+
+type RecoverScanner struct {
+	scanner    Scanner
+	recovererr error
+}
+
+func WithContext(ctx context.Context, scanner Scanner) Scanner {
+	if ctx == nil {
+		return scanner
+	}
+	return &CtxScanner{
 		scanner: scanner,
 		ctx:     ctx,
+		reschan: make(chan bool),
 	}
-	if ctx == nil {
-		return s
+}
+
+func WithRecover(scanner Scanner) *RecoverScanner {
+	return &RecoverScanner{scanner: scanner}
+}
+
+func (s *CtxScanner) init() {
+	if s.ctx == nil {
+		return
 	}
-	s.c = make(chan bool)
 	s.Lock()
 	go func() {
 		for {
 			s.Lock()
 			select {
-			case <-ctx.Done():
-				close(s.c)
+			case <-s.ctx.Done():
+				close(s.reschan)
 				return
-			case s.c <- scanner.Scan():
+			case s.reschan <- s.scanner.Scan():
 			}
 		}
 	}()
-
-	return s
 }
 
-func (s *Scanner) Scan() bool {
+func (s *CtxScanner) Scan() bool {
 	if s == nil || s.scanner == nil {
 		return false
 	}
 	if s.ctx == nil {
 		return s.scanner.Scan()
 	}
+	s.Do(s.init)
+
 	s.Unlock()
 	select {
-	case res := <-s.c:
+	case res := <-s.reschan:
 		return res
 	case <-s.ctx.Done():
 		return false
 	}
 }
 
-func (s *Scanner) Err() error {
+func (s *RecoverScanner) Scan() (ret bool) {
+	defer func() {
+		e := Recover(recover())
+		if e != nil {
+			ret = false
+			s.recovererr = e
+		}
+	}()
+	return s.scanner.Scan()
+}
+
+func (s *CtxScanner) Err() error {
+	if s.ctx == nil {
+		if s.scanner == nil {
+			return nil
+		}
+		return s.scanner.Err()
+	}
+	select {
+	case <-s.ctx.Done():
+		return nil
+	default:
+		return s.scanner.Err()
+	}
+}
+
+func (s *RecoverScanner) Err() error {
+	if s.recovererr != nil {
+		return s.recovererr
+	}
 	return s.scanner.Err()
 }
 
-func (s *Scanner) Bytes() []byte {
+func (s *CtxScanner) Bytes() []byte {
 	return s.scanner.Bytes()
 }
 
-func (s *Scanner) Buffer(buf []byte, max int) {
+func (s *CtxScanner) Buffer(buf []byte, max int) {
 	s.scanner.Buffer(buf, max)
 }
 
-func (s *Scanner) Text() string {
+func (s *CtxScanner) Text() string {
 	return s.scanner.Text()
 }
 
-func (s *Scanner) Split(f bufio.SplitFunc) {
+func (s *CtxScanner) Split(f bufio.SplitFunc) {
+	s.scanner.Split(f)
+}
+
+func (s *RecoverScanner) Bytes() []byte {
+	return s.scanner.Bytes()
+}
+
+func (s *RecoverScanner) Buffer(buf []byte, max int) {
+	s.scanner.Buffer(buf, max)
+}
+
+func (s *RecoverScanner) Text() string {
+	return s.scanner.Text()
+}
+
+func (s *RecoverScanner) Split(f bufio.SplitFunc) {
 	s.scanner.Split(f)
 }
 
@@ -81,22 +151,9 @@ func Recover(r interface{}) error {
 	e := eerrors.Err(r)
 	if e != nil {
 		if strings.HasPrefix(e.Error(), "bufio.Scan") {
-			return eerrors.Wrap(e, "Scanner panicked")
-		} else {
-			panic(r)
+			return eerrors.WithTypes(eerrors.Wrap(e, "Scanner panicked"), "Panic", "Fatal")
 		}
+		panic(r)
 	}
 	return nil
-}
-
-type scanner interface {
-	Scan() bool
-}
-
-func ScanRecover(s scanner) (ret bool, err error) {
-	defer func() {
-		err = Recover(recover())
-	}()
-	ret = s.Scan()
-	return
 }

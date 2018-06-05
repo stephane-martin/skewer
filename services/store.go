@@ -24,6 +24,8 @@ import (
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/eerrors"
 	"github.com/stephane-martin/skewer/utils/httpserver"
+	"github.com/stephane-martin/skewer/utils/reservoir"
+	"github.com/stephane-martin/skewer/utils/waiter"
 )
 
 type storeServiceImpl struct {
@@ -108,72 +110,84 @@ func (s *storeServiceImpl) Start() ([]model.ListenerInfo, error) {
 	return nil, nil
 }
 
-func (s *storeServiceImpl) create() (err error) {
+func (s *storeServiceImpl) create() error {
 	var destinations conf.DestinationType
-	destinations, err = s.config.Main.GetDestinations()
+	destinations, err := s.config.Main.GetDestinations()
 	if err != nil {
 		return eerrors.Wrap(err, "Error getting destinations")
 	}
-	s.store, err = store.NewStore(s.shutdownCtx, s.config.Store, s.ring, destinations, s.confined, s.logger)
+	sto, err := store.NewStore(s.shutdownCtx, s.config.Store, s.ring, destinations, s.confined, s.logger)
 	if err != nil {
 		return eerrors.Wrap(err, "Error creating the Store")
 	}
+	s.store = sto
 	err = s.store.StoreAllSyslogConfigs(s.config)
 	if err != nil {
 		return eerrors.Wrap(err, "Error storing configurations in store")
 	}
-	// receive syslog messages on the pipe
+
+	reserv := reservoir.NewReservoir(uint64(s.store.BatchSize))
+
+	// send messages to the store
 	s.ingestwg.Add(1)
 	go func() {
 		defer s.ingestwg.Done()
 
-		scanner := utils.NewWrappedScanner(s.pipeCtx, bufio.NewScanner(s.pipe))
+		m := make(map[utils.MyULID]string, s.store.BatchSize)
+		w := waiter.Default()
+
+		for {
+			err := reserv.DeliverTo(m)
+			if err == eerrors.ErrQDisposed {
+				return
+			}
+			if len(m) == 0 {
+				w.WaitCtx(s.pipeCtx)
+				continue
+			}
+			w.Reset()
+			_, e := s.store.Ingest(m)
+			if e != nil {
+				// TODO: damned
+			}
+			for k := range m {
+				delete(m, k)
+			}
+		}
+	}()
+
+	// receive syslog messages on the pipe
+	s.ingestwg.Add(1)
+	go func() {
+		defer func() {
+			reserv.Dispose()
+			s.logger.Debug("Stopped to read the ingestion store pipe")
+			s.ingestwg.Done()
+		}()
+
+		scanner := utils.WithRecover(utils.WithContext(s.pipeCtx, bufio.NewScanner(s.pipe)))
 		scanner.Split(utils.MakeDecryptSplit(s.secret))
 		scanner.Buffer(make([]byte, 0, 65536), 65536)
 
-		var err error
 		protobuff := proto.NewBuffer(make([]byte, 0, 4096))
 
-		for {
-			for {
-				cont, err := utils.ScanRecover(scanner)
-				if err != nil {
-					s.logger.Crit("Scanner panicked in store service", "error", err)
-					go func() { s.Shutdown() }()
-					return
-				}
-				if !cont {
-					break
-				}
-				msgBytes := scanner.Bytes()
-				protobuff.SetBuf(msgBytes)
-				message, err := model.FromBuf(protobuff) // we need to parse to get the message uid
-				if err != nil {
-					model.FullFree(message)
-					s.logger.Error("Unexpected error decoding message from the Store pipe", "error", err)
-					go func() { s.Shutdown() }()
-					return
-				}
-				uid := message.Uid
+		for scanner.Scan() {
+			msgBytes := scanner.Bytes()
+			protobuff.SetBuf(msgBytes)
+			message, err := model.FromBuf(protobuff) // we need to parse to get the message uid
+			if err != nil {
 				model.FullFree(message)
-				err = s.store.Stash(uid, string(msgBytes))
-				if err != nil {
-					s.logger.Error("Error pushing message to the store queue", "error", err)
-					go func() { s.Shutdown() }()
-					return
-				}
-			}
-
-			err = scanner.Err()
-			if eerrors.IsTimeout(err) {
-				continue
-			}
-			if err == nil || eerrors.HasFileClosed(err) {
-				s.logger.Debug("Stopped to read the ingestion store pipe")
+				s.logger.Error("Unexpected error decoding message from the Store pipe", "error", err)
+				go func() { s.Shutdown() }()
 				return
-			} else if err != nil {
-				s.logger.Warn("Unexpected error decoding message from the Store pipe", "error", err)
 			}
+			uid := message.Uid
+			model.FullFree(message)
+			reserv.Add(uid, string(msgBytes))
+		}
+
+		if err != nil && !eerrors.HasFileClosed(err) {
+			s.logger.Warn("Unexpected error decoding message from the Store pipe", "error", err)
 		}
 	}()
 	return nil

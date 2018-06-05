@@ -40,6 +40,8 @@ var ErrRELPNoHost = RELPClientError(eerrors.New("Empty host or empty unix socket
 var ErrRELPNoPort = RELPClientError(eerrors.New("Empty port"))
 var ErrRELPTimeout = RELPClientError(eerrors.New("Timeout waiting for RELP response"))
 
+// TODO: replace gotomic.Hash by a ctrie to get rid of gotomic dep
+
 type IntKey int32
 
 func (self IntKey) HashCode() uint32 {
@@ -120,7 +122,7 @@ type RELPClient struct {
 	conn    net.Conn
 	writer  *concurrent.Writer
 	encoder encoders.Encoder
-	scanner *bufio.Scanner
+	scanner utils.Scanner
 	logger  log15.Logger
 	ticker  *time.Ticker
 
@@ -260,7 +262,7 @@ func (c *RELPClient) Connect() (err error) {
 	}
 
 	c.conn = conn
-	c.scanner = bufio.NewScanner(c.conn)
+	c.scanner = utils.WithRecover(bufio.NewScanner(c.conn))
 	c.scanner.Split(utils.RelpSplit)
 
 	err = c.wopen()
@@ -366,10 +368,7 @@ func (c *RELPClient) wclose() (err error) {
 }
 
 func (c *RELPClient) scan() (txnr int32, retcode int, data []byte, err error) {
-	ret, err := utils.ScanRecover(c.scanner)
-	if err != nil {
-		return 0, 0, nil, RELPClientError(err)
-	}
+	ret := c.scanner.Scan()
 	if !ret {
 		return 0, 0, nil, c.scanner.Err()
 	}

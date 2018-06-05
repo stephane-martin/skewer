@@ -25,7 +25,8 @@ import (
 	"github.com/stephane-martin/skewer/sys/namespaces"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/eerrors"
-	"github.com/stephane-martin/skewer/utils/queue"
+	"github.com/stephane-martin/skewer/utils/reservoir"
+	"github.com/stephane-martin/skewer/utils/waiter"
 )
 
 var space = []byte(" ")
@@ -41,8 +42,8 @@ var GATHER = []byte("gathermetrics")
 var METRICS = []byte("metrics")
 var NOLISTENER = eerrors.New("no listener")
 
-// PluginController launches and controls the plugins services
-type PluginController struct {
+// Controller launches and controls the various services by distinct processes.
+type Controller struct {
 	typ  base.Types
 	name string
 
@@ -50,7 +51,7 @@ type PluginController struct {
 
 	pipe     *os.File
 	logger   log15.Logger
-	stasher  *StorePlugin
+	stasher  *StoreController
 	registry *consul.Registry
 
 	metricsChan chan []*dto.MetricFamily
@@ -73,12 +74,12 @@ type PluginController struct {
 type CFactory struct {
 	ring     kring.Ring
 	signKey  *memguard.LockedBuffer
-	stasher  *StorePlugin
+	stasher  *StoreController
 	registry *consul.Registry
 	logger   log15.Logger
 }
 
-func ControllerFactory(ring kring.Ring, signKey *memguard.LockedBuffer, stasher *StorePlugin, registry *consul.Registry, logger log15.Logger) *CFactory {
+func ControllerFactory(ring kring.Ring, signKey *memguard.LockedBuffer, stasher *StoreController, registry *consul.Registry, logger log15.Logger) *CFactory {
 	f := CFactory{
 		ring:     ring,
 		signKey:  signKey,
@@ -89,12 +90,12 @@ func ControllerFactory(ring kring.Ring, signKey *memguard.LockedBuffer, stasher 
 	return &f
 }
 
-func (f *CFactory) New(typ base.Types) (*PluginController, error) {
+func (f *CFactory) New(typ base.Types) (*Controller, error) {
 	name, err := base.Name(typ, false)
 	if err != nil {
 		return nil, err
 	}
-	s := PluginController{
+	s := Controller{
 		typ:          typ,
 		name:         name,
 		stasher:      f.stasher,
@@ -108,23 +109,17 @@ func (f *CFactory) New(typ base.Types) (*PluginController, error) {
 	return &s, nil
 }
 
-func (f *CFactory) NewStore(loggerHandle uintptr) *StorePlugin {
+func (f *CFactory) NewStore(loggerHandle uintptr) *StoreController {
 	st, _ := f.New(base.Store)
-	s := &StorePlugin{
-		PluginController: st,
-		q:                queue.NewBSliceQueue(),
-		gen:              utils.NewGenerator(),
-		pool: &sync.Pool{
-			New: func() interface{} {
-				return proto.NewBuffer(make([]byte, 0, 16384))
-			},
-		},
+	return &StoreController{
+		Controller: st,
+		gen:        utils.NewGenerator(),
+		reserv:     reservoir.NewReservoir(5000),
 	}
-	return s
 }
 
 // W encodes an writes a message to the controlled plugin via its stdin
-func (s *PluginController) W(header []byte, message []byte) (err error) {
+func (s *Controller) W(header []byte, message []byte) (err error) {
 	s.stdinMu.Lock()
 	if s.stdinWriter != nil {
 		err = eerrors.Wrap(s.stdinWriter.WriteWithHeader(header, message), "error writing to child stdin pipe")
@@ -136,7 +131,7 @@ func (s *PluginController) W(header []byte, message []byte) (err error) {
 }
 
 // Gather asks the controlled plugin to report its metrics
-func (s *PluginController) Gather() (m []*dto.MetricFamily, err error) {
+func (s *Controller) Gather() (m []*dto.MetricFamily, err error) {
 	m = make([]*dto.MetricFamily, 0)
 	select {
 	case <-s.ShutdownChan:
@@ -168,7 +163,7 @@ func (s *PluginController) Gather() (m []*dto.MetricFamily, err error) {
 }
 
 // Stop kindly asks the controlled plugin to stop activity
-func (s *PluginController) Stop() error {
+func (s *Controller) Stop() error {
 	// in case the plugin was in fact never created...
 	s.createdMu.Lock()
 	created := s.created
@@ -193,7 +188,7 @@ func (s *PluginController) Stop() error {
 }
 
 // Shutdown demands that the controlled plugin shutdowns now. After killTimeOut, it kills the plugin.
-func (s *PluginController) Shutdown(killTimeOut time.Duration) (killed bool) {
+func (s *Controller) Shutdown(killTimeOut time.Duration) (killed bool) {
 	// in case the plugin process was in fact never created...
 	s.createdMu.Lock()
 	created := s.created
@@ -239,11 +234,11 @@ func (s *PluginController) Shutdown(killTimeOut time.Duration) (killed bool) {
 
 // SetConf gives the current global configuration to the controller.
 // The controller will communicate the configuration to the controlled plugin at next start.
-func (s *PluginController) SetConf(c conf.BaseConfig) {
+func (s *Controller) SetConf(c conf.BaseConfig) {
 	s.conf = c
 }
 
-func (s *PluginController) kill(misbevave bool) (err error) {
+func (s *Controller) kill(misbevave bool) (err error) {
 	if misbevave {
 		s.logger.Crit("killing misbehaving plugin", "type", s.name)
 	}
@@ -259,25 +254,18 @@ type infosAndError struct {
 }
 
 // listen for the encrypted messages that the plugin produces
-func (s *PluginController) listenpipe(secret *memguard.LockedBuffer) (err error) {
+func (s *Controller) listenpipe(secret *memguard.LockedBuffer) (err error) {
 	if s.pipe == nil || s.typ == base.Store || s.typ == base.Configuration {
 		return nil
 	}
-	scanner := bufio.NewScanner(s.pipe)
+	scanner := utils.WithRecover(bufio.NewScanner(s.pipe))
 	scanner.Split(utils.MakeDecryptSplit(secret))
 	scanner.Buffer(make([]byte, 0, 132000), 132000)
 
 	var message *model.FullMessage
 	protobuff := proto.NewBuffer(make([]byte, 0, 4096))
 
-	for {
-		cont, err := utils.ScanRecover(scanner)
-		if err != nil {
-			return eerrors.Wrap(err, "Plugin control scanning panicked")
-		}
-		if !cont {
-			break
-		}
+	for scanner.Scan() {
 		protobuff.SetBuf(scanner.Bytes())
 		message, err = model.FromBuf(protobuff)
 		if err != nil {
@@ -301,7 +289,7 @@ func (s *PluginController) listenpipe(secret *memguard.LockedBuffer) (err error)
 	return nil
 }
 
-func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndError {
+func (s *Controller) listen(secret *memguard.LockedBuffer) chan infosAndError {
 	startErrorChan := make(chan infosAndError)
 
 	var once sync.Once
@@ -356,24 +344,13 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 		}() // end of defer
 
 		// read the encoded messages that the plugin may write on stdout
-		scanner := bufio.NewScanner(s.cmd.Stdout)
+		scanner := utils.WithRecover(bufio.NewScanner(s.cmd.Stdout))
 		scanner.Split(utils.PluginSplit)
 		scanner.Buffer(make([]byte, 0, 132000), 132000)
 		command := ""
 		infos := make([]model.ListenerInfo, 0)
 
-		for {
-			cont, err := utils.ScanRecover(scanner)
-			if err != nil {
-				err = eerrors.Wrap(err, "Scanner panicked in plugin control listen pipe")
-				s.logger.Crit(err.Error())
-				startError(err, nil)
-				kill = true
-				return
-			}
-			if !cont {
-				break
-			}
+		for scanner.Scan() {
 			parts := bytes.SplitN(scanner.Bytes(), space, 2)
 			command = string(parts[0])
 			switch command {
@@ -421,7 +398,6 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 					}
 				}
 			case "infos":
-				// the RELP plugin can sen notification about its listeners long after starting up
 				if len(parts) == 2 {
 					newinfos := make([]model.ListenerInfo, 0)
 					err := json.Unmarshal([]byte(parts[1]), &newinfos)
@@ -499,8 +475,8 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 			s.logger.Debug(err.Error())
 			startError(err, nil)
 			// 'scanner' has returned without error.
-			// So we know that the plugin child has exited
-			// Let's wait that the shutdown channel has been closed before executing the defer()
+			// so we know that the plugin child has exited
+			// let's wait that the shutdown channel has been closed before executing the defer()
 			<-s.ShutdownChan
 		} else {
 			if eerrors.HasFileClosed(err) {
@@ -520,7 +496,7 @@ func (s *PluginController) listen(secret *memguard.LockedBuffer) chan infosAndEr
 }
 
 // Start asks the controlled plugin to start the operations.
-func (s *PluginController) Start() (infos []model.ListenerInfo, err error) {
+func (s *Controller) Start() (infos []model.ListenerInfo, err error) {
 	s.createdMu.Lock()
 	s.startedMu.Lock()
 	if !s.created {
@@ -653,7 +629,7 @@ func PollDirectories(dirs []string) func(*PluginCreateOpts) {
 	}
 }
 
-func (s *PluginController) Create(optsfuncs ...func(*PluginCreateOpts)) error {
+func (s *Controller) Create(optsfuncs ...func(*PluginCreateOpts)) error {
 	// if the provider process already lives, Create() just returns
 	s.createdMu.Lock()
 	if s.created {
@@ -854,96 +830,69 @@ func (s *PluginController) Create(optsfuncs ...func(*PluginCreateOpts)) error {
 
 }
 
-// StorePlugin is the specialized controller that takes care of the Store.
-type StorePlugin struct {
-	*PluginController
-	q         *queue.BSliceQueue
+// StoreController is the specialized controller that takes care of the Store.
+type StoreController struct {
+	*Controller
+	reserv    *reservoir.Reservoir
 	msgsBatch []string
 	gen       *utils.Generator
 	pushwg    sync.WaitGroup
-	pool      *sync.Pool
 }
 
-func (s *StorePlugin) getBuffer() (buf *proto.Buffer) {
-	buf = s.pool.Get().(*proto.Buffer)
-	buf.Reset()
-	return buf
-}
-
-func (s *StorePlugin) putBuffer(buf *proto.Buffer) {
-	if buf != nil {
-		s.pool.Put(buf)
-	}
-}
-
-func (s *StorePlugin) pushqueue(secret *memguard.LockedBuffer) {
-	var message string
-	var err error
+func (s *StoreController) push(secret *memguard.LockedBuffer) {
 	bufpipe := bufio.NewWriter(s.pipe)
 	writeToStore := utils.NewEncryptWriter(bufpipe, secret)
+	m := make(map[utils.MyULID]string, 5000)
+	w := waiter.Default()
+
 	for {
-		s.q.GetManySlicesInto(&s.msgsBatch) // sets msgsBatch length to 0 before putting at most cap(msgsBatch) messages in it
-		if len(s.msgsBatch) == 0 {
+		err := s.reserv.DeliverTo(m)
+		if err == eerrors.ErrQDisposed {
 			return
 		}
-		for _, message = range s.msgsBatch {
-			_, err = io.WriteString(writeToStore, message)
+
+		if len(m) == 0 {
+			w.Wait()
+			continue
+		}
+		w.Reset()
+
+		for _, v := range m {
+			_, err := io.WriteString(writeToStore, v)
 			if err != nil {
 				s.logger.Error("Unexpected error when writing messages to the Store pipe", "error", err)
 				return
 			}
 		}
-		err = bufpipe.Flush()
-		if err != nil {
-			s.logger.Error("Unexpected error when flushing the Store pipe", "error", err)
-			return
+		bufpipe.Flush()
+
+		for k := range m {
+			delete(m, k)
 		}
 	}
-}
-
-func (s *StorePlugin) push(secret *memguard.LockedBuffer) {
-	for s.q.Wait(0) {
-		s.pushqueue(secret)
-	}
-	s.pushwg.Done()
 }
 
 // Shutdown stops definetely the Store.
-func (s *StorePlugin) Shutdown(killTimeOut time.Duration) {
-	s.q.Dispose()   // will make push() return
-	s.pushwg.Wait() // wait that push() returns
-
-	if s.conf.Main.EncryptIPC {
-		secret, err := s.ring.GetBoxSecret()
-		if err == nil {
-			s.pushqueue(secret) // empty the queue, in case there are pending messages
-		}
-	}
-
-	_ = s.pipe.Close()                       // signal the store that we are done sending messages
-	s.PluginController.Shutdown(killTimeOut) // shutdown the child
+func (s *StoreController) Shutdown(killTimeOut time.Duration) {
+	s.reserv.Dispose()                 // will make push() return
+	s.pushwg.Wait()                    // wait that push() returns
+	_ = s.pipe.Close()                 // signal the store that we are done sending messages
+	s.Controller.Shutdown(killTimeOut) // shutdown the child
 }
 
-// Stash stores the given message into the Store
-func (s *StorePlugin) Stash(m *model.FullMessage) (err error) {
-	// this method is called very frequently, so we avoid to lock anything
-	// the BSliceQueue ensures that we write the messages sequentially to the store child
+// Stash sends the given message to the Store
+func (s *StoreController) Stash(m *model.FullMessage) error {
 	if s.conf.Store.AddMissingMsgID && len(m.Fields.MsgId) == 0 {
 		m.Fields.MsgId = m.Uid.String()
 	}
-	buf := s.getBuffer()
-	defer s.putBuffer(buf)
-	err = buf.Marshal(m)
+	err := s.reserv.AddMessage(m)
 	if err != nil {
 		return eerrors.Wrap(err, "Failed to protobuf-marshal message to be sent to the Store")
 	}
-	return eerrors.Wrap(
-		s.q.PutSlice(string(buf.Bytes())),
-		"Failed to enqueue message to be sent to the Store",
-	)
+	return nil
 }
 
-func (s *StorePlugin) Start() (infos []model.ListenerInfo, err error) {
+func (s *StoreController) Start() (infos []model.ListenerInfo, err error) {
 	var secret *memguard.LockedBuffer
 	if s.conf.Main.EncryptIPC {
 		secret, err = s.ring.GetBoxSecret()
@@ -952,12 +901,14 @@ func (s *StorePlugin) Start() (infos []model.ListenerInfo, err error) {
 		}
 	}
 
-	infos, err = s.PluginController.Start()
+	infos, err = s.Controller.Start()
 	if err != nil {
 		return nil, err
 	}
-	s.msgsBatch = make([]string, 0, s.conf.Store.BatchSize)
 	s.pushwg.Add(1)
-	go s.push(secret)
+	go func() {
+		defer s.pushwg.Done()
+		s.push(secret)
+	}()
 	return infos, nil
 }

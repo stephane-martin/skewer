@@ -6,15 +6,14 @@ import (
 	"io"
 	"os"
 	"sync"
-	"time"
 
 	"github.com/awnumar/memguard"
-	"github.com/gogo/protobuf/proto"
 	"github.com/inconshreveable/log15"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/eerrors"
-	"github.com/stephane-martin/skewer/utils/queue"
+	"github.com/stephane-martin/skewer/utils/reservoir"
+	"github.com/stephane-martin/skewer/utils/waiter"
 )
 
 var stdoutLock sync.Mutex
@@ -24,29 +23,13 @@ var SYSLOG = []byte("syslog")
 var INFOS = []byte("infos")
 var SP = []byte(" ")
 
-var rpool = &sync.Pool{New: func() interface{} {
-	return proto.NewBuffer(make([]byte, 0, 16384))
-}}
-
-func getBuffer() (buf *proto.Buffer) {
-	buf = rpool.Get().(*proto.Buffer)
-	buf.Reset()
-	return buf
-}
-
-func putBuffer(buf *proto.Buffer) {
-	if buf != nil {
-		rpool.Put(buf)
-	}
-}
-
 // Reporter is used by plugins to report new syslog messages to the controller.
 type Reporter struct {
 	name         string
 	logger       log15.Logger
 	pipe         *os.File
 	bufferedPipe *bufio.Writer
-	queue        *queue.BSliceQueue
+	reserv       *reservoir.Reservoir
 	secret       *memguard.LockedBuffer
 	pipeWriter   *utils.EncryptWriter
 }
@@ -57,13 +40,13 @@ func NewReporter(name string, l log15.Logger, pipe *os.File) *Reporter {
 		name:   name,
 		logger: l,
 		pipe:   pipe,
+		reserv: reservoir.NewReservoir(5000),
 	}
 	rep.bufferedPipe = bufio.NewWriterSize(pipe, 32768)
 	return &rep
 }
 
 func (s *Reporter) Start() {
-	s.queue = queue.NewBSliceQueue()
 	go s.pushqueue()
 }
 
@@ -74,27 +57,38 @@ func (s *Reporter) SetSecret(secret *memguard.LockedBuffer) {
 
 func (s *Reporter) pushqueue() {
 	defer func() {
-		_ = s.bufferedPipe.Flush()
-		_ = s.pipe.Close()
+		s.bufferedPipe.Flush()
+		s.pipe.Close()
 	}()
-	var (
-		m    string
-		have bool
-		err  error
-	)
 
-	for s.queue.Wait(0) {
-		for s.queue.Wait(100 * time.Millisecond) {
-			have, _, m, _ = s.queue.Get()
-			if have {
-				_, err = io.WriteString(s.pipeWriter, m)
-				if err != nil {
-					s.logger.Crit("Unexpected error when writing messages to the plugin pipe", "error", err)
-					return
-				}
+	m := make(map[utils.MyULID]string, 5000)
+	w := waiter.Default()
+
+	for {
+		err := s.reserv.DeliverTo(m)
+		if err == eerrors.ErrQDisposed {
+			return
+		}
+
+		if len(m) == 0 {
+			w.Wait()
+			continue
+		}
+		w.Reset()
+
+		for _, v := range m {
+			_, err := io.WriteString(s.pipeWriter, v)
+			if err != nil {
+				s.logger.Crit("Unexpected error when writing messages to the plugin pipe", "error", err)
+				return
 			}
 		}
 		err = s.bufferedPipe.Flush()
+
+		for k := range m {
+			delete(m, k)
+		}
+
 		if err != nil {
 			s.logger.Crit("Unexpected error when flushing the plugin pipe", "error", err)
 			return
@@ -104,24 +98,16 @@ func (s *Reporter) pushqueue() {
 
 // Stop stops the reporter.
 func (s *Reporter) Stop() {
-	s.queue.Dispose()
+	s.reserv.Dispose()
 }
 
 // Stash reports one syslog message to the controller.
 func (s *Reporter) Stash(m *model.FullMessage) error {
-	var err error
-	buf := getBuffer()
-	defer putBuffer(buf)
-	err = buf.Marshal(m)
+	err := s.reserv.AddMessage(m)
 	if err != nil {
 		return eerrors.Wrapf(err, "Failed to marshal a message to be sent by plugin: %s", s.name)
 	}
-	return eerrors.Fatal(
-		eerrors.Wrapf(
-			s.queue.PutSlice(string(buf.Bytes())),
-			"Failed to enqueue a message to be sent by plugin: %s", s.name,
-		),
-	)
+	return nil
 }
 
 // Report reports information about the actual listening ports to the controller.

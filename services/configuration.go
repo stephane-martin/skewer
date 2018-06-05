@@ -193,19 +193,10 @@ func (c *ConfigurationService) Start(r kring.Ring) error {
 		}()
 
 		var command string
-		scanner := bufio.NewScanner(cmd.Stdout)
+		scanner := utils.WithRecover(bufio.NewScanner(cmd.Stdout))
 		scanner.Split(utils.MakeDecryptSplit(c.boxsec))
 
-		for {
-			cont, err := utils.ScanRecover(scanner)
-			if err != nil {
-				c.logger.Crit("Scanner panicked in configuration controller", "error", err)
-				kill = true
-				return
-			}
-			if !cont {
-				break
-			}
+		for scanner.Scan() {
 			parts := strings.SplitN(scanner.Text(), " ", 2)
 			command = parts[0]
 			switch command {
@@ -359,19 +350,12 @@ func LaunchConfProvider(ctx context.Context, r kring.Ring, confined bool, logger
 	var confdir string
 	var params consul.ConnParams
 
-	scanner := utils.NewWrappedScanner(ctx, bufio.NewScanner(os.Stdin))
+	scanner := utils.WithRecover(utils.WithContext(ctx, bufio.NewScanner(os.Stdin)))
 	scanner.Split(utils.MakeSignSplit(sigpubkey))
 	var command string
 	var cancel context.CancelFunc
 
-	for {
-		cont, err := utils.ScanRecover(scanner)
-		if err != nil {
-			return eerrors.Wrap(err, "Scanner panicked in configuration provider")
-		}
-		if !cont {
-			break
-		}
+	for scanner.Scan() {
 		parts := strings.SplitN(scanner.Text(), " ", 2)
 		command = parts[0]
 

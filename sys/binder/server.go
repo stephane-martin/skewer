@@ -130,8 +130,6 @@ func serveOne(ctx context.Context, wg *sync.WaitGroup, parentFD uintptr, secret 
 		wg.Done()
 	}()
 
-	scanner := bufio.NewScanner(childConn)
-	scanner.Split(utils.MakeDecryptSplit(secret))
 	schan := make(chan *ExternalConn)
 	pchan := make(chan *ExternalPacketConn)
 	writer := utils.NewEncryptWriter(childConn, secret)
@@ -200,17 +198,12 @@ func serveOne(ctx context.Context, wg *sync.WaitGroup, parentFD uintptr, secret 
 			wg.Done()
 		}()
 
+		scanner := utils.WithRecover(bufio.NewScanner(childConn))
+		scanner.Split(utils.MakeDecryptSplit(secret))
+
 		listeners := map[string]net.Listener{}
 		var rmsg string
-		for {
-			cont, err := utils.ScanRecover(scanner)
-			if err != nil {
-				logger.Crit("Scanner panicked in binder server", "error", err)
-				return
-			}
-			if !cont {
-				break
-			}
+		for scanner.Scan() {
 			rmsg = strings.Trim(scanner.Text(), " \r\n")
 			command := strings.SplitN(rmsg, " ", 2)[0]
 			args := strings.Trim(rmsg[len(command):], " \r\n")

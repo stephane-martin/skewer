@@ -71,17 +71,10 @@ func Launch(ctx context.Context, typ base.Types, opts ...ProviderOpt) (err error
 		return err
 	}
 
-	scanner := utils.NewWrappedScanner(fatalctx, bufio.NewScanner(os.Stdin))
+	scanner := utils.WithRecover(utils.WithContext(fatalctx, bufio.NewScanner(os.Stdin)))
 	scanner.Split(utils.MakeSignSplit(signpubkey))
 
-	for {
-		cont, err := utils.ScanRecover(scanner)
-		if err != nil {
-			return eerrors.Wrap(err, "Plugin provider scanning panicked")
-		}
-		if !cont {
-			break
-		}
+	for scanner.Scan() {
 		parts := bytes.SplitN(scanner.Bytes(), space, 2)
 		command = string(parts[0])
 		switch command {
@@ -111,14 +104,14 @@ func Launch(ctx context.Context, typ base.Types, opts ...ProviderOpt) (err error
 				err = eerrors.Wrapf(err, "Can't configure service '%s'", name)
 				_ = Wout(STARTERROR, []byte(err.Error()))
 				return err
-			} else if len(infos) == 0 && (typ == base.TCP || typ == base.UDP) {
+			} else if len(infos) == 0 && (typ == base.TCP || typ == base.UDP || typ == base.RELP) {
 				// only TCP and UDP directly report info about their effective listening ports
 				svc.Stop()
 				err := Wout([]byte("nolistenererror"), []byte("plugin is inactive"))
 				if err != nil {
 					return eerrors.Wrapf(err, "Error writing to parent of provider '%s", name)
 				}
-			} else if typ == base.TCP {
+			} else if typ == base.TCP || typ == base.RELP {
 				infosb, _ := json.Marshal(infos)
 				err := Wout(STARTED, infosb)
 				if err != nil {
