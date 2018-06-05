@@ -250,7 +250,7 @@ func (s *GraylogSvcImpl) handleConnection(conn net.PacketConn, config conf.Grayl
 				chunkStartTime[msgid] = time.Now()
 
 			}
-			if (time.Now().Sub(chunkStartTime[msgid])) > (5 * time.Second) {
+			if (time.Since(chunkStartTime[msgid])) > (5 * time.Second) {
 				logger.Warn("GELF chunk arrived after 5 seconds")
 				delete(chunks, msgid)
 				continue
