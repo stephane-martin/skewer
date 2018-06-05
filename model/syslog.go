@@ -53,14 +53,14 @@ type RawKafkaMessage struct {
 	Offset     int64
 }
 
-type RawTcpMessage struct {
+type RawTCPMessage struct {
 	RawMessage
 	Message []byte
 	Txnr    int32
 	ConnID  utils.MyULID
 }
 
-type RawUdpMessage struct {
+type RawUDPMessage struct {
 	RawMessage
 	Message [65536]byte
 	Size    int
@@ -73,7 +73,7 @@ type DeferedRequest struct {
 
 var rawTCPPool = &sync.Pool{
 	New: func() interface{} {
-		return &RawTcpMessage{
+		return &RawTCPMessage{
 			Message: make([]byte, 0, 4096),
 		}
 	},
@@ -81,12 +81,12 @@ var rawTCPPool = &sync.Pool{
 
 var rawUDPPool = &sync.Pool{
 	New: func() interface{} {
-		return new(RawUdpMessage)
+		return new(RawUDPMessage)
 	},
 }
 
-func RawTCPFactory(message []byte) (raw *RawTcpMessage) {
-	raw = rawTCPPool.Get().(*RawTcpMessage)
+func RawTCPFactory(message []byte) (raw *RawTCPMessage) {
+	raw = rawTCPPool.Get().(*RawTCPMessage)
 	if cap(raw.Message) < len(message) {
 		raw.Message = make([]byte, 0, len(message))
 	}
@@ -95,23 +95,23 @@ func RawTCPFactory(message []byte) (raw *RawTcpMessage) {
 	return raw
 }
 
-func RawTCPFree(raw *RawTcpMessage) {
+func RawTCPFree(raw *RawTCPMessage) {
 	rawTCPPool.Put(raw)
 }
 
-func RawUDPFactory() (raw *RawUdpMessage) {
-	return rawUDPPool.Get().(*RawUdpMessage)
+func RawUDPFactory() (raw *RawUDPMessage) {
+	return rawUDPPool.Get().(*RawUDPMessage)
 }
 
-func RawUDPFree(raw *RawUdpMessage) {
+func RawUDPFree(raw *RawUDPMessage) {
 	rawUDPPool.Put(raw)
 }
 
-func (raw *RawUdpMessage) GetMessage() []byte {
+func (raw *RawUDPMessage) GetMessage() []byte {
 	return raw.Message[:raw.Size]
 }
 
-func RawUDPFromConn(conn net.PacketConn) (raw *RawUdpMessage, remote net.Addr, err error) {
+func RawUDPFromConn(conn net.PacketConn) (raw *RawUDPMessage, remote net.Addr, err error) {
 	raw = RawUDPFactory()
 	raw.Size, remote, err = conn.ReadFrom(raw.Message[:])
 	return raw, remote, err
