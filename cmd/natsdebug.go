@@ -36,11 +36,11 @@ to quickly create a Cobra application.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Println("natsdebug called")
 		conn, err := nats.Connect(nats.DefaultURL)
-		defer conn.Close()
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
+		defer conn.Close()
 		conn.Subscribe(">", handler)
 		sigchan := make(chan os.Signal, 1)
 		signal.Notify(sigchan, syscall.SIGTERM, syscall.SIGINT)
