@@ -30,7 +30,9 @@ func newFilesMap() *filesMap {
 
 func (m *filesMap) Clear() {
 	m.fm.ForEach(func(e filetrie.Entry) {
-		e.Value.Release()
+		if e.Value.Release() {
+			openedFilesGauge.Dec()
+		}
 	})
 	m.fm.Clear()
 }
@@ -52,7 +54,9 @@ func (m *filesMap) Get(fname string) *utils.OFile {
 func (m *filesMap) Remove(fname string) {
 	f, ok := m.fm.Remove(fname)
 	if ok {
-		f.Release()
+		if f.Release() {
+			openedFilesGauge.Dec()
+		}
 	}
 }
 
@@ -181,7 +185,7 @@ func (o *openedFiles) open(filename string) (fi *utils.OFile, err error) {
 	if err != nil {
 		return nil, err
 	}
-
+	openedFilesGauge.Inc()
 	fi = utils.NewOFile(f, filename, time.Now().Add(o.timeout), o.bufferSize, o.gzip, o.gziplevel, o.logger)
 	o.files.Put(filename, fi)
 	fi.Acquire()
@@ -242,8 +246,10 @@ func (d *FileDestination) sendOne(ctx context.Context, message *model.FullMessag
 		d.logger.Warn("Error opening file", "filename", filename, "error", err)
 		return err
 	}
-	defer f.Release()
 	_, err = io.WriteString(f, encoded)
+	if f.Release() {
+		openedFilesGauge.Dec()
+	}
 	return err
 }
 
