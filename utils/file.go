@@ -13,7 +13,7 @@ import (
 )
 
 type OFile struct {
-	oFile      *os.File
+	f          *os.File
 	closeAt    atomic.Int64
 	Name       string
 	writer     *concurrent.Writer
@@ -24,9 +24,8 @@ type OFile struct {
 }
 
 func NewOFile(f *os.File, name string, closeAt time.Time, bufferSize int, doGzip bool, gzipLevel int, logger log15.Logger) *OFile {
-	//openedFilesGauge.Inc()
 	o := &OFile{
-		oFile:  f,
+		f:      f,
 		Name:   name,
 		logger: logger,
 	}
@@ -41,11 +40,13 @@ func NewOFile(f *os.File, name string, closeAt time.Time, bufferSize int, doGzip
 	return o
 }
 
-func (o *OFile) Release() {
+func (o *OFile) Release() bool {
 	if o.refs.Add(-1) == 0 {
-		o.closeFile()
+		o.close()
 		o.logger.Debug("Closing file", "filename", o.Name)
+		return true
 	}
+	return false
 }
 
 func (o *OFile) Acquire() {
@@ -81,18 +82,15 @@ func (o *OFile) Sync() (err error) {
 		}
 	}
 	// fsync the file itself
-	return o.oFile.Sync()
+	return o.f.Sync()
 }
 
-func (o *OFile) closeFile() {
+func (o *OFile) close() {
 	o.Flush()
 	if o.gzipwriter != nil {
 		_ = o.gzipwriter.Close()
 	}
-	err := o.oFile.Close()
-	if err != nil {
-		//openedFilesGauge.Dec()
-	}
+	_ = o.f.Close()
 }
 
 // ensure thread safety for the gzip writer
