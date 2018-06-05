@@ -18,13 +18,6 @@ import (
 	"github.com/stephane-martin/skewer/utils/queue/udp"
 )
 
-type UdpServerStatus int
-
-const (
-	UdpStopped UdpServerStatus = iota
-	UdpStarted
-)
-
 func initUdpRegistry() {
 	base.Once.Do(func() {
 		base.InitRegistry()
@@ -34,7 +27,6 @@ func initUdpRegistry() {
 type UdpServiceImpl struct {
 	base.BaseService
 	UdpConfigs       []conf.UDPSourceConfig
-	status           UdpServerStatus
 	stasher          *base.Reporter
 	wg               sync.WaitGroup
 	fatalErrorChan   chan struct{}
@@ -46,7 +38,6 @@ type UdpServiceImpl struct {
 func NewUdpService(env *base.ProviderEnv) (*UdpServiceImpl, error) {
 	initUdpRegistry()
 	s := UdpServiceImpl{
-		status:     UdpStopped,
 		stasher:    env.Reporter,
 		UdpConfigs: []conf.UDPSourceConfig{},
 	}
@@ -91,7 +82,7 @@ func (s *UdpServiceImpl) Parse() error {
 	}
 }
 
-func (s *UdpServiceImpl) ParseOne(raw *model.RawUdpMessage, gen *utils.Generator) error {
+func (s *UdpServiceImpl) ParseOne(raw *model.RawUDPMessage, gen *utils.Generator) error {
 	syslogMsgs, err := s.parserEnv.Parse(&raw.Decoder, raw.Message[:raw.Size])
 	if err != nil {
 		return err
@@ -126,11 +117,6 @@ func (s *UdpServiceImpl) Gather() ([]*dto.MetricFamily, error) {
 }
 
 func (s *UdpServiceImpl) Start() ([]model.ListenerInfo, error) {
-	s.LockStatus()
-	defer s.UnlockStatus()
-	if s.status != UdpStopped {
-		return nil, ServerNotStopped
-	}
 	s.fatalErrorChan = make(chan struct{})
 	s.fatalOnce = &sync.Once{}
 
@@ -160,7 +146,6 @@ func (s *UdpServiceImpl) Start() ([]model.ListenerInfo, error) {
 		infos = append(infos, i)
 	}
 	if len(infos) > 0 {
-		s.status = UdpStarted
 		s.Logger.Info("Listening on UDP", "nb_services", len(infos))
 	} else {
 		s.Logger.Debug("The UDP service has not been started: no listening port")
@@ -181,18 +166,11 @@ func (s *UdpServiceImpl) Shutdown() {
 }
 
 func (s *UdpServiceImpl) Stop() {
-	s.LockStatus()
-	defer s.UnlockStatus()
-	if s.status != UdpStarted {
-		return
-	}
 	s.CloseConnections()
 	if s.rawMessagesQueue != nil {
 		s.rawMessagesQueue.Dispose()
 	}
 	s.wg.Wait()
-
-	s.status = UdpStopped
 	s.Logger.Debug("Udp server has stopped")
 }
 

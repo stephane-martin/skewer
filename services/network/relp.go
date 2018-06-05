@@ -21,7 +21,6 @@ import (
 	"github.com/stephane-martin/skewer/decoders"
 	"github.com/stephane-martin/skewer/model"
 	"github.com/stephane-martin/skewer/services/base"
-	"github.com/stephane-martin/skewer/sys/binder"
 	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/eerrors"
 	"github.com/stephane-martin/skewer/utils/queue/intq"
@@ -217,28 +216,34 @@ type meta struct {
 }
 
 type RelpService struct {
-	impl           *RelpServiceImpl
+	StreamingService
 	fatalErrorChan chan struct{}
-	fatalOnce      *sync.Once
-	QueueSize      uint64
-	logger         log15.Logger
+	fatalOnce      sync.Once
+	ACKQueueSize   uint64
 	reporter       *base.Reporter
-	b              binder.Client
-	sc             []conf.RELPSourceConfig
-	pc             []conf.ParserConfig
 	wg             sync.WaitGroup
 	confined       bool
+	rawQ           *tcp.Ring
+	parsewg        sync.WaitGroup
+	configs        map[utils.MyULID]conf.RELPSourceConfig
+	forwarder      *ackForwarder
+	parserEnv      *decoders.ParsersEnv
 }
 
 func NewRelpService(env *base.ProviderEnv) (base.Provider, error) {
 	initRelpRegistry()
 	s := RelpService{
-		b:        env.Binder,
-		logger:   env.Logger,
-		reporter: env.Reporter,
-		confined: env.Confined,
+		reporter:       env.Reporter,
+		confined:       env.Confined,
+		forwarder:      newAckForwarder(),
+		configs:        make(map[utils.MyULID]conf.RELPSourceConfig),
+		fatalErrorChan: make(chan struct{}),
 	}
-	s.impl = NewRelpServiceImpl(env.Confined, env.Reporter, env.Binder, env.Logger)
+	s.StreamingService.init()
+	s.StreamingService.BaseService.Logger = env.Logger.New("class", "RelpServer")
+	s.StreamingService.BaseService.Binder = env.Binder
+	s.StreamingService.handler = RelpHandler{Server: &s}
+	s.StreamingService.confined = env.Confined
 	return &s, nil
 }
 
@@ -258,139 +263,23 @@ func (s *RelpService) Gather() ([]*dto.MetricFamily, error) {
 	return base.Registry.Gather()
 }
 
-func (s *RelpService) Start() (infos []model.ListenerInfo, err error) {
-	// the Relp service manages registration in Consul by itself and
-	// therefore does not report infos
-	//if capabilities.CapabilitiesSupported {
-	//	s.logger.Debug("Capabilities", "caps", capabilities.GetCaps())
-	//}
-	infos = []model.ListenerInfo{}
-	s.impl = NewRelpServiceImpl(s.confined, s.reporter, s.b, s.logger)
-	s.fatalErrorChan = make(chan struct{})
-	s.fatalOnce = &sync.Once{}
-
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		for {
-			state := <-s.impl.StatusChan
-			switch state {
-			case FinalStopped:
-				//s.impl.Logger.Debug("The RELP service has been definitely halted")
-				//fmt.Fprintln(os.Stderr, "FINALSTOPPED")
-				_ = s.reporter.Report([]model.ListenerInfo{})
-				return
-
-			case Stopped:
-				//s.impl.Logger.Debug("The RELP service is stopped")
-				s.impl.SetConf(s.sc, s.pc, s.QueueSize)
-				infos, err := s.impl.Start()
-				if err == nil {
-					//fmt.Fprintln(os.Stderr, "STOPPED")
-					err = s.reporter.Report(infos)
-					if err != nil {
-						s.impl.Logger.Error("Failed to report infos. Fatal error.", "error", err)
-						s.dofatal()
-					}
-				} else {
-					s.impl.Logger.Warn("The RELP service has failed to start", "error", err)
-					//fmt.Fprintln(os.Stderr, "FAILSTART")
-					err = s.reporter.Report([]model.ListenerInfo{})
-					if err != nil {
-						s.impl.Logger.Error("Failed to report infos. Fatal error.", "error", err)
-						s.dofatal()
-					} else {
-						s.impl.StopAndWait()
-					}
-				}
-
-			case Waiting:
-				//s.impl.Logger.Debug("RELP waiting")
-				go func() {
-					time.Sleep(time.Duration(30) * time.Second)
-					s.impl.EndWait()
-				}()
-
-			case Started:
-				//s.impl.Logger.Debug("The RELP service has been started")
-			}
-		}
-	}()
-
-	s.impl.StatusChan <- Stopped // trigger the RELP service to start
-	return
-}
-
 func (s *RelpService) Shutdown() {
 	s.Stop()
 }
 
-func (s *RelpService) Stop() {
-	s.impl.FinalStop()
-	s.wg.Wait()
-}
-
-//func (s *RelpService) SetConf(sc []conf.RELPSourceConfig, pc []conf.ParserConfig, queueSize uint64) {
-func (s *RelpService) SetConf(c conf.BaseConfig) {
-	s.sc = c.RELPSource
-	s.pc = c.Parsers
-	s.QueueSize = c.Main.InputQueueSize
-}
-
-type RelpServiceImpl struct {
-	StreamingService
-	RelpConfigs []conf.RELPSourceConfig
-	status      RelpServerStatus
-	StatusChan  chan RelpServerStatus
-	reporter    *base.Reporter
-	rawQ        *tcp.Ring
-	parsewg     sync.WaitGroup
-	configs     map[utils.MyULID]conf.RELPSourceConfig
-	forwarder   *ackForwarder
-	parserEnv   *decoders.ParsersEnv
-}
-
-func NewRelpServiceImpl(confined bool, reporter *base.Reporter, b binder.Client, logger log15.Logger) *RelpServiceImpl {
-	s := RelpServiceImpl{
-		status:    Stopped,
-		reporter:  reporter,
-		configs:   map[utils.MyULID]conf.RELPSourceConfig{},
-		forwarder: newAckForwarder(),
-	}
-	s.StreamingService.init()
-	s.StreamingService.BaseService.Logger = logger.New("class", "RelpServer")
-	s.StreamingService.BaseService.Binder = b
-	s.StreamingService.handler = RelpHandler{Server: &s}
-	s.StreamingService.confined = confined
-	s.StatusChan = make(chan RelpServerStatus, 10)
-	return &s
-}
-
-func (s *RelpServiceImpl) Start() ([]model.ListenerInfo, error) {
-	s.LockStatus()
-	defer s.UnlockStatus()
-	if s.status == FinalStopped {
-		return nil, ServerDefinitelyStopped
-	}
-	if s.status != Stopped && s.status != Waiting {
-		return nil, ServerNotStopped
-	}
-
+func (s *RelpService) Start() ([]model.ListenerInfo, error) {
 	infos := s.initTCPListeners()
 	if len(infos) == 0 {
 		s.Logger.Info("RELP service not started: no listener")
 		return infos, nil
 	}
-
 	s.Logger.Info("Listening on RELP", "nb_services", len(infos))
 
-	s.rawQ = tcp.NewRing(s.QueueSize)
-	s.configs = map[utils.MyULID]conf.RELPSourceConfig{}
-
+	s.configs = make(map[utils.MyULID]conf.RELPSourceConfig, len(s.UnixListeners)+len(s.TCPListeners))
 	for _, l := range s.UnixListeners {
 		s.configs[l.Conf.ConfID] = conf.RELPSourceConfig(l.Conf)
 	}
-	for _, l := range s.TcpListeners {
+	for _, l := range s.TCPListeners {
 		s.configs[l.Conf.ConfID] = conf.RELPSourceConfig(l.Conf)
 	}
 
@@ -399,18 +288,14 @@ func (s *RelpServiceImpl) Start() ([]model.ListenerInfo, error) {
 		s.parsewg.Add(1)
 		go func() {
 			// Parse() returns an error if something fatal happened
-			// in that case we stop the RELP service (and try to restart it after)
 			err := s.Parse()
 			s.parsewg.Done()
 			if err != nil {
 				s.Logger.Error(err.Error())
-				go s.StopAndWait()
+				s.dofatal()
 			}
 		}()
 	}
-
-	s.status = Started
-	s.StatusChan <- Started
 
 	s.wg.Add(1)
 	go func() {
@@ -420,53 +305,7 @@ func (s *RelpServiceImpl) Start() ([]model.ListenerInfo, error) {
 	return infos, nil
 }
 
-func (s *RelpServiceImpl) Stop() {
-	s.LockStatus()
-	s.doStop(false, false)
-	s.UnlockStatus()
-}
-
-func (s *RelpServiceImpl) FinalStop() {
-	s.LockStatus()
-	s.doStop(true, false)
-	s.UnlockStatus()
-}
-
-func (s *RelpServiceImpl) StopAndWait() {
-	s.LockStatus()
-	s.doStop(false, true)
-	s.UnlockStatus()
-}
-
-func (s *RelpServiceImpl) EndWait() {
-	s.LockStatus()
-	if s.status != Waiting {
-		s.UnlockStatus()
-		return
-	}
-	s.status = Stopped
-	s.StatusChan <- Stopped
-	s.UnlockStatus()
-}
-
-func (s *RelpServiceImpl) doStop(final bool, wait bool) {
-	if final && (s.status == Waiting || s.status == Stopped || s.status == FinalStopped) {
-		if s.status != FinalStopped {
-			s.status = FinalStopped
-			s.StatusChan <- FinalStopped
-			close(s.StatusChan)
-		}
-		return
-	}
-
-	if s.status == Stopped || s.status == FinalStopped || s.status == Waiting {
-		if s.status == Stopped && wait {
-			s.status = Waiting
-			s.StatusChan <- Waiting
-		}
-		return
-	}
-
+func (s *RelpService) Stop() {
 	s.resetTCPListeners() // makes the listeners stop
 	s.CloseConnections()
 	// no more message will arrive in rawMessagesQueue
@@ -475,36 +314,24 @@ func (s *RelpServiceImpl) doStop(final bool, wait bool) {
 	}
 	// the parsers consume the rest of rawMessagesQueue, then they stop
 	s.parsewg.Wait() // wait that the parsers have stopped
-
 	// after the parsers have stopped, we can close the queues
 	s.forwarder.RemoveAll()
 	// wait that all goroutines have ended
 	s.wg.Wait()
-
-	if final {
-		s.status = FinalStopped
-		s.StatusChan <- FinalStopped
-		close(s.StatusChan)
-	} else if wait {
-		s.status = Waiting
-		s.StatusChan <- Waiting
-	} else {
-		s.status = Stopped
-		s.StatusChan <- Stopped
-	}
 }
 
-func (s *RelpServiceImpl) SetConf(sc []conf.RELPSourceConfig, pc []conf.ParserConfig, queueSize uint64) {
-	tcpConfigs := []conf.TCPSourceConfig{}
-	for _, c := range sc {
+func (s *RelpService) SetConf(c conf.BaseConfig) {
+	tcpConfigs := make([]conf.TCPSourceConfig, 0, len(c.RELPSource))
+	for _, c := range c.RELPSource {
 		tcpConfigs = append(tcpConfigs, conf.TCPSourceConfig(c))
 	}
-	// MaxMessageSize is 132000 bytes
-	s.StreamingService.SetConf(tcpConfigs, pc, queueSize, 132000)
-	s.parserEnv = decoders.NewParsersEnv(s.ParserConfigs, s.Logger)
+	s.StreamingService.SetConf(tcpConfigs, c.Parsers, c.Main.InputQueueSize, 132000)
+	s.parserEnv = decoders.NewParsersEnv(c.Parsers, s.Logger)
+	s.rawQ = tcp.NewRing(c.Main.InputQueueSize)
+	s.ACKQueueSize = c.Main.InputQueueSize
 }
 
-func (s *RelpServiceImpl) parseOne(raw *model.RawTcpMessage, gen *utils.Generator) error {
+func (s *RelpService) parseOne(raw *model.RawTCPMessage, gen *utils.Generator) error {
 	syslogMsgs, err := s.parserEnv.Parse(&raw.Decoder, raw.Message)
 	if err != nil {
 		return err
@@ -538,7 +365,7 @@ func (s *RelpServiceImpl) parseOne(raw *model.RawTcpMessage, gen *utils.Generato
 	return nil
 }
 
-func (s *RelpServiceImpl) Parse() error {
+func (s *RelpService) Parse() error {
 	gen := utils.NewGenerator()
 
 	for {
@@ -575,7 +402,7 @@ func writeFailure(conn net.Conn, txnr int32) (err error) {
 	return err
 }
 
-func (s *RelpServiceImpl) handleResponses(conn net.Conn, connID utils.MyULID, client string, logger log15.Logger) error {
+func (s *RelpService) handleResponses(conn net.Conn, connID utils.MyULID, client string, logger log15.Logger) error {
 	successes := map[int32]bool{}
 	failures := map[int32]bool{}
 	var err error
@@ -649,7 +476,7 @@ func (s *RelpServiceImpl) handleResponses(conn net.Conn, connID utils.MyULID, cl
 }
 
 type RelpHandler struct {
-	Server *RelpServiceImpl
+	Server *RelpService
 }
 
 func (h RelpHandler) HandleConnection(conn net.Conn, c conf.TCPSourceConfig) (err error) {
@@ -657,7 +484,7 @@ func (h RelpHandler) HandleConnection(conn net.Conn, c conf.TCPSourceConfig) (er
 	config := conf.RELPSourceConfig(c)
 	s := h.Server
 	s.AddConnection(conn)
-	connID := s.forwarder.AddConn(s.QueueSize)
+	connID := s.forwarder.AddConn(s.ACKQueueSize)
 	props := eprops(conn)
 	l := makeLogger(s.Logger, props, "relp")
 	l.Info("New client")
@@ -704,18 +531,11 @@ func scan(l log15.Logger, f *ackForwarder, rawq *tcp.Ring, c net.Conn, tout time
 	if tout > 0 {
 		_ = c.SetReadDeadline(time.Now().Add(tout))
 	}
-	scanner := bufio.NewScanner(c)
+	scanner := utils.WithRecover(bufio.NewScanner(c))
 	scanner.Split(utils.RelpSplit)
 	scanner.Buffer(make([]byte, 0, 132000), 132000)
 
-	for {
-		cont, err := utils.ScanRecover(scanner)
-		if err != nil {
-			return eerrors.Wrap(err, "Scanner panicked in RELP service")
-		}
-		if !cont {
-			break
-		}
+	for scanner.Scan() {
 		splits = bytes.SplitN(scanner.Bytes(), sp, 3)
 		txnr, err = utils.Atoi32(string(splits[0]))
 		if err != nil {

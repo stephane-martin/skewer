@@ -259,18 +259,18 @@ func (s *DirectRelpServiceImpl) Start() ([]model.ListenerInfo, error) {
 	for _, l := range s.UnixListeners {
 		s.configs[l.Conf.ConfID] = conf.DirectRELPSourceConfig(l.Conf)
 	}
-	for _, l := range s.TcpListeners {
+	for _, l := range s.TCPListeners {
 		s.configs[l.Conf.ConfID] = conf.DirectRELPSourceConfig(l.Conf)
 	}
 
-	s.wg.Add(1)
+	s.wgroup.Add(1)
 	go func() {
-		defer s.wg.Done()
+		defer s.wgroup.Done()
 		s.push2kafka()
 	}()
-	s.wg.Add(1)
+	s.wgroup.Add(1)
 	go func() {
-		defer s.wg.Done()
+		defer s.wgroup.Done()
 		s.handleKafkaResponses()
 	}()
 
@@ -286,9 +286,9 @@ func (s *DirectRelpServiceImpl) Start() ([]model.ListenerInfo, error) {
 	s.status = Started
 	s.StatusChan <- Started
 
-	s.wg.Add(1)
+	s.wgroup.Add(1)
 	go func() {
-		defer s.wg.Done()
+		defer s.wgroup.Done()
 		s.Listen()
 	}()
 	return infos, nil
@@ -355,7 +355,7 @@ func (s *DirectRelpServiceImpl) doStop(final bool, wait bool) {
 	// after the parsers have stopped, we can close the queues
 	s.forwarder.RemoveAll()
 	// wait that all goroutines have ended
-	s.wg.Wait()
+	s.wgroup.Wait()
 	// unregister kafka metrics
 	for _, collector := range s.collectors {
 		base.Registry.Unregister(collector)
@@ -385,7 +385,7 @@ func (s *DirectRelpServiceImpl) SetConf(sc []conf.DirectRELPSourceConfig, pc []c
 	s.parserEnv = decoders.NewParsersEnv(s.ParserConfigs, s.Logger)
 }
 
-func makeDRELPLogger(logger log15.Logger, raw *model.RawTcpMessage) log15.Logger {
+func makeDRELPLogger(logger log15.Logger, raw *model.RawTCPMessage) log15.Logger {
 	return logger.New(
 		"protocol", "directrelp",
 		"client", raw.Client,
@@ -396,7 +396,7 @@ func makeDRELPLogger(logger log15.Logger, raw *model.RawTcpMessage) log15.Logger
 	)
 }
 
-func (s *DirectRelpServiceImpl) parseOne(raw *model.RawTcpMessage) error {
+func (s *DirectRelpServiceImpl) parseOne(raw *model.RawTCPMessage) error {
 	syslogMsgs, err := s.parserEnv.Parse(&raw.Decoder, raw.Message)
 	if err != nil {
 		return err

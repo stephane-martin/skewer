@@ -29,36 +29,34 @@ type UnixListenerConf struct {
 
 type StreamingService struct {
 	base.BaseService
-	TcpConfigs     []conf.TCPSourceConfig
-	TcpListeners   []TCPListenerConf
+	SourceConfigs  []conf.TCPSourceConfig
+	TCPListeners   []TCPListenerConf
 	UnixListeners  []UnixListenerConf
 	handler        StreamHandler
+	accwgroup      sync.WaitGroup
+	wgroup         sync.WaitGroup
 	MaxMessageSize int
-	acceptsWg      sync.WaitGroup
-	wg             sync.WaitGroup
 	confined       bool
 }
 
 func (s *StreamingService) init() {
 	s.BaseService.Init()
-	s.TcpListeners = []TCPListenerConf{}
+	s.TCPListeners = []TCPListenerConf{}
 	s.UnixListeners = []UnixListenerConf{}
-	s.TcpConfigs = []conf.TCPSourceConfig{}
+	s.SourceConfigs = []conf.TCPSourceConfig{}
 }
 
 func (s *StreamingService) initTCPListeners() []model.ListenerInfo {
-	nb := 0
 	s.ClearConnections()
-	s.TcpListeners = []TCPListenerConf{}
+	s.TCPListeners = []TCPListenerConf{}
 	s.UnixListeners = []UnixListenerConf{}
-	for _, syslogConf := range s.TcpConfigs {
+	for _, syslogConf := range s.SourceConfigs {
 		if len(syslogConf.UnixSocketPath) > 0 {
 			l, err := s.Binder.Listen("unix", syslogConf.UnixSocketPath)
 			if err != nil {
 				s.Logger.Warn("Error listening on stream unix socket", "path", syslogConf.UnixSocketPath, "error", err)
 			} else {
 				s.Logger.Debug("Listener", "protocol", "stream", "path", syslogConf.UnixSocketPath, "format", syslogConf.Format)
-				nb++
 				lc := UnixListenerConf{
 					Listener: l,
 					Conf:     syslogConf,
@@ -80,13 +78,12 @@ func (s *StreamingService) initTCPListeners() []model.ListenerInfo {
 					s.Logger.Warn("Error listening on stream (TCP or RELP)", "listen_addr", listenAddr, "error", err)
 				} else {
 					s.Logger.Debug("Listener", "protocol", "stream", "addr", listenAddr, "format", syslogConf.Format)
-					nb++
 					lc := TCPListenerConf{
 						Listener: l,
 						Port:     port,
 						Conf:     syslogConf,
 					}
-					s.TcpListeners = append(s.TcpListeners, lc)
+					s.TCPListeners = append(s.TCPListeners, lc)
 				}
 			}
 		}
@@ -99,7 +96,7 @@ func (s *StreamingService) initTCPListeners() []model.ListenerInfo {
 			UnixSocketPath: unixc.Conf.UnixSocketPath,
 		})
 	}
-	for _, tcpc := range s.TcpListeners {
+	for _, tcpc := range s.TCPListeners {
 		infos = append(infos, model.ListenerInfo{
 			BindAddr: tcpc.Conf.BindAddr,
 			Port:     tcpc.Port,
@@ -110,7 +107,7 @@ func (s *StreamingService) initTCPListeners() []model.ListenerInfo {
 }
 
 func (s *StreamingService) resetTCPListeners() {
-	for _, l := range s.TcpListeners {
+	for _, l := range s.TCPListeners {
 		_ = l.Listener.Close()
 	}
 	for _, l := range s.UnixListeners {
@@ -177,7 +174,7 @@ func (s *StreamingService) Listen() (err error) {
 	c := eerrors.ChainErrors()
 	var wg sync.WaitGroup
 
-	for _, lc := range s.TcpListeners {
+	for _, lc := range s.TCPListeners {
 		wg.Add(1)
 		go func(co TCPListenerConf) {
 			defer wg.Done()
@@ -202,5 +199,5 @@ func (s *StreamingService) Listen() (err error) {
 func (s *StreamingService) SetConf(sc []conf.TCPSourceConfig, pc []conf.ParserConfig, queueSize uint64, messageSize int) {
 	s.MaxMessageSize = messageSize
 	s.BaseService.SetConf(pc, queueSize)
-	s.TcpConfigs = sc
+	s.SourceConfigs = sc
 }

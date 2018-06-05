@@ -22,13 +22,6 @@ import (
 	"github.com/stephane-martin/skewer/utils/queue/tcp"
 )
 
-type TcpServerStatus int
-
-const (
-	TcpStopped TcpServerStatus = iota
-	TcpStarted
-)
-
 func initTcpRegistry() {
 	base.Once.Do(func() {
 		base.InitRegistry()
@@ -37,20 +30,18 @@ func initTcpRegistry() {
 
 type TcpServiceImpl struct {
 	StreamingService
-	status           TcpServerStatus
-	statusChan       chan TcpServerStatus
 	reporter         *base.Reporter
 	rawMessagesQueue *tcp.Ring
 	fatalErrorChan   chan struct{}
-	fatalOnce        *sync.Once
+	fatalOnce        sync.Once
 	parserEnv        *decoders.ParsersEnv
 }
 
 func NewTcpService(env *base.ProviderEnv) (*TcpServiceImpl, error) {
 	initTcpRegistry()
 	s := TcpServiceImpl{
-		status:   TcpStopped,
-		reporter: env.Reporter,
+		reporter:       env.Reporter,
+		fatalErrorChan: make(chan struct{}),
 	}
 	s.StreamingService.init()
 	s.StreamingService.BaseService.Logger = env.Logger.New("class", "TcpServer")
@@ -71,50 +62,40 @@ func (s *TcpServiceImpl) Type() base.Types {
 
 // Start makes the TCP service start
 func (s *TcpServiceImpl) Start() ([]model.ListenerInfo, error) {
-	s.LockStatus()
-	if s.status != TcpStopped {
-		s.UnlockStatus()
-		return nil, ServerNotStopped
-	}
-	s.statusChan = make(chan TcpServerStatus, 1)
 	s.fatalErrorChan = make(chan struct{})
-	s.fatalOnce = &sync.Once{}
 
 	// start listening on the required ports
 	infos := s.initTCPListeners()
-	if len(infos) > 0 {
-		s.status = TcpStarted
-		s.wg.Add(1)
+	if len(infos) == 0 {
+		s.Logger.Debug("TCP Server not started: no listener")
+		return infos, nil
+	}
+	s.wgroup.Add(1)
+	go func() {
+		defer s.wgroup.Done()
+		err := s.Listen()
+		if err != nil {
+			if eerrors.HasFileClosed(err) {
+				s.Logger.Debug("Closed TCP listener", "error", err)
+			} else {
+				s.Logger.Warn("TCP listen error", "error", err)
+			}
+		}
+	}()
+	s.Logger.Info("Listening on TCP", "nb_services", len(infos))
+	// start the parsers
+	cpus := runtime.NumCPU()
+	for i := 0; i < cpus; i++ {
+		s.wgroup.Add(1)
 		go func() {
-			defer s.wg.Done()
-			err := s.Listen()
+			defer s.wgroup.Done()
+			err := s.parse()
 			if err != nil {
-				if eerrors.HasFileClosed(err) {
-					s.Logger.Debug("Closed TCP listener", "error", err)
-				} else {
-					s.Logger.Warn("TCP listen error", "error", err)
-				}
+				s.dofatal()
+				s.Logger.Error(err.Error())
 			}
 		}()
-		s.Logger.Info("Listening on TCP", "nb_services", len(infos))
-		// start the parsers
-		cpus := runtime.NumCPU()
-		for i := 0; i < cpus; i++ {
-			s.wg.Add(1)
-			go func() {
-				defer s.wg.Done()
-				err := s.parse()
-				if err != nil {
-					s.dofatal()
-					s.Logger.Error(err.Error())
-				}
-			}()
-		}
-	} else {
-		s.Logger.Debug("TCP Server not started: no listener")
-		close(s.statusChan)
 	}
-	s.UnlockStatus()
 	return infos, nil
 }
 
@@ -133,24 +114,13 @@ func (s *TcpServiceImpl) Shutdown() {
 
 // Stop makes the TCP service stop
 func (s *TcpServiceImpl) Stop() {
-	s.LockStatus()
-	if s.status != TcpStarted {
-		s.UnlockStatus()
-		return
-	}
 	s.resetTCPListeners() // close the listeners
 	s.CloseConnections()  // close all current connections.
 	if s.rawMessagesQueue != nil {
 		s.rawMessagesQueue.Dispose()
 	}
-	s.wg.Wait() // wait that all goroutines have ended
-	s.Logger.Debug("TcpServer goroutines have ended")
-
-	s.status = TcpStopped
-	s.statusChan <- TcpStopped
-	close(s.statusChan)
+	s.wgroup.Wait() // wait that all goroutines have ended
 	s.Logger.Debug("TCP server has stopped")
-	s.UnlockStatus()
 }
 
 // SetConf configures the TCP service
@@ -172,7 +142,7 @@ func logg(logger log15.Logger, raw *model.RawMessage) log15.Logger {
 	)
 }
 
-func (s *TcpServiceImpl) parseOne(raw *model.RawTcpMessage, gen *utils.Generator) error {
+func (s *TcpServiceImpl) parseOne(raw *model.RawTCPMessage, gen *utils.Generator) error {
 	syslogMsgs, err := s.parserEnv.Parse(&raw.Decoder, raw.Message)
 	if err != nil {
 		return err
@@ -225,8 +195,8 @@ func (s *TcpServiceImpl) parse() error {
 	}
 }
 
-func makeRawTCPFactory(props tcpProps, confID utils.MyULID, decoder conf.DecoderBaseConfig) func([]byte) *model.RawTcpMessage {
-	return func(data []byte) *model.RawTcpMessage {
+func makeRawTCPFactory(props tcpProps, confID utils.MyULID, decoder conf.DecoderBaseConfig) func([]byte) *model.RawTCPMessage {
+	return func(data []byte) *model.RawTCPMessage {
 		raw := model.RawTCPFactory(data)
 		raw.Client = props.Client
 		raw.LocalPort = props.LocalPort
@@ -268,7 +238,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TCPSourceConfig)
 	if timeout > 0 {
 		_ = conn.SetReadDeadline(time.Now().Add(timeout))
 	}
-	scanner := bufio.NewScanner(conn)
+	scanner := utils.WithRecover(bufio.NewScanner(conn))
 	scanner.Buffer(make([]byte, 0, s.MaxMessageSize), s.MaxMessageSize)
 	if config.LineFraming {
 		scanner.Split(makeLFTCPSplit(config.FrameDelimiter))
@@ -276,14 +246,7 @@ func (h tcpHandler) HandleConnection(conn net.Conn, config conf.TCPSourceConfig)
 		scanner.Split(TcpSplit)
 	}
 
-	for {
-		cont, err := utils.ScanRecover(scanner)
-		if err != nil {
-			return eerrors.Wrap(err, "Scanner panicked in TCP service")
-		}
-		if !cont {
-			break
-		}
+	for scanner.Scan() {
 		if timeout > 0 {
 			_ = conn.SetReadDeadline(time.Now().Add(timeout))
 		}
