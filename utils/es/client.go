@@ -8,6 +8,9 @@ import (
 	"github.com/stephane-martin/skewer/conf"
 )
 
+// GetClient returns a new Elasticsearch client from the provided configuration.
+//
+// If httpClient is nil, http.DefaultClient is used.
 func GetClient(config conf.ElasticDestConfig, httpClient *http.Client, logger log15.Logger) (c *elastic.Client, err error) {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
