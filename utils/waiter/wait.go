@@ -1,6 +1,7 @@
 package waiter
 
 import (
+	"context"
 	"runtime"
 	"time"
 
@@ -35,6 +36,24 @@ func (e *W) Wait() {
 		return
 	}
 	time.Sleep(d)
+}
+
+func (e *W) WaitCtx(ctx context.Context) {
+	if ctx == nil {
+		e.Wait()
+		return
+	}
+	d := e.Next()
+	if d == 0 {
+		runtime.Gosched()
+		return
+	}
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(d):
+		return
+	}
 }
 
 func pow(x uint64, y uint8) (res uint64) {
