@@ -43,7 +43,7 @@ func (s ErrorSlice) Empty() bool {
 }
 
 func (s ErrorSlice) Error() string {
-	if len(s) == 0 {
+	if s.Empty() {
 		return ""
 	}
 	var buf strings.Builder
@@ -60,7 +60,7 @@ func (s ErrorSlice) Error() string {
 }
 
 func (s ErrorSlice) Format(f fmt.State, c rune) {
-	if len(s) == 0 {
+	if s.Empty() {
 		return
 	}
 	if c == 'v' && f.Flag('+') {
@@ -75,7 +75,7 @@ func (s ErrorSlice) Format(f fmt.State, c rune) {
 }
 
 func (s ErrorSlice) Causes() []error {
-	if len(s) == 0 {
+	if s.Empty() {
 		return nil
 	}
 	s2 := make([]error, 0, len(s))
@@ -86,7 +86,7 @@ func (s ErrorSlice) Causes() []error {
 }
 
 func (s ErrorSlice) WithTags(tags ...string) error {
-	if len(s) == 0 {
+	if s.Empty() {
 		return nil
 	}
 	if len(tags) < 2 {
@@ -112,21 +112,21 @@ func (s ErrorSlice) WithTags(tags ...string) error {
 }
 
 func (s ErrorSlice) Wrap(msg string) error {
-	if len(s) == 0 {
+	if s.Empty() {
 		return nil
 	}
 	return errors.Wrap(s, msg)
 }
 
 func (s ErrorSlice) WithTypes(types ...string) error {
-	if len(s) == 0 {
+	if s.Empty() {
 		return nil
 	}
 	return errors.WithTypes(s, types...)
 }
 
 func (s ErrorSlice) With(msg string, types []string, tags ...string) (err error) {
-	if len(s) == 0 {
+	if s.Empty() {
 		return nil
 	}
 	err = s.WithTags(tags...)
@@ -135,7 +135,7 @@ func (s ErrorSlice) With(msg string, types []string, tags ...string) (err error)
 }
 
 func (s ErrorSlice) Is(typ string) bool {
-	if len(s) == 0 {
+	if s.Empty() {
 		return false
 	}
 	for _, cause := range s {
@@ -259,6 +259,10 @@ func (c *ChainedErrors) Send(ch chan<- error) {
 	close(ch)
 }
 
-func Combine(errs ...error) (err error) {
-	return ChainErrors().Extend(errs).Sum()
+func Combine(errs ...error) error {
+	e := ChainErrors().Extend(errs).Sum()
+	if e.Empty() {
+		return nil
+	}
+	return e
 }
