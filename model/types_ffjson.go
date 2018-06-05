@@ -2394,17 +2394,16 @@ handle_Fields:
 
 			j.Fields = nil
 
-			state = fflib.FFParse_after_value
-			goto mainparse
-		}
+		} else {
 
-		if j.Fields == nil {
-			j.Fields = new(RegularSyslog)
-		}
+			if j.Fields == nil {
+				j.Fields = new(RegularSyslog)
+			}
 
-		err = j.Fields.UnmarshalJSONFFLexer(fs, fflib.FFParse_want_key)
-		if err != nil {
-			return err
+			err = j.Fields.UnmarshalJSONFFLexer(fs, fflib.FFParse_want_key)
+			if err != nil {
+				return err
+			}
 		}
 		state = fflib.FFParse_after_value
 	}
@@ -2879,18 +2878,17 @@ handle_TimeReported:
 	{
 		if tok == fflib.FFTok_null {
 
-			state = fflib.FFParse_after_value
-			goto mainparse
-		}
+		} else {
 
-		tbuf, err := fs.CaptureField(tok)
-		if err != nil {
-			return fs.WrapErr(err)
-		}
+			tbuf, err := fs.CaptureField(tok)
+			if err != nil {
+				return fs.WrapErr(err)
+			}
 
-		err = j.TimeReported.UnmarshalJSON(tbuf)
-		if err != nil {
-			return fs.WrapErr(err)
+			err = j.TimeReported.UnmarshalJSON(tbuf)
+			if err != nil {
+				return fs.WrapErr(err)
+			}
 		}
 		state = fflib.FFParse_after_value
 	}
@@ -2905,18 +2903,17 @@ handle_TimeGenerated:
 	{
 		if tok == fflib.FFTok_null {
 
-			state = fflib.FFParse_after_value
-			goto mainparse
-		}
+		} else {
 
-		tbuf, err := fs.CaptureField(tok)
-		if err != nil {
-			return fs.WrapErr(err)
-		}
+			tbuf, err := fs.CaptureField(tok)
+			if err != nil {
+				return fs.WrapErr(err)
+			}
 
-		err = j.TimeGenerated.UnmarshalJSON(tbuf)
-		if err != nil {
-			return fs.WrapErr(err)
+			err = j.TimeGenerated.UnmarshalJSON(tbuf)
+			if err != nil {
+				return fs.WrapErr(err)
+			}
 		}
 		state = fflib.FFParse_after_value
 	}
