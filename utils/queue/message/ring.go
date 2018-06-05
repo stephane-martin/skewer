@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/stephane-martin/skewer/model"
-	"github.com/stephane-martin/skewer/utils"
 	"github.com/stephane-martin/skewer/utils/eerrors"
 	"github.com/stephane-martin/skewer/utils/waiter"
 	"go.uber.org/atomic"
@@ -41,7 +40,7 @@ type Ring struct {
 }
 
 func (rb *Ring) init(size uint64) {
-	size = utils.RoundUp(size)
+	size = roundUp(size)
 	rb.nodes = make(nodes, size)
 	for i := uint64(0); i < size; i++ {
 		rb.nodes[i] = newNode(i)
@@ -68,7 +67,7 @@ func (rb *Ring) put(item *model.FullMessage, offer bool) (bool, error) {
 	var n *node
 	w := waiter.Default()
 	pos := rb.queue.Load()
-L:
+
 	for {
 		if rb.disposed.Load() {
 			return false, eerrors.ErrQDisposed
@@ -76,21 +75,17 @@ L:
 
 		n = rb.nodes[pos&rb.mask]
 		seq := n.position.Load()
-		switch dif := seq - pos; {
-		case dif == 0:
+		if seq == pos {
 			if rb.queue.CAS(pos, pos+1) {
-				break L
+				break
 			}
-		case dif < 0:
-			panic(`Ring buffer in a compromised state during a put operation.`)
-		default:
+		} else {
 			pos = rb.queue.Load()
 		}
 
 		if offer {
 			return false, nil
 		}
-
 		w.Wait()
 	}
 
@@ -108,7 +103,7 @@ func (rb *Ring) Get() (*model.FullMessage, error) {
 }
 
 func (rb *Ring) PollDeadline(deadline time.Time) (*model.FullMessage, error) {
-	return rb.Poll(deadline.Sub(time.Now()))
+	return rb.Poll(time.Until(deadline))
 }
 
 // Poll will return the next item in the queue.  This call will block
@@ -127,26 +122,23 @@ func (rb *Ring) Poll(timeout time.Duration) (*model.FullMessage, error) {
 	if timeout > 0 {
 		start = time.Now()
 	}
-L:
+
 	for {
 		n = rb.nodes[pos&rb.mask]
 		seq := n.position.Load()
-		switch dif := seq - (pos + 1); {
-		case dif == 0:
+		if seq == (pos + 1) {
 			if rb.dequeue.CAS(pos, pos+1) {
-				break L
+				break
 			}
-		case dif < 0:
-			panic(`Ring buffer in compromised state during a get operation.`)
-		default:
+		} else {
 			pos = rb.dequeue.Load()
 		}
 
-		if timeout > 0 && time.Since(start) >= timeout {
-			return zero, eerrors.ErrQTimeout
-		}
 		if rb.disposed.Load() {
 			return zero, eerrors.ErrQDisposed
+		}
+		if timeout < 0 || (timeout > 0 && time.Since(start) >= timeout) {
+			return zero, eerrors.ErrQTimeout
 		}
 		w.Wait()
 	}
@@ -196,4 +188,16 @@ func NewRing(size uint64) *Ring {
 	rb := &Ring{}
 	rb.init(size)
 	return rb
+}
+
+func roundUp(v uint64) uint64 {
+	v--
+	v |= v >> 1
+	v |= v >> 2
+	v |= v >> 4
+	v |= v >> 8
+	v |= v >> 16
+	v |= v >> 32
+	v++
+	return v
 }
