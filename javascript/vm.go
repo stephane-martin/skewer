@@ -54,9 +54,9 @@ type FilterResult int64
 
 const (
 	PASS         FilterResult = 0
-	DROPPED                   = 1
-	REJECTED                  = 2
-	FILTER_ERROR              = 3
+	DROPPED      FilterResult = 1
+	REJECTED     FilterResult = 2
+	FILTER_ERROR FilterResult = 3
 )
 
 type iSyslogMessage struct {
@@ -310,7 +310,7 @@ func (e *Environment) setFilterMessagesFunc(f string) error {
 }
 
 func (e *Environment) Topic(m *model.SyslogMessage) (topic string, err error) {
-	errs := make([]error, 0, 0)
+	errs := make([]error, 0)
 
 	if e.jsTopic != nil {
 		var jsMessage goja.Value
@@ -346,7 +346,7 @@ func (e *Environment) Topic(m *model.SyslogMessage) (topic string, err error) {
 }
 
 func (e *Environment) PartitionKey(m *model.SyslogMessage) (partitionKey string, err error) {
-	errs := make([]error, 0, 0)
+	errs := make([]error, 0)
 	var jsMessage goja.Value
 	var jsPartitionKey goja.Value
 
@@ -376,7 +376,7 @@ func (e *Environment) PartitionKey(m *model.SyslogMessage) (partitionKey string,
 }
 
 func (e *Environment) PartitionNumber(m *model.SyslogMessage) (partitionNumber int32, err error) {
-	errs := make([]error, 0, 0)
+	errs := make([]error, 0)
 	var jsMessage goja.Value
 	var jsPartitionNumber goja.Value
 
