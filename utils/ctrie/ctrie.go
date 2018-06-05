@@ -1025,10 +1025,7 @@ func (l *list) Tail() (*list, bool) {
 
 // IsEmpty indicates if the list is empty.
 func (l *list) IsEmpty() bool {
-	if l == nil {
-		return true
-	}
-	return false
+	return l == nil
 }
 
 // Length returns the number of items in the list.
