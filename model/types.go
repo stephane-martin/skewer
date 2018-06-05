@@ -42,7 +42,7 @@ const (
 	Flocal7
 )
 
-var Facilities map[Facility]string = map[Facility]string{
+var Facilities = map[Facility]string{
 	0:  "kern",
 	1:  "user",
 	2:  "mail",
@@ -69,7 +69,7 @@ var Facilities map[Facility]string = map[Facility]string{
 	23: "local7",
 }
 
-var Severities map[Severity]string = map[Severity]string{
+var Severities = map[Severity]string{
 	0: "emerg",
 	1: "alert",
 	2: "crit",
