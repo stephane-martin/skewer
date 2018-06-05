@@ -52,7 +52,11 @@ utils/queue/kafka/ring.go: utils/queue/ring.go
 utils/queue/defered/ring.go: utils/queue/ring.go
 	test -n "${GOPATH}"  # test $$GOPATH
 	genny -in=utils/queue/ring.go -out=utils/queue/defered/ring.go -pkg=defered gen Data=*model.DeferedRequest
-	
+
+utils/queue/stringq/ring.go: utils/queue/ring.go
+	test -n "${GOPATH}"  # test $$GOPATH
+	genny -in=utils/queue/ring.go -out=utils/queue/stringq/ring.go -pkg=stringq gen Data=utils.UIDString
+
 utils/queue/message/ring.go: utils/queue/ring.go
 	test -n "${GOPATH}"  # test $$GOPATH
 	genny -in=utils/queue/ring.go -out=utils/queue/message/ring.go -pkg=message gen Data=*model.FullMessage
@@ -91,13 +95,16 @@ vet:
 	test -n "${GOPATH}"  # test $$GOPATH
 	go vet ./... || true
 
+revive:
+	test -n "${GOPATH}"  # test $$GOPATH
+	revive -exclude vendor/... -formatter stylish -config revive.toml ./... 
+
 tools:
 	test -n "${GOPATH}"  # test $$GOPATH
 	go get -u github.com/spf13/cobra/cobra
 	go get -u github.com/awalterschulze/goderive
 	go get -u github.com/pquerna/ffjson
 	go get -u github.com/hashrocket/ws
-	go get -u github.com/kardianos/govendor
 	go get -u github.com/cheekybits/genny
 	go get -u github.com/gogo/protobuf/proto
 	go get -u github.com/gogo/protobuf/gogoproto
@@ -106,4 +113,6 @@ tools:
 	go get -u github.com/gogo/protobuf/protoc-gen-gogofaster
 	go get -u github.com/gogo/protobuf/protoc-gen-gogoslick
 	go get -u github.com/rakyll/statik
-
+	go get -u github.com/mgechev/revive
+	go get -u honnef.co/go/tools/cmd/gosimple
+	go get -u honnef.co/go/tools/cmd/staticcheck
