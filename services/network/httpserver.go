@@ -54,7 +54,7 @@ func newTracker(count int64, callbackOK func(), callbackFail func()) *requestTra
 		callbackFail: callbackFail,
 	}
 	r.count.Store(count)
-	r.Lock()
+	r.wg.Add(1)
 	return &r
 }
 
@@ -64,8 +64,8 @@ type requestTracker struct {
 	callbackFail func()
 	connID       utils.MyULID
 	failed       atomic.Bool
-	sync.Mutex
-	sync.Once
+	wg           sync.WaitGroup
+	once         sync.Once
 }
 
 func (r *requestTracker) done() {
@@ -75,13 +75,13 @@ func (r *requestTracker) done() {
 }
 
 func (r *requestTracker) finish(ok bool) {
-	r.Do(func() {
+	r.once.Do(func() {
 		if ok {
 			r.callbackOK()
 		} else {
 			r.callbackFail()
 		}
-		r.Unlock()
+		r.wg.Done()
 	})
 }
 
@@ -97,8 +97,7 @@ func (r *requestTracker) cancel() {
 }
 
 func (r *requestTracker) wait() {
-	r.Lock()
-	r.Unlock()
+	r.wg.Wait()
 }
 
 type HTTPServiceImpl struct {
@@ -444,7 +443,7 @@ func (s *HTTPServiceImpl) parse() error {
 	}
 }
 
-func (s *HTTPServiceImpl) parseAndEnqueue(gen *utils.Generator, raw *model.RawTcpMessage) error {
+func (s *HTTPServiceImpl) parseAndEnqueue(gen *utils.Generator, raw *model.RawTCPMessage) error {
 	logger := s.logger.New(
 		"protocol", "httpserver",
 		"format", raw.Decoder.Format,
@@ -469,7 +468,7 @@ func (s *HTTPServiceImpl) parseAndEnqueue(gen *utils.Generator, raw *model.RawTc
 	return nil
 }
 
-func (s *HTTPServiceImpl) parseOne(raw *model.RawTcpMessage) (fulls []*model.FullMessage, err error) {
+func (s *HTTPServiceImpl) parseOne(raw *model.RawTCPMessage) (fulls []*model.FullMessage, err error) {
 	syslogMsgs, err := s.parserEnv.Parse(&raw.Decoder, raw.Message)
 	if err != nil {
 		return nil, err
