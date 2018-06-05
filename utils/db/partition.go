@@ -5,9 +5,15 @@ import (
 	"github.com/stephane-martin/skewer/utils"
 )
 
+var trueBytes = []byte("true")
+
 type partitionImpl struct {
 	parent *badger.DB
 	prefix string
+}
+
+func (p *partitionImpl) Prefix() string {
+	return p.prefix
 }
 
 func (p *partitionImpl) Get(key utils.MyULID, dst []byte, txn *NTransaction) (ret []byte, err error) {
@@ -22,8 +28,6 @@ func (p *partitionImpl) Set(key utils.MyULID, value string, txn *NTransaction) (
 	}
 	return nil
 }
-
-var trueBytes = []byte("true")
 
 func (p *partitionImpl) AddManyTrueMap(m map[utils.MyULID]string, txn *NTransaction) (err error) {
 	if len(m) == 0 {

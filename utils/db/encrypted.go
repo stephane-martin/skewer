@@ -51,6 +51,10 @@ func NewEncryptedPartition(p Partition, secret *memguard.LockedBuffer) (Partitio
 	}, nil
 }
 
+func (encDB *EncryptedDB) Prefix() string {
+	return encDB.p.Prefix()
+}
+
 func (encDB *EncryptedDB) KeyIterator(txn *NTransaction) *ULIDIterator {
 	opt := badger.IteratorOptions{
 		PrefetchValues: false,

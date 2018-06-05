@@ -32,9 +32,8 @@ func (i *ULIDIterator) Rewind() {
 func (i *ULIDIterator) Valid() bool {
 	if len(i.prefix) > 0 {
 		return i.iter.ValidForPrefix(i.prefix)
-	} else {
-		return i.iter.Valid()
 	}
+	return i.iter.Valid()
 }
 
 func (i *ULIDIterator) Key() (uid utils.MyULID) {
