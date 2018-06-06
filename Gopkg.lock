@@ -455,6 +455,12 @@
 
 [[projects]]
   branch = "master"
+  name = "github.com/oklog/run"
+  packages = ["."]
+  revision = "6934b124db28979da51d3470dadfa34d73d72652"
+
+[[projects]]
+  branch = "master"
   name = "github.com/oklog/ulid"
   packages = ["."]
   revision = "7e1bd8a9a281b5abdf651a430b918bb0ecdbceda"
@@ -633,10 +639,10 @@
   revision = "7c0cea34c8ece3fbeb2b27ab9b59511d360fb394"
 
 [[projects]]
+  branch = "master"
   name = "github.com/spf13/pflag"
   packages = ["."]
-  revision = "583c0c0531f06d5278b7d917446061adc344b5cd"
-  version = "v1.0.1"
+  revision = "3ebe029320b2676d667ae88da602a5f854788a8a"
 
 [[projects]]
   name = "github.com/spf13/viper"
@@ -761,6 +767,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "c69c844b3796b4a749fa18d4ed3550c9c3863b60bb730e026f9e4f1c89e6baf7"
+  inputs-digest = "1e6b8bbceb08b9d60805f6b1ed36bf67e3de132bb6c52e52c428fc790a364452"
   solver-name = "gps-cdcl"
   solver-version = 1
