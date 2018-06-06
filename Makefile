@@ -116,3 +116,4 @@ tools:
 	go get -u github.com/mgechev/revive
 	go get -u honnef.co/go/tools/cmd/gosimple
 	go get -u honnef.co/go/tools/cmd/staticcheck
+	go get -u github.com/cweill/gotests/...

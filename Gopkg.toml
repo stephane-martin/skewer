@@ -254,6 +254,10 @@
   branch = "master"
   name = "golang.org/x/text"
 
+[[constraint]]
+  name = "github.com/stretchr/testify"
+  version = "1.2.1"
+
 [prune]
   go-tests = true
   unused-packages = true

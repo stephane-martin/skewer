@@ -500,6 +500,12 @@
   version = "v0.8.0"
 
 [[projects]]
+  name = "github.com/pmezard/go-difflib"
+  packages = ["difflib"]
+  revision = "792786c7400a136282c1664665ae0a8db921c6c2"
+  version = "v1.0.0"
+
+[[projects]]
   branch = "master"
   name = "github.com/pquerna/ffjson"
   packages = [
@@ -675,6 +681,12 @@
   version = "v0.3"
 
 [[projects]]
+  name = "github.com/stretchr/testify"
+  packages = ["assert"]
+  revision = "12b6f73e6084dad08a7c6e575284b177ecafbc71"
+  version = "v1.2.1"
+
+[[projects]]
   branch = "master"
   name = "github.com/syndtr/gocapability"
   packages = ["capability"]
@@ -767,6 +779,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "67a8f96fdb5e6c232467c784279acc615b63be0ee981d3ee64c568be74b7a497"
+  inputs-digest = "4d7987664522a560acb60777c2f94de8e954c32abe7750f67489bc444b2b88db"
   solver-name = "gps-cdcl"
   solver-version = 1

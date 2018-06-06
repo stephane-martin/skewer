@@ -976,7 +976,7 @@ func (s *MessageStore) resetFailuresByDest(dest conf.DestinationType) (err error
 			}
 			t, n := utils.Bytes2Time(timeb)
 			if n <= 0 {
-				s.logger.Warn("Invalid entry in failed", "error", err)
+				s.logger.Warn("Invalid entry in failed")
 				invalidUIDs = append(invalidUIDs, uid)
 				continue
 			}
