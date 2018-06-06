@@ -132,7 +132,7 @@
     "table",
     "y"
   ]
-  revision = "2e3a32f0ccac3066fb4206b28deb39c210c5266f"
+  revision = "cdf9ffb40fde980875360cf2b1f7d66946fdc769"
 
 [[projects]]
   branch = "master"
@@ -767,6 +767,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "1e6b8bbceb08b9d60805f6b1ed36bf67e3de132bb6c52e52c428fc790a364452"
+  inputs-digest = "67a8f96fdb5e6c232467c784279acc615b63be0ee981d3ee64c568be74b7a497"
   solver-name = "gps-cdcl"
   solver-version = 1
