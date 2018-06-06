@@ -163,6 +163,7 @@ type Backend struct {
 	Partitions map[QueueType]map[conf.DestinationType]db.Partition
 	Messages   db.Partition
 	Configs    db.Partition
+	Whole      db.Partition
 }
 
 func (b *Backend) GetPartition(qtype QueueType, dtype conf.DestinationType) db.Partition {
@@ -186,6 +187,7 @@ func NewBackend(parent *badger.DB, storeSecret *memguard.LockedBuffer) (b *Backe
 			return nil, eerrors.Wrap(err, "Failed to initialize encrypted partition")
 		}
 	}
+	b.Whole = db.NewPartition(parent, "")
 	return b, nil
 }
 
@@ -206,13 +208,12 @@ type MessageStore struct {
 	OutputsChans   map[conf.DestinationType]chan []*model.FullMessage
 	zeroMsgFlags   map[conf.DestinationType]*atomic.Bool
 
-	toStashQueue    *queue.BSliceQueue
 	ackQueue        *queue.AckQueue
 	nackQueue       *queue.AckQueue
 	permerrorsQueue *queue.AckQueue
 
 	confined        bool
-	batchSize       uint32
+	BatchSize       uint32
 	addMissingMsgID bool
 	generator       *utils.Generator
 	uidsTmpBuf      []utils.MyULID
@@ -239,8 +240,8 @@ func (s *MessageStore) SetDestinations(dests conf.DestinationType) {
 }
 
 func (s *MessageStore) receiveAcks() error {
-	var ackBatchSize = uint32(s.batchSize * 4 / 5)
-	var nackBatchSize = uint32(s.batchSize / 10)
+	var ackBatchSize = uint32(s.BatchSize * 4 / 5)
+	var nackBatchSize = uint32(s.BatchSize / 10)
 	acks := make([]queue.UidDest, 0, ackBatchSize)
 	nacks := make([]queue.UidDest, 0, nackBatchSize)
 	permerrs := make([]queue.UidDest, 0, nackBatchSize)
@@ -259,21 +260,6 @@ func (s *MessageStore) receiveAcks() error {
 		err = s.doPermanentError(permerrs)
 		if err != nil {
 			return eerrors.Wrap(err, "Error applying PermErrors")
-		}
-	}
-	return nil
-}
-
-func (s *MessageStore) consumeStashQueue() (err error) {
-	m := make(map[utils.MyULID]string)
-	for s.toStashQueue.Wait(0) {
-		s.toStashQueue.GetManyIntoMap(&m, s.batchSize)
-		if len(m) == 0 {
-			continue
-		}
-		_, err = s.ingest(m)
-		if err != nil {
-			return eerrors.Wrap(err, "Ingestion error")
 		}
 	}
 	return nil
@@ -513,18 +499,6 @@ func (s *MessageStore) init(ctx context.Context) {
 	s.wg.Add(1)
 	go func() {
 		defer func() {
-			s.logger.Debug("consumeStashQueue done")
-			s.wg.Done()
-		}()
-		err := s.consumeStashQueue()
-		if err != nil {
-			errs <- err
-		}
-	}()
-
-	s.wg.Add(1)
-	go func() {
-		defer func() {
 			s.logger.Debug("tickResetFailures done")
 			s.wg.Done()
 		}()
@@ -559,9 +533,7 @@ func (s *MessageStore) init(ctx context.Context) {
 			cancel()
 			close(s.FatalErrorChan)
 		}
-		// dispose the queues. makes the goroutines consumeStashQueue and
-		// receiveAcks stop.
-		s.toStashQueue.Dispose()
+		// dispose the queues. makes the goroutine receiveAcks stop.
 		s.ackQueue.Dispose()
 		s.nackQueue.Dispose()
 		s.permerrorsQueue.Dispose()
@@ -623,8 +595,7 @@ func NewStore(ctx context.Context, cfg conf.StoreConfig, r kring.Ring, dests con
 		confined:        cfnd,
 		logger:          l.New("class", "MessageStore"),
 		dests:           &Destinations{},
-		batchSize:       cfg.BatchSize,
-		toStashQueue:    queue.NewBSliceQueue(),
+		BatchSize:       cfg.BatchSize,
 		ackQueue:        queue.NewAckQueue(),
 		nackQueue:       queue.NewAckQueue(),
 		permerrorsQueue: queue.NewAckQueue(),
@@ -778,42 +749,51 @@ func (s *MessageStore) initGauge() {
 	s.logger.Debug("Calculating the store initial content size")
 
 	txn := db.NewNTransaction(s.badger, false)
-	badgerGauge.WithLabelValues("syslogconf", "").Set(float64(s.backend.Configs.Count(txn)))
+	allkeys := s.backend.Whole.ListKeys(txn)
 	txn.Discard()
+	allprefix := make(map[string][]string)
+	for _, k := range allkeys {
+		allprefix[string(k)[:2]] = append(allprefix[string(k)[:2]], string(k)[2:])
+	}
 
-	txn = db.NewNTransaction(s.badger, false)
-	badgerGauge.WithLabelValues("messages", "").Set(float64(s.backend.Messages.Count(txn)))
-	txn.Discard()
+	badgerGauge.WithLabelValues("syslogconf", "").Set(float64(len(allprefix[s.backend.Configs.Prefix()])))
+	badgerGauge.WithLabelValues("messages", "").Set(float64(len(allprefix[s.backend.Messages.Prefix()])))
 
 	for dname, dtype := range conf.Destinations {
 		badgerGauge.WithLabelValues("sent", dname).Set(0)
 
-		dbi := s.backend.GetPartition(Ready, dtype)
-		txn := db.NewNTransaction(s.badger, false)
-		msgs := dbi.ListKeys(txn)
-		txn.Discard()
-		for _, msg := range msgs {
-			s.count.Inc(msg)
+		prefix := getPartitionPrefix(Ready, dtype)
+		keys := allprefix[prefix]
+		c := int(0)
+		for _, key := range keys {
+			if len(key) == 16 {
+				c++
+				s.count.Inc(utils.MyULID(key))
+			}
 		}
-		badgerGauge.WithLabelValues("ready", dname).Set(float64(len(msgs)))
+		badgerGauge.WithLabelValues("ready", dname).Set(float64(c))
 
-		dbi = s.backend.GetPartition(Failed, dtype)
-		txn = db.NewNTransaction(s.badger, false)
-		msgs = dbi.ListKeys(txn)
-		txn.Discard()
-		for _, msg := range msgs {
-			s.count.Inc(msg)
+		prefix = getPartitionPrefix(Failed, dtype)
+		keys = allprefix[prefix]
+		c = 0
+		for _, key := range keys {
+			if len(key) == 16 {
+				c++
+				s.count.Inc(utils.MyULID(key))
+			}
 		}
-		badgerGauge.WithLabelValues("failed", dname).Set(float64(len(msgs)))
+		badgerGauge.WithLabelValues("failed", dname).Set(float64(c))
 
-		dbi = s.backend.GetPartition(PermErrors, dtype)
-		txn = db.NewNTransaction(s.badger, false)
-		msgs = dbi.ListKeys(txn)
-		txn.Discard()
-		for _, msg := range msgs {
-			s.count.Inc(msg)
+		prefix = getPartitionPrefix(PermErrors, dtype)
+		keys = allprefix[prefix]
+		c = 0
+		for _, key := range keys {
+			if len(key) == 16 {
+				c++
+				s.count.Inc(utils.MyULID(key))
+			}
 		}
-		badgerGauge.WithLabelValues("permerrors", dname).Set(float64(len(msgs)))
+		badgerGauge.WithLabelValues("permerrors", dname).Set(float64(c))
 	}
 	s.logger.Debug("Done calculating the store initial content size")
 }
@@ -1109,14 +1089,6 @@ func (s *MessageStore) PurgeBadger() (err error) {
 	return nil
 }
 
-func (s *MessageStore) Stash(uid utils.MyULID, b string) (err error) {
-	err = eerrors.Wrap(
-		s.toStashQueue.Put(uid, b),
-		"Error putting message on the store stash queue",
-	)
-	return err
-}
-
 func ingestReadyHelper(badg *badger.DB, readyDB db.Partition, queue map[utils.MyULID]string) error {
 	txn := db.NewNTransaction(badg, true)
 	defer txn.Discard()
@@ -1156,7 +1128,7 @@ func (s *MessageStore) ingestMessages(queue map[utils.MyULID]string) error {
 	}
 }
 
-func (s *MessageStore) ingest(m map[utils.MyULID]string) (int, error) {
+func (s *MessageStore) Ingest(m map[utils.MyULID]string) (int, error) {
 	length := len(m)
 
 	if length == 0 {
@@ -1299,9 +1271,9 @@ func tryRetrieveHelper(msgsDB, readyDB, sentDB db.Partition, badg *badger.DB, ba
 }
 
 func (s *MessageStore) retrieve(dest conf.DestinationType) ([]*model.FullMessage, error) {
-	now := time.Now()
+	startt := time.Now()
 	defer func() {
-		retrieveTimeSummary.Observe(time.Now().Sub(now).Seconds() * 1000)
+		retrieveTimeSummary.Observe(time.Since(startt).Seconds() * 1000)
 	}()
 
 	// messages object is allocated from a pool, so it's the responsability of
@@ -1317,7 +1289,7 @@ func (s *MessageStore) retrieve(dest conf.DestinationType) ([]*model.FullMessage
 	var err error
 
 	for {
-		uids, messages, nbInvalids, nbNotFound, err = tryRetrieveHelper(messagesDB, readyDB, sentDB, s.badger, s.batchSize, s.logger)
+		uids, messages, nbInvalids, nbNotFound, err = tryRetrieveHelper(messagesDB, readyDB, sentDB, s.badger, s.BatchSize, s.logger)
 
 		if err == nil {
 			break
