@@ -43,8 +43,8 @@
 [[projects]]
   name = "github.com/Shopify/sarama"
   packages = ["."]
-  revision = "f7be6aa2bc7b2e38edf816b08b582782194a1c02"
-  version = "v1.16.0"
+  revision = "35324cf48e33d8260e1c7c18854465a904ade249"
+  version = "v1.17.0"
 
 [[projects]]
   name = "github.com/StackExchange/wmi"
@@ -224,8 +224,8 @@
     "internal/singleflight",
     "internal/util"
   ]
-  revision = "877867d2845fbaf86798befe410b6ceb6f5c29a3"
-  version = "v6.10.2"
+  revision = "83fb42932f6145ce52df09860384a4653d2d332a"
+  version = "v6.12.0"
 
 [[projects]]
   name = "github.com/go-sourcemap/sourcemap"
@@ -284,7 +284,7 @@
   branch = "master"
   name = "github.com/gorilla/websocket"
   packages = ["."]
-  revision = "21ab95fa12b9bdd8fecf5fa3586aad941cc98785"
+  revision = "5ed622c449da6d44c3c8329331ff47a9e5844f71"
 
 [[projects]]
   name = "github.com/hashicorp/consul"
@@ -351,8 +351,8 @@
     "models",
     "pkg/escape"
   ]
-  revision = "02d7d4f043b34ecb4e9b2dbec298c6f9450c2a32"
-  version = "v1.5.2"
+  revision = "89e084a80fb1e0bf5e7d38038e3367f821fdf3d7"
+  version = "v1.5.3"
 
 [[projects]]
   branch = "master"
@@ -399,7 +399,7 @@
     "jlexer",
     "jwriter"
   ]
-  revision = "8b799c424f57fa123fc63a99d6383bc6e4c02578"
+  revision = "3fdea8d05856a0c8df22ed4bc71b3219245e4485"
 
 [[projects]]
   name = "github.com/mattn/go-colorable"
@@ -422,14 +422,14 @@
 [[projects]]
   name = "github.com/matttproud/golang_protobuf_extensions"
   packages = ["pbutil"]
-  revision = "3247c84500bff8d9fb6d579d800f20b3e091582c"
-  version = "v1.0.0"
+  revision = "c12348ce28de40eed0136aa2b644d0ee0650e56c"
+  version = "v1.0.1"
 
 [[projects]]
   branch = "master"
   name = "github.com/mitchellh/go-homedir"
   packages = ["."]
-  revision = "b8bc1bf767474819792c23f32d8286a45736f1c6"
+  revision = "3864e76763d94a6df2f9960b16a20a33da9f9a66"
 
 [[projects]]
   branch = "master"
@@ -472,14 +472,14 @@
     "config",
     "uritemplates"
   ]
-  revision = "44bae82109267d22e07c6eb6937806ebb0cd9699"
-  version = "v6.1.21"
+  revision = "dabcc5de0a3fd6313870c223c3119e2b1e942ba3"
+  version = "v6.1.23"
 
 [[projects]]
   name = "github.com/pelletier/go-toml"
   packages = ["."]
-  revision = "acdc4509485b587f5e675510c4f2c63e90ff68a8"
-  version = "v1.1.0"
+  revision = "c01d1270ff3e442a8a57cddc1c92dc1138598194"
+  version = "v1.2.0"
 
 [[projects]]
   name = "github.com/pierrec/lz4"
@@ -522,7 +522,7 @@
     "prometheus",
     "prometheus/promhttp"
   ]
-  revision = "c51dc758d4bb30acacbef9eaa2b774969a135086"
+  revision = "208fa994be3bd65c0de04f506db92852b581bc4a"
 
 [[projects]]
   branch = "master"
@@ -549,7 +549,7 @@
     "nfs",
     "xfs"
   ]
-  revision = "8b1c2da0d56deffdbb9e48d4414b4e674bd8083e"
+  revision = "94663424ae5ae9856b40a9f170762b4197024661"
 
 [[projects]]
   branch = "master"
@@ -602,8 +602,8 @@
     "net",
     "process"
   ]
-  revision = "c95755e4bcd7a62bb8bd33f3a597a7c7f35e2cf3"
-  version = "v2.18.04"
+  revision = "eeb1d38d69593f121e060d24d17f7b1f0936b203"
+  version = "v2.18.05"
 
 [[projects]]
   branch = "master"
@@ -720,7 +720,7 @@
     "poly1305",
     "salsa20/salsa"
   ]
-  revision = "1a580b3eff7814fc9b40602fd35256c63b50f491"
+  revision = "b47b1587369238182299fe4dad77d05b8b461e06"
 
 [[projects]]
   branch = "master"
@@ -730,7 +730,7 @@
     "internal/timeseries",
     "trace"
   ]
-  revision = "9ef9f5bb98a1fdc41f8cf6c250a4404b4085e389"
+  revision = "1e491301e022f8f977054da4c2d852decd59571f"
 
 [[projects]]
   branch = "master"
@@ -739,7 +739,7 @@
     "unix",
     "windows"
   ]
-  revision = "88eb85aaee56831ad49eaf7aa80d73de9814cde2"
+  revision = "bc2ef10f1b658ea907736406814a6187b49ea3ec"
 
 [[projects]]
   branch = "master"
