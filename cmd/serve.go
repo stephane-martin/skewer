@@ -122,8 +122,8 @@ type serveChild struct {
 	conf           *conf.BaseConfig
 	consulParams   consul.ConnParams
 	consulRegistry *consul.Registry
-	store          *services.StorePlugin
-	controllers    map[base.Types]*services.PluginController
+	store          *services.StoreController
+	controllers    map[base.Types]*services.Controller
 	metricsServer  *metrics.MetricsServer
 	signPrivKey    *memguard.LockedBuffer
 	ring           kring.Ring
@@ -271,7 +271,7 @@ func (ch *serveChild) setupConsulRegistry() error {
 	return nil
 }
 
-func (ch *serveChild) setupStore() (st *services.StorePlugin, err error) {
+func (ch *serveChild) setupStore() (st *services.StoreController, err error) {
 	f := services.ControllerFactory(ch.ring, ch.signPrivKey, nil, ch.consulRegistry, ch.logger)
 	st = f.NewStore(base.LoggerHdl(base.Store))
 	st.SetConf(*ch.conf)
@@ -314,7 +314,7 @@ func (ch *serveChild) setupSignKey() error {
 	return nil
 }
 
-func setupController(f *services.CFactory, typ base.Types) *services.PluginController {
+func setupController(f *services.CFactory, typ base.Types) *services.Controller {
 	switch typ {
 	case base.Configuration, base.Store:
 		return nil
@@ -325,7 +325,7 @@ func setupController(f *services.CFactory, typ base.Types) *services.PluginContr
 }
 
 func (ch *serveChild) setupControllers() {
-	ch.controllers = map[base.Types]*services.PluginController{}
+	ch.controllers = map[base.Types]*services.Controller{}
 	factory := services.ControllerFactory(ch.ring, ch.signPrivKey, ch.store, ch.consulRegistry, ch.logger)
 	for typ := range base.Types2Names {
 		switch typ {
