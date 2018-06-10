@@ -5,11 +5,6 @@ import (
 	"strings"
 )
 
-type AcceptSpec struct {
-	Value string
-	Q     float64
-}
-
 type octetType byte
 
 const (
@@ -40,7 +35,7 @@ func init() {
 		var t octetType
 		isCtl := c <= 31 || c == 127
 		isChar := 0 <= c && c <= 127
-		isSeparator := strings.ContainsRune(" \t\"(),/:;<=>?@[]\\{}", rune(c))
+		isSeparator := strings.ContainsRune(" \t\"(),/:;<>?@[]\\{}", rune(c))
 		if strings.ContainsRune(" \t\r\n", rune(c)) {
 			t |= isSpace
 		}
@@ -102,70 +97,159 @@ func expectQuality(s string) (q float64, rest string) {
 	return q + float64(n)/float64(d), s[i:]
 }
 
-func ParseAccept(header http.Header, key string) (specs []AcceptSpec) {
-loop:
-	for _, s := range header[key] {
-		for {
-			var spec AcceptSpec
-			spec.Value, s = expectTokenSlash(s)
-			if spec.Value == "" {
-				continue loop
-			}
-			spec.Q = 1.0
-			s = skipSpace(s)
-			if strings.HasPrefix(s, ";") {
-				s = skipSpace(s[1:])
-				if !strings.HasPrefix(s, "q=") {
-					continue loop
-				}
-				spec.Q, s = expectQuality(s[2:])
-				if spec.Q < 0.0 {
-					continue loop
-				}
-			}
-			specs = append(specs, spec)
-			s = skipSpace(s)
-			if !strings.HasPrefix(s, ",") {
-				continue loop
-			}
-			s = skipSpace(s[1:])
-		}
-	}
-	return
+type AcceptSpec struct {
+	Range   string
+	Quality float64
+	Params  []string
 }
 
-func NegotiateContentType(r *http.Request, offers []string, defaultOffer string) string {
+func (spec *AcceptSpec) Type() string {
+	i := strings.Index(spec.Range, "/")
+	if i < 0 {
+		return spec.Range
+	}
+	return spec.Range[:i]
+}
+
+func (spec *AcceptSpec) SubType() string {
+	i := strings.Index(spec.Range, "/")
+	if i < 0 {
+		return ""
+	}
+	if i == (len(spec.Range) - 1) {
+		return ""
+	}
+	return spec.Range[i+1:]
+}
+
+func (self *AcceptSpec) Inferior(other AcceptSpec) bool {
+	if self.Quality < other.Quality {
+		return true
+	}
+
+	selfIsWild := self.IsWild()
+	selfIsHalfWild := self.IsHalfWild()
+	otherIsWild := other.IsWild()
+	otherIsHalfWild := other.IsHalfWild()
+	selfIsPlain := !selfIsWild && !selfIsHalfWild
+	otherIsPlain := !otherIsWild && !otherIsHalfWild
+
+	if selfIsWild {
+		if !otherIsWild {
+			return true
+		}
+	}
+
+	if otherIsWild {
+		if !selfIsWild {
+			return false
+		}
+	}
+
+	if selfIsHalfWild {
+		if otherIsWild {
+			return false
+		}
+		if otherIsPlain {
+			return true
+		}
+	}
+
+	if otherIsHalfWild {
+		if selfIsWild {
+			return true
+		}
+		if selfIsPlain {
+			return false
+		}
+	}
+
+	return len(self.Params) < len(other.Params)
+}
+
+func (spec *AcceptSpec) IsWild() bool {
+	return spec.Type() == "*"
+}
+
+func (spec *AcceptSpec) IsHalfWild() bool {
+	return spec.Type() != "*" && spec.SubType() == "*"
+}
+
+func (spec *AcceptSpec) Match(offer string) bool {
+	if spec.IsWild() {
+		return true
+	}
+	if spec.IsHalfWild() && strings.HasPrefix(offer, spec.Type()+"/") {
+		return true
+	}
+	return spec.Range == offer
+}
+
+func parseOneAccept(header string, specs []AcceptSpec) []AcceptSpec {
+	var q float64
+	for {
+		spec := AcceptSpec{
+			Quality: 1,
+			Params:  make([]string, 0),
+		}
+		spec.Range, header = expectTokenSlash(header)
+		if spec.Range == "" {
+			return specs
+		}
+		for {
+			header = skipSpace(header)
+			if !strings.HasPrefix(header, ";") {
+				break
+			}
+			header = skipSpace(header[1:])
+			if !strings.HasPrefix(header, "q=") {
+				var v string
+				v, header = expectTokenSlash(header)
+				spec.Params = append(spec.Params, v)
+				continue
+			}
+			q, header = expectQuality(header[2:])
+			if q != -1 {
+				spec.Quality = q
+			}
+			break
+		}
+		specs = append(specs, spec)
+		header = skipSpace(header)
+		if !strings.HasPrefix(header, ",") {
+			return specs
+		}
+		header = skipSpace(header[1:])
+	}
+}
+
+func ParseAccept(headers []string) (specs []AcceptSpec) {
+	specs = make([]AcceptSpec, 0)
+	for _, header := range headers {
+		specs = parseOneAccept(header, specs)
+	}
+	return specs
+}
+
+func NegotiateContentType(r *http.Request, serverOffers []string, defaultOffer string) string {
+	return negotiateContentType(ParseAccept(r.Header["Accept"]), serverOffers, defaultOffer)
+}
+
+func negotiateContentType(clientSpecs []AcceptSpec, serverOffers []string, defaultOffer string) string {
+	bestClientSpec := AcceptSpec{
+		Range:   defaultOffer,
+		Quality: -1,
+		Params:  []string{},
+	}
 	bestOffer := defaultOffer
-	bestQ := -1.0
-	bestWild := 3
-	specs := ParseAccept(r.Header, "Accept")
-	for _, offer := range offers {
-		for _, spec := range specs {
-			switch {
-			case spec.Q == 0.0:
-				// ignore
-			case spec.Q < bestQ:
-				// better match found
-			case spec.Value == "*/*":
-				if spec.Q > bestQ || bestWild > 2 {
-					bestQ = spec.Q
-					bestWild = 2
-					bestOffer = offer
-				}
-			case strings.HasSuffix(spec.Value, "/*"):
-				if strings.HasPrefix(offer, spec.Value[:len(spec.Value)-1]) &&
-					(spec.Q > bestQ || bestWild > 1) {
-					bestQ = spec.Q
-					bestWild = 1
-					bestOffer = offer
-				}
-			default:
-				if spec.Value == offer &&
-					(spec.Q > bestQ || bestWild > 0) {
-					bestQ = spec.Q
-					bestWild = 0
-					bestOffer = offer
-				}
+	for _, clientSpec := range clientSpecs {
+		for _, serverOffer := range serverOffers {
+			if !clientSpec.Match(serverOffer) {
+				continue
+			}
+			if bestClientSpec.Inferior(clientSpec) {
+				bestClientSpec = clientSpec
+				bestOffer = serverOffer
 			}
 		}
 	}
