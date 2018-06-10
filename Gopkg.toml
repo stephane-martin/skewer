@@ -156,7 +156,7 @@
 
 [[constraint]]
   branch = "master"
-  name = "github.com/oklog/run"
+  name = "github.com/golang/sync"
 
 [[constraint]]
   name = "github.com/olivere/elastic"

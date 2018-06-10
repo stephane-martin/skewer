@@ -282,6 +282,12 @@
 
 [[projects]]
   branch = "master"
+  name = "github.com/golang/sync"
+  packages = ["errgroup"]
+  revision = "1d60e4601c6fd243af51cc01ddf169918a5407ca"
+
+[[projects]]
+  branch = "master"
   name = "github.com/gorilla/websocket"
   packages = ["."]
   revision = "5ed622c449da6d44c3c8329331ff47a9e5844f71"
@@ -452,12 +458,6 @@
   packages = ["."]
   revision = "289cccf02c178dc782430d534e3c1f5b72af807f"
   version = "v1.0.0"
-
-[[projects]]
-  branch = "master"
-  name = "github.com/oklog/run"
-  packages = ["."]
-  revision = "6934b124db28979da51d3470dadfa34d73d72652"
 
 [[projects]]
   branch = "master"
@@ -779,6 +779,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "4d7987664522a560acb60777c2f94de8e954c32abe7750f67489bc444b2b88db"
+  inputs-digest = "b1dd88277762ef35aeaa8d40d813c4c69ae97e0434cbdeeb0ac9f2c8c6623ed0"
   solver-name = "gps-cdcl"
   solver-version = 1

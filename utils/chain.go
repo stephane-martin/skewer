@@ -3,7 +3,7 @@ package utils
 import (
 	"io"
 
-	"github.com/oklog/run"
+	"github.com/golang/sync/errgroup"
 	"github.com/stephane-martin/skewer/utils/eerrors"
 )
 
@@ -55,21 +55,18 @@ func AnyErr(errs ...error) (err error) {
 
 // Parallel executes the provided funcs in parallel and returns the errors
 func Parallel(funs ...Func) eerrors.ErrorSlice {
-	var g run.Group
+	var g errgroup.Group
 	c := eerrors.ChainErrors()
 	for _, fun := range funs {
 		f := fun
-		g.Add(
+		g.Go(
 			func() error {
 				err := f()
 				c.Append(err)
 				return err
 			},
-			func(e error) {
-
-			},
 		)
 	}
-	g.Run()
+	g.Wait()
 	return c.Sum()
 }
