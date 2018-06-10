@@ -747,55 +747,60 @@ func (s *MessageStore) GetSyslogConfig(confID utils.MyULID) (*conf.FilterSubConf
 
 func (s *MessageStore) initGauge() {
 	s.logger.Debug("Calculating the store initial content size")
+	defer s.logger.Debug("Done calculating the store initial content size")
 
 	txn := db.NewNTransaction(s.badger, false)
 	allkeys := s.backend.Whole.ListKeys(txn)
 	txn.Discard()
-	allprefix := make(map[string][]string)
-	for _, k := range allkeys {
-		allprefix[string(k)[:2]] = append(allprefix[string(k)[:2]], string(k)[2:])
+	keysByPrefix := make(map[string][]utils.MyULID)
+	var (
+		wholekey, key, prefix string
+		err                   error
+		uid, k                utils.MyULID
+	)
+	for _, k = range allkeys {
+		wholekey = string(k)
+		if len(wholekey) == 18 {
+			prefix = wholekey[:2]
+			key = wholekey[2:]
+			uid = utils.MyULID(key)
+			keysByPrefix[prefix] = append(keysByPrefix[prefix], uid)
+		}
 	}
 
-	badgerGauge.WithLabelValues("syslogconf", "").Set(float64(len(allprefix[s.backend.Configs.Prefix()])))
-	badgerGauge.WithLabelValues("messages", "").Set(float64(len(allprefix[s.backend.Messages.Prefix()])))
+	badgerGauge.WithLabelValues("syslogconf", "").Set(float64(len(keysByPrefix[s.backend.Configs.Prefix()])))
+	badgerGauge.WithLabelValues("messages", "").Set(float64(len(keysByPrefix[s.backend.Messages.Prefix()])))
 
 	for dname, dtype := range conf.Destinations {
 		badgerGauge.WithLabelValues("sent", dname).Set(0)
 
 		prefix := getPartitionPrefix(Ready, dtype)
-		keys := allprefix[prefix]
+		uids := keysByPrefix[prefix]
 		c := int(0)
-		for _, key := range keys {
-			if len(key) == 16 {
-				c++
-				s.count.Inc(utils.MyULID(key))
-			}
+		for _, uid = range uids {
+			c++
+			s.count.Inc(uid)
 		}
 		badgerGauge.WithLabelValues("ready", dname).Set(float64(c))
 
 		prefix = getPartitionPrefix(Failed, dtype)
-		keys = allprefix[prefix]
+		uids = keysByPrefix[prefix]
 		c = 0
-		for _, key := range keys {
-			if len(key) == 16 {
-				c++
-				s.count.Inc(utils.MyULID(key))
-			}
+		for _, uid = range uids {
+			c++
+			s.count.Inc(uid)
 		}
 		badgerGauge.WithLabelValues("failed", dname).Set(float64(c))
 
 		prefix = getPartitionPrefix(PermErrors, dtype)
-		keys = allprefix[prefix]
+		uids = keysByPrefix[prefix]
 		c = 0
-		for _, key := range keys {
-			if len(key) == 16 {
-				c++
-				s.count.Inc(utils.MyULID(key))
-			}
+		for _, uid = range uids {
+			c++
+			s.count.Inc(uid)
 		}
 		badgerGauge.WithLabelValues("permerrors", dname).Set(float64(c))
 	}
-	s.logger.Debug("Done calculating the store initial content size")
 }
 
 func (s *MessageStore) closeBadgers() {
